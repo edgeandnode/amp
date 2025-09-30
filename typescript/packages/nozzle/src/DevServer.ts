@@ -73,22 +73,14 @@ export const make = Effect.gen(function*() {
 
         const dependencies = Object.values(manifest.dependencies)
         yield* Effect.forEach(dependencies, (dependency) =>
-          // TODO: Should dump with version once that's working again.
-          // admin.dumpDatasetWithVersion(dependency.name, dependency.version, {
-          //   endBlock: Number(block),
-          // }),
-          admin.dumpDataset(dependency.name, {
+          admin.dumpDatasetVersion(dependency.name, dependency.version, {
             endBlock: Number(block),
           }), {
           concurrency: "unbounded",
           discard: true,
         })
 
-        // TODO: Should dump with version once that's working again.
-        // admin.dumpDatasetVersion(manifest.name, manifest.version, {
-        //   endBlock: Number(block),
-        // }),
-        yield* admin.dumpDataset(manifest.name, {
+        yield* admin.dumpDatasetVersion(manifest.name, manifest.version, {
           endBlock: Number(block),
         })
       }).pipe(

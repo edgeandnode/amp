@@ -28,7 +28,10 @@ use datafusion::{
     error::DataFusionError,
     logical_expr::LogicalPlan,
 };
-use dataset_store::{DatasetError, DatasetStore};
+use dataset_store::{
+    CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
+    PlanningCtxForSqlError,
+};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
@@ -59,7 +62,16 @@ pub enum Error {
     ExecutionError(DataFusionError),
 
     #[error("error looking up datasets: {0}")]
-    DatasetStoreError(#[from] DatasetError),
+    DatasetStoreError(#[from] GetDatasetError),
+
+    #[error("error loading catalog for SQL: {0}")]
+    CatalogForSqlError(#[from] CatalogForSqlError),
+
+    #[error("error loading physical catalog: {0}")]
+    GetPhysicalCatalogError(#[from] GetPhysicalCatalogError),
+
+    #[error("error creating planning context: {0}")]
+    PlanningCtxForSqlError(#[from] PlanningCtxForSqlError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
@@ -92,6 +104,9 @@ impl RequestError for Error {
             Error::UnsupportedFlightDescriptorCommand(_) => "UNSUPPORTED_FLIGHT_DESCRIPTOR_COMMAND",
             Error::ExecutionError(_) => "EXECUTION_ERROR",
             Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
+            Error::CatalogForSqlError(_) => "CATALOG_FOR_SQL_ERROR",
+            Error::GetPhysicalCatalogError(_) => "LOAD_PHYSICAL_CATALOG_ERROR",
+            Error::PlanningCtxForSqlError(_) => "PLANNING_CTX_FOR_SQL_ERROR",
             Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
             Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
             Error::CoreError(CoreError::PlanEncodingError(_)) => "PLAN_ENCODING_ERROR",
@@ -125,8 +140,10 @@ impl RequestError for Error {
             Error::CoreError(CoreError::TableNotFoundError(_)) => StatusCode::NOT_FOUND,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CatalogForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetPhysicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PlanningCtxForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
@@ -147,7 +164,6 @@ impl From<Error> for Status {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
-            Error::DatasetStoreError(e) if e.is_not_found() => Status::not_found(e.to_string()),
             Error::DatasetStoreError(_) => Status::internal(e.to_string()),
 
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
@@ -169,6 +185,9 @@ impl From<Error> for Status {
 
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
             Error::StreamingExecutionError(_) => Status::internal(e.to_string()),
+            Error::CatalogForSqlError(_) => Status::internal(e.to_string()),
+            Error::GetPhysicalCatalogError(_) => Status::internal(e.to_string()),
+            Error::PlanningCtxForSqlError(_) => Status::internal(e.to_string()),
             Error::InvalidQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
@@ -203,8 +222,7 @@ impl Service {
         let dataset_store = self.dataset_store.clone();
         let catalog = dataset_store
             .catalog_for_sql(&query, self.env.clone())
-            .await
-            .map_err(|err| Error::DatasetStoreError(err))?;
+            .await?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx
@@ -483,7 +501,7 @@ impl Service {
 
         let catalog = self
             .dataset_store
-            .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
+            .get_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
             .await?;
         let query_ctx = PlanningContext::new(catalog.logical().clone());
         let plan = query_ctx

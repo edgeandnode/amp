@@ -3102,9 +3102,7 @@ dependencies = [
  "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
- "serde_json",
  "thiserror",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -3126,7 +3124,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -3517,7 +3514,6 @@ dependencies = [
  "serde_with",
  "thiserror",
  "tokio",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -3558,7 +3554,6 @@ dependencies = [
  "serde_with",
  "thiserror",
  "tokio",
- "toml 0.8.23",
  "tracing",
  "url",
 ]
@@ -3639,7 +3634,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "toml 0.8.23",
  "tonic 0.12.3",
  "tonic-build",
  "tracing",
@@ -7418,7 +7412,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "toml 0.8.23",
  "tonic 0.12.3",
  "tonic-build",
  "tracing",

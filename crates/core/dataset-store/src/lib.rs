@@ -1,18 +1,11 @@
-use std::{
-    collections::BTreeSet,
-    num::NonZeroU32,
-    str::FromStr,
-    sync::{Arc, RwLock},
-};
+use std::{collections::BTreeSet, num::NonZeroU32, str::FromStr, sync::Arc};
 
-use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
-    RawDatasetRows, Store,
+    BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{self, common::schema_from_tables, derived, sql_datasets::SqlDataset},
+    manifest::{common::schema_from_tables, derived, sql_datasets::SqlDataset},
     query_context::QueryEnv,
     sql_visitors::all_function_names,
 };
@@ -21,30 +14,52 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, value::ManifestValue, version::Version,
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_derived::{Manifest as DerivedManifest, sql_dataset::Manifest as SqlManifest};
+use eth_beacon_datasets::{
+    Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
 };
-use datasets_derived::Manifest as DerivedDatasetManifest;
-use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
+use evm_rpc_datasets::{
+    DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest,
+    ProviderConfig as EvmRpcProviderConfig,
+};
+use firehose_datasets::{
+    DATASET_KIND as FIREHOSE_DATASET_KIND,
+    dataset::{Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig},
+};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
-use rand::seq::SliceRandom;
-use tracing::instrument;
+use parking_lot::RwLock;
+use rand::seq::SliceRandom as _;
+use substreams_datasets::dataset::{
+    Manifest as SubstreamsManifest, ProviderConfig as SubstreamsProviderConfig,
+};
 use url::Url;
 
+mod block_stream_client;
 mod dataset_kind;
 mod error;
+mod manifests;
 pub mod providers;
 pub mod sql_datasets;
 
-use self::providers::ProvidersConfigStore;
+use self::{
+    block_stream_client::BlockStreamClient,
+    manifests::{GetLatestVersionError, ManifestsStore},
+    providers::{ProviderConfig, ProvidersConfigStore},
+};
 pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
-    error::{DatasetError, Error, RegistrationError},
+    error::{
+        CatalogForSqlError, EthCallForDatasetError, ExtractDatasetFromFunctionNamesError,
+        ExtractDatasetFromTableRefsError, GetAllDatasetsError, GetClientError, GetDatasetError,
+        GetLogicalCatalogError, GetPhysicalCatalogError, GetSqlDatasetError, IsRegisteredError,
+        PlanningCtxForSqlError, RegisterManifestError,
+    },
+    manifests::StoreError,
 };
-/// Alias for TOML value type used in provider configurations.
-// TODO: #[deprecated(note = "use dataset_store::providers::ProviderConfig instead")]
-pub type ProviderConfigTomlValue = toml::Value;
+
+const PLACEHOLDER_OWNER: &'static str = "no-owner";
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -56,19 +71,32 @@ pub struct DatasetStore {
     // Provider store for managing provider configurations and caching.
     providers: ProvidersConfigStore,
     // Store for dataset definitions (manifests).
-    pub(crate) dataset_defs_store: Arc<Store>,
+    manifests_store: ManifestsStore,
 }
 
 impl DatasetStore {
     pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Arc<Self> {
         let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
+        let manifests_store = ManifestsStore::new(
+            metadata_db.clone(),
+            config.dataset_defs_store.prefixed_store(),
+        );
         Arc::new(Self {
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
             providers: providers_store,
-            dataset_defs_store: config.dataset_defs_store.clone(),
+            manifests_store,
         })
+    }
+
+    /// Initialize the dataset store by loading existing manifests into the metadata database
+    ///
+    /// This method ensures that all manifests present in the object store are registered in the
+    /// metadata database. It's idempotent and will only register manifests that don't already exist.
+    /// The initialization runs only once per instance.
+    pub async fn init(&self) {
+        self.manifests_store.init().await
     }
 
     /// Get a reference to the providers configuration store
@@ -77,428 +105,557 @@ impl DatasetStore {
     }
 
     /// Register a dataset manifest in both the dataset store and metadata database.
-    /// Validates the manifest doesn't already exist, serializes it to JSON, stores it
-    /// in the dataset definitions store, and records metadata in the database.
+    ///
+    /// The operation is atomic - either both the store and metadata database are updated
+    /// or neither is updated.
     pub async fn register_manifest<M>(
         &self,
         name: &Name,
         version: &Version,
         manifest: &M,
-    ) -> Result<(), RegistrationError>
+    ) -> Result<(), RegisterManifestError>
     where
         M: serde::Serialize,
     {
-        // Check if the dataset with the given name and version already exists in the registry.
-        if self
-            .metadata_db
-            .dataset_exists(name, version)
-            .await
-            .map_err(RegistrationError::ExistenceCheck)?
-        {
-            return Err(RegistrationError::DatasetExists {
+        // Check for existing datasets with the same name and version
+        if self.is_registered(name, version).await? {
+            return Err(RegisterManifestError::DatasetExists {
                 name: name.clone(),
                 version: version.clone(),
             });
         }
 
-        // Prepare manifest data for storage
-        let manifest_json =
-            serde_json::to_string(&manifest).map_err(RegistrationError::ManifestSerialization)?;
-
-        // Store manifest in dataset definitions store
-        let manifest_path = object_store::path::Path::from(format!(
-            "{}__{}.json",
-            name,
-            version.to_underscore_version()
-        ));
-
-        self.dataset_defs_store
-            .prefixed_store()
-            .put(&manifest_path, manifest_json.into())
-            .await
-            .map_err(RegistrationError::ManifestStorage)?;
-
-        // TODO: Extract the dataset owner from the manifest
-        let dataset_owner = "no-owner";
+        // Store manifest in the underlying store first
+        let manifest_path = self.manifests_store.store(name, version, manifest).await?;
 
         // Register dataset metadata in database
+        // TODO: Extract the dataset owner from the manifest
+        let owner = PLACEHOLDER_OWNER;
+
         self.metadata_db
-            .register_dataset(dataset_owner, name, version, manifest_path.as_ref())
+            .register_dataset(owner, name, version, &manifest_path.to_string())
             .await
-            .map_err(RegistrationError::MetadataRegistration)?;
+            .map_err(RegisterManifestError::MetadataRegistration)?;
 
         Ok(())
     }
 
-    /// Register a dataset manifest in the dataset store without metadata database tracking.
+    /// Check if a dataset with the given name and version is registered
     ///
-    /// This is a lightweight version of [`Self::register_manifest`] that skips the metadata
-    /// database operations. It only serializes the manifest to JSON and stores it in the
-    /// dataset definitions store.
-    ///
-    /// # Notes
-    ///
-    /// Unlike [`Self::register_manifest`], this function:
-    /// - Does not check for existing datasets
-    /// - Does not register metadata in the database
-    /// - Does not track dataset ownership
-    /// - Uses a simpler file naming scheme (`{name}.json` vs `{name}__{version}.json`)
-    pub async fn register_raw_dataset_manifest<M>(
+    /// Returns true if the dataset is registered, false otherwise.
+    /// This operation queries the metadata database directly.
+    pub async fn is_registered(
         &self,
         name: &Name,
-        _version: &Version,
-        manifest: &M,
-    ) -> Result<(), RegistrationError>
-    where
-        M: serde::Serialize,
-    {
-        // Prepare manifest data for storage
-        let manifest_json =
-            serde_json::to_string(&manifest).map_err(RegistrationError::ManifestSerialization)?;
-
-        // Store manifest in dataset definitions store
-        let manifest_path = format!("{}.json", name).into();
-
-        self.dataset_defs_store
-            .prefixed_store()
-            .put(&manifest_path, manifest_json.into())
+        version: &Version,
+    ) -> Result<bool, IsRegisteredError> {
+        self.metadata_db
+            .dataset_exists(name, version)
             .await
-            .map_err(RegistrationError::ManifestStorage)?;
-
-        Ok(())
+            .map_err(IsRegisteredError)
     }
 
-    pub async fn load_dataset(
-        self: &Arc<Self>,
-        name: &str,
-        version: Option<&Version>,
-    ) -> Result<Dataset, DatasetError> {
-        let dataset_identifier = self.load_dataset_from_registry(name, version).await?;
-        self.clone()
-            .load_dataset_inner(&dataset_identifier)
-            .await
-            .map_err(|err| (name, err).into())
-    }
-
-    pub async fn try_load_dataset(
+    pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
         version: impl Into<Option<&Version>>,
-    ) -> Result<Option<Dataset>, DatasetError> {
-        match self.load_dataset(name, version.into()).await {
-            Ok(dataset) => Ok(Some(dataset)),
-            Err(err) => {
-                if err.is_not_found() {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
-            }
-        }
-    }
+    ) -> Result<Option<Dataset>, GetDatasetError> {
+        let name = &name
+            .parse::<Name>()
+            .map_err(|err| GetDatasetError::InvalidDatasetName {
+                name: name.to_string(),
+                source: err,
+            })?;
 
-    pub async fn load_dataset_from_registry(
-        self: &Arc<Self>,
-        name: &str,
-        version: Option<&Version>,
-    ) -> Result<String, DatasetError> {
-        let name = &name.parse::<Name>().expect("valid dataset name");
-
-        let dataset_identifier = match version {
-            Some(version) => self
-                .metadata_db
-                .get_dataset_manifest_path(name, version)
+        // If no version is provided, try to get the latest version from the mainfests store
+        // or use a placeholder version (default version, i.e., v0.0.0) if not found.
+        let version = match version.into() {
+            Some(v) => v.clone(),
+            None => self
+                .manifests_store
+                .get_latest_version(name)
                 .await
-                .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?
-                .map(|manifest_path| manifest_path.trim_end_matches(".json").to_string())
-                .ok_or_else(|| {
-                    DatasetError::from((
-                        name,
-                        Error::DatasetVersionNotFound(name.to_string(), version.to_string()),
-                    ))
-                })?,
-            None => {
-                match self
-                    .metadata_db
-                    .get_dataset_latest_version_with_details(name)
-                    .await
-                    .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?
-                    .map(|details| details.version)
-                {
-                    Some(version) => {
-                        let version_identifier = Version::from(version).to_underscore_version();
-                        format!("{}__{}", name, version_identifier)
+                .map_err(|GetLatestVersionError::MetadataDbError(source)| {
+                    GetDatasetError::GetLatestVersion {
+                        name: name.to_string(),
+                        source,
                     }
-                    None => name.to_string(),
-                }
-            }
-        };
-        Ok(dataset_identifier)
-    }
-
-    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
-        let all_objs = self
-            .dataset_defs_store
-            .list_all_shallow()
-            .await
-            .map_err(DatasetError::no_context)?;
-
-        let mut datasets = Vec::new();
-        for obj in all_objs {
-            // Unwrap: We listed files.
-            let path = std::path::Path::new(obj.location.filename().unwrap());
-            let stem = path.file_stem().and_then(|s| s.to_str());
-            if stem.is_none() {
-                continue;
-            }
-            datasets.push(self.load_dataset(stem.unwrap(), None).await?);
-        }
-        Ok(datasets)
-    }
-
-    pub async fn load_sql_dataset(
-        self: &Arc<Self>,
-        dataset: &str,
-    ) -> Result<SqlDataset, DatasetError> {
-        self.clone()
-            .load_sql_dataset_inner(dataset)
-            .await
-            .map_err(|err| (dataset, err).into())
-    }
-
-    /// It's a hack for this to return a `SqlDataset`. Soon we should deprecate `SqlDataset` and
-    /// define a new struct to represent manifest datasets.
-    pub async fn load_manifest_dataset(
-        self: &Arc<Self>,
-        dataset: &str,
-        version: &Version,
-    ) -> Result<SqlDataset, DatasetError> {
-        let dataset_identifier = self
-            .load_dataset_from_registry(dataset, Some(version))
-            .await?;
-        self.clone()
-            .load_manifest_dataset_inner(&dataset_identifier)
-            .await
-            .map_err(|err| (dataset, err).into())
-    }
-
-    /// Loads a [DatasetSrc] and [common](CommonManifest) data for a TOML or JSON file with the
-    /// given name.
-    async fn common_data_and_dataset(
-        &self,
-        dataset_name: &str,
-    ) -> Result<(CommonManifest, DatasetSrc), Error> {
-        let dataset_src = self
-            .dataset_defs_store
-            .get_string(format!("{}.toml", dataset_name))
-            .map_ok(DatasetSrc::Toml)
-            .or_else(|err| async move {
-                if !err.is_not_found() {
-                    return Err(err);
-                }
-                self.dataset_defs_store
-                    .get_string(format!("{}.json", dataset_name))
-                    .await
-                    .map(DatasetSrc::Json)
-            })
-            .await?;
-
-        let common: CommonManifest = match &dataset_src {
-            DatasetSrc::Toml(src) => {
-                tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<CommonManifest>(src)?
-            }
-            DatasetSrc::Json(src) => serde_json::from_str::<CommonManifest>(src)?,
+                })?
+                .unwrap_or_default(),
         };
 
-        Ok((common, dataset_src))
-    }
+        let cache_key = format!("{}__{}", name, version.to_underscore_version());
+        if let Some(dataset) = self.dataset_cache.read().get(&cache_key) {
+            tracing::trace!(
+                dataset_name = %name,
+                dataset_version = %version,
+                "Cache hit, returning cached dataset"
+            );
 
-    async fn load_manifest_dataset_inner(
-        self: Arc<Self>,
-        dataset_name: &str,
-    ) -> Result<SqlDataset, Error> {
-        let filename = format!("{}.json", dataset_name);
-        let raw_manifest = self.dataset_defs_store.get_string(filename).await?;
-        let manifest: DerivedDatasetManifest =
-            serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-        let queries = derived::queries(&manifest).map_err(Error::SqlParseError)?;
-        let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
-        Ok(SqlDataset { dataset, queries })
-    }
-
-    async fn load_dataset_inner(
-        self: &Arc<Self>,
-        dataset_identifier: &str,
-    ) -> Result<Dataset, Error> {
-        if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_identifier) {
-            return Ok(dataset.clone());
+            return Ok(Some(dataset.clone()));
         }
 
-        let (common, dataset_src) = self.common_data_and_dataset(dataset_identifier).await?;
-        let kind = DatasetKind::from_str(&common.kind)?;
-        let value = dataset_src.to_value()?;
-        let (dataset, ground_truth_schema) = match kind {
+        tracing::debug!(
+            dataset_name = %name,
+            dataset_version = %version,
+            "Cache miss, loading from store"
+        );
+
+        // Try to load the dataset manifest using ManifestsStore
+        let Some(manifest_content) =
+            self.manifests_store
+                .get(name, &version)
+                .await
+                .map_err(|err| GetDatasetError::ManifestRetrievalError {
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: Box::new(err),
+                })?
+        else {
+            return Ok(None);
+        };
+
+        let manifest = manifest_content
+            .try_into_manifest::<CommonManifest>()
+            .map_err(|err| GetDatasetError::ManifestParseError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: err,
+            })?;
+
+        tracing::debug!(
+            dataset_name = %name,
+            dataset_version = %version,
+            dataset_kind = %manifest.kind,
+            "Loaded dataset manifest: {manifest:?}"
+        );
+
+        let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
+            GetDatasetError::UnsupportedKind {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                kind: err.kind,
+            }
+        })?;
+
+        let dataset = match kind {
             DatasetKind::EvmRpc => {
-                let builtin_schema =
-                    schema_from_tables(&evm_rpc_datasets::tables::all(&common.network));
-                (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
+                let manifest = manifest_content
+                    .try_into_manifest::<EvmRpcManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+                evm_rpc_datasets::dataset(manifest)
             }
             DatasetKind::EthBeacon => {
-                let builtin_schema =
-                    schema_from_tables(&eth_beacon_datasets::all_tables(common.network.clone()));
-                (eth_beacon_datasets::dataset(value)?, Some(builtin_schema))
+                let manifest = manifest_content
+                    .try_into_manifest::<EthBeaconManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+                eth_beacon_datasets::dataset(manifest)
             }
             DatasetKind::Firehose => {
-                let builtin_schema =
-                    schema_from_tables(&firehose_datasets::evm::tables::all(&common.network));
-                (
-                    firehose_datasets::evm::dataset(value)?,
-                    Some(builtin_schema),
-                )
+                let manifest = manifest_content
+                    .try_into_manifest::<FirehoseManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+                firehose_datasets::evm::dataset(manifest)
             }
             DatasetKind::Substreams => {
-                let dataset = substreams_datasets::dataset(value).await?;
-                let store_schema = schema_from_tables(&dataset.tables);
-                (dataset, Some(store_schema))
-            }
-            DatasetKind::Sql => {
-                let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
-                (store_dataset, None)
+                let value = manifest_content
+                    .try_into_manifest::<SubstreamsManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+                let dataset = substreams_datasets::dataset(value).await.map_err(|err| {
+                    GetDatasetError::SubstreamsCreationError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    }
+                })?;
+                let builtin_schema = schema_from_tables(&dataset.tables);
+
+                if let Some(manifest_schema) = &manifest.schema
+                    && manifest_schema != &builtin_schema
+                {
+                    return Err(GetDatasetError::SchemaMismatch {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                    });
+                }
+
+                dataset
             }
             DatasetKind::Derived => {
-                let manifest = dataset_src.try_into_manifest()?;
-                let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
-                (dataset, None)
+                let manifest = manifest_content
+                    .try_into_manifest::<DerivedManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+                let dataset = derived::dataset(manifest).map_err(|err| {
+                    GetDatasetError::DerivedCreationError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err.into(),
+                    }
+                })?;
+                dataset
+            }
+            DatasetKind::Sql => {
+                let manifest = manifest_content
+                    .try_into_manifest::<SqlManifest>()
+                    .map_err(|err| GetDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+
+                // Fetch all SQL files for the dataset
+                let sql_files = self
+                    .manifests_store
+                    .get_sql_files(&name, &version)
+                    .await
+                    .map_err(|err| GetDatasetError::SqlFilesError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: format!("Failed to get SQL files: {}", err).into(),
+                    })?;
+
+                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
+                    .await
+                    .map_err(|err| GetDatasetError::SqlDatasetError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+
+                sql_dataset.dataset
             }
         };
-
-        if let Some(ground_truth_schema) = ground_truth_schema
-            && let Some(loaded_schema) = common.schema
-        {
-            if loaded_schema != ground_truth_schema {
-                return Err(Error::SchemaMismatch);
-            }
-        }
 
         // Cache the dataset.
         self.dataset_cache
             .write()
-            .unwrap()
-            .insert(dataset_identifier.to_string(), dataset.clone());
+            .insert(cache_key.to_string(), dataset.clone());
 
-        Ok(dataset)
+        tracing::debug!(
+            dataset_name = %name,
+            dataset_version = %version,
+            dataset_kind = %kind,
+            "Dataset loaded (and cached) successfully"
+        );
+
+        Ok(Some(dataset))
     }
 
-    #[instrument(skip(self), err)]
-    async fn load_sql_dataset_inner(
-        self: Arc<Self>,
-        dataset_name: &str,
-    ) -> Result<SqlDataset, Error> {
-        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
-        let kind = DatasetKind::from_str(&common.kind)?;
+    pub async fn get_all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, GetAllDatasetsError> {
+        let list = self.manifests_store.list().await;
 
-        if kind != DatasetKind::Sql {
-            return Err(Error::UnsupportedKind(kind.to_string()));
+        let mut datasets = Vec::new();
+        for (name, version) in list {
+            match self.get_dataset(&name, &version).await? {
+                Some(dataset) => datasets.push(dataset),
+                None => {
+                    tracing::warn!(
+                        dataset_name = %name,
+                        dataset_version = %version,
+                        "Dataset manifest listed but not found when loading"
+                    );
+                }
+            }
         }
 
-        let value = raw_dataset.to_value()?;
-
-        self.sql_dataset(value).await
+        Ok(datasets)
     }
 
-    pub async fn load_client(
-        &self,
-        dataset: &str,
-        only_finalized_blocks: bool,
-        meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<impl BlockStreamer, DatasetError> {
-        self.load_client_inner(dataset, only_finalized_blocks, meter)
+    #[tracing::instrument(skip(self), err)]
+    pub async fn get_sql_dataset(
+        self: &Arc<Self>,
+        name: &str,
+        version: impl Into<Option<&Version>> + std::fmt::Debug,
+    ) -> Result<Option<SqlDataset>, GetSqlDatasetError> {
+        // Validate dataset name
+        let name = &name
+            .parse::<Name>()
+            .map_err(|err| GetSqlDatasetError::InvalidDatasetName {
+                name: name.to_string(),
+                source: err,
+            })?;
+
+        // If no version is provided use a placeholder version (default version, i.e., v0.0.0).
+        let version = &version.into().cloned().unwrap_or_default();
+
+        // Try to load the dataset manifest using ManifestsStore
+        let Some(dataset_src) = self
+            .manifests_store
+            .get(name, version)
             .await
-            .map_err(|err| (dataset, err).into())
-            .map(|client| client.with_retry())
+            .map_err(|err| GetSqlDatasetError::ManifestRetrievalError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(err),
+            })?
+        else {
+            return Ok(None);
+        };
+
+        let manifest = dataset_src
+            .try_into_manifest::<CommonManifest>()
+            .map_err(|err| GetSqlDatasetError::ManifestParseError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: err,
+            })?;
+
+        tracing::debug!(
+            dataset_name = %name,
+            dataset_version = %version,
+            "Loaded manifest: {manifest:?}"
+        );
+
+        let kind = DatasetKind::from_str(&manifest.kind).map_err(|err: UnsupportedKindError| {
+            GetSqlDatasetError::UnsupportedKind {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                kind: err.kind,
+            }
+        })?;
+
+        match kind {
+            DatasetKind::Derived => {
+                let manifest =
+                    dataset_src
+                        .try_into_manifest::<DerivedManifest>()
+                        .map_err(|err| GetSqlDatasetError::ManifestParseError {
+                            name: name.to_string(),
+                            version: Some(version.to_string()),
+                            source: err,
+                        })?;
+
+                let queries = derived::queries(&manifest).map_err(|err| {
+                    GetSqlDatasetError::SqlParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    }
+                })?;
+                let dataset = derived::dataset(manifest).map_err(|err| {
+                    GetSqlDatasetError::DerivedCreationError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    }
+                })?;
+
+                Ok(Some(SqlDataset { dataset, queries }))
+            }
+            DatasetKind::Sql => {
+                let manifest = dataset_src
+                    .try_into_manifest::<SqlManifest>()
+                    .map_err(|err| GetSqlDatasetError::ManifestParseError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+
+                // Fetch all SQL files for the dataset
+                let sql_files = self
+                    .manifests_store
+                    .get_sql_files(&name, version)
+                    .await
+                    .map_err(|err| GetSqlDatasetError::SqlFilesError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: format!("Failed to get SQL files: {}", err).into(),
+                    })?;
+
+                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
+                    .await
+                    .map_err(|err| GetSqlDatasetError::SqlDatasetError {
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?;
+
+                Ok(Some(sql_dataset))
+            }
+            _ => Err(GetSqlDatasetError::UnsupportedKind {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                kind: kind.to_string(),
+            }),
+        }
     }
 
-    #[instrument(skip(self), err)]
-    async fn load_client_inner(
+    #[tracing::instrument(skip(self), err)]
+    pub async fn get_client(
         &self,
         dataset_name: &str,
+        dataset_version: impl Into<Option<&Version>> + std::fmt::Debug,
         only_finalized_blocks: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<BlockStreamClient, Error> {
-        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
-        let value = raw_dataset.to_value()?;
-        let kind = DatasetKind::from_str(&common.kind)?;
+    ) -> Result<Option<impl BlockStreamer>, GetClientError> {
+        let dataset_name =
+            &dataset_name
+                .parse::<Name>()
+                .map_err(|err| GetClientError::InvalidDatasetName {
+                    name: dataset_name.to_string(),
+                    source: err,
+                })?;
+        let dataset_version = dataset_version.into();
 
-        let Some((provider_name, provider)) =
-            self.find_provider(kind, common.network.clone()).await
+        // Get the dataset manifest for the given name and version
+        let Some(manifest_content) = self
+            .manifests_store
+            .get(dataset_name, dataset_version)
+            .await
+            .map_err(|err| GetClientError::ManifestRetrievalError {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+                source: Box::new(err),
+            })?
         else {
+            return Ok(None);
+        };
+
+        let manifest = manifest_content
+            .try_into_manifest::<CommonManifest>()
+            .map_err(|err| GetClientError::CommonManifestParseError {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+                source: err,
+            })?;
+
+        tracing::debug!(
+            dataset_name = %dataset_name,
+            dataset_version = %dataset_version.map(|v| v.to_string()).as_deref().unwrap_or("latest"),
+            "Loaded manifest: {manifest:?}"
+        );
+
+        let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
+            GetClientError::UnsupportedKind {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+                kind: err.kind,
+            }
+        })?;
+        if !kind.is_raw() {
+            return Err(GetClientError::UnsupportedKind {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+                kind: manifest.kind,
+            });
+        }
+
+        let Some(config) = self.find_provider(kind, manifest.network.clone()).await else {
             tracing::warn!(
-                provider_kind = %kind,
-                provider_network = %common.network,
+                provider_kind = %manifest.kind,
+                provider_network = %manifest.network,
                 "no providers available for the requested kind-network configuration"
             );
-            return Err(Error::ProviderNotFound {
+
+            return Err(GetClientError::ProviderNotFound {
+                name: dataset_name.to_string(),
                 dataset_kind: kind,
-                network: common.network,
+                network: manifest.network,
             });
         };
-        Ok(match kind {
-            DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
-                evm_rpc_datasets::client(
-                    provider,
-                    common.network,
-                    provider_name,
-                    only_finalized_blocks,
-                    meter,
-                )
-                .await?,
-            ),
-            DatasetKind::EthBeacon => BlockStreamClient::EthBeacon(eth_beacon_datasets::client(
-                provider,
-                common.network,
-                provider_name,
-                only_finalized_blocks,
-            )?),
-            DatasetKind::Firehose => BlockStreamClient::Firehose(
-                firehose_datasets::Client::new(
-                    provider,
-                    common.network,
-                    provider_name,
-                    only_finalized_blocks,
-                )
-                .await?,
-            ),
-            DatasetKind::Substreams => BlockStreamClient::Substreams(
-                substreams_datasets::Client::new(
-                    provider,
-                    value,
-                    common.network,
-                    provider_name,
-                    only_finalized_blocks,
-                )
-                .await?,
-            ),
-            DatasetKind::Sql | DatasetKind::Derived => {
-                // SQL and Manifest datasets don't have a client.
-                return Err(Error::UnsupportedKind(common.kind));
+
+        let client = match kind {
+            DatasetKind::EvmRpc => {
+                let config = config
+                    .try_into_config::<EvmRpcProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?;
+                evm_rpc_datasets::client(config, only_finalized_blocks, meter)
+                    .await
+                    .map(BlockStreamClient::EvmRpc)
+                    .map_err(|err| GetClientError::EvmRpcClientError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?
             }
-        })
+            DatasetKind::EthBeacon => {
+                let config = config
+                    .try_into_config::<EthBeaconProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?;
+                BlockStreamClient::EthBeacon(eth_beacon_datasets::client(
+                    config,
+                    only_finalized_blocks,
+                ))
+            }
+            DatasetKind::Firehose => {
+                let config = config
+                    .try_into_config::<FirehoseProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?;
+                firehose_datasets::Client::new(config, only_finalized_blocks)
+                    .await
+                    .map(BlockStreamClient::Firehose)
+                    .map_err(|err| GetClientError::FirehoseClientError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?
+            }
+            DatasetKind::Substreams => {
+                let config = config
+                    .try_into_config::<SubstreamsProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: dataset_name.to_string(),
+                        source: err,
+                    })?;
+                let manifest = manifest_content
+                    .try_into_manifest::<SubstreamsManifest>()
+                    .map_err(|err| GetClientError::SubstreamsManifestParseError {
+                        name: dataset_name.to_string(),
+                        version: dataset_version.map(|v| v.to_string()),
+                        source: err,
+                    })?;
+                substreams_datasets::Client::new(config, manifest, only_finalized_blocks)
+                    .await
+                    .map(BlockStreamClient::Substreams)
+                    .map_err(|err| GetClientError::SubstreamsClientError {
+                        name: dataset_name.to_string(),
+                        source: err.into(),
+                    })?
+            }
+            _ => {
+                unreachable!("non-raw dataset kinds are filtered out earlier");
+            }
+        };
+
+        Ok(Some(client.with_retry()))
     }
 
-    async fn find_provider(
-        &self,
-        kind: DatasetKind,
-        network: String,
-    ) -> Option<(String, ProviderConfigTomlValue)> {
+    async fn find_provider(&self, kind: DatasetKind, network: String) -> Option<ProviderConfig> {
         // Collect matching provider configurations into a vector for shuffling
         let mut matching_providers = self
             .providers
             .get_all()
             .await
-            .iter()
-            .filter(|(_, prov)| prov.kind == kind && prov.network == network)
-            .map(|(name, prov)| (name.clone(), prov.clone()))
+            .values()
+            .filter(|prov| prov.kind == kind && prov.network == network)
+            .cloned()
             .collect::<Vec<_>>();
 
         if matching_providers.is_empty() {
@@ -508,11 +665,12 @@ impl DatasetStore {
         // Try each provider in random order until we find one with successful env substitution
         matching_providers.shuffle(&mut rand::rng());
 
-        'try_find_provider: for (provider_name, mut provider) in matching_providers {
+        'try_find_provider: for mut provider in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
                 if let Err(err) = common::env_substitute::substitute_env_vars(value) {
                     tracing::warn!(
+                        provider_name = %provider.name,
                         provider_kind = %kind,
                         provider_network = %network,
                         error = %err,
@@ -528,70 +686,11 @@ impl DatasetStore {
                 "successfully selected provider with environment substitution"
             );
 
-            // Convert back to toml::Value for compatibility
-            // TODO: Remove conversion once the fn callers use ProviderConfig directly
-            let value = toml::Value::try_from(provider)
-                .expect("ProviderConfig structs should always be convertible to toml::Value");
-
-            return Some((provider_name, value));
+            return Some(provider);
         }
 
         // If we get here, no suitable providers were found
         None
-    }
-
-    /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
-    async fn eth_call_for_dataset(&self, dataset: &Dataset) -> Result<Option<ScalarUDF>, Error> {
-        #[derive(serde::Deserialize)]
-        struct EvmRpcProvider {
-            url: Url,
-            rate_limit_per_minute: Option<NonZeroU32>,
-        }
-
-        if dataset.kind != "evm-rpc" {
-            return Ok(None);
-        }
-
-        // Check if we already have the provider cached.
-        let cache_key = dataset.name.to_string();
-        if let Some(udf) = self.eth_call_cache.read().unwrap().get(&cache_key) {
-            return Ok(Some(udf.clone()));
-        }
-
-        // Load the provider from the dataset definition.
-        let Some((_provider_name, provider)) = self
-            .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
-            .await
-        else {
-            tracing::warn!(
-                provider_kind = %DatasetKind::EvmRpc,
-                provider_network = %dataset.network,
-                "no providers available for the requested kind-network configuration"
-            );
-            return Err(Error::ProviderNotFound {
-                dataset_kind: DatasetKind::EvmRpc,
-                network: dataset.network.clone(),
-            });
-        };
-
-        let provider: EvmRpcProvider = provider.try_into()?;
-        // Cache the provider.
-        let provider = if provider.url.scheme() == "ipc" {
-            evm::provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
-                .await
-                .map_err(Error::IpcConnectionError)?
-        } else {
-            evm::provider::new(provider.url, provider.rate_limit_per_minute)
-        };
-        let udf =
-            AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
-
-        self.eth_call_cache
-            .write()
-            .unwrap()
-            .insert(cache_key, udf.clone());
-
-        Ok(Some(udf))
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
@@ -605,34 +704,40 @@ impl DatasetStore {
         self: &Arc<Self>,
         query: &parser::Statement,
         env: QueryEnv,
-    ) -> Result<Catalog, DatasetError> {
-        let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
+    ) -> Result<Catalog, CatalogForSqlError> {
+        let (tables, _) = resolve_table_references(query, true)
+            .map_err(|err| CatalogForSqlError::TableReferenceResolution { source: err.into() })?;
+        let function_names = all_function_names(query)
+            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err.into() })?;
 
-        self.load_physical_catalog(tables, function_names, &env)
+        self.get_physical_catalog(tables, function_names, &env)
             .await
+            .map_err(CatalogForSqlError::GetPhysicalCatalog)
     }
 
-    /// Looks up the datasets for the given table references and loads them into a catalog.
-    pub async fn load_physical_catalog(
+    /// Looks up the datasets for the given table references and gets them into a catalog.
+    pub async fn get_physical_catalog(
         self: &Arc<Self>,
         table_refs: impl IntoIterator<Item = TableReference>,
         function_names: impl IntoIterator<Item = String>,
         env: &QueryEnv,
-    ) -> Result<Catalog, DatasetError> {
+    ) -> Result<Catalog, GetPhysicalCatalogError> {
         let logical_catalog = self
-            .load_logical_catalog(table_refs, function_names, &env.isolate_pool)
-            .await?;
+            .get_logical_catalog(table_refs, function_names, &env.isolate_pool)
+            .await
+            .map_err(GetPhysicalCatalogError::GetLogicalCatalog)?;
 
         let mut tables = Vec::new();
         for table in &logical_catalog.tables {
             let physical_table = PhysicalTable::get_active(table, self.metadata_db.clone())
                 .await
-                .map_err(DatasetError::unknown)?
-                .ok_or(DatasetError::unknown(format!(
-                    "Table {} has not been synced",
-                    table,
-                )))?;
+                .map_err(|err| GetPhysicalCatalogError::PhysicalTableRetrieval {
+                    table: table.to_string(),
+                    source: err.into(),
+                })?
+                .ok_or(GetPhysicalCatalogError::TableNotSynced {
+                    table: table.to_string(),
+                })?;
             tables.push(physical_table.into());
         }
         Ok(Catalog::new(tables, logical_catalog))
@@ -643,49 +748,80 @@ impl DatasetStore {
     pub async fn planning_ctx_for_sql(
         self: Arc<Self>,
         query: &parser::Statement,
-    ) -> Result<PlanningContext, DatasetError> {
-        let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
+    ) -> Result<PlanningContext, PlanningCtxForSqlError> {
+        let (tables, _) = resolve_table_references(query, true).map_err(|err| {
+            PlanningCtxForSqlError::TableReferenceResolution { source: err.into() }
+        })?;
+        let function_names = all_function_names(query)
+            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err.into() })?;
         let resolved_tables = self
-            .load_logical_catalog(tables, function_names, &IsolatePool::dummy())
+            .get_logical_catalog(tables, function_names, &IsolatePool::dummy())
             .await?;
         Ok(PlanningContext::new(resolved_tables))
     }
 
     /// Looks up the datasets for the given table references and creates resolved tables. Create
     /// UDFs specific to the referenced datasets.
-    async fn load_logical_catalog(
+    async fn get_logical_catalog(
         self: &Arc<Self>,
         table_refs: impl IntoIterator<Item = TableReference>,
         function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
-    ) -> Result<LogicalCatalog, DatasetError> {
-        let table_refs: Vec<_> = table_refs.into_iter().collect();
-        let mut dataset_names = datasets_from_table_refs(table_refs.iter().cloned())?;
-        for func_name in function_names {
-            match func_name.split('.').collect::<Vec<_>>().as_slice() {
-                // Simple name assumed to be Datafusion built-in function.
-                [_] => continue,
-                [dataset, _] => {
-                    dataset_names.insert(dataset.to_string());
-                }
-                _ => {
-                    return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
-                        func_name,
-                    )));
-                }
-            }
-        }
+    ) -> Result<LogicalCatalog, GetLogicalCatalogError> {
+        let table_refs = table_refs.into_iter().collect::<Vec<_>>();
+        let function_names = function_names.into_iter().collect::<Vec<_>>();
+
+        let datasets = {
+            let mut datasets = BTreeSet::new();
+
+            let table_refs_datasets = dataset_versions_from_table_refs(table_refs.iter())
+                .map_err(GetLogicalCatalogError::ExtractDatasetFromTableRefs)?;
+            tracing::debug!(
+                table_refs_datasets = ?table_refs_datasets,
+                "Extracted datasets from table references"
+            );
+            datasets.extend(table_refs_datasets);
+
+            let function_datasets =
+                dataset_versions_from_function_names(function_names.iter().map(AsRef::as_ref))
+                    .map_err(GetLogicalCatalogError::ExtractDatasetFromFunctionNames)?;
+            tracing::debug!(
+                function_datasets = ?function_datasets,
+                "Extracted datasets from function names"
+            );
+            datasets.extend(function_datasets);
+
+            tracing::debug!(
+                total_datasets = ?datasets,
+                "Combined datasets from table references and function names"
+            );
+            datasets
+        };
+
         let mut resolved_tables = Vec::new();
         let mut udfs = Vec::new();
-        for dataset_name in dataset_names {
-            let dataset = self.load_dataset(&dataset_name, None).await?;
-            let udf = self
-                .eth_call_for_dataset(&dataset)
+        for (dataset_name, dataset_version) in datasets {
+            let Some(dataset) = self
+                .get_dataset(&dataset_name, &dataset_version)
                 .await
-                .map_err(|err| (dataset_name.clone(), err))?;
-            if let Some(udf) = udf {
-                udfs.push(udf);
+                .map_err(GetLogicalCatalogError::GetDataset)?
+            else {
+                return Err(GetLogicalCatalogError::DatasetNotFound {
+                    name: dataset_name.to_string(),
+                    version: dataset_version.clone(),
+                });
+            };
+
+            if dataset.kind == EVM_RPC_DATASET_KIND {
+                let udf = self.eth_call_for_dataset(&dataset).await.map_err(|err| {
+                    GetLogicalCatalogError::EthCallUdfCreation {
+                        dataset: dataset_name.to_string(),
+                        source: err,
+                    }
+                })?;
+                if let Some(udf) = udf {
+                    udfs.push(udf);
+                }
             }
 
             // Add JS UDFs
@@ -698,160 +834,233 @@ impl DatasetStore {
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
                         (Some(schema), table_name) => {
-                            schema == dataset_name && table_name == table.name()
+                            let versioned_name = match &dataset_version {
+                                None => dataset_name.to_string(),
+                                Some(v) => {
+                                    format!("{}__{}", dataset_name, v.to_underscore_version())
+                                }
+                            };
+
+                            schema == versioned_name && table_name == table.name()
                         }
                         _ => false, // Unqualified table
                     }
                 });
 
                 if is_referenced {
-                    let table_ref = TableReference::partial(dataset_name.clone(), table.name());
+                    let versioned_name = match &dataset_version {
+                        None => dataset_name.to_string(),
+                        Some(v) => {
+                            format!("{}__{}", dataset_name, v.to_underscore_version())
+                        }
+                    };
+
+                    let table_ref = TableReference::partial(versioned_name, table.name());
                     table.update_table_ref(table_ref);
                     resolved_tables.push(table);
                 }
             }
         }
+
         Ok(LogicalCatalog {
             tables: resolved_tables,
             udfs,
         })
     }
 
-    /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
-    fn sql_dataset(
-        self: Arc<Self>,
-        dataset_def: ManifestValue,
-    ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
-        sql_datasets::dataset(self, dataset_def)
-            .map_err(Error::SqlDatasetError)
-            .boxed()
-    }
-}
+    /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
+    async fn eth_call_for_dataset(
+        &self,
+        dataset: &Dataset,
+    ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
+        let name = &dataset.name;
+        let version = dataset.version.clone().unwrap_or_default();
 
-/// Represents a dataset definition source text, either in TOML or JSON format.
-enum DatasetSrc {
-    Toml(String),
-    Json(String),
-}
-
-impl DatasetSrc {
-    fn to_value(&self) -> Result<ManifestValue, Error> {
-        let value = match self {
-            DatasetSrc::Toml(src) => ManifestValue::Toml(toml::Value::from_str(src)?),
-            DatasetSrc::Json(src) => ManifestValue::Json(serde_json::Value::from_str(src)?),
-        };
-
-        Ok(value)
-    }
-
-    pub fn try_into_manifest<T>(&self) -> Result<T, Error>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let manifest = match self {
-            DatasetSrc::Toml(src) => toml::from_str(src)?,
-            DatasetSrc::Json(src) => serde_json::from_str(src)?,
-        };
-        Ok(manifest)
-    }
-}
-
-fn datasets_from_table_refs(
-    table_refs: impl Iterator<Item = TableReference>,
-) -> Result<BTreeSet<String>, DatasetError> {
-    let mut dataset_names = BTreeSet::new();
-    for t in table_refs {
-        if t.catalog().is_some() {
-            return Err(DatasetError::no_context(Error::UnsupportedName(
-                format!(
-                    "found table qualified with catalog '{}', tables must only be qualified with a dataset name",
-                    t.table()
-                )
-                .into(),
-            )));
+        if dataset.kind != EVM_RPC_DATASET_KIND {
+            return Ok(None);
         }
 
-        let Some(catalog_schema) = t.schema() else {
-            return Err(DatasetError::no_context(Error::UnsupportedName(
-                format!(
-                "found unqualified table '{}', all tables must be qualified with a dataset name",
-                t.table()
-            )
-                .into(),
-            )));
+        // Check if we already have the provider cached.
+        let cache_key = format!("{}__{}", name, version.to_underscore_version());
+        if let Some(udf) = self.eth_call_cache.read().get(&cache_key) {
+            return Ok(Some(udf.clone()));
+        }
+
+        // Load the provider from the dataset definition.
+        let Some(config) = self
+            .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
+            .await
+        else {
+            tracing::warn!(
+                dataset_name = %name,
+                dataset_version = %version,
+                provider_kind = %DatasetKind::EvmRpc,
+                provider_network = %dataset.network,
+                "no providers available for the requested kind-network configuration"
+            );
+            return Err(EthCallForDatasetError::ProviderNotFound {
+                dataset_kind: DatasetKind::EvmRpc,
+                network: dataset.network.clone(),
+            });
         };
-        dataset_names.insert(catalog_schema.to_string());
+
+        // Internal struct for extracting specific provider config fields.
+        #[derive(serde::Deserialize)]
+        struct EvmRpcProviderConfig {
+            url: Url,
+            rate_limit_per_minute: Option<NonZeroU32>,
+        }
+
+        let provider = config
+            .try_into_config::<EvmRpcProviderConfig>()
+            .map_err(EthCallForDatasetError::ProviderConfigParse)?;
+
+        // Cache the provider.
+        let provider = if provider.url.scheme() == "ipc" {
+            evm::provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
+                .await
+                .map_err(|err| EthCallForDatasetError::IpcConnection(err.into()))?
+        } else {
+            evm::provider::new(provider.url, provider.rate_limit_per_minute)
+        };
+
+        let udf =
+            AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
+
+        // Cache the EthCall UDF
+        self.eth_call_cache.write().insert(cache_key, udf.clone());
+
+        Ok(Some(udf))
     }
-    Ok(dataset_names)
 }
 
-#[derive(Clone)]
-enum BlockStreamClient {
-    EvmRpc(evm_rpc_datasets::JsonRpcClient),
-    EthBeacon(eth_beacon_datasets::BeaconClient),
-    Firehose(firehose_datasets::Client),
-    Substreams(substreams_datasets::Client),
-}
+/// Extracts dataset names and versions from table references in SQL queries.
+///
+/// This function processes table references from SQL queries and extracts the dataset names
+/// and optional versions from the schema portion of qualified table names.
+///
+/// # Table Reference Format
+/// - All tables must be qualified with a dataset name: `dataset_name.table_name`
+/// - Versioned datasets: `dataset_name__x_y_z.table_name` where x, y, z are version numbers
+/// - Catalog-qualified tables are not supported
+///
+/// # Returns
+/// A set of unique (dataset_name, version) tuples extracted from the table references.
+fn dataset_versions_from_table_refs<'a>(
+    table_refs: impl Iterator<Item = &'a TableReference>,
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromTableRefsError> {
+    let mut datasets = BTreeSet::new();
 
-impl BlockStreamer for BlockStreamClient {
-    async fn block_stream(
-        self,
-        start_block: BlockNum,
-        end_block: BlockNum,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
-        // Each client returns a different concrete stream type, so we
-        // use `stream!` to unify them into a wrapper stream
-        stream! {
-            match self {
-                Self::EvmRpc(client) => {
-                    let stream = client.block_stream(start_block, end_block).await;
-                    for await item in stream {
-                        yield item;
-                    }
-                }
-                Self::EthBeacon(client) => {
-                let stream = client.block_stream(start_block, end_block).await;
-                   for await item in stream {
-                        yield item;
-                    }
-                }
-                Self::Firehose(client) => {
-                    let stream = client.block_stream(start_block, end_block).await;
-                    for await item in stream {
-                        yield item;
-                    }
-                }
-                Self::Substreams(client) => {
-                    let stream = client.block_stream(start_block, end_block).await;
-                    for await item in stream {
-                        yield item;
-                    }
-                }
+    for table_ref in table_refs {
+        if table_ref.catalog().is_some() {
+            return Err(ExtractDatasetFromTableRefsError::CatalogQualifiedTable {
+                table: table_ref.table().to_string(),
+            });
+        }
+
+        let Some(catalog_schema) = table_ref.schema() else {
+            return Err(ExtractDatasetFromTableRefsError::UnqualifiedTable {
+                table: table_ref.table().to_string(),
+            });
+        };
+
+        // Parse and extract dataset name and version if present.
+        let (name_str, version_str) = catalog_schema
+            .rsplit_once("__")
+            .map(|(name_str, version_str)| (name_str, Some(version_str)))
+            .unwrap_or((catalog_schema, None));
+
+        let name = name_str.parse::<Name>().map_err(|err| {
+            ExtractDatasetFromTableRefsError::InvalidDatasetName {
+                name: name_str.to_string(),
+                schema: catalog_schema.to_string(),
+                source: err,
             }
-        }
+        })?;
+
+        let version = version_str
+            .map(|v| v.replace("_", "."))
+            .map(|v| {
+                v.parse::<Version>()
+                    .map_err(|_| ExtractDatasetFromTableRefsError::InvalidVersion {
+                        version: v,
+                        schema: catalog_schema.to_string(),
+                    })
+            })
+            .transpose()?;
+
+        datasets.insert((name, version));
     }
 
-    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
-        match self {
-            Self::EvmRpc(client) => client.latest_block().await,
-            Self::EthBeacon(client) => client.latest_block().await,
-            Self::Firehose(client) => client.latest_block().await,
-            Self::Substreams(client) => client.latest_block().await,
-        }
+    Ok(datasets)
+}
+
+/// Extracts dataset names and versions from function names in SQL queries.
+///
+/// This function processes qualified function names (e.g., `dataset.function` or `dataset__1_0_0.function`)
+/// and extracts the dataset name and optional version from the qualifier.
+///
+/// # Function Name Format
+/// - Simple function names (no qualifier) are assumed to be built-in DataFusion functions
+/// - Qualified functions: `dataset_name.function_name` or `dataset_name__x_y_z.function_name`
+/// - Version format in qualifier: `__x_y_z` where x, y, z are version numbers
+///
+/// # Returns
+/// A set of unique (dataset_name, version) tuples extracted from the function names.
+fn dataset_versions_from_function_names<'a>(
+    function_names: impl IntoIterator<Item = &'a str>,
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromFunctionNamesError> {
+    let mut datasets = BTreeSet::new();
+
+    for func_name in function_names {
+        let parts: Vec<_> = func_name.split('.').collect();
+        let fn_dataset = match parts.as_slice() {
+            // Simple name assumed to be Datafusion built-in function.
+            [_] => continue,
+            [dataset, _] => dataset,
+            _ => {
+                return Err(
+                    ExtractDatasetFromFunctionNamesError::InvalidFunctionFormat {
+                        function: func_name.to_string(),
+                    },
+                );
+            }
+        };
+
+        // Parse and extract dataset name and version if present.
+        let (name_str, version_str) = fn_dataset
+            .rsplit_once("__")
+            .map(|(name_str, version_str)| (name_str, Some(version_str)))
+            .unwrap_or((fn_dataset, None));
+
+        let name = name_str.parse::<Name>().map_err(|err| {
+            ExtractDatasetFromFunctionNamesError::InvalidDatasetName {
+                name: name_str.to_string(),
+                function: fn_dataset.to_string(),
+                source: err,
+            }
+        })?;
+
+        let version = version_str
+            .map(|v| v.replace("_", "."))
+            .map(|v| {
+                v.parse::<Version>().map_err(|_| {
+                    ExtractDatasetFromFunctionNamesError::InvalidVersion {
+                        version: v,
+                        function: fn_dataset.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
+
+        datasets.insert((name, version));
     }
 
-    fn provider_name(&self) -> &str {
-        match self {
-            Self::EvmRpc(client) => client.provider_name(),
-            Self::EthBeacon(client) => client.provider_name(),
-            Self::Firehose(client) => client.provider_name(),
-            Self::Substreams(client) => client.provider_name(),
-        }
-    }
+    Ok(datasets)
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
-#[instrument(skip(dataset_store), err)]
+#[tracing::instrument(skip(dataset_store), err)]
 pub async fn resolve_blocks_table(
     dataset_store: &Arc<DatasetStore>,
     src_datasets: &BTreeSet<&str>,
@@ -859,11 +1068,11 @@ pub async fn resolve_blocks_table(
 ) -> Result<PhysicalTable, BoxError> {
     let dataset = {
         fn is_raw_dataset(kind: &str) -> bool {
-            ["evm-rpc", "firehose"].contains(&kind)
+            [EVM_RPC_DATASET_KIND, FIREHOSE_DATASET_KIND].contains(&kind)
         }
 
         let mut datasets: Vec<Dataset> = dataset_store
-            .all_datasets()
+            .get_all_datasets()
             .await?
             .into_iter()
             .filter(|d| d.network == network)

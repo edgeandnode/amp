@@ -12,7 +12,6 @@ pub mod evm;
 mod proto;
 
 pub use client::Client;
-use datasets_common::value::ManifestValueError;
 
 pub use self::dataset_kind::{DATASET_KIND, FirehoseDatasetKind, FirehoseDatasetKindError};
 
@@ -32,17 +31,4 @@ pub enum Error {
     Utf8(#[from] InvalidMetadataValue),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-impl From<ManifestValueError> for Error {
-    fn from(err: ManifestValueError) -> Self {
-        match err {
-            ManifestValueError::Toml(toml_err) => Error::Toml(toml_err),
-            ManifestValueError::Json(json_err) => Error::Json(json_err),
-        }
-    }
 }

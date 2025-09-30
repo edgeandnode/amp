@@ -1,14 +1,12 @@
+use common::Dataset;
+
+use crate::dataset::Manifest;
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use crate::{Error, dataset::Manifest};
 pub mod pb_to_rows;
 pub mod tables;
 
-use common::Dataset;
-use datasets_common::value::ManifestValue;
-
-pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
-    let manifest: Manifest = value.try_into_manifest()?;
-    Ok(Dataset {
+pub fn dataset(manifest: Manifest) -> Dataset {
+    Dataset {
         name: manifest.name,
         version: Some(manifest.version),
         kind: manifest.kind.to_string(),
@@ -16,7 +14,7 @@ pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
         tables: tables::all(&manifest.network),
         network: manifest.network,
         functions: vec![],
-    })
+    }
 }
 
 /// Automatically generate a README.md file with the schema whenever tests are executed.

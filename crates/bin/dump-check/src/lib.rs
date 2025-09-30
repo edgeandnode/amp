@@ -27,11 +27,18 @@ pub async fn dump_check(
 ) -> Result<(), BoxError> {
     let dataset_version = dataset_version.map(|v| v.parse()).transpose()?;
     let dataset = dataset_store
-        .load_dataset(&dataset_name, dataset_version.as_ref())
-        .await?;
+        .get_dataset(&dataset_name, dataset_version.as_ref())
+        .await?
+        .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
     let client = dataset_store
-        .load_client(&dataset_name, false, metrics.as_ref().map(|m| &m.meter))
-        .await?;
+        .get_client(
+            &dataset_name,
+            dataset_version.as_ref(),
+            false,
+            metrics.as_ref().map(|m| &m.meter),
+        )
+        .await?
+        .ok_or_else(|| format!("Client for dataset '{}' not found", dataset_name))?;
     let total_blocks = end_block - start + 1;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {

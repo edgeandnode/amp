@@ -33,8 +33,8 @@ use crate::ctx::Ctx;
 /// - Handles cases where metadata DB is unavailable (active_location will be null)
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, BoxRequestError> {
-    let datasets_with_provider = ctx.store.all_datasets().await.map_err(|err| {
-        tracing::debug!(error=?err, "failed to get all datasets");
+    let datasets_with_provider = ctx.store.get_all_datasets().await.map_err(|err| {
+        tracing::debug!(error=?err, "failed to load all datasets");
         Error::DatasetStoreError(err)
     })?;
 
@@ -113,7 +113,7 @@ pub enum Error {
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("dataset store error: {0}")]
-    DatasetStoreError(#[from] dataset_store::DatasetError),
+    DatasetStoreError(#[from] dataset_store::GetAllDatasetsError),
     /// Metadata database error while retrieving active locations
     ///
     /// This occurs when:
