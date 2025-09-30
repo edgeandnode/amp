@@ -59,7 +59,7 @@ pub async fn dump(
     for dataset_name in datasets {
         let (dataset_name, version) =
             if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match Version::from_version_identifier(version_str) {
+                match Version::try_from_underscore_version(version_str) {
                     Ok(v) => (name, Some(v)),
                     Err(err) => {
                         tracing::warn!(
