@@ -20,12 +20,14 @@ use datafusion::{
 use datafusion_proto::bytes::{
     logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
 };
+use tracing::instrument;
 
 use crate::{
     BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     metadata::segments::ResumeWatermark,
     plan_visitors::{
-        is_incremental, order_by_block_num, propagate_block_num, unproject_special_block_num_column,
+        IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num,
+        unproject_special_block_num_column,
     },
     query_context::{Error, TableProviderCodec},
     stream_helpers::is_streaming,
@@ -196,12 +198,14 @@ impl TableProvider for PlanningTable {
         unreachable!("PlanningTable should never be scanned")
     }
 }
+
 /// A plan that has `PlanningTable` for its `TableProvider`s. It cannot be executed before being
 /// first "attached" to a `QueryContext`.
 #[derive(Debug, Clone)]
 pub struct DetachedLogicalPlan(LogicalPlan);
 
 impl DetachedLogicalPlan {
+    #[instrument(skip_all, err)]
     pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, Error> {
         Ok(self
             .0
@@ -224,7 +228,7 @@ impl DetachedLogicalPlan {
             .data)
     }
 
-    pub fn is_incremental(&self) -> Result<bool, BoxError> {
+    pub fn is_incremental(&self) -> Result<IncrementalCheck, BoxError> {
         is_incremental(&self.0)
     }
 

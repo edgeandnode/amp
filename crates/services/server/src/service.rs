@@ -21,6 +21,7 @@ use common::{
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     notification_multiplexer::{self, NotificationMultiplexerHandle},
+    plan_visitors::IncrementalCheck,
     query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
 use datafusion::{
@@ -244,13 +245,14 @@ impl Service {
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
         // is_incremental returns an error if query contains DDL, DML, etc.
-        let is_incr = plan
+        let incremental_check = plan
             .is_incremental()
             .map_err(|e| Error::InvalidQuery(e.to_string()))?;
-        if is_streaming && !is_incr {
-            return Err(Error::InvalidQuery(
-                "not incremental queries are not supported for streaming".to_string(),
-            ));
+        if is_streaming && let IncrementalCheck::NonIncremental(op) = incremental_check {
+            return Err(Error::InvalidQuery(format!(
+                "non-incremental queries are not supported for streaming, query contains non-incremental operation: `{}`",
+                op
+            )));
         }
 
         // If not streaming or metadata db is not available, execute once

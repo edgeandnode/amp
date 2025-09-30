@@ -102,6 +102,7 @@ use common::{
     manifest::sql_datasets::SqlDataset,
     metadata::segments::ResumeWatermark,
     notification_multiplexer::NotificationMultiplexerHandle,
+    plan_visitors::IncrementalCheck,
     query_context::QueryEnv,
 };
 use futures::StreamExt as _;
@@ -130,7 +131,7 @@ pub async fn dump_table(
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
-    let dataset_name = dataset.dataset.name.as_str();
+    let dataset_name = dataset.dataset.name.clone();
     let table_name = table.table_name().to_string();
     let query = dataset
         .queries
@@ -145,7 +146,6 @@ pub async fn dump_table(
 
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     let dataset_store = ctx.dataset_store.clone();
-    let data_store = ctx.data_store.clone();
     let env = env.clone();
     let parquet_opts = parquet_opts.clone();
     let compaction_opts = compaction_opts.clone();
@@ -158,7 +158,7 @@ pub async fn dump_table(
         let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
-        let is_incr = plan.is_incremental()?;
+        let incremental_check = plan.is_incremental()?;
 
         let Some(start) = catalog.earliest_block().await? else {
             // If the dependencies have synced nothing, we have nothing to do.
@@ -181,56 +181,38 @@ pub async fn dump_table(
             }
         };
 
-        if is_incr {
-            let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
-            let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
-            dump_sql_query(
-                &ctx,
-                &env,
-                &catalog,
-                plan.clone(),
-                start..=end,
-                resume_watermark,
-                table.clone(),
-                &parquet_opts,
-                &compaction_opts,
-                microbatch_max_interval,
-                &ctx.notification_multiplexer,
-                metrics.clone(),
+        if let IncrementalCheck::NonIncremental(op) = incremental_check {
+            return Err(format!(
+                "syncing non-incremental table is not supported: {}.{} (contains non-incremental operation: {})",
+                table_name, dataset_name, op
             )
-            .await?;
-        } else {
-            let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
-                table.table(),
-                &data_store,
-                ctx.metadata_db.clone(),
-                false,
-            )
-            .await?
-            .into();
-            dump_sql_query(
-                &ctx,
-                &env,
-                &catalog,
-                plan.clone(),
-                start..=end,
-                None,
-                physical_table,
-                &parquet_opts,
-                &compaction_opts,
-                microbatch_max_interval,
-                &ctx.notification_multiplexer,
-                metrics.clone(),
-            )
-            .await?;
+            .into());
         }
+
+        let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
+        let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
+        dump_sql_query(
+            &ctx,
+            &env,
+            &catalog,
+            plan.clone(),
+            start..=end,
+            resume_watermark,
+            table.clone(),
+            &parquet_opts,
+            &compaction_opts,
+            microbatch_max_interval,
+            &ctx.notification_multiplexer,
+            metrics.clone(),
+        )
+        .await?;
 
         Ok(())
     });
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+        tracing::error!(dataset=%dataset.dataset.name, error=%err, "dataset dump failed");
         return Err(err.into_box_error());
     }
 
