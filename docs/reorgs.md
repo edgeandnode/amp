@@ -27,17 +27,19 @@ Arrow Flight clients receive metadata about the block range associated with each
 
 #### Metadata Format
 
-The `app_metadata` field contains JSON-serialized metadata with the following structure:
-```json
-{
-  "ranges": [
-    {
-      "network": "anvil",
-      "numbers": { "start": 0, "end": 2 },
-      "hash": "0x0deee2eaa7adb2b28c7fa731f79ea86e77e375f8ee0a0f2619ba6ec3eb2f68e6",
-      "prev_hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
-    }
-  ]
+The `app_metadata` field contains protobuf-serialized metadata with the following structure:
+```proto3
+syntax = "proto3";
+
+message AppMetadata {
+  message BlockRange {
+    string network = 1;
+    uint64 start = 2;
+    uint64 end = 3;
+    string hash = 4;
+    optional string prev_hash = 5;
+  }
+  repeated BlockRange ranges = 1;
 }
 ```
 where:
@@ -58,15 +60,19 @@ For a reference implementation in Rust, see `nozzle_client::with_reorg` which au
 
 Nozzle supports resuming streaming queries by adding a `nozzle-resume` header to the `GetFlightInfo` request to the Nozzle server. The header value, "resume watermark" can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the resume watermark from the ranges known to be fully processed.
 
-The `nozzle-resume` header value is expected to be JSON-serialized data with the following structure:
+The `nozzle-resume` header value is expected to be protobuf-serialized data with the following structure:
 
-```json
-{
-  "anvil": {
-    "number": 2,
-    "hash": "0x0deee2eaa7adb2b28c7fa731f79ea86e77e375f8ee0a0f2619ba6ec3eb2f68e6"
+```proto3
+syntax = "proto3";
+
+message ResumeWatermarks {
+  message ResumeWatermark {
+    string network = 1;
+    uint64 number = 2;
+    string hash = 3;
   }
+  repeated ResumeWatermark watermarks = 1;
 }
 ```
 
-The JSON value is expected to have a block number & hash entry for each network present in the ranges metadata.
+The protobuf message is expected to have a block number & hash entry for each network present in the ranges metadata.
