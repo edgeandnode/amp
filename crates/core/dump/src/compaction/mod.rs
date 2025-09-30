@@ -2,77 +2,40 @@ pub mod algorithm;
 pub mod collector;
 pub mod compactor;
 pub mod error;
-pub mod group;
-pub mod size;
+pub mod plan;
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     sync::Arc,
     time::Duration,
 };
 
-use common::{
-    Timestamp, catalog::physical::PhysicalTable,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
+use common::{Timestamp, catalog::physical::PhysicalTable};
+use futures::{
+    FutureExt, TryFutureExt,
+    future::{BoxFuture, ok as ready_ok},
 };
-use futures::{FutureExt, TryFutureExt, future::BoxFuture};
 use tokio::task::JoinHandle;
 
-use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
 pub use crate::compaction::{
+    algorithm::{CompactionAlgorithm, SegmentSizeLimit},
     error::{CollectionResult, CollectorError, CompactionResult, CompactorError},
-    size::{SegmentSize, SegmentSizeLimit},
+};
+use crate::{
+    WriterProperties,
+    compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt},
 };
 
 /// Duration collector must wait prior to deleting files
 pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
-#[derive(Debug, Clone)]
-pub struct CompactionProperties {
-    pub compactor_active: bool,
-    pub collector_active: bool,
-    pub compactor_interval: Duration,
-    pub collector_interval: Duration,
-    pub file_lock_duration: Duration,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub parquet_writer_props: ParquetWriterProperties,
-    pub size_limit: SegmentSizeLimit,
-}
-
-impl Display for CompactionProperties {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let active = format!(
-            "active: {}",
-            if self.compactor_active && self.collector_active {
-                "[ compactor, collector ]"
-            } else if self.compactor_active {
-                "compactor"
-            } else if self.collector_active {
-                "collector"
-            } else {
-                "false"
-            }
-        );
-        write!(
-            f,
-            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
-            compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
-            collector_interval = format!("collector_interval: {:?}", self.collector_interval),
-            file_lock_duration = format!("file_lock_duration: {:?}", self.file_lock_duration),
-            metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
-            write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
-            size_limit = format!("size_limit: {}", self.size_limit),
-        )
-    }
-}
 pub struct NozzleCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
 }
 
 impl NozzleCompactor {
-    pub fn start(table: Arc<PhysicalTable>, opts: Arc<CompactionProperties>) -> Self {
+    pub fn start(table: Arc<PhysicalTable>, opts: Arc<WriterProperties>) -> Self {
         NozzleCompactor {
             compaction_task: Compactor::start(&table, &opts),
             deletion_task: Collector::start(&table, &opts),
@@ -112,7 +75,7 @@ pub type DeletionTask = NozzleCompactorTask<Collector>;
 pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
-    opts: Arc<CompactionProperties>,
+    opts: Arc<WriterProperties>,
     previous: Option<Timestamp>,
 }
 
@@ -169,31 +132,38 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
 pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     type Error: CompactionErrorExt;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self;
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<WriterProperties>) -> Self;
 
     /// Run the task
     fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
 
-    fn interval(opts: &Arc<CompactionProperties>) -> Duration;
+    fn interval(opts: &Arc<WriterProperties>) -> Duration;
 
-    fn active(opts: &Arc<CompactionProperties>) -> bool;
+    fn active(opts: &Arc<WriterProperties>) -> bool;
 
-    fn deactivate(opts: &mut Arc<CompactionProperties>);
+    fn deactivate(opts: &mut Arc<WriterProperties>);
 
     /// Handle errors from the previous run
     ///
     /// If the error is recoverable, return `self` to retry
+    #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn handle_error(
         table: &Arc<PhysicalTable>,
-        opts: &mut Arc<CompactionProperties>,
+        opts: &mut Arc<WriterProperties>,
         err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
     ) -> Self {
         let this = Self::new(table, opts);
         let err = err.into();
         if err.is_cancellation() {
             Self::deactivate(opts);
-            tracing::warn!("{this:?} was cancelled");
+            tracing::info!("{this:?} was cancelled");
             return this;
+        } else if err.is_debug() {
+            tracing::debug!("{err}");
+            this
+        } else if err.is_informational() {
+            tracing::info!("Informational error occurred in {this}: {err}");
+            this
         } else if err.is_recoverable() {
             tracing::warn!("Recoverable error occurred in {this}: {err}");
             this
@@ -202,16 +172,22 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn start(
         table: &Arc<PhysicalTable>,
-        opts: &Arc<CompactionProperties>,
+        opts: &Arc<WriterProperties>,
     ) -> NozzleCompactorTask<Self> {
-        let task = tokio::spawn(Self::new(table, opts).run());
-        NozzleCompactorTask {
+        let task = tokio::spawn(ready_ok(Self::new(table, opts)));
+
+        let mut this = NozzleCompactorTask {
             task,
             table: Arc::clone(table),
             opts: Arc::clone(opts),
             previous: None,
-        }
+        };
+
+        this.try_run();
+
+        this
     }
 }
