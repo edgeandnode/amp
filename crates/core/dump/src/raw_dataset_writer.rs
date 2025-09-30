@@ -8,11 +8,10 @@ use common::{
 use metadata_db::MetadataDb;
 
 use crate::{
-    compaction::{CompactionProperties, NozzleCompactor},
+    WriterProperties,
+    compaction::NozzleCompactor,
     metrics,
-    parquet_writer::{
-        ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
-    },
+    parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
 };
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -30,9 +29,7 @@ impl RawDatasetWriter {
     pub fn new(
         catalog: Catalog,
         metadata_db: MetadataDb,
-        opts: ParquetWriterProperties,
-        compaction_opts: &Arc<CompactionProperties>,
-        partition_size: u64,
+        opts: Arc<WriterProperties>,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
@@ -41,14 +38,7 @@ impl RawDatasetWriter {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = RawTableWriter::new(
-                table.clone(),
-                opts.clone(),
-                compaction_opts,
-                partition_size,
-                ranges,
-                metrics.clone(),
-            )?;
+            let writer = RawTableWriter::new(table.clone(), opts.clone(), ranges, metrics.clone())?;
             writers.insert(table_name.to_string(), writer);
         }
         Ok(RawDatasetWriter {
@@ -109,8 +99,7 @@ impl RawDatasetWriter {
 
 struct RawTableWriter {
     table: Arc<PhysicalTable>,
-    opts: ParquetWriterProperties,
-    partition_size: u64,
+    opts: Arc<WriterProperties>,
 
     /// The ranges of block numbers that this writer is responsible for.
     /// Organized as a stack, where the top range is the one being written.
@@ -127,9 +116,7 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        opts: ParquetWriterProperties,
-        compaction_opts: &Arc<CompactionProperties>,
-        partition_size: u64,
+        opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
@@ -138,19 +125,18 @@ impl RawTableWriter {
         let current_file = match ranges_to_write.last() {
             Some(range) => Some(ParquetFileWriter::new(
                 table.clone(),
-                opts.clone(),
+                opts.as_ref(),
                 *range.start(),
             )?),
             None => None,
         };
 
-        let nozzle_compactor = NozzleCompactor::start(table.clone(), compaction_opts.clone());
+        let nozzle_compactor = NozzleCompactor::start(table.clone(), opts.clone());
 
         Ok(Self {
             table,
             opts,
             ranges_to_write,
-            partition_size,
             current_file,
             current_range: None,
             metrics,
@@ -180,7 +166,7 @@ impl RawTableWriter {
                 .ranges_to_write
                 .last()
                 .map(|range| {
-                    ParquetFileWriter::new(self.table.clone(), self.opts.clone(), *range.start())
+                    ParquetFileWriter::new(self.table.clone(), self.opts.as_ref(), *range.start())
                 })
                 .transpose()?;
             self.current_file = new_file;
@@ -209,8 +195,8 @@ impl RawTableWriter {
             _ => false,
         };
         // We also split the segment if we have reached the configured max `partition_size`.
-        let partition_size_exceeded =
-            self.current_file.as_ref().unwrap().bytes_written() >= self.partition_size as usize;
+        let partition_size_exceeded = self.current_file.as_ref().unwrap().bytes_written()
+            >= self.opts.partition.0.bytes as usize;
         if reorg || partition_size_exceeded {
             // `parquet_meta` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
@@ -228,7 +214,7 @@ impl RawTableWriter {
             self.ranges_to_write.push(block_num..=*range.end());
             let new_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
-                self.opts.clone(),
+                self.opts.as_ref(),
                 block_num,
             )?);
             self.current_file = new_file;

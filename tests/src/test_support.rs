@@ -18,7 +18,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    metadata::segments::BlockRange,
+    metadata::{Generation, segments::BlockRange},
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
@@ -364,7 +364,6 @@ pub(crate) async fn dump_dataset(
     microbatch_max_interval: Option<u64>,
 ) -> Result<(), BoxError> {
     // dump the dataset
-    let partition_size_mb = 100;
     let metadata_db: MetadataDb = config.metadata_db().await?.into();
 
     let physical_tables = dump(
@@ -374,7 +373,6 @@ pub(crate) async fn dump_dataset(
         true,
         Some(end as i64),
         n_jobs,
-        partition_size_mb,
         None,
         microbatch_max_interval,
         None,
@@ -705,23 +703,30 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     file_lock_duration: Duration,
 ) {
     let length = table.files().await.unwrap().len();
-    let parquet_writer_props = dump::parquet_opts(&config.parquet);
-    let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.compactor_active = compactor_active;
-    opts.collector_active = collector_active;
+    let mut opts = dump::parquet_opts(&config.parquet);
 
-    opts.file_lock_duration = file_lock_duration;
-    opts.collector_interval = Duration::ZERO;
-    opts.compactor_interval = Duration::ZERO;
+    let opts_mut = Arc::get_mut(&mut opts).unwrap();
+    opts_mut
+        .compactor
+        .active
+        .store(compactor_active, std::sync::atomic::Ordering::SeqCst);
+    opts_mut
+        .collector
+        .active
+        .store(collector_active, std::sync::atomic::Ordering::SeqCst);
 
-    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+    opts_mut.collector.file_lock_duration = file_lock_duration;
+    opts_mut.collector.interval = Duration::ZERO;
+    opts_mut.compactor.interval = Duration::ZERO;
 
-    let mut task = T::start(table, &Arc::new(opts));
+    opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1);
+
+    let mut task = T::start(table, &opts);
 
     task.join_current_then_spawn_new().await;
 
     while !task.is_finished() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 

@@ -18,6 +18,8 @@ use rand::RngCore as _;
 use tracing::{debug, instrument, trace};
 use url::Url;
 
+use crate::WriterProperties;
+
 pub async fn commit_metadata(
     metadata_db: &MetadataDb,
     parquet_meta: ParquetMeta,
@@ -61,7 +63,7 @@ pub struct ParquetFileWriter {
 impl ParquetFileWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        opts: ParquetWriterProperties,
+        opts: &WriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
         // TODO: We need to make file names unique when we start handling non-finalized blocks.
@@ -73,7 +75,8 @@ impl ParquetFileWriter {
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
         let object_writer = BufWriter::new(table.object_store(), file_path);
-        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
+        let writer =
+            AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.parquet.clone()))?;
         Ok(ParquetFileWriter {
             writer,
             file_url,

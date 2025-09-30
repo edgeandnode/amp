@@ -91,8 +91,8 @@ impl Default for CollectorConfig {
     fn default() -> Self {
         Self {
             active: false,
-            min_interval: Duration::from_secs(5),
-            deletion_lock_duration: Duration::ZERO,
+            min_interval: Duration::from_secs(5), // 5 seconds
+            deletion_lock_duration: Duration::from_secs(30 * 60), // 30 minutes
         }
     }
 }
@@ -137,7 +137,7 @@ pub struct CompactionAlgorithmConfig {
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
-            base_cooldown_duration: Duration::from_secs(5).into(),
+            base_cooldown_duration: Duration::from_secs(2).into(),
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }

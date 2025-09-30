@@ -15,3 +15,14 @@ metadata_db_url = "patch_me"
 flight_addr = "0.0.0.0:0"
 jsonl_addr = "0.0.0.0:0"
 admin_api_addr = "0.0.0.0:0"
+
+# Writer/Parquet configuration
+[writer]
+compression = "zstd(1)"
+bloom_filters = false
+cache_size_mb = 1024
+
+# Target file size configuration
+blocks = 100000
+bytes = 104857600 # 100 MB
+rows = 0
