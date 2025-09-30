@@ -5,7 +5,7 @@ use metadata_db::JobId;
 use tracing::instrument;
 
 pub use crate::core::Ctx;
-use crate::{core::dump_tables, default_partition_size, metrics};
+use crate::{core::dump_tables, metrics};
 
 /// The kind of job is inferred from the location and associated dataset information.
 ///
@@ -88,7 +88,6 @@ impl Job {
                     ctx.clone(),
                     &tables,
                     1,
-                    default_partition_size(),
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,

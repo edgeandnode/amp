@@ -27,10 +27,6 @@ pub struct WriterProperties {
     pub partition: SegmentSizeLimit,
 }
 
-pub fn default_partition_size() -> u64 {
-    4096 * 1024 * 1024 // 4 GB
-}
-
 pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterProperties> {
     // We have not done our own benchmarking, but the default 1_000_000 value for this adds about a
     // megabyte of storage per column, per row group. This analysis by InfluxData suggests that

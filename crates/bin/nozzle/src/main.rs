@@ -54,8 +54,8 @@ enum Command {
         /// The size of each partition in MB. Once the size is reached, a new part file is created. This
         /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
         /// but will correlate with this value. Defaults to 4 GB.
-        #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
-        partition_size_mb: u64,
+        #[arg(long, env = "DUMP_PARTITION_SIZE_MB")]
+        partition_size_mb: Option<u64>,
 
         /// How often to run the dump job in minutes. By default will run once and exit.
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
@@ -141,7 +141,7 @@ async fn main_inner() -> Result<(), BoxError> {
     let config_path = config;
 
     let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
-    let (config, metadata_db) =
+    let (mut config, metadata_db) =
         load_config_and_metadata_db(config_path.as_ref(), allow_temp_db).await?;
 
     let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
@@ -173,6 +173,11 @@ async fn main_inner() -> Result<(), BoxError> {
             if let Some(ref opentelemetry) = config.opentelemetry {
                 dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
             }
+
+            if let Some(partition_size_mb) = partition_size_mb {
+                config.parquet.target_size.bytes = partition_size_mb * 1024 * 1024;
+            }
+
             let config = Arc::new(config);
 
             let mut datasets_to_dump = Vec::new();
@@ -200,7 +205,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 ignore_deps,
                 end_block,
                 n_jobs,
-                partition_size_mb,
                 run_every_mins,
                 None,
                 location,

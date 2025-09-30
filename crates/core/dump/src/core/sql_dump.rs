@@ -100,7 +100,7 @@ use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     manifest::sql_datasets::SqlDataset,
-    metadata::segments::ResumeWatermark,
+    metadata::{Generation, segments::ResumeWatermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::QueryEnv,
 };
@@ -109,11 +109,10 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    compaction::{CompactionProperties, NozzleCompactor},
+    WriterProperties,
+    compaction::NozzleCompactor,
     metrics,
-    parquet_writer::{
-        ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
-    },
+    parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
 };
 
@@ -124,8 +123,7 @@ pub async fn dump_table(
     dataset: SqlDataset,
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
-    parquet_opts: &ParquetWriterProperties,
-    compaction_opts: &Arc<CompactionProperties>,
+    opts: &Arc<WriterProperties>,
     microbatch_max_interval: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -147,8 +145,7 @@ pub async fn dump_table(
     let dataset_store = ctx.dataset_store.clone();
     let data_store = ctx.data_store.clone();
     let env = env.clone();
-    let parquet_opts = parquet_opts.clone();
-    let compaction_opts = compaction_opts.clone();
+    let opts = opts.clone();
 
     join_set.spawn(async move {
         let catalog = dataset_store
@@ -192,8 +189,7 @@ pub async fn dump_table(
                 start..=end,
                 resume_watermark,
                 table.clone(),
-                &parquet_opts,
-                &compaction_opts,
+                &opts,
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
                 metrics.clone(),
@@ -216,8 +212,7 @@ pub async fn dump_table(
                 start..=end,
                 None,
                 physical_table,
-                &parquet_opts,
-                &compaction_opts,
+                &opts,
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
                 metrics.clone(),
@@ -246,8 +241,7 @@ async fn dump_sql_query(
     range: RangeInclusive<BlockNum>,
     resume_watermark: Option<ResumeWatermark>,
     physical_table: Arc<PhysicalTable>,
-    parquet_opts: &ParquetWriterProperties,
-    compaction_opts: &Arc<CompactionProperties>,
+    opts: &Arc<WriterProperties>,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -276,17 +270,13 @@ async fn dump_sql_query(
     };
 
     let mut microbatch_start = *range.start();
-    let mut writer = ParquetFileWriter::new(
-        physical_table.clone(),
-        parquet_opts.clone(),
-        microbatch_start,
-    )?;
+    let mut writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
     let dataset_name = physical_table.dataset().name.clone();
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
-    let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
+    let mut compactor = NozzleCompactor::start(physical_table.clone(), opts.clone());
 
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
@@ -328,7 +318,7 @@ async fn dump_sql_query(
                     object_meta,
                     footer,
                     ..
-                } = writer.close(range, vec![]).await?;
+                } = writer.close(range, vec![], Generation::default()).await?;
 
                 commit_metadata(
                     &ctx.metadata_db,
@@ -343,11 +333,7 @@ async fn dump_sql_query(
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
-                writer = ParquetFileWriter::new(
-                    physical_table.clone(),
-                    parquet_opts.clone(),
-                    microbatch_start,
-                )?;
+                writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
                 if let Some(ref metrics) = metrics {
                     metrics.inc_sql_dataset_files_written(dataset_name.clone());

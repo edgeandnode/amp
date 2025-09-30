@@ -29,7 +29,6 @@ pub async fn dump_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
-    partition_size: u64,
     microbatch_max_interval: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -44,16 +43,7 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(
-            ctx,
-            tables,
-            n_jobs,
-            partition_size,
-            end,
-            metrics,
-            only_finalized_blocks,
-        )
-        .await
+        dump_raw_tables(ctx, tables, n_jobs, end, metrics, only_finalized_blocks).await
     } else {
         dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
     }
@@ -64,7 +54,6 @@ pub async fn dump_raw_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
-    partition_size: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     only_finalized_blocks: bool,
@@ -74,7 +63,6 @@ pub async fn dump_raw_tables(
     }
 
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
-    let compaction_opts = crate::compaction_opts(&ctx.config.compaction, &parquet_opts).into();
 
     // Check that all tables belong to the same dataset.
     let dataset = {
@@ -106,9 +94,7 @@ pub async fn dump_raw_tables(
                 n_jobs,
                 catalog,
                 tables,
-                partition_size,
-                &parquet_opts,
-                compaction_opts,
+                parquet_opts,
                 end,
                 &dataset.name,
                 metrics,
@@ -142,9 +128,8 @@ pub async fn dump_user_tables(
         tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
     }
 
-    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+    let opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env()?;
-    let compaction_opts = crate::compaction_opts(&ctx.config.compaction, &parquet_opts).into();
 
     for table in tables {
         consistency_check(table).await?;
@@ -174,8 +159,7 @@ pub async fn dump_user_tables(
             dataset,
             &env,
             table.clone(),
-            &parquet_opts,
-            &compaction_opts,
+            &opts,
             microbatch_max_interval,
             end,
             metrics.clone(),
