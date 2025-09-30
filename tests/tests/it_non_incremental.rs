@@ -5,8 +5,8 @@ use tests::{run_spec, testlib::ctx::TestCtxBuilder};
 async fn non_incremental_tests() {
     logging::init();
     let test_ctx = TestCtxBuilder::new("non_incremental_tests")
-        .with_dataset_manifests(["eth_rpc"])
-        .with_dataset_snapshots(["eth_rpc"])
+        .with_dataset_manifest("eth_rpc")
+        .with_dataset_snapshot("eth_rpc")
         .with_provider_config("rpc_eth_mainnet")
         .build()
         .await

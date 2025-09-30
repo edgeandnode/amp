@@ -8,7 +8,7 @@ export default defineDataset((ctx) => ({
     eth_rpc: {
       owner: "graphprotocol",
       name: "eth_rpc",
-      version: "0.1.0",
+      version: "0.0.0",
     },
   },
   tables: {
