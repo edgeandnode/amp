@@ -171,6 +171,7 @@ impl StreamingQuery {
     /// only the tables relevant for the query.
     ///
     /// The query execution loop will run in its own task.
+    #[instrument(skip_all, err)]
     pub async fn spawn(
         query_env: QueryEnv,
         catalog: Catalog,
