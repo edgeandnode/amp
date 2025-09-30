@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use common::BlockNum;
 use monitoring::telemetry;
 
 /// The recommended interval at which to export metrics when running the `dump` command.
@@ -21,6 +22,15 @@ pub struct MetricsRegistry {
     // Byte metrics.
     pub raw_dataset_bytes_written: telemetry::metrics::Counter,
     pub sql_dataset_bytes_written: telemetry::metrics::Counter,
+
+    // Compaction metrics.
+    pub successful_compactions: telemetry::metrics::Counter,
+    pub failed_compactions: telemetry::metrics::Counter,
+
+    // Garbage Collector metrics.
+    pub files_deleted: telemetry::metrics::Counter,
+    pub files_not_found: telemetry::metrics::Counter,
+    pub files_failed_to_delete: telemetry::metrics::Counter,
 }
 
 impl MetricsRegistry {
@@ -55,6 +65,31 @@ impl MetricsRegistry {
                 meter,
                 "sql_dataset_bytes_written",
                 "Counter for SQL dataset bytes written",
+            ),
+            successful_compactions: telemetry::metrics::Counter::new(
+                meter,
+                "successful_compactions",
+                "Counter for successful compaction operations",
+            ),
+            failed_compactions: telemetry::metrics::Counter::new(
+                meter,
+                "failed_compactions",
+                "Counter for failed compaction operations",
+            ),
+            files_deleted: telemetry::metrics::Counter::new(
+                meter,
+                "files_deleted",
+                "Counter for files successfully deleted by the garbage collector",
+            ),
+            files_not_found: telemetry::metrics::Counter::new(
+                meter,
+                "files_not_found",
+                "Counter for files not found during garbage collection",
+            ),
+            files_failed_to_delete: telemetry::metrics::Counter::new(
+                meter,
+                "files_failed_to_delete",
+                "Counter for files that failed to delete during garbage collection",
             ),
         }
     }
@@ -129,5 +164,53 @@ impl MetricsRegistry {
         ];
         self.raw_dataset_bytes_written
             .inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_successful_compactions(
+        &self,
+        dataset: String,
+        table: String,
+        range_start: BlockNum,
+    ) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+            telemetry::metrics::KeyValue::new("range_start", range_start as i64),
+        ];
+        self.successful_compactions.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_failed_compactions(&self, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.failed_compactions.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_files_deleted(&self, amount: usize, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.files_deleted.inc_by_with_kvs(amount as u64, &kv_pairs);
+    }
+
+    pub(crate) fn inc_files_not_found(&self, amount: usize, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.files_not_found
+            .inc_by_with_kvs(amount as u64, &kv_pairs);
+    }
+
+    pub(crate) fn inc_files_failed_to_delete(&self, amount: usize, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.files_failed_to_delete
+            .inc_by_with_kvs(amount as u64, &kv_pairs);
     }
 }

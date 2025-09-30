@@ -1,30 +1,68 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    sync::Arc,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
-use common::{catalog::physical::PhysicalTable, metadata::segments::BlockRange};
-use futures::{FutureExt, StreamExt, TryStreamExt, future::BoxFuture, stream};
-use metadata_db::{FileId, MetadataDb};
+use common::{
+    BlockNum,
+    catalog::physical::PhysicalTable,
+    config::ParquetConfig,
+    metadata::{SegmentSize, segments::BlockRange},
+};
+use futures::{FutureExt, StreamExt, TryStreamExt, future::BoxFuture};
+use metadata_db::MetadataDb;
 
 use crate::{
+    WriterProperties,
     compaction::{
-        CompactionProperties, CompactionResult, CompactorError, NozzleCompactorTaskType,
-        group::{CompactionFile, CompactionGroupGenerator},
+        CompactionResult, CompactorError, NozzleCompactorTaskType,
+        algorithm::CompactionAlgorithm,
+        plan::{CompactionFile, CompactionPlan},
     },
+    metrics::MetricsRegistry,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };
+
+#[derive(Debug, Clone)]
+pub struct CompactorProperties {
+    pub active: Arc<AtomicBool>,
+    pub algorithm: CompactionAlgorithm,
+    pub interval: Duration,
+    pub metadata_concurrency: usize,
+    pub write_concurrency: usize,
+}
+
+impl<'a> From<&'a ParquetConfig> for CompactorProperties {
+    fn from(config: &'a ParquetConfig) -> Self {
+        CompactorProperties {
+            active: Arc::new(AtomicBool::new(config.compactor.active)),
+            algorithm: CompactionAlgorithm::from(config),
+            interval: config
+                .compactor
+                .min_interval
+                .unwrap_or_else(|| Duration::from_millis(1000)),
+            metadata_concurrency: config.compactor.metadata_concurrency,
+            write_concurrency: config.compactor.write_concurrency,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Compactor {
     pub(super) table: Arc<PhysicalTable>,
-    pub(super) opts: Arc<CompactionProperties>,
+    pub(super) opts: Arc<WriterProperties>,
+    pub(super) metrics: Option<Arc<MetricsRegistry>>,
 }
 
 impl Debug for Compactor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Compactor {{ table: {} }}", self.table.table_ref())
+        write!(
+            f,
+            "Compactor {{ table: {}, algorithm: {} }}",
+            self.table.table_ref(),
+            self.opts.compactor.algorithm.kind()
+        )
     }
 }
 
@@ -32,7 +70,7 @@ impl Display for Compactor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Compactor {{ opts: {}, table: {} }}",
+            "Compactor {{ opts: {:?}, table: {} }}",
             self.opts,
             self.table.table_ref()
         )
@@ -40,37 +78,34 @@ impl Display for Compactor {
 }
 
 impl Compactor {
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all, fields(table = self.table.table_name()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
-        let compaction_stream = CompactionGroupGenerator::from_table(table, opts).await?;
+        let mut join_set = CompactionPlan::from_table(table, opts)
+            .await?
+            .try_compact_all();
 
-        // await: We need to collect the stream
-        let compaction_groups = compaction_stream.into_compaction_groups().await;
-
-        tracing::info!(
-            "Created {} compaction groups for table {}",
-            compaction_groups.len(),
-            self.table.table_ref()
-        );
-
-        let mut join_set = stream::iter(compaction_groups)
-            .map(|group| group.compact())
-            .buffer_unordered(1);
-
-        // await: We need to await the completion of compaction tasks
+        // await: We need to await all the compaction tasks to finish before returning
         while let Some(result) = join_set.next().await {
             match result {
-                // Happy path, compaction succeeded
-                Ok(file_ids) => {
-                    tracing::debug!("Compaction succeeded. FileIds: {file_ids:?}");
-                    continue;
+                Ok(range_start) => {
+                    if let Some(metrics) = &self.metrics {
+                        let dataset = self.table.dataset().name.to_string();
+                        let table_name = self.table.table_name().to_string();
+                        metrics.inc_successful_compactions(dataset, table_name, range_start);
+                    }
                 }
-                // Error occurred during compaction, trace it and move on
-                Err(err) => tracing::error!("{err}"),
+                Err(err) => {
+                    if let Some(metrics) = &self.metrics {
+                        let dataset = self.table.dataset().name.to_string();
+                        let table_name = self.table.table_name().to_string();
+                        metrics.inc_failed_compactions(dataset, table_name);
+                    }
+                    tracing::warn!("{err}");
+                }
             }
         }
 
@@ -81,10 +116,15 @@ impl Compactor {
 impl NozzleCompactorTaskType for Compactor {
     type Error = CompactorError;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+    fn new(
+        table: &Arc<PhysicalTable>,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self {
         Compactor {
             table: Arc::clone(table),
             opts: Arc::clone(opts),
+            metrics: metrics.clone(),
         }
     }
 
@@ -92,39 +132,50 @@ impl NozzleCompactorTaskType for Compactor {
         self.compact().boxed()
     }
 
-    fn interval(opts: &Arc<CompactionProperties>) -> std::time::Duration {
-        opts.compactor_interval
+    fn interval(opts: &Arc<WriterProperties>) -> std::time::Duration {
+        opts.compactor.interval
     }
 
-    fn active(opts: &Arc<CompactionProperties>) -> bool {
-        opts.compactor_active
+    fn active(opts: &Arc<WriterProperties>) -> bool {
+        opts.compactor
+            .active
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn deactivate(opts: &mut Arc<CompactionProperties>) {
-        Arc::make_mut(opts).compactor_active = false;
+    fn deactivate(opts: &mut Arc<WriterProperties>) {
+        opts.compactor
+            .active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
 pub struct CompactionGroup {
+    pub opts: Arc<WriterProperties>,
+    pub size: SegmentSize,
     pub streams: Vec<CompactionFile>,
     pub table: Arc<PhysicalTable>,
-    pub opts: Arc<CompactionProperties>,
 }
 
 impl CompactionGroup {
-    pub fn new(
-        streams: Vec<CompactionFile>,
-        table: &Arc<PhysicalTable>,
-        opts: &Arc<CompactionProperties>,
-    ) -> CompactionResult<Self> {
-        Ok(Self {
-            streams,
-            table: Arc::clone(table),
+    pub fn new_empty(opts: &Arc<WriterProperties>, table: &Arc<PhysicalTable>) -> Self {
+        CompactionGroup {
             opts: Arc::clone(opts),
-        })
+            size: SegmentSize::default(),
+            streams: Vec::new(),
+            table: Arc::clone(table),
+        }
     }
 
-    async fn write_and_finish(mut self) -> CompactionResult<ParquetFileWriterOutput> {
+    pub fn push(&mut self, file: CompactionFile) {
+        self.size += file.size;
+        self.streams.push(file);
+    }
+
+    pub fn is_empty_or_singleton(&self) -> bool {
+        self.streams.len() <= 1
+    }
+
+    async fn write_and_finish(self) -> CompactionResult<ParquetFileWriterOutput> {
         let range = {
             let start_range = &self
                 .streams
@@ -149,52 +200,57 @@ impl CompactionGroup {
             }
         };
 
-        let mut writer = ParquetFileWriter::new(
-            Arc::clone(&self.table),
-            self.opts.parquet_writer_props.clone(),
-            range.start(),
-        )
-        .map_err(CompactorError::create_writer_error(
-            &self.opts.parquet_writer_props,
-        ))?;
+        let mut writer = ParquetFileWriter::new(Arc::clone(&self.table), &self.opts, range.start())
+            .map_err(CompactorError::create_writer_error(&self.opts.parquet))?;
 
-        let mut file_ids = Vec::with_capacity(self.streams.len());
-
-        for file in self.streams.iter_mut() {
-            file_ids.push(file.file_id);
-            while let Some(ref batch) = file.stream.try_next().await? {
+        let mut parent_ids = Vec::with_capacity(self.streams.len());
+        for mut file in self.streams {
+            while let Some(ref batch) = file.sendable_stream.try_next().await? {
                 writer.write(batch).await?;
             }
+            parent_ids.push(file.file_id);
         }
+        // Increment generation for new file
+        let generation = self.size.generation + 1;
 
         writer
-            .close(range, file_ids)
+            .close(range, parent_ids, generation)
             .await
             .map_err(|err| CompactorError::FileWriteError { err })
     }
 
-    pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
+    #[tracing::instrument(skip_all, err)]
+    pub async fn compact(self) -> CompactionResult<BlockNum> {
+        let number_of_files = self.streams.len();
         let metadata_db = self.table.metadata_db().clone();
-        let duration = self.opts.file_lock_duration;
+        let duration = self.opts.collector.file_lock_duration;
 
         let output = self.write_and_finish().await?;
 
+        // Unwrap: We always have at least one range since we just wrote it
+        let start = output.parquet_meta.ranges.first().unwrap().start();
         output
-            .commit_metadata(metadata_db.clone())
+            .commit_metadata(&metadata_db)
             .await
             .map_err(CompactorError::metadata_commit_error)?;
 
         output
-            .upsert_gc_manifest(Arc::new(metadata_db), duration)
+            .upsert_gc_manifest(&metadata_db, duration)
             .await
             .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
-        Ok(output.parent_ids)
+        tracing::info!(
+            "Compacted {} files into new file {}",
+            number_of_files,
+            output.object_meta.location,
+        );
+
+        Ok(start)
     }
 }
 
 impl ParquetFileWriterOutput {
-    async fn commit_metadata(&self, metadata_db: MetadataDb) -> Result<(), metadata_db::Error> {
+    async fn commit_metadata(&self, metadata_db: &MetadataDb) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
         let file_name = self.object_meta.location.filename().unwrap().to_string();
         let object_size = self.object_meta.size;
@@ -218,7 +274,7 @@ impl ParquetFileWriterOutput {
 
     async fn upsert_gc_manifest(
         &self,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: &MetadataDb,
         duration: Duration,
     ) -> Result<(), metadata_db::Error> {
         metadata_db

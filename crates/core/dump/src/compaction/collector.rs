@@ -1,10 +1,10 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    sync::Arc,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
-use common::{Timestamp, catalog::physical::PhysicalTable};
+use common::{Timestamp, catalog::physical::PhysicalTable, config::ParquetConfig};
 use futures::{
     FutureExt, StreamExt, TryStreamExt, future,
     stream::{self, BoxStream},
@@ -13,17 +13,37 @@ use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
+    WriterProperties,
     compaction::{
-        CompactionProperties, NozzleCompactorTaskType,
+        NozzleCompactorTaskType,
         error::{CollectionResult, CollectorError},
     },
     consistency_check,
+    metrics::MetricsRegistry,
 };
+
+#[derive(Debug, Clone)]
+pub struct CollectorProperties {
+    pub active: Arc<AtomicBool>,
+    pub interval: Duration,
+    pub file_lock_duration: Duration,
+}
+
+impl<'a> From<&'a ParquetConfig> for CollectorProperties {
+    fn from(config: &'a ParquetConfig) -> Self {
+        CollectorProperties {
+            active: Arc::new(AtomicBool::new(config.collector.active)),
+            interval: config.collector.min_interval,
+            file_lock_duration: config.collector.deletion_lock_duration,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Collector {
     pub(super) table: Arc<PhysicalTable>,
-    pub(super) opts: Arc<CompactionProperties>,
+    pub(super) opts: Arc<WriterProperties>,
+    pub(super) metrics: Option<Arc<MetricsRegistry>>,
 }
 
 impl Debug for Collector {
@@ -52,6 +72,12 @@ impl Collector {
             .await
         {
             Ok(output) if output.len() > 0 => {
+                if let Some(metrics) = &self.metrics {
+                    let dataset = self.table.dataset().name.as_str();
+                    let table_name = self.table.table_name();
+                    output.update_metrics(metrics, dataset, table_name);
+                }
+
                 output.update_manifest(&metadata_db).await.map_err(
                     CollectorError::manifest_update_error(
                         [output.successes, output.not_found].concat(),
@@ -81,7 +107,7 @@ impl Display for Collector {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Garbage Collector {{ table: {}, opts: {} }}",
+            "Garbage Collector {{ table: {}, opts: {:?} }}",
             self.table.table_ref(),
             self.opts
         )
@@ -91,10 +117,15 @@ impl Display for Collector {
 impl NozzleCompactorTaskType for Collector {
     type Error = CollectorError;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+    fn new(
+        table: &Arc<PhysicalTable>,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self {
         Collector {
             table: Arc::clone(table),
             opts: Arc::clone(opts),
+            metrics: metrics.clone(),
         }
     }
 
@@ -102,16 +133,20 @@ impl NozzleCompactorTaskType for Collector {
         self.collect().boxed()
     }
 
-    fn interval(opts: &Arc<CompactionProperties>) -> Duration {
-        opts.collector_interval
+    fn interval(opts: &Arc<WriterProperties>) -> Duration {
+        opts.collector.interval
     }
 
-    fn active(opts: &Arc<CompactionProperties>) -> bool {
-        opts.collector_active
+    fn active(opts: &Arc<WriterProperties>) -> bool {
+        opts.collector
+            .active
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn deactivate(opts: &mut Arc<CompactionProperties>) {
-        Arc::make_mut(opts).collector_active = false;
+    fn deactivate(opts: &mut Arc<WriterProperties>) {
+        opts.collector
+            .active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -199,6 +234,24 @@ impl DeletionOutput {
         let file_ids = [self.successes(), self.not_found()].concat();
 
         metadata_db.delete_file_ids(&file_ids).await
+    }
+
+    fn update_metrics(&self, metrics: &Arc<MetricsRegistry>, dataset: &str, table: &str) {
+        metrics.inc_files_deleted(
+            self.successes().len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
+        metrics.inc_files_not_found(
+            self.not_found().len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
+        metrics.inc_files_failed_to_delete(
+            self.errors.len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
     }
 
     pub fn len(&self) -> usize {

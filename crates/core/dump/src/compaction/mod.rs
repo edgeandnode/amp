@@ -24,6 +24,7 @@ pub use crate::compaction::{
 use crate::{
     WriterProperties,
     compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt},
+    metrics::MetricsRegistry,
 };
 
 /// Duration collector must wait prior to deleting files
@@ -35,10 +36,14 @@ pub struct NozzleCompactor {
 }
 
 impl NozzleCompactor {
-    pub fn start(table: Arc<PhysicalTable>, opts: Arc<WriterProperties>) -> Self {
+    pub fn start(
+        table: Arc<PhysicalTable>,
+        opts: Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
         NozzleCompactor {
-            compaction_task: Compactor::start(&table, &opts),
-            deletion_task: Collector::start(&table, &opts),
+            compaction_task: Compactor::start(&table, &opts, &metrics),
+            deletion_task: Collector::start(&table, &opts, &metrics),
         }
     }
 
@@ -76,6 +81,7 @@ pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
     opts: Arc<WriterProperties>,
+    metrics: Option<Arc<MetricsRegistry>>,
     previous: Option<Timestamp>,
 }
 
@@ -108,14 +114,16 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
         let task = &mut self.task;
 
         let inner = match task
-            .map_err(|join_err| T::handle_error(&self.table, &mut self.opts, join_err))
+            .map_err(|join_err| {
+                T::handle_error(&self.table, &mut self.opts, &self.metrics, join_err)
+            })
             .await
         {
             Ok(Ok(inner)) | Err(inner) => {
                 self.previous = Some(Timestamp::now());
                 inner
             }
-            Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, err),
+            Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, &self.metrics, err),
         };
         self.task = tokio::spawn(inner.run());
     }
@@ -132,7 +140,11 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
 pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     type Error: CompactionErrorExt;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<WriterProperties>) -> Self;
+    fn new(
+        table: &Arc<PhysicalTable>,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self;
 
     /// Run the task
     fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
@@ -150,9 +162,10 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn handle_error(
         table: &Arc<PhysicalTable>,
         opts: &mut Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
         err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
     ) -> Self {
-        let this = Self::new(table, opts);
+        let this = Self::new(table, opts, metrics);
         let err = err.into();
         if err.is_cancellation() {
             Self::deactivate(opts);
@@ -176,14 +189,16 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn start(
         table: &Arc<PhysicalTable>,
         opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
     ) -> NozzleCompactorTask<Self> {
-        let task = tokio::spawn(ready_ok(Self::new(table, opts)));
+        let task = tokio::spawn(ready_ok(Self::new(table, opts, metrics)));
 
         let mut this = NozzleCompactorTask {
             task,
             table: Arc::clone(table),
             opts: Arc::clone(opts),
             previous: None,
+            metrics: metrics.clone(),
         };
 
         this.try_run();
