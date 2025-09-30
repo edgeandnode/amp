@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use common::{
     BlockNum, BoxError, RawTableRows,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::segments::BlockRange,
+    metadata::{Generation, segments::BlockRange},
 };
 use metadata_db::MetadataDb;
 
@@ -131,7 +131,7 @@ impl RawTableWriter {
             None => None,
         };
 
-        let nozzle_compactor = NozzleCompactor::start(table.clone(), opts.clone());
+        let nozzle_compactor = NozzleCompactor::start(table.clone(), opts.clone(), metrics.clone());
 
         Ok(Self {
             table,
@@ -267,7 +267,7 @@ impl RawTableWriter {
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
 
-        let metadata = file.close(range, vec![]).await?;
+        let metadata = file.close(range, vec![], Generation::default()).await?;
 
         self.compactor.try_run();
 

@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
     BlockNum, BoxError, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
-        extract_footer_bytes_from_file,
-        parquet::{PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        Generation, extract_footer_bytes_from_file,
+        parquet::{
+            GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
+        },
         segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
@@ -95,6 +96,7 @@ impl ParquetFileWriter {
         mut self,
         range: BlockRange,
         parent_ids: Vec<FileId>,
+        generation: Generation,
     ) -> Result<ParquetFileWriterOutput, BoxError> {
         self.writer.flush().await?;
 
@@ -124,6 +126,10 @@ impl ParquetFileWriter {
         );
         self.writer
             .append_key_value_metadata(parent_file_id_metadata);
+
+        let generation_metadata =
+            KeyValue::new(GENERATION_METADATA_KEY.to_string(), generation.to_string());
+        self.writer.append_key_value_metadata(generation_metadata);
 
         self.writer.close().await?;
 
