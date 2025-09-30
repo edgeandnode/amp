@@ -7,7 +7,7 @@ use std::{
 };
 
 use common::{
-    ParquetFooterCache,
+    BlockNum, ParquetFooterCache,
     catalog::{physical::PhysicalTable, reader::NozzleReaderFactory},
     metadata::{
         SegmentSize,
@@ -140,7 +140,7 @@ impl<'a> CompactionPlan<'a> {
             location_id: table.location_id(),
             metadata_db: table.metadata_db().clone(),
             object_store: Arc::clone(&table.object_store()),
-            parquet_footer_cache: ParquetFooterCache::builder(1).build(),
+            parquet_footer_cache: ParquetFooterCache::builder(size).build(),
         });
 
         let files = stream::iter(chain.0)
@@ -166,7 +166,7 @@ impl<'a> CompactionPlan<'a> {
         })
     }
 
-    pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<()>> {
+    pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<BlockNum>> {
         let write_concurrency = self.opts.compactor.write_concurrency;
         self.map(CompactionGroup::compact)
             .buffer_unordered(write_concurrency)

@@ -389,7 +389,7 @@ impl Serialize for Overflow {
 /// # Examples
 ///
 /// ```
-/// # use common::metadata::size::{SegmentSize, Generation};
+/// # use common::metadata::{SegmentSize, Generation};
 /// // Create a SegmentSize representing a file with 1000 blocks, 1MB of data, and 5000 rows
 /// let size = SegmentSize {
 ///     length: 1,
