@@ -1,7 +1,7 @@
 import { defineDataset } from "nozzl"
 
-export default defineDataset((ctx) => ({
-  name: "multi_version",  
+export default defineDataset(() => ({
+  name: "multi_version",
   network: "mainnet",
   version: "0.0.2",
   dependencies: {

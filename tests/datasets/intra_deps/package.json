@@ -1,5 +1,8 @@
 {
-  "name": "@nozzle-datasets/basic-function",
+  "name": "nozzle-test-intra-deps",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "nozzl": "workspace:*"
+  }
 }

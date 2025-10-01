@@ -1,8 +1,12 @@
 {
-  "extends": "../tsconfig.json",
-  "include": [
-    "src",
-    "v1.config.ts",
-    "v2.config.ts"
-  ]
+  "include": ["*.ts"],
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "preserve",
+    "strict": true,
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  }
 }

@@ -37,34 +37,6 @@ impl NozzlCli {
         &self.admin_url
     }
 
-    /// Install dependencies for a dataset using pnpm.
-    ///
-    /// Runs `pnpm install` in the specified dataset directory.
-    #[tracing::instrument(skip_all, err)]
-    pub async fn install(&self, path: &Path) -> Result<(), BoxError> {
-        let install_path = path.parent().unwrap_or(path);
-        tracing::debug!(
-            "Running pnpm install in `{}`",
-            install_path.to_string_lossy()
-        );
-
-        let status = tokio::process::Command::new("pnpm")
-            .args(&["install"])
-            .current_dir(install_path)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await?;
-
-        if status != ExitStatus::default() {
-            return Err(BoxError::from(format!(
-                "Failed to install dependencies: pnpm install failed with exit code {status}"
-            )));
-        }
-
-        Ok(())
-    }
-
     /// Build a dataset manifest using nozzl build command.
     ///
     /// Runs `pnpm nozzl build` in the specified dataset directory.

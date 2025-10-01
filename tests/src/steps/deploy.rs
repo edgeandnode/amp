@@ -28,7 +28,6 @@ impl Step {
 
         let dataset_package = DatasetPackage::new(&self.deploy, self.config.as_deref());
         let cli = ctx.new_nozzl_cli();
-        dataset_package.install(&cli).await?;
         dataset_package.register(&cli).await
     }
 }

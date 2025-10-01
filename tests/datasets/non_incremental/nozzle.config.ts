@@ -1,6 +1,6 @@
 import { defineDataset } from "nozzl"
 
-export default defineDataset((ctx) => ({
+export default defineDataset(() => ({
   name: "non_incremental",
   network: "mainnet",
   version: "0.1.0",
@@ -23,7 +23,7 @@ export default defineDataset((ctx) => ({
         JOIN eth_rpc.transactions t ON b.block_num = t.block_num
       `,
       network: "mainnet",
-    }
+    },
   },
   functions: {},
 }))

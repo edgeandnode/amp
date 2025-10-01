@@ -3,8 +3,8 @@
   "extends": "./tsconfig.base.jsonc",
   "include": [],
   "references": [
-    { "path": "packages/nozzle" },
-    { "path": "packages/studio" },
-    { "path": "packages/studio-cli" }
+    { "path": "typescript/nozzle" },
+    { "path": "typescript/studio" },
+    { "path": "typescript/studio-cli" }
   ]
 }

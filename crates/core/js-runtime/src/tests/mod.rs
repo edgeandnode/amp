@@ -34,16 +34,7 @@ fn throws() {
 
     assert_eq!(
         err.to_string(),
-        r#"exception in script: Uncaught: Error: test exception
- --> test.js:6:1-2
-	throw new Error("test exception");
- ^
-
-
-Stack trace:
-Error: test exception
-    at throws (test.js:6:8)
-"#
+        "exception in script: Uncaught: Error: test exception\n --> test.js:6:2-3\n  throw new Error(\"test exception\")\n  ^\n\n\nStack trace:\nError: test exception\n    at throws (test.js:6:9)\n"
     );
 }
 

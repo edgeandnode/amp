@@ -1,6 +1,6 @@
 import { defineDataset } from "nozzl"
 
-export default defineDataset((ctx) => ({
+export default defineDataset(() => ({
   name: "intra_deps",
   network: "mainnet",
   version: "0.1.0",
