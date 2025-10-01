@@ -12,7 +12,6 @@ cargo-clean:
     cargo clean
 
 # PNPM install (pnpm install)
-[working-directory: 'typescript']
 pnpm-install:
     pnpm install
 
@@ -43,17 +42,14 @@ fmt-rs-file FILE:
     cargo +nightly fmt -- {{FILE}}
 
 # Format TypeScript code (pnpm format)
-[working-directory: 'typescript']
 fmt-ts:
     pnpm format
 
 # Check TypeScript code format (pnpm lint)
-[working-directory: 'typescript']
 fmt-ts-check:
     pnpm lint
 
 # Format specific TypeScript file (pnpm lint --fix <file>)
-[working-directory: 'typescript']
 fmt-ts-file FILE:
     pnpm lint --fix {{replace_regex(FILE, '^(.*/)?typescript/', '')}}
 
@@ -82,7 +78,6 @@ clippy-crate CRATE *EXTRA_FLAGS:
     cargo clippy --package {{CRATE}} --all-targets {{EXTRA_FLAGS}}
 
 # Check typescript code (pnpm check)
-[working-directory: 'typescript']
 check-ts:
     pnpm check
 

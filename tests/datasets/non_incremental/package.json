@@ -1,0 +1,8 @@
+{
+  "name": "nozzle-test-non-incremental",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "nozzl": "workspace:*"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.jsonc",
+  "include": [],
+  "references": [
+    { "path": "typescript/nozzle" },
+    { "path": "typescript/studio" },
+    { "path": "typescript/studio-cli" }
+  ]
+}

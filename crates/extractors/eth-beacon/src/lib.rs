@@ -1,11 +1,7 @@
 use std::num::NonZeroU32;
 
 use common::{BlockNum, Dataset};
-use datasets_common::{
-    name::Name,
-    value::{ManifestValue, ManifestValueError},
-    version::Version,
-};
+use datasets_common::{name::Name, version::Version};
 use reqwest::Url;
 
 mod block;
@@ -36,62 +32,41 @@ pub struct Manifest {
 
 #[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct EthBeaconProvider {
+pub struct ProviderConfig {
+    pub name: String,
+    pub kind: EthBeaconDatasetKind,
+    pub network: String,
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
     pub concurrent_request_limit: Option<u16>,
     pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
-pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
-    let manifest: Manifest = value.try_into_manifest()?;
-    Ok(Dataset {
-        kind: manifest.kind.to_string(),
+pub fn dataset(manifest: Manifest) -> Dataset {
+    Dataset {
         name: manifest.name,
         version: Some(manifest.version),
+        kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
         tables: all_tables(manifest.network.clone()),
         network: manifest.network,
         functions: vec![],
-    })
+    }
 }
 
 pub fn all_tables(network: String) -> Vec<common::Table> {
     vec![block::table(network)]
 }
 
-pub fn client(
-    provider: toml::Value,
-    network: String,
-    provider_name: String,
-    final_blocks_only: bool,
-) -> Result<BeaconClient, Error> {
-    let provider: EthBeaconProvider = provider.try_into().map_err(Error::Toml)?;
-    Ok(BeaconClient::new(
+pub fn client(provider: ProviderConfig, final_blocks_only: bool) -> BeaconClient {
+    BeaconClient::new(
         provider.url,
-        network,
-        provider_name,
+        provider.network,
+        provider.name,
         u16::max(1, provider.concurrent_request_limit.unwrap_or(1024)),
         provider.rate_limit_per_minute,
         final_blocks_only,
-    ))
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("TOML parse error: {0}")]
-    Toml(#[source] toml::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[source] serde_json::Error),
-}
-
-impl From<ManifestValueError> for Error {
-    fn from(err: ManifestValueError) -> Self {
-        match err {
-            ManifestValueError::Toml(toml_err) => Error::Toml(toml_err),
-            ManifestValueError::Json(json_err) => Error::Json(json_err),
-        }
-    }
+    )
 }
 
 #[tokio::test]

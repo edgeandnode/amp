@@ -86,16 +86,23 @@ impl Anvil {
     /// Create a new Anvil fixture with HTTP connection on the specified port.
     ///
     /// This spawns Anvil configured to listen on the given HTTP port.
+    /// If port is 0, Anvil will automatically allocate an available port.
     pub async fn new_http(port: u16) -> Result<Self, BoxError> {
         let instance = AlloyAnvil::new().port(port).spawn();
+        let assigned_port = instance.port();
 
+        // Connect to the existing Anvil instance via HTTP
+        let url = format!("http://localhost:{}", assigned_port);
         let provider = alloy::providers::ProviderBuilder::new()
-            .connect_anvil_with_config(|anvil| anvil.port(port));
+            .connect_http(url.parse()?)
+            .erased();
 
         Ok(Self {
             _instance: instance,
-            provider: provider.erased(),
-            connection: AnvilConnection::Http { port },
+            provider,
+            connection: AnvilConnection::Http {
+                port: assigned_port,
+            },
         })
     }
 

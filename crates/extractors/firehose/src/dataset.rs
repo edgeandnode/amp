@@ -21,7 +21,10 @@ pub struct Manifest {
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct FirehoseProvider {
+pub struct ProviderConfig {
+    pub name: String,
+    pub kind: FirehoseDatasetKind,
+    pub network: String,
     pub url: String,
     pub token: Option<String>,
 }

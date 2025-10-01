@@ -3,7 +3,8 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use dataset_store::RegistrationError;
+use common::BoxError;
+use dataset_store::RegisterManifestError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest};
 use evm_rpc_datasets::{DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest};
@@ -74,22 +75,23 @@ pub async fn handler(
         }
     };
 
-    let dataset = ctx
+    // Early check if dataset already exists in the store to avoid unnecessary processing
+    let dataset_exists = ctx
         .store
-        .try_load_dataset(&payload.name, &payload.version)
+        .is_registered(&payload.name, &payload.version)
         .await
         .map_err(|err| {
             tracing::error!(
                 name = %payload.name,
                 version = %payload.version,
                 error = ?err,
-                "Failed to load dataset"
+                "Failed to check dataset existence in store"
             );
-            Error::StoreError(err)
+            Error::StoreError(err.into())
         })?;
 
     // Check if dataset already exists with this name and version
-    if dataset.is_some() {
+    if dataset_exists {
         return Err(Error::DatasetAlreadyExists(
             payload.name.to_string(),
             payload.version.to_string(),
@@ -166,7 +168,7 @@ pub async fn handler(
                 })?;
 
             ctx.store
-                .register_raw_dataset_manifest(&manifest.name, &manifest.version, &manifest)
+                .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
                 .map_err(|err| {
                     tracing::error!(
@@ -247,7 +249,7 @@ pub enum Error {
     /// - Registry information extraction failed
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
-    ManifestRegistrationError(#[from] RegistrationError),
+    ManifestRegistrationError(#[from] RegisterManifestError),
 
     /// Unsupported dataset kind
     ///
@@ -274,7 +276,7 @@ pub enum Error {
     /// - Dataset store configuration errors
     /// - Dataset store connectivity issues
     #[error("dataset store error: {0}")]
-    StoreError(#[from] dataset_store::DatasetError),
+    StoreError(#[source] BoxError),
 }
 
 impl RequestError for Error {

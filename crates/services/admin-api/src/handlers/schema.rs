@@ -127,7 +127,7 @@ enum Error {
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("Dataset store error: {0}")]
-    DatasetStoreError(dataset_store::DatasetError),
+    DatasetStoreError(#[from] dataset_store::PlanningCtxForSqlError),
     /// Planning error while determining output schema
     ///
     /// This occurs when:

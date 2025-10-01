@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, fmt, sync::Arc};
 
 use datafusion::{
     common::{
@@ -137,73 +137,116 @@ pub fn constrain_by_block_num(
     .map(|t| t.data)
 }
 
-/// How a logical plan can be materialized in a dataset. For some queries,
-/// we support incremental materialization, whereas for others we need to
-/// recalculate the entire output.
-pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
+/// Reasons why a logical plan cannot be materialized incrementally
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NonIncrementalOp {
+    /// Limit requires counting rows across batches
+    Limit,
+    /// Aggregations need state management
+    Aggregate,
+    /// Distinct operations need global deduplication
+    Distinct,
+    /// Joins need to maintain state between batches
+    Join,
+    /// Sorts require seeing all data
+    Sort,
+    /// Window functions often require sorting and state
+    Window,
+    /// Recursive queries are inherently stateful
+    RecursiveQuery,
+}
+
+impl fmt::Display for NonIncrementalOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use NonIncrementalOp::*;
+        match self {
+            Limit => write!(f, "Limit"),
+            Aggregate => write!(f, "Aggregate"),
+            Distinct => write!(f, "Distinct"),
+            Join => write!(f, "Join"),
+            Sort => write!(f, "Sort"),
+            Window => write!(f, "Window"),
+            RecursiveQuery => write!(f, "RecursiveQuery"),
+        }
+    }
+}
+
+/// Result of checking if a logical plan can be materialized incrementally
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncrementalCheck {
+    /// The plan can be materialized incrementally
+    Incremental,
+    /// The plan cannot be materialized incrementally due to the given operation
+    NonIncremental(NonIncrementalOp),
+}
+
+impl IncrementalCheck {
+    /// Returns `true` if the plan can be materialized incrementally
+    pub fn is_incremental(&self) -> bool {
+        matches!(self, IncrementalCheck::Incremental)
+    }
+}
+
+/// Can the given logical plan be sync'ed incrementally?
+pub fn is_incremental(plan: &LogicalPlan) -> Result<IncrementalCheck, BoxError> {
     use LogicalPlan::*;
 
-    fn unsupported(op: String) -> Option<BoxError> {
-        Some(format!("unsupported operation in query: {op}").into())
-    }
-
-    // As we traverse the tree, assume we can materialize incrementally. If
-    // we find a node that requires materialization of the entire query
-    // nonincrementally, `is_incr` to `true`. If we find anything that
-    // cannot be materialized, we set `Err` to `Some(_)`. This ensures that
-    // we always report an error if there is one, and never go from entire
-    // to incremental materialization.
-    let mut is_incr = true;
+    let mut non_incremental_op = None;
     let mut err: Option<BoxError> = None;
 
-    // The plan is materializable if no non-materializable nodes are found.
-    plan.apply(|node| {
+    plan.exists(|node| {
         match node {
-            // Embarrassingly parallel operators
-            Projection(_) | Filter(_) | Union(_) | Unnest(_) => { /* incremental */ }
-
-            // Limit is stateful, it needs to count rows
-            Limit(_) => is_incr = false,
-
-            // Not really logical operators, so we just skip them.
-            Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
-            | SubqueryAlias(_) | DescribeTable(_) | Explain(_) | Analyze(_) => { /* incremental */ }
-
-            // Aggregations and join materialization seem doable
-            // incrementally but need thinking through.
-            Aggregate(_) | Distinct(_) => is_incr = false,
-            Join(_) => is_incr = false,
-
-            // Sorts are not parallel or incremental
-            Sort(_) => is_incr = false,
-
-            // Window functions are complicated, they often result in a sort.
-            Window(_) => is_incr = false,
-
-            // Another complicated one.
-            RecursiveQuery(_) => is_incr = false,
-
-            // Definitely not supported.
-            Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
-                err = unsupported(format!("{}", node.display()))
+            // Entirely unsupported operations.
+            Dml(_) | Ddl(_) | Statement(_) | Copy(_) | Extension(_) => {
+                err = Some(format!("unsupported operation in query: {}", node.display()).into());
+                Ok(true)
             }
 
-            // We don't currently have any custom operators.
-            Extension(_) => err = unsupported(format!("{}", node.display())),
-        };
+            // Stateless operators
+            Projection(_) | Filter(_) | Union(_) | Unnest(_) | Repartition(_) | TableScan(_)
+            | EmptyRelation(_) | Values(_) | Subquery(_) | SubqueryAlias(_) | DescribeTable(_)
+            | Explain(_) | Analyze(_) => Ok(false),
 
-        // Stop recursion if we found a non-materializable node.
-        match err {
-            Some(_) => Ok(TreeNodeRecursion::Stop),
-            None => Ok(TreeNodeRecursion::Continue),
+            // Non-incremental but supported operations
+            Limit(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Limit);
+                Ok(true)
+            }
+            Aggregate(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Aggregate);
+                Ok(true)
+            }
+            Distinct(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Distinct);
+                Ok(true)
+            }
+            Join(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Join);
+                Ok(true)
+            }
+            Sort(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Sort);
+                Ok(true)
+            }
+            Window(_) => {
+                non_incremental_op = Some(NonIncrementalOp::Window);
+                Ok(true)
+            }
+            RecursiveQuery(_) => {
+                non_incremental_op = Some(NonIncrementalOp::RecursiveQuery);
+                Ok(true)
+            }
         }
-    })
-    .unwrap();
+    })?;
 
-    match err {
-        Some(err) => Err(err),
-        None => Ok(is_incr),
+    if let Some(err) = err {
+        return Err(err);
     }
+
+    Ok(match non_incremental_op {
+        None => IncrementalCheck::Incremental,
+        Some(op) => IncrementalCheck::NonIncremental(op),
+    })
 }
 
 pub fn extract_table_references_from_plan(

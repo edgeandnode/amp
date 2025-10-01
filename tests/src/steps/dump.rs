@@ -17,26 +17,25 @@ pub struct Step {
     pub dataset: String,
     /// The ending block number for the dump operation.
     pub end: u64,
-    /// Whether this dump operation is expected to fail.
-    #[serde(default)]
-    pub expect_fail: bool,
+    /// Expected failure message substring (if dump should fail).
+    pub failure: Option<String>,
 }
 
 impl Step {
     /// Executes the dataset dump operation.
     ///
     /// Performs the dump operation using test helpers, validates table consistency,
-    /// and handles expected failure scenarios. If expect_fail is true, the step
-    /// succeeds only if the dump operation fails.
+    /// and handles expected failure scenarios. If failure is specified, the step
+    /// succeeds only if the dump operation fails with the expected error.
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
         tracing::debug!(
-            "Dumping dataset '{}' up to block {}, expect_fail={}",
+            "Dumping dataset '{}' up to block {}, failure={:?}",
             self.dataset,
             self.end,
-            self.expect_fail
+            self.failure
         );
 
-        let result = async {
+        let result: Result<(), BoxError> = async {
             let physical_tables = test_helpers::dump_dataset(
                 ctx.daemon_server().config(),
                 ctx.metadata_db(),
@@ -55,9 +54,23 @@ impl Step {
         }
         .await;
 
-        if self.expect_fail {
-            assert!(result.is_err(), "Expected dump to fail, but it succeeded");
-            Ok(())
+        // Handle expected failure cases
+        if let Some(expected_substring) = &self.failure {
+            match result {
+                Err(actual_error) => {
+                    let actual_error_str = actual_error.to_string();
+                    if !actual_error_str.contains(expected_substring.trim()) {
+                        return Err(format!(
+                            "Expected error to contain: \"{}\"\nActual error: \"{}\"",
+                            expected_substring.trim(),
+                            actual_error_str
+                        )
+                        .into());
+                    }
+                    Ok(())
+                }
+                Ok(_) => Err("Expected dump to fail, but it succeeded".into()),
+            }
         } else {
             result
         }

@@ -1,6 +1,6 @@
 import { defineDataset } from "nozzl"
 
-export default defineDataset((ctx) => ({
+export default defineDataset(() => ({
   name: "multi_version",
   network: "mainnet",
   version: "0.0.1",
@@ -8,7 +8,7 @@ export default defineDataset((ctx) => ({
     eth_firehose: {
       owner: "graphprotocol",
       name: "eth_firehose",
-      version: "0.1.0",
+      version: "0.0.0",
     },
   },
   tables: {

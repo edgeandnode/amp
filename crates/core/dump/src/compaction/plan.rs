@@ -121,7 +121,7 @@ pub struct CompactionPlan<'a> {
 }
 
 impl<'a> CompactionPlan<'a> {
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all)]
     pub async fn from_table(
         table: Arc<PhysicalTable>,
         opts: Arc<WriterProperties>,

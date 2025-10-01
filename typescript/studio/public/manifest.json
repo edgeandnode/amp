@@ -1,0 +1,21 @@
+{
+  "short_name": "Amp Studio",
+  "name": "Amp Datasets Studio",
+  "description": "UI for interacting with amp datasets. Writing, running and validating queries and datasets to create a dataset definition for deploying",
+  "icons": [
+    {
+      "src": "favicon/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo/Amp-symbol-color.png",
+      "type": "image/png",
+      "sizes": "64x64 128x128 256x256 512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#6f4cff",
+  "background_color": "#0c0a1d"
+}

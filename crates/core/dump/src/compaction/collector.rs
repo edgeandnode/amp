@@ -171,7 +171,7 @@ impl DeletionOutput {
         }
     }
 
-    #[tracing::instrument(skip_all, err, fields(table=%table.table_ref()))]
+    #[tracing::instrument(skip_all, fields(table=%table.table_ref()))]
     pub async fn try_from_manifest_stream<'a>(
         table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
@@ -225,7 +225,7 @@ impl DeletionOutput {
             .await)
     }
 
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all)]
     pub async fn update_manifest(
         &self,
         metadata_db: &MetadataDb,
