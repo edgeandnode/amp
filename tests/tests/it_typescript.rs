@@ -7,10 +7,7 @@
 //! Each test function corresponds to one TypeScript test file, allowing nextest to parallelize
 //! across test files while maintaining isolation.
 
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-};
+use std::process::Stdio;
 
 use common::BoxError;
 use monitoring::logging;
@@ -39,19 +36,12 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
         .build()
         .await?;
 
-    // Determine TypeScript workspace root relative to Rust workspace
-    let workspace = get_typescript_workspace_path()?;
-    let path: String = format!("packages/nozzle/test/{}", file);
-    tracing::info!(
-        "Running vitest in {} for test file {}",
-        workspace.display(),
-        path
-    );
+    let path: String = format!("typescript/nozzle/test/{}", file);
+    tracing::info!("Running vitest for test file {}", path);
 
     // Run vitest with isolated infrastructure connection info
     let status = tokio::process::Command::new("pnpm")
         .args(&["vitest", "run", &path, "--no-file-parallelism"])
-        .current_dir(&workspace)
         .env(
             "NOZZLE_ADMIN_URL",
             ctx.daemon_server().admin_api_server_url(),
@@ -70,15 +60,6 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
 
     tracing::info!("Test file {} completed successfully", file);
     Ok(())
-}
-
-/// Get the path to the TypeScript workspace from the Rust workspace.
-fn get_typescript_workspace_path() -> Result<PathBuf, BoxError> {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .ok_or("Failed to find workspace root")?;
-    Ok(workspace_root.join("typescript"))
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md"],
+    ignores: ["crates", "**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md"],
   },
   eslint.configs.recommended,
   tseslint.configs.strict,
@@ -114,6 +114,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/*/src/**/*", "packages/*/scripts/**/*", "packages/*/test/**/*"],
+    files: ["typescript/*/src/**/*", "typescript/*/scripts/**/*", "typescript/*/test/**/*"],
   },
 )

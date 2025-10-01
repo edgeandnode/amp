@@ -70,17 +70,17 @@ NOZZLE_CONFIG=config.toml cargo run -p nozzle -- worker --node-id worker-1
 NOZZLE_CONFIG=config.toml cargo run -p nozzle -- server
 ```
 
-8. Start anvil in `typescript/packages/example` dir (or any that has foundry). Will remain running, create new terminal window
+8. Start anvil in `typescript/example` dir (or any that has foundry). Will remain running, create new terminal window
 
 ```bash
-# cd into typescript/packages/example
+# cd into typescript/example
 anvil
 ```
 
-9. Deploy smart contract from `typescript/packages/example` directory (or any dir that is wired up with foundry and smart contracts). create new terminal window
+9. Deploy smart contract from `typescript/example` directory (or any dir that is wired up with foundry and smart contracts). create new terminal window
 
 ```bash
-# cd into typescript/packages/example
+# cd into typescript/example
 forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
@@ -102,18 +102,18 @@ NOZZLE_CONFIG=config.toml cargo run --release --bin nozzle -- dump --dataset anv
 curl localhost:1610/datasets
 ```
 
-13. Run studio cli cmd in `typescript/packages/example`
+13. Run studio cli cmd in `typescript/example`
 
 ```bash
-# cd into typescript/packages/example
+# cd into typescript/example
 pnpm run studio --open
 # or
 bun nozzle studio --open
 ```
 
-14. (Optional, if building on studio and want HMR for changes). Run studio dev in `typescript/packages/studio`
+14. (Optional, if building on studio and want HMR for changes). Run studio dev in `typescript/studio`
 
 ```bash
-# cd into typescript/packages/studio
+# cd into typescript/studio
 pnpm run dev
 ```

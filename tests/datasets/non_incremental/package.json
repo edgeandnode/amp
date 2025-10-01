@@ -1,5 +1,8 @@
 {
-  "name": "@nozzle-datasets/non-incremental",
+  "name": "nozzle-test-non-incremental",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "nozzl": "workspace:*"
+  }
 }
