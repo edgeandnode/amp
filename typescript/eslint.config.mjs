@@ -24,6 +24,9 @@ export default tseslint.config(
       parser: tseslint.parser,
       ecmaVersion: 2018,
       sourceType: "module",
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     settings: {
       "import-x/resolver": {

@@ -6,7 +6,9 @@ export class Dependency extends Schema.Class<Dependency>("Dependency")({
   version: Schema.String,
 }) {}
 
-export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinition")({
+export class TableDefinition extends Schema.Class<TableDefinition>(
+  "TableDefinition",
+)({
   sql: Schema.String,
 }) {}
 
@@ -67,18 +69,24 @@ export const DatasetReadme = Schema.String.pipe(
   }),
 )
 
-export class FunctionSource extends Schema.Class<FunctionSource>("FunctionSource")({
+export class FunctionSource extends Schema.Class<FunctionSource>(
+  "FunctionSource",
+)({
   source: Schema.String,
   filename: Schema.String,
 }) {}
 
-export class FunctionDefinition extends Schema.Class<FunctionDefinition>("FunctionDefinition")({
+export class FunctionDefinition extends Schema.Class<FunctionDefinition>(
+  "FunctionDefinition",
+)({
   source: FunctionSource,
   inputTypes: Schema.Array(Schema.String),
   outputType: Schema.String,
 }) {}
 
-export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
+export class DatasetDefinition extends Schema.Class<DatasetDefinition>(
+  "DatasetDefinition",
+)({
   name: DatasetName,
   network: Network,
   version: DatasetVersion,
@@ -206,14 +214,18 @@ export class OutputSchema extends Schema.Class<OutputSchema>("OutputSchema")({
   networks: Schema.Array(Schema.String),
 }) {}
 
-export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionManifest")({
+export class FunctionManifest extends Schema.Class<FunctionManifest>(
+  "FunctionManifest",
+)({
   name: Schema.String,
   source: FunctionSource,
   inputTypes: Schema.Array(Schema.String),
   outputType: Schema.String,
 }) {}
 
-export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
+export class DatasetManifest extends Schema.Class<DatasetManifest>(
+  "DatasetManifest",
+)({
   kind: Schema.Literal("manifest"),
   network: Network,
   name: DatasetName,
