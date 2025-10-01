@@ -26,11 +26,11 @@ export function SubmitButton({ children, status, ...rest }: SubmitButtonProps) {
         dirty: state.isDirty,
       })}
     >
-      {({ canSubmit, valid }) => (
+      {(state) => (
         <Button
           {...rest}
           type="submit"
-          disabled={!canSubmit || !valid}
+          disabled={!state.canSubmit || !state.valid}
           data-state={status}
           variant={rest.variant || "secondary"}
           addonAfter={

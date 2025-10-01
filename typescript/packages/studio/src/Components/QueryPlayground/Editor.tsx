@@ -69,11 +69,11 @@ export function Editor({
         height={height}
         theme={theme}
         value={field.state.value}
-        onChange={(val) => field.handleChange(val || "")}
+        onChange={(val: string | undefined) => field.handleChange(val || "")}
         data-state={hasErrors ? "invalid" : undefined}
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
-        onMount={(editor) => {
+        onMount={(editor: monaco.editor.IStandaloneCodeEditor) => {
           // Configure editor options
           editor.updateOptions({
             suggest: {

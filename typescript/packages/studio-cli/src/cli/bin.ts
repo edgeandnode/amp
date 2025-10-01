@@ -20,6 +20,7 @@ import {
   PlatformConfigProvider,
 } from "@effect/platform"
 import { NodeContext, NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { Table } from "apache-arrow"
 import {
   Cause,
   Chunk,
@@ -36,7 +37,6 @@ import {
   String,
   Struct,
 } from "effect"
-import { Table } from "apache-arrow"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import { Arrow, ArrowFlight } from "nozzl"
