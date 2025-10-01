@@ -14,10 +14,7 @@ use datafusion::{
 };
 use tracing::instrument;
 
-use crate::{
-    BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal,
-    query_context::prepend_special_block_num_field,
-};
+use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal};
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
 /// names are reserved for special columns.
@@ -277,6 +274,31 @@ pub fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
     LogicalPlan::Sort(sort)
 }
 
+pub fn prepend_special_block_num_field(
+    schema: &datafusion::common::DFSchema,
+) -> Arc<datafusion::common::DFSchema> {
+    use datafusion::arrow::datatypes::{DataType, Field, Fields};
+
+    // Do nothing if a field with the same name is already present. Note that this
+    // is not redundant with `DFSchema::merge`, because that will consider
+    // different qualifiers as different fields even if the name is the same.
+    if schema
+        .fields()
+        .iter()
+        .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+    {
+        return Arc::new(schema.clone());
+    }
+
+    let mut new_schema = datafusion::common::DFSchema::from_unqualified_fields(
+        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+        Default::default(),
+    )
+    .unwrap();
+    new_schema.merge(schema);
+    new_schema.into()
+}
+
 #[cfg(test)]
 mod tests {
     use datafusion::{
@@ -413,6 +435,112 @@ mod tests {
                 .iter()
                 .any(|f| f.name() == SPECIAL_BLOCK_NUM),
             "Schema should contain the SPECIAL_BLOCK_NUM field"
+        );
+    }
+
+    #[test]
+    fn test_prepend_special_block_num_field_idempotent() {
+        use datafusion::{
+            arrow::datatypes::{DataType, Field, Schema},
+            common::DFSchema,
+        };
+
+        // Test 1: Function adds _block_num field when schema doesn't have it
+        let schema = DFSchema::from_unqualified_fields(
+            vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+            ]
+            .into(),
+            Default::default(),
+        )
+        .unwrap();
+
+        let result = prepend_special_block_num_field(&schema);
+
+        assert_eq!(result.fields().len(), 3, "Should add _block_num field");
+        assert_eq!(
+            result.fields()[0].name(),
+            SPECIAL_BLOCK_NUM,
+            "First field should be _block_num"
+        );
+        assert_eq!(result.fields()[1].name(), "id");
+        assert_eq!(result.fields()[2].name(), "value");
+
+        // Test 2: Function is idempotent (calling twice returns same schema)
+        let result2 = prepend_special_block_num_field(&result);
+
+        assert_eq!(
+            result2.fields().len(),
+            3,
+            "Calling again should not add another field"
+        );
+        assert_eq!(
+            result2.fields()[0].name(),
+            SPECIAL_BLOCK_NUM,
+            "First field should still be _block_num"
+        );
+
+        // Test 3: Function skips adding field when _block_num already exists in schema
+        let schema_with_block_num = DFSchema::from_unqualified_fields(
+            vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+                Field::new("value", DataType::Utf8, false),
+            ]
+            .into(),
+            Default::default(),
+        )
+        .unwrap();
+
+        let result3 = prepend_special_block_num_field(&schema_with_block_num);
+
+        assert_eq!(
+            result3.fields().len(),
+            3,
+            "Should not add _block_num when it already exists"
+        );
+        assert!(
+            result3
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+            "Should still contain _block_num field"
+        );
+
+        // Test 4: Function skips adding field when qualified _block_num exists (e.g., foo._block_num)
+        // This is the critical case mentioned in the comment: different qualifiers should be
+        // considered as the same field for the purposes of this function.
+        let arrow_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new("value", DataType::Utf8, false),
+        ]));
+        let qualified_schema = DFSchema::try_from_qualified_schema("foo", &arrow_schema).unwrap();
+
+        let result4 = prepend_special_block_num_field(&qualified_schema);
+
+        assert_eq!(
+            result4.fields().len(),
+            3,
+            "Should not add _block_num when qualified version (foo._block_num) exists"
+        );
+        assert!(
+            result4
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+            "Should still contain _block_num field"
+        );
+        // Verify the qualified field is preserved
+        let (qualifier, _field) = result4
+            .iter()
+            .find(|(_, f)| f.name() == SPECIAL_BLOCK_NUM)
+            .unwrap();
+        assert_eq!(
+            qualifier.map(|q| q.to_string()),
+            Some("foo".to_string()),
+            "Qualified field should retain its qualifier"
         );
     }
 }
