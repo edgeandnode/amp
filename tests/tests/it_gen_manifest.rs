@@ -111,7 +111,7 @@ async fn generate_manifest_sql() {
 
     let network = "mainnet".to_string();
     let kind = "sql".to_string();
-    let name = "sql_over_eth_firehose".to_string();
+    let name = "sql_stream_ds".to_string();
 
     let mut out = Vec::new();
 
