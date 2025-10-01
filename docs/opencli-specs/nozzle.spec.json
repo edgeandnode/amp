@@ -3,10 +3,10 @@
   "info": {
     "title": "Nozzle CLI",
     "description": "High-performance ETL (Extract, Transform, Load) architecture for blockchain data services. Extracts blockchain data from various sources, transforms it via SQL queries, and serves it through multiple query interfaces.",
-    "version": "0.1.0",
+    "version": "0.1.0-20251001",
     "contact": {
       "name": "Edge & Node",
-      "url": "https://github.com/edgeandnode/nozzle"
+      "url": "https://github.com/edgeandnode/project-nozzle"
     }
   },
   "environment": [
