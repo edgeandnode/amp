@@ -36,6 +36,7 @@ import {
   String,
   Struct,
 } from "effect"
+import { Table } from "apache-arrow"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import { Arrow, ArrowFlight } from "nozzl"
@@ -307,7 +308,10 @@ FROM (
             }
           }))
         .handle("Query", ({ payload }) =>
-          flight.table(payload.query).pipe(
+          flight.stream(payload.query).pipe(
+            Stream.runCollect,
+            Effect.map((_) => Chunk.toArray(_)),
+            Effect.map((array) => new Table(array.map((response) => response.data))),
             Effect.flatMap((table) => {
               const schema = Arrow.generateSchema(table.schema)
               return Effect.succeed([table, schema] as const)
