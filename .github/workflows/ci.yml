@@ -56,6 +56,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+        with:
+          submodules: recursive
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -171,54 +173,6 @@ jobs:
 
       - name: Check types
         run: just check-ts
-
-  # TODO: Use a built binary here from the build.yml workflow
-  typescript-tests:
-    name: TypeScript tests
-    runs-on: namespace-profile-linux-default
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
-        with:
-          submodules: recursive
-
-      - name: Setup dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql
-          
-          # Add PostgreSQL binaries to PATH
-          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
-
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
-        with:
-          cache: true
-          rustflags: ""
-
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1.4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
-        with:
-          package_json_file: typescript/package.json
-
-      - name: Install dependencies
-        run: just pnpm-install
-
-      # TODO: Ideally we'd be using a binary built in a previous step here.
-      - name: Build binary
-        run: cargo build --release -p nozzle
-
-      - name: Add Nozzle binaries to PATH
-        run: echo "$(pwd)/target/release" >> $GITHUB_PATH
-
-      - name: Run tests
-        working-directory: typescript
-        run: pnpm test
 
   # Check generated code is up to date
   gen-check:

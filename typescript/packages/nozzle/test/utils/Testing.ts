@@ -1,142 +1,53 @@
+import { createGrpcTransport } from "@connectrpc/connect-node"
 import * as NodeContext from "@effect/platform-node/NodeContext"
-import * as Path from "@effect/platform/Path"
+import * as Vitest from "@effect/vitest"
+import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
-import * as Anvil from "nozzl/Anvil"
-import * as Model from "nozzl/Model"
-import * as Nozzle from "nozzl/Nozzle"
+import * as Admin from "nozzl/api/Admin"
+import * as ArrowFlight from "nozzl/api/ArrowFlight"
+import * as JsonLines from "nozzl/api/JsonLines"
+import * as EvmRpc from "nozzl/evm/EvmRpc"
 import * as Fixtures from "./Fixtures.ts"
 
-export interface TestingOptions {
-  /**
-   * The path to the nozzle executable.
-   *
-   * @default "nozzle"
-   */
-  readonly nozzleExecutable?: string | undefined
-
-  /**
-   * Additional arguments to pass to the nozzle executable.
-   *
-   * This can be useful when running the nozzle server through cargo
-   * directly from source e.g. during development or testing.
-   */
-  readonly nozzleArgs?: Array<string> | undefined
-
-  /**
-   * The working directory to run the anvil instance in.
-   */
-  readonly anvilWorkingDirectory?: string | undefined
-
-  /**
-   * The port to run the anvil instance on.
-   *
-   * @default 8545
-   */
-  readonly anvilPort?: number | undefined
-
-  /**
-   * Whether to print the stdout and stderr output of anvil to the console.
-   *
-   * @default "both"
-   */
-  readonly anvilOutput?: "stdout" | "stderr" | "both" | "none" | undefined
-
-  /**
-   * Whether to print the stdout and stderr output of nozzle to the console.
-   *
-   * @default "both"
-   */
-  readonly nozzleOutput?: "stdout" | "stderr" | "both" | "none" | undefined
-
-  /**
-   * The port to run the admin service on.
-   *
-   * @default 1610
-   */
-  readonly adminPort?: number | undefined
-
-  /**
-   * The port to run the json-lines service on.
-   *
-   * @default 1603
-   */
-  readonly jsonLinesPort?: number | undefined
-
-  /**
-   * The port to run the arrow-flight service on.
-   *
-   * @default 1602
-   */
-  readonly arrowFlightPort?: number | undefined
-}
-
 /**
- * The default options for the testing layer.
- */
-export const defaultOptions: TestingOptions = {
-  anvilOutput: "both",
-  anvilPort: 8545,
-  adminPort: 1610,
-  arrowFlightPort: 1602,
-  jsonLinesPort: 1603,
-  nozzleOutput: "both",
-  nozzleArgs: [],
-  nozzleExecutable: "nozzle",
-  anvilWorkingDirectory: undefined,
-}
-
-/**
- * Creates a test environment layer.
+ * Creates a test environment layer that connects to externally managed infrastructure.
  *
- * @param config - The configuration for the test environment.
- * @returns A layer for the test environment.
+ * This layer reads connection URLs from environment variables and creates client layers
+ * for Admin, JsonLines, ArrowFlight, and EvmRpc services. It does not spawn any processes.
+ *
+ * Environment variables:
+ * - NOZZLE_ADMIN_URL: Admin API URL (default: http://localhost:1610)
+ * - NOZZLE_JSONL_URL: JSON Lines API URL (default: http://localhost:1603)
+ * - NOZZLE_FLIGHT_URL: Arrow Flight API URL (default: http://localhost:1602)
+ * - ANVIL_RPC_URL: Anvil RPC URL (default: http://localhost:8545)
+ *
+ * @returns A layer for the test environment with all necessary client services.
  */
-export const layer = (config: TestingOptions = {}) =>
+export const layer = Vitest.layer(
   Effect.gen(function*() {
-    const path = yield* Path.Path
-
     const {
-      adminPort,
-      anvilOutput,
-      anvilPort,
-      arrowFlightPort,
-      jsonLinesPort,
-      nozzleOutput,
-    } = { ...defaultOptions, ...config }
-
-    const anvil = Anvil.layer({
-      httpPort: anvilPort,
-      printOutput: anvilOutput,
-      workingDirectory: Option.fromNullable(config.anvilWorkingDirectory).pipe(
-        Option.getOrElse(() => path.resolve(import.meta.dirname, "..", "fixtures", "contracts")),
-      ),
+      adminUrl,
+      anvilRpcUrl,
+      flightUrl,
+      jsonlUrl,
+    } = yield* Config.all({
+      adminUrl: Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
+      jsonlUrl: Config.string("NOZZLE_JSONL_URL").pipe(Config.withDefault("http://localhost:1603")),
+      flightUrl: Config.string("NOZZLE_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
+      anvilRpcUrl: Config.string("ANVIL_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
     })
 
-    const nozzle = Nozzle.layer({
-      nozzleExecutable: Option.fromNullable(config.nozzleExecutable).pipe(
-        Option.getOrElse(() =>
-          path.resolve(import.meta.dirname, "..", "..", "..", "..", "..", "target", "release", "nozzle")
-        ),
-      ),
-      nozzleArgs: config.nozzleArgs,
-      printOutput: nozzleOutput,
-      adminPort,
-      jsonLinesPort,
-      arrowFlightPort,
-      providerDefinitions: {
-        anvil: new Model.EvmRpcProvider({
-          kind: "evm-rpc",
-          network: "anvil",
-          url: new URL(`http://localhost:${anvilPort}`),
-        }),
-      },
-    })
+    const flight = ArrowFlight.layer(createGrpcTransport({ baseUrl: flightUrl }))
+    const jsonl = JsonLines.layer(jsonlUrl)
+    const admin = Admin.layer(adminUrl)
+    const rpc = EvmRpc.layer(anvilRpcUrl)
 
-    return Layer.merge(nozzle, anvil)
+    return Layer.mergeAll(admin, jsonl, flight, rpc)
   }).pipe(
     Layer.unwrapEffect,
     Layer.merge(Fixtures.layer),
     Layer.provideMerge(NodeContext.layer),
-  )
+  ),
+  { excludeTestServices: true },
+)
