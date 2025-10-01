@@ -12,11 +12,14 @@ default = ["snmalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
+arrow-array = { version = "55.2.0", default-features = false }
+arrow-schema = { version = "55.2.0" }
 backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
 datafusion.workspace = true
 datasets-derived = { path = "../../core/datasets-derived" }
+enum_dispatch = "0.3.13"
 futures.workspace = true
 monitoring = { path = "../../core/monitoring" }
 nozzle-client = { path = "../../client" }
@@ -34,7 +37,6 @@ sqlx = { version = "0.8.6", features = [
     "macros",
     "chrono",
 ] }
-pgpq = { git = "https://github.com/adriangb/pgpq.git" }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true

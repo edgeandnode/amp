@@ -17,7 +17,7 @@ providers_dir = "providers"
 dataset_defs_dir = "datasets"
 
 # Metadata database url.
-metadata_db_url = "postgres://ampsync_with_electricsql_adm:admin@db:6434/amp?sslmode=disable"
+metadata_db_url = "postgres://postgres:postgres@db:5432/amp?sslmode=disable"
 
 # How much memory the server can use in MB. Setting this to 0 means unlimited
 max_mem_mb = 0

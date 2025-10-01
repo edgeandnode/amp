@@ -40,5 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# amp
+# infra
+infra/amp/data
+infra/amp/datasets/*
+!infra/amp/datasets/anvil*
+infra/postgres/data*
 !infra/amp/config.toml

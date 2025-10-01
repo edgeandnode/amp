@@ -4,9 +4,9 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB_LIST: ampsync_with_electricsql,amp
-      POSTGRES_DB: ampsync_with_electricsql
-      POSTGRES_USER: ampsync_with_electricsql_adm
-      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
       - "6434:5432"
@@ -19,13 +19,13 @@ services:
       - -c
       - config_file=/etc/postgresql/postgresql.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ampsync_with_electricsql_adm"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   amp:
-    image: ghcr.io/edgeandnode/nozzle
+    image: ghcr.io/edgeandnode/nozzle:sha-4f710c1
     command: ["--config", "/var/lib/amp/config.toml", "server", "--dev"]
     depends_on:
       db:
@@ -49,7 +49,7 @@ services:
   ampsync:
     # Build from workspace root to include all dependencies
     build:
-      context: ../../../..
+      context: ../../../../..
       dockerfile: crates/bin/ampsync/Dockerfile
     image: ampsync:latest
     environment:
@@ -63,8 +63,8 @@ services:
       DATABASE_HOST: db
       DATABASE_PORT: 5432
       DATABASE_NAME: ampsync_with_electricsql
-      DATABASE_USER: ampsync_with_electricsql_adm
-      DATABASE_PASSWORD: admin
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
 
       # Logging
       RUST_LOG: info,ampsync=debug
@@ -86,7 +86,7 @@ services:
   electric:
     image: docker.io/electricsql/electric:latest
     environment:
-      DATABASE_URL: postgresql://ampsync_with_electricsql_adm:admin@db:5432/ampsync_with_electricsql?sslmode=disable
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ampsync_with_electricsql?sslmode=disable
       # Not suitable for production. Only use insecure mode in development or if you've otherwise secured the Electric API.
       # See https://electric-sql.com/docs/guides/security
       ELECTRIC_INSECURE: true

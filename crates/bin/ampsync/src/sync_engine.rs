@@ -9,10 +9,9 @@ use common::{BoxError, arrow::array::RecordBatch};
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use datasets_derived::manifest::{ArrowSchema, Field};
 use nozzle_client::InvalidationRange;
-use pgpq::ArrowToPostgresBinaryEncoder;
 use sqlx::{Pool, Postgres};
 
-use crate::conn::DbConnPool;
+use crate::{conn::DbConnPool, pgpq::ArrowToPostgresBinaryEncoder};
 
 /// Convert Arrow schema to PostgreSQL CREATE TABLE statement
 pub fn arrow_schema_to_postgres_ddl(

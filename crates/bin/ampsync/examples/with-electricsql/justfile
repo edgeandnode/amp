@@ -36,7 +36,7 @@ check-ts:
 
 # Run all development services in parallel
 [parallel]
-dev: dev-app dev-proxy dev-nozzle
+dev: dev-app dev-proxy dev-amp
 
 # Run the app in development mode
 [private]
@@ -48,7 +48,7 @@ dev-app:
 dev-proxy:
     pnpm nozzl proxy
 
-# Start the nozzle development server (watch config changes)
+# Start the amp development server (watch config changes)
 [private]
-dev-nozzle:
+dev-amp:
     pnpm nozzl dev

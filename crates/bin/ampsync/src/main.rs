@@ -1,5 +1,6 @@
 mod conn;
 mod manifest;
+mod pgpq;
 mod sync_engine;
 
 use std::{env, path::PathBuf, sync::Arc};
