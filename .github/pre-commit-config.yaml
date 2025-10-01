@@ -34,7 +34,7 @@ repos:
     name: Format TypeScript code
     language: system
     entry: just fmt-ts
-    types_or: [ts, tsx, javascript, json]
+    types_or: [ts, tsx, javascript]
     stages: [pre-commit, pre-merge-commit, manual]
     pass_filenames: false
     require_serial: true
@@ -50,7 +50,7 @@ repos:
     name: Check TypeScript types
     language: system
     entry: just check-ts
-    types_or: [ts, tsx, javascript, json]
+    types_or: [ts, tsx, javascript]
     stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true

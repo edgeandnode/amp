@@ -36,7 +36,6 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 ### 3. Query Serving (`server`)
 - **Arrow Flight Server** (port 1602): High-performance binary protocol
 - **JSON Lines Server** (port 1603): Simple HTTP interface
-- **Registry Service** (port 1611): Dataset discovery
 - **Admin API** (port 1610): Management interface
 - Features:
   - SQL query execution via DataFusion
