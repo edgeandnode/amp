@@ -23,11 +23,11 @@ async fn get_all_with_empty_store_returns_empty_list() {
 async fn register_with_valid_provider_stores_and_retrieves() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let provider = create_test_evm_provider();
     let provider_name = "test-evm";
+    let provider = create_test_evm_provider(provider_name);
 
     //* When
-    let register_result = store.register(provider_name, provider.clone()).await;
+    let register_result = store.register(provider.clone()).await;
 
     //* Then
     assert!(
@@ -57,12 +57,12 @@ async fn register_with_valid_provider_stores_and_retrieves() {
 async fn register_with_multiple_providers_all_retrievable() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let evm_provider = create_test_evm_provider();
-    let fhs_provider = create_test_firehose_provider();
+    let evm_provider = create_test_evm_provider("evm-mainnet");
+    let fhs_provider = create_test_firehose_provider("fhs-polygon");
 
     //* When
-    let evm_result = store.register("evm-mainnet", evm_provider.clone()).await;
-    let firehose_result = store.register("fhs-polygon", fhs_provider.clone()).await;
+    let evm_result = store.register(evm_provider.clone()).await;
+    let firehose_result = store.register(fhs_provider.clone()).await;
 
     //* Then
     assert!(
@@ -105,13 +105,13 @@ async fn register_with_multiple_providers_all_retrievable() {
 async fn register_with_duplicate_name_returns_conflict_error() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let evm_provider = create_test_evm_provider();
-    let fhs_provider = create_test_firehose_provider();
     let provider_name = "duplicate-name";
+    let evm_provider = create_test_evm_provider(provider_name);
+    let fhs_provider = create_test_firehose_provider(provider_name);
 
     //* When
-    let first_result = store.register(provider_name, evm_provider).await;
-    let second_result = store.register(provider_name, fhs_provider).await;
+    let first_result = store.register(evm_provider).await;
+    let second_result = store.register(fhs_provider).await;
 
     //* Then
     assert!(
@@ -139,11 +139,11 @@ async fn register_with_duplicate_name_returns_conflict_error() {
 async fn delete_with_existing_provider_removes_from_store_and_cache() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let provider = create_test_evm_provider();
     let provider_name = "test-delete";
+    let provider = create_test_evm_provider(provider_name);
 
     store
-        .register(provider_name, provider)
+        .register(provider)
         .await
         .expect("should register provider");
 
@@ -181,11 +181,11 @@ async fn delete_with_existing_provider_removes_from_store_and_cache() {
 async fn register_with_subdirectory_path_stores_at_correct_location() {
     //* Given
     let (store, raw_store) = create_test_providers_store();
-    let provider = create_test_evm_provider();
     let provider_name = "networks/mainnet/primary-rpc";
+    let provider = create_test_evm_provider(provider_name);
 
     //* When
-    let result = store.register(provider_name, provider).await;
+    let result = store.register(provider).await;
 
     //* Then
     assert!(
@@ -203,11 +203,11 @@ async fn register_with_subdirectory_path_stores_at_correct_location() {
 async fn delete_with_subdirectory_path_removes_correct_file() {
     //* Given
     let (store, raw_store) = create_test_providers_store();
-    let provider = create_test_evm_provider();
     let provider_name = "networks/mainnet/primary-rpc";
+    let provider = create_test_evm_provider(provider_name);
 
     // Pre-register the provider
-    let register_result = store.register(provider_name, provider).await;
+    let register_result = store.register(provider).await;
     assert!(register_result.is_ok(), "setup registration should succeed");
 
     //* When
@@ -239,23 +239,25 @@ fn create_test_providers_store() -> (ProvidersConfigStore, Arc<dyn ObjectStore>)
 }
 
 /// Create a test EVM RPC provider with mainnet configuration
-fn create_test_evm_provider() -> ProviderConfig {
-    let toml_str = indoc::indoc! {r#"
+fn create_test_evm_provider(name: &str) -> ProviderConfig {
+    let toml_str = indoc::formatdoc! {r#"
+        name = "{name}"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
-    toml::from_str(toml_str).expect("should parse valid EVM provider TOML")
+    toml::from_str(&toml_str).expect("should parse valid EVM provider TOML")
 }
 
 /// Create a test Firehose provider with polygon configuration
-fn create_test_firehose_provider() -> ProviderConfig {
-    let toml_str = indoc::indoc! {r#"
+fn create_test_firehose_provider(name: &str) -> ProviderConfig {
+    let toml_str = indoc::formatdoc! {r#"
+        name = "{name}"
         kind = "firehose"
         network = "polygon"
         url = "https://polygon.firehose.io"
         token = "secret"
     "#};
-    toml::from_str(toml_str).expect("should parse valid Firehose provider TOML")
+    toml::from_str(&toml_str).expect("should parse valid Firehose provider TOML")
 }

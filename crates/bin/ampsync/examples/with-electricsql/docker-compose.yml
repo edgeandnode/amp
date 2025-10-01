@@ -51,6 +51,7 @@ services:
     build:
       context: ../../../..
       dockerfile: crates/bin/ampsync/Dockerfile
+    image: ampsync:latest
     environment:
       # Dataset manifest configuration
       DATASET_MANIFEST: /home/ampsync/nozzle.config.ts

@@ -1,0 +1,4 @@
+onlyBuiltDependencies: null
+packages:
+  - typescript/*
+  - tests/datasets/*

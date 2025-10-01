@@ -19,9 +19,10 @@ async fn sql_dataset_input_batch_size() {
     // 2. First dump eth_firehose dependency on the spot
     let start = test
         .dataset_store()
-        .load_dataset("eth_firehose", None)
+        .get_dataset("eth_firehose", None)
         .await
         .unwrap()
+        .expect("Dataset should exist")
         .start_block
         .unwrap();
     let end = start + 3;

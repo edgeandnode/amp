@@ -1,0 +1,12 @@
+- name: restore_eth_rpc
+  restore: eth_rpc
+
+- name: deploy_non_incremental
+  deploy: non_incremental
+  end: 15000000
+
+- name: dump_non_incremental_join_fails
+  dataset: non_incremental
+  end: 15000000
+  failure: |
+    non-incremental operation: Join

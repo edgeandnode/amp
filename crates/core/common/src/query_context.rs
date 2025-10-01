@@ -439,6 +439,7 @@ pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
 }
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
+#[instrument(skip_all, err)]
 async fn execute_plan(
     ctx: &SessionContext,
     mut plan: LogicalPlan,

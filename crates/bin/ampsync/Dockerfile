@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.83-slim AS builder
+FROM rustlang/rust:nightly-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     build-essential \
     git \
+    curl \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
@@ -15,6 +17,7 @@ WORKDIR /app
 # Copy workspace files
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY tests ./tests
 
 # Build the ampsync binary with release optimizations
 RUN cargo build --release -p ampsync

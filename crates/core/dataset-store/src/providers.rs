@@ -7,6 +7,7 @@
 //! ## Provider Configuration Structure
 //!
 //! All provider configurations must define at least:
+//! - `name`: A unique identifier for the provider configuration
 //! - `kind`: The type of provider (e.g., "evm-rpc", "firehose", "substreams")
 //! - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 //!
@@ -20,22 +21,6 @@ use object_store::ObjectStore;
 use parking_lot::RwLock;
 
 use crate::dataset_kind::DatasetKind;
-
-/// Provider configuration with required and provider-specific fields.
-///
-/// This struct captures the required fields (`kind` and `network`) that must be present
-/// in all provider configurations, while using serde's `flatten` attribute to collect
-/// all additional provider-specific configuration fields in the `rest` field.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ProviderConfig {
-    /// The type of provider (e.g., "evm-rpc", "firehose", "substreams")
-    pub kind: DatasetKind,
-    /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
-    pub network: String,
-    /// All other provider-specific configuration fields
-    #[serde(flatten)]
-    pub rest: toml::Table,
-}
 
 /// Manages provider configurations and caching
 ///
@@ -169,15 +154,13 @@ where
     /// Register a new provider configuration in both cache and store
     ///
     /// If a provider configuration with the same name already exists, returns a conflict error.
-    pub async fn register(
-        &self,
-        name: &str,
-        provider: ProviderConfig,
-    ) -> Result<(), RegisterError> {
+    pub async fn register(&self, provider: ProviderConfig) -> Result<(), RegisterError> {
         // Load and populate cache if empty
         if self.cache.read().is_empty() {
             self.load_into_cache().await;
         }
+
+        let name = &provider.name;
 
         // Check if provider configuration already exists
         if self.cache.read().contains_key(name) {
@@ -282,6 +265,49 @@ where
     }
 }
 
+/// Provider configuration with required and provider-specific fields.
+///
+/// This struct captures the required fields (`kind` and `network`) that must be present
+/// in all provider configurations, while using serde's `flatten` attribute to collect
+/// all additional provider-specific configuration fields in the `rest` field.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProviderConfig {
+    /// Unique name of the provider configuration
+    #[serde(default)]
+    pub name: String,
+    /// The type of provider (e.g., "evm-rpc", "firehose", "substreams")
+    pub kind: DatasetKind,
+    /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
+    pub network: String,
+    /// All other provider-specific configuration fields
+    #[serde(flatten)]
+    pub rest: toml::Table,
+}
+
+impl ProviderConfig {
+    /// Convert this provider configuration into a specific configuration type.
+    ///
+    /// Deserializes all fields (`kind`, `network`, and provider-specific fields from `rest`)
+    /// into a strongly-typed configuration struct. The conversion can fail if required fields
+    /// are missing, field types don't match, or values are invalid for the target type.
+    pub fn try_into_config<T>(&self) -> Result<T, ParseConfigError>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        let value = toml::Value::try_from(self).unwrap_or_else(|err| {
+            unreachable!(
+                "Failed to convert ProviderConfig to toml::Value: {err}. This should never happen."
+            )
+        });
+        value.try_into().map_err(ParseConfigError)
+    }
+}
+
+/// Error that can occur when parsing provider configuration into specific config types.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to parse provider configuration: {0}")]
+pub struct ParseConfigError(#[source] toml::de::Error);
+
 /// Load and parse a single provider configuration file.
 ///
 /// Loads a provider configuration file from storage, parses it as TOML,
@@ -319,12 +345,17 @@ async fn load_and_parse_file(
         })?;
 
     // Parse TOML and deserialize directly to ProviderConfig
-    let provider = toml::from_str::<ProviderConfig>(&content).map_err(|source| {
+    let mut provider = toml::from_str::<ProviderConfig>(&content).map_err(|source| {
         LoadFileError::TomlParseError {
             path: path.clone(),
             source,
         }
     })?;
+
+    // Auto-populate name field from file path if not present in TOML
+    if provider.name.is_empty() {
+        provider.name = path.strip_suffix(".toml").unwrap_or(&path).to_string();
+    }
 
     Ok(provider)
 }

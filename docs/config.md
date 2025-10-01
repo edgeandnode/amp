@@ -82,6 +82,39 @@ Details for the raw datasets currently implemented:
 - Firehose [dataset docs](../crates/extractors/firehose/README.md)
 - Substreams [dataset docs](../crates/extractors/substreams/README.md)
 
+### Generating Raw Dataset Manifests
+
+The `generate-manifest` command provides a convenient way to generate manifest JSON files for raw datasets. These manifests define the schema and configuration that will be used during extraction.
+
+#### Usage
+
+```bash
+# Generate manifest for EVM RPC dataset
+nozzle generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet
+
+# Generate manifest for Firehose dataset
+nozzle generate-manifest --network mainnet --kind firehose --name eth_firehose
+
+# Generate manifest for Substreams dataset
+nozzle generate-manifest --network mainnet --kind substreams --name uniswap_v3 \
+  --manifest https://example.com/substreams.yaml --module map_pools
+
+# Output to file
+nozzle generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
+  -o ./dataset_defs_dir/eth_mainnet.json
+```
+
+#### Parameters
+
+- `--network`: Network name (e.g., mainnet, goerli, polygon)
+- `--kind`: Dataset type (evm-rpc, firehose, substreams, eth-beacon)
+- `--name`: Dataset name (must be a valid dataset identifier)
+- `--out`: Optional output file path (defaults to stdout)
+- `--manifest`: Substreams manifest URL (required for substreams kind)
+- `--module`: Substreams module name (required for substreams kind)
+
+The generated manifest includes the complete schema definition with all tables and columns for the specified dataset type and network.
+
 ## Datasets
 
 A dataset can be defined as a set of queries on other datasets, with each query defining a view. Dataset views can be materialized, to share a result

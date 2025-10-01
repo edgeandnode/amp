@@ -37,14 +37,6 @@ impl DatasetPackage {
         }
     }
 
-    /// Install dependencies for the dataset using pnpm.
-    ///
-    /// Runs `pnpm install` in the dataset's parent directory using the provided CLI.
-    #[tracing::instrument(skip_all, err)]
-    pub async fn install(&self, cli: &NozzlCli) -> Result<(), BoxError> {
-        cli.install(&self.path).await
-    }
-
     /// Build the dataset manifest using nozzl build command.
     ///
     /// Runs `pnpm nozzl build` in the dataset directory using the provided CLI.

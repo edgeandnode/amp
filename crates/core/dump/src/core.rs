@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    self, BoxError, LogicalCatalog,
+    BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -159,12 +159,26 @@ pub async fn dump_user_tables(
         let dataset = table.table().dataset();
 
         let dataset = match dataset.kind.as_str() {
-            SQL_DATASET_KIND => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
-            DERIVED_DATASET_KIND => {
-                ctx.dataset_store
-                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
-                    .await?
-            }
+            SQL_DATASET_KIND => ctx
+                .dataset_store
+                .get_sql_dataset(&dataset.name, None)
+                .await?
+                .ok_or_else(|| format!("SQL dataset '{}' not found", dataset.name))?,
+            DERIVED_DATASET_KIND => ctx
+                .dataset_store
+                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
+                .await?
+                .ok_or_else(|| {
+                    format!(
+                        "Derived dataset '{}' version '{}' not found",
+                        dataset.name,
+                        dataset
+                            .version
+                            .as_ref()
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "latest".to_string())
+                    )
+                })?,
             _ => {
                 return Err(format!(
                     "Unsupported dataset kind {} for table {}",

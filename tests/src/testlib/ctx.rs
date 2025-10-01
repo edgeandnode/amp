@@ -44,10 +44,15 @@ use super::fixtures::{
 };
 use crate::testlib::env_dir::TestEnvDir;
 
+enum AnvilMode {
+    Ipc,
+    Http,
+}
+
 pub struct TestCtxBuilder {
     test_name: String,
     daemon_config: DaemonConfig,
-    anvil_fixture: bool,
+    anvil_fixture: Option<AnvilMode>,
     dataset_manifests_to_preload: BTreeSet<String>,
     sql_dataset_files_to_preload: BTreeSet<String>,
     provider_configs_to_preload: BTreeSet<String>,
@@ -60,7 +65,7 @@ impl TestCtxBuilder {
         Self {
             test_name: test_name.into(),
             daemon_config: Default::default(),
-            anvil_fixture: false,
+            anvil_fixture: None,
             dataset_manifests_to_preload: Default::default(),
             sql_dataset_files_to_preload: Default::default(),
             provider_configs_to_preload: Default::default(),
@@ -322,7 +327,17 @@ impl TestCtxBuilder {
     /// An Anvil instance will be created with IPC connection and configured automatically.
     /// The provider will be named "anvil_rpc" and available for dataset connections.
     pub fn with_anvil_ipc(mut self) -> Self {
-        self.anvil_fixture = true;
+        self.anvil_fixture = Some(AnvilMode::Ipc);
+        self
+    }
+
+    /// Enable Anvil fixture for blockchain testing with HTTP connection.
+    ///
+    /// An Anvil instance will be created with HTTP connection on an automatically allocated port.
+    /// This is useful for avoiding port conflicts and allows forge scripts to work (forge doesn't support IPC).
+    /// The provider will be named "anvil_rpc" and available for dataset connections.
+    pub fn with_anvil_http(mut self) -> Self {
+        self.anvil_fixture = Some(AnvilMode::Http);
         self
     }
 
@@ -411,19 +426,32 @@ impl TestCtxBuilder {
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true).await?);
 
         // Create Anvil fixture (if enabled)
-        let anvil = if self.anvil_fixture {
-            let fixture = Anvil::new_ipc().await?;
+        let anvil = match self.anvil_fixture {
+            Some(AnvilMode::Ipc) => {
+                let fixture = Anvil::new_ipc().await?;
 
-            fixture
-                .wait_for_ready(std::time::Duration::from_secs(30))
-                .await?;
+                fixture
+                    .wait_for_ready(std::time::Duration::from_secs(30))
+                    .await?;
 
-            // Preload Anvil provider config into the daemon state dir
-            let anvil_provider = fixture.new_provider_config();
-            daemon_state_dir.create_provider_config("anvil_rpc", &anvil_provider)?;
-            Some(fixture)
-        } else {
-            None
+                // Preload Anvil provider config into the daemon state dir
+                let anvil_provider = fixture.new_provider_config();
+                daemon_state_dir.create_provider_config("anvil_rpc", &anvil_provider)?;
+                Some(fixture)
+            }
+            Some(AnvilMode::Http) => {
+                let fixture = Anvil::new_http(0).await?;
+
+                fixture
+                    .wait_for_ready(std::time::Duration::from_secs(30))
+                    .await?;
+
+                // Preload Anvil provider config into the daemon state dir
+                let anvil_provider = fixture.new_provider_config();
+                daemon_state_dir.create_provider_config("anvil_rpc", &anvil_provider)?;
+                Some(fixture)
+            }
+            None => None,
         };
 
         // Start nozzle server using the fixture

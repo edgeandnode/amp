@@ -15,7 +15,7 @@ use tracing::instrument;
 
 use crate::{
     Error,
-    dataset::FirehoseProvider,
+    dataset::ProviderConfig,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
 };
@@ -32,24 +32,17 @@ pub struct Client {
 
 impl Client {
     /// Configure the client from a Firehose dataset definition.
-    pub async fn new(
-        provider: toml::Value,
-        network: String,
-        provider_name: String,
-        final_blocks_only: bool,
-    ) -> Result<Self, Error> {
-        let FirehoseProvider { url, token } = provider.try_into()?;
-
+    pub async fn new(config: ProviderConfig, final_blocks_only: bool) -> Result<Self, Error> {
         let client = {
-            let uri = Uri::from_str(&url)?;
+            let uri = Uri::from_str(&config.url)?;
             let mut endpoint = Endpoint::from(uri);
             endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
-            let auth = AuthInterceptor::new(token)?;
+            let auth = AuthInterceptor::new(config.token)?;
             Client {
                 endpoint,
                 auth,
-                network,
-                provider_name,
+                network: config.network,
+                provider_name: config.name,
                 final_blocks_only,
             }
         };

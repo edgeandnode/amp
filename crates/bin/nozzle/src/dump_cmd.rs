@@ -12,10 +12,12 @@ use common::{
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::DatasetStore;
 use datasets_common::version::Version;
+use datasets_derived::{
+    DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
+};
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;
-use tracing::{info, warn};
 
 pub async fn dump(
     config: Arc<Config>,
@@ -51,18 +53,19 @@ pub async fn dump(
     }
 
     let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
-    info!("dump order: {}", dump_order.join(", "));
+    tracing::info!("dump order: {}", dump_order.join(", "));
 
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
         let (dataset_name, version) =
             if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match Version::from_version_identifier(version_str) {
+                match Version::try_from_underscore_version(version_str) {
                     Ok(v) => (name, Some(v)),
-                    Err(e) => {
-                        warn!(
+                    Err(err) => {
+                        tracing::warn!(
                             "Skipping dataset {} due to invalid version: {}",
-                            dataset_name, e
+                            dataset_name,
+                            err
                         );
                         continue;
                     }
@@ -71,15 +74,17 @@ pub async fn dump(
                 (dataset_name.as_str(), None)
             };
         let dataset = dataset_store
-            .load_dataset(&dataset_name, version.as_ref())
-            .await?;
+            .get_dataset(&dataset_name, version.as_ref())
+            .await?
+            .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
             let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
-            info!(
+            tracing::info!(
                 "Table dump order for dataset {}: {:?}",
-                dataset_name, table_names
+                dataset_name,
+                table_names
             );
         }
 
@@ -166,21 +171,26 @@ pub async fn datasets_and_dependencies(
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
-        let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
+        let dataset_name = datasets.pop().unwrap();
+        let Some(dataset) = store.get_dataset(&dataset_name, None).await? else {
+            return Err(format!("Dataset '{}' not found", dataset_name).into());
+        };
+
         let sql_dataset = match dataset.kind.as_str() {
-            datasets_derived::sql_dataset::DATASET_KIND => {
-                store.load_sql_dataset(&dataset.name).await?
-            }
-            datasets_derived::DATASET_KIND => {
-                store
-                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
-                    .await?
-            }
+            SQL_DATASET_KIND => store
+                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
+                .await?
+                .ok_or_else(|| format!("SQL dataset '{}' not found", dataset.name))?,
+            DERIVED_DATASET_KIND => store
+                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
+                .await?
+                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?,
             _ => {
                 deps.insert(dataset.name.to_string(), vec![]);
                 continue;
             }
         };
+
         let mut refs: Vec<String> = Default::default();
         for query in sql_dataset.queries.values() {
             let (tables, _) = resolve_table_references(query, true)?;

@@ -51,11 +51,19 @@ Dataset endpoints handle the lifecycle of data extraction configurations and
 provide information about available datasets and their tables.
 
 #### `GET /datasets`
-Lists all available datasets in the system with their table information and
-active locations.
-Returns comprehensive dataset information including dataset names and types,
-all tables within each dataset with their network associations,
-and active storage locations for each table.
+Lists all registered datasets from the metadata database registry with cursor-based pagination.
+Returns dataset information including names, versions, and owners from the metadata database.
+Supports pagination through query parameters: `limit` (default: 50, max: 1000) and `last_dataset_id` (format: "name:version").
+Results are ordered by dataset name ASC and version DESC (newest first within each dataset).
+
+**Cursor Format Notes:**
+- The `last_dataset_id` cursor uses the format `"name:version"` (e.g., `"eth_mainnet:1.0.0"`)
+- The colon `:` character is valid per RFC 3986 and doesn't require URL encoding
+- Both encoded (`eth_mainnet%3A1.0.0`) and unencoded (`eth_mainnet:1.0.0`) formats are accepted
+- For maximum compatibility across different browsers and systems, URL encoding the colon as `%3A` is recommended
+
+This endpoint queries the metadata database registry, which contains all datasets that have been registered
+and processed through the system, providing a comprehensive view of available datasets with their ownership information.
 
 See [`handlers/datasets/get_all.rs`](src/handlers/datasets/get_all.rs) for more detailed information about this endpoint.
 
@@ -70,6 +78,16 @@ locations.
 
 See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for more detailed information about this endpoint.
 
+#### `GET /datasets/{name}/versions`
+Lists all versions for a specific dataset from the metadata database registry with cursor-based pagination.
+The `name` parameter specifies the dataset name to retrieve versions for and must be a valid dataset name format.
+Returns version information for the specified dataset ordered by version DESC (newest first).
+Supports pagination through query parameters: `limit` (default: 50, max: 1000) and `last_version` (version string, e.g., "1.0.0").
+
+This endpoint queries the metadata database registry to provide a comprehensive view of all available versions for a specific dataset, enabling version-aware operations and historical data access.
+
+See [`handlers/datasets/get_versions.rs`](src/handlers/datasets/get_versions.rs) for more detailed information about this endpoint.
+
 #### `GET /datasets/{name}/versions/{version}`
 Retrieves detailed information about a specific version of a dataset.
 This endpoint provides version-specific dataset information when you need to access a particular version rather than the latest version.
@@ -81,12 +99,9 @@ See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for m
 #### `POST /datasets`
 Registers a new dataset configuration to the system.
 Accepts a JSON payload containing `name`, `version`, and `manifest` fields.
-Supports two main registration scenarios:
-- **Derived datasets** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
-- **EVM-RPC datasets** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
-
-Both dataset types are registered using the same underlying `register_manifest` method to ensure consistency.
-Other dataset kinds (firehose, substreams, etc.) are not supported through this endpoint.
+Supports two main registration scenarios: derived datasets (kind="manifest")
+which are registered in both object store and metadata database,
+and SQL datasets (other kinds) which store dataset definitions in object store.
 Returns HTTP 201 Created upon successful registration.
 
 See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.
