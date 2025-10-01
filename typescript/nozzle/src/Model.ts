@@ -181,7 +181,7 @@ export type DatasetVersionCursor = Schema.Schema.Type<typeof DatasetVersionCurso
  * Response for listing versions of a specific dataset
  */
 export class DatasetVersionsResponse extends Schema.Class<DatasetVersionsResponse>("DatasetVersionsResponse")({
-  versions: Schema.Array(DatasetRegistryInfo),
+  versions: Schema.Array(DatasetVersion),
   nextCursor: Schema.optional(DatasetVersionCursor).pipe(Schema.fromKey("next_cursor")),
 }) {}
 

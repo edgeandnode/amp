@@ -18,6 +18,7 @@ import * as Utils from "../Utils.ts"
 
 import { build } from "./commands/build.ts"
 import { codegen } from "./commands/codegen.ts"
+import { datasets } from "./commands/datasets.ts"
 import { dev } from "./commands/dev.ts"
 import { dump } from "./commands/dump.ts"
 import { jobs } from "./commands/jobs.ts"
@@ -37,7 +38,7 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, dump, jobs, locations, query, proxy, register]),
+  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
