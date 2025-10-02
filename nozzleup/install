@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+REPO="edgeandnode/project-nozzle"
+REF="main"
+
+BASE=${XDG_CONFIG_HOME:-$HOME}
+DIR=${DIR-"$BASE/.nozzle"}
+BIN="$DIR/bin"
+
+# OPTIONAL: Needed for private repository access. Can be deleted once the repository is public.
+BEARER="${GITHUB_TOKEN:-}"
+
+download_file() {
+  local path=$1
+  local output=$2
+
+  if [ -n "$BEARER" ]; then
+    if ! curl -sSfL \
+      -H "Authorization: Bearer $BEARER" \
+      -H "Accept: application/vnd.github.v3.raw" \
+      "https://api.github.com/repos/$REPO/contents/$path?ref=$REF" \
+      -o "$output"; then
+      return 1
+    fi
+  else
+    if ! curl -sSfL \
+      "https://raw.githubusercontent.com/$REPO/$REF/$path" \
+      -o "$output"; then
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+echo "Installing nozzleup ..."
+mkdir -p "$BIN"
+
+if [ -n "$BEARER" ]; then
+  echo "Using GitHub API for private repository access ..."
+fi
+
+if ! download_file "nozzleup/nozzleup" "$BIN/nozzleup"; then
+  echo "Failed to download nozzleup"
+  exit 1
+fi
+
+chmod +x "$BIN/nozzleup"
+
+PROFILE=""
+case $SHELL in
+  */zsh)
+    PROFILE="${ZDOTDIR-"$HOME"}/.zshenv"
+    ;;
+  */bash)
+    PROFILE="$HOME/.bashrc"
+    ;;
+  */fish)
+    PROFILE="$HOME/.config/fish/config.fish"
+    ;;
+  */ash)
+    PROFILE="$HOME/.profile"
+    ;;
+  *)
+    echo
+    echo "Failed to detect shell. Please manually add $BIN to your PATH."
+    exit 1
+    ;;
+esac
+
+if [[ ":$PATH:" != *":${BIN}:"* ]]; then
+  if [[ "$SHELL" == */fish ]]; then
+    if { echo >> "$PROFILE" && echo "fish_add_path -a $BIN" >> "$PROFILE"; } 2>/dev/null; then
+      echo "Added $BIN to your PATH."
+      echo
+      echo "Run 'source $PROFILE' or start a new terminal session to use nozzleup."
+    else
+      echo
+      echo "Failed to add $BIN to your PATH."
+      echo
+      echo "Please manually add the following line to your shell configuration file ($PROFILE):"
+      echo
+      echo "  fish_add_path -a $BIN"
+      echo
+      exit 1
+    fi
+  else
+    if { echo >> "$PROFILE" && echo "export PATH=\"\$PATH:$BIN\"" >> "$PROFILE"; } 2>/dev/null; then
+      echo "Added $BIN to your PATH."
+      echo
+      echo "Run 'source $PROFILE' or start a new terminal session to use nozzleup."
+    else
+      echo
+      echo "Failed to add $BIN to your PATH."
+      echo
+      echo "Please manually add the following line to your shell configuration file ($PROFILE):"
+      echo
+      echo "  export PATH=\"\$PATH:$BIN\""
+      echo
+      exit 1
+    fi
+  fi
+fi
