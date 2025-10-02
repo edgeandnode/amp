@@ -92,9 +92,7 @@ fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefini
     let mut extractor = ManifestExtractor::new();
     extractor.visit_program(&parse_result.program);
 
-    extractor
-        .extract_manifest()
-        .ok_or_else(|| "No manifest configuration found in the file".into())
+    extractor.extract_manifest()
 }
 
 /// Transform a DatasetDefinition to a full Manifest by inferring schemas from Nozzle server.
@@ -268,9 +266,12 @@ impl ManifestExtractor {
         }
     }
 
-    fn extract_manifest(self) -> Option<DatasetDefinition> {
-        let json = self.manifest_json?;
-        serde_json::from_value(json).ok()
+    fn extract_manifest(self) -> Result<DatasetDefinition, BoxError> {
+        let json = self
+            .manifest_json
+            .ok_or("No manifest configuration found in the file")?;
+        serde_json::from_value(json)
+            .map_err(|e| format!("Failed to parse manifest JSON: {}", e).into())
     }
 
     /// Convert an AST object expression to a JSON Value

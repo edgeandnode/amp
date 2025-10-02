@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use arrow_array::{Array, RecordBatch, TimestampMicrosecondArray, TimestampNanosecondArray};
+use arrow_array::{
+    Array, RecordBatch, TimestampNanosecondArray, builder::PrimitiveBuilder,
+    types::TimestampMicrosecondType,
+};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use common::BoxError;
 
@@ -9,7 +12,9 @@ use common::BoxError;
 /// PostgreSQL only supports microsecond precision, but Nozzle may return nanosecond timestamps.
 /// This function converts any Timestamp(Nanosecond) columns to Timestamp(Microsecond) by
 /// dividing the values by 1000.
-pub fn convert_nanosecond_timestamps(batch: &RecordBatch) -> Result<RecordBatch, BoxError> {
+///
+/// Takes ownership of the batch to avoid cloning when no conversion is needed.
+pub fn convert_nanosecond_timestamps(batch: RecordBatch) -> Result<RecordBatch, BoxError> {
     let schema = batch.schema();
     let mut needs_conversion = false;
 
@@ -24,9 +29,9 @@ pub fn convert_nanosecond_timestamps(batch: &RecordBatch) -> Result<RecordBatch,
         }
     }
 
-    // If no conversion needed, return the original batch
+    // If no conversion needed, return the original batch without cloning
     if !needs_conversion {
-        return Ok(batch.clone());
+        return Ok(batch);
     }
 
     // Build new schema and convert columns
@@ -43,19 +48,18 @@ pub fn convert_nanosecond_timestamps(batch: &RecordBatch) -> Result<RecordBatch,
                     .downcast_ref::<TimestampNanosecondArray>()
                     .ok_or("Failed to downcast to TimestampNanosecondArray")?;
 
-                // Create new array with microseconds (divide by 1000)
-                let us_values: Vec<Option<i64>> = (0..ns_array.len())
-                    .map(|row| {
-                        if ns_array.is_null(row) {
-                            None
-                        } else {
-                            Some(ns_array.value(row) / 1000)
-                        }
-                    })
-                    .collect();
-
-                let us_array =
-                    TimestampMicrosecondArray::from(us_values).with_timezone_opt(tz.clone());
+                // Build the microsecond array directly without intermediate Vec allocation
+                // This is much more efficient for large batches (avoids 16MB+ allocations)
+                let mut builder =
+                    PrimitiveBuilder::<TimestampMicrosecondType>::with_capacity(ns_array.len());
+                for row in 0..ns_array.len() {
+                    if ns_array.is_null(row) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(ns_array.value(row) / 1000);
+                    }
+                }
+                let us_array = builder.finish().with_timezone_opt(tz.clone());
 
                 // Create new field with microsecond precision
                 new_fields.push(Arc::new(Field::new(

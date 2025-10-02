@@ -8,7 +8,7 @@ use common::BoxError;
 use datasets_derived::manifest::ArrowSchema;
 use nozzle_client::SqlClient;
 
-/// Infer the Arrow schema for a SQL query by querying the Nozzle server with LIMIT 0.
+/// Infer the Arrow schema for a SQL query by querying the Nozzle server with LIMIT 1.
 ///
 /// This executes the query without retrieving data, only metadata including the schema.
 /// Uses a SELECT subquery approach to provide the dataset context.
@@ -16,8 +16,8 @@ use nozzle_client::SqlClient;
 /// # Arguments
 /// * `nozzle_client` - Connected Nozzle SQL client
 /// * `sql` - The SQL query to infer schema for
-/// * `dataset_name` - The dataset name to use as the query context
-/// * `table_name` - The table name (for error messages)
+/// * `dataset_name` - The dataset name (currently unused, kept for API compatibility)
+/// * `table_name` - The table name (used in error messages)
 ///
 /// # Returns
 /// * `Result<ArrowSchema, BoxError>` - Inferred Arrow schema or error
@@ -25,7 +25,7 @@ pub async fn infer_schema(
     nozzle_client: &mut SqlClient,
     sql: &str,
     _dataset_name: &str,
-    _table_name: &str,
+    table_name: &str,
 ) -> Result<ArrowSchema, BoxError> {
     // Execute the user's SQL directly with LIMIT 1 to get the schema
     // We use LIMIT 1 to ensure we get at least one batch with the schema
@@ -36,13 +36,23 @@ pub async fn infer_schema(
     let mut result_stream = nozzle_client
         .query(&schema_query, None, None)
         .await
-        .map_err(|e| format!("Failed to execute schema query: {}", e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to execute schema query for table '{}': {}",
+                table_name, e
+            )
+        })?;
 
     // Get the first batch (should be empty due to LIMIT 0)
     use futures::StreamExt;
 
     if let Some(result) = result_stream.next().await {
-        let batch = result.map_err(|e| format!("Failed to get result batch: {}", e))?;
+        let batch = result.map_err(|e| {
+            format!(
+                "Failed to get result batch for table '{}': {}",
+                table_name, e
+            )
+        })?;
 
         // Extract the Arrow schema from the batch's data field
         let arrow_schema = batch.data.schema();
@@ -50,7 +60,11 @@ pub async fn infer_schema(
         // Convert to our ArrowSchema format
         convert_arrow_schema_to_manifest_schema(arrow_schema.as_ref())
     } else {
-        Err("No result batch received from Nozzle server".into())
+        Err(format!(
+            "No result batch received from Nozzle server for table '{}'",
+            table_name
+        )
+        .into())
     }
 }
 

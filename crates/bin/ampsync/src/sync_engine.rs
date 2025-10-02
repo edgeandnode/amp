@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     ops::Deref,
     time::{Duration, Instant},
 };
@@ -120,7 +121,8 @@ pub struct AdaptiveBatchManager {
     /// Target processing time per batch (in milliseconds)
     target_duration_ms: u64,
     /// Recent performance samples (duration in ms, rows processed)
-    recent_samples: Vec<(u64, usize)>,
+    /// Using VecDeque for O(1) pop_front instead of Vec's O(n) remove(0)
+    recent_samples: VecDeque<(u64, usize)>,
     /// Maximum number of samples to keep
     max_samples: usize,
     /// Number of consecutive errors (for reducing batch size)
@@ -136,7 +138,7 @@ impl Default for AdaptiveBatchManager {
             min_batch_size: 100,      // Minimum 100 rows
             max_batch_size: 50_000,   // Maximum 50K rows
             target_duration_ms: 1000, // Target 1 second per batch
-            recent_samples: Vec::with_capacity(10),
+            recent_samples: VecDeque::with_capacity(10),
             max_samples: 10,
             error_count: 0,
             target_memory_bytes: 50 * 1024 * 1024, // Target 50MB per batch
@@ -153,9 +155,9 @@ impl AdaptiveBatchManager {
         self.error_count = 0;
 
         // Add to recent samples
-        self.recent_samples.push((duration_ms, rows_processed));
+        self.recent_samples.push_back((duration_ms, rows_processed));
         if self.recent_samples.len() > self.max_samples {
-            self.recent_samples.remove(0);
+            self.recent_samples.pop_front();
         }
 
         // Adjust batch size based on performance
@@ -245,14 +247,14 @@ impl AdaptiveBatchManager {
 #[derive(Clone)]
 pub struct AmpsyncDbEngine {
     pool: Pool<Postgres>,
-    batch_manager: std::sync::Arc<std::sync::Mutex<AdaptiveBatchManager>>,
+    batch_manager: std::sync::Arc<tokio::sync::Mutex<AdaptiveBatchManager>>,
 }
 
 impl AmpsyncDbEngine {
     pub fn new(pool: &DbConnPool) -> Self {
         Self {
             pool: pool.deref().clone(),
-            batch_manager: std::sync::Arc::new(std::sync::Mutex::new(
+            batch_manager: std::sync::Arc::new(tokio::sync::Mutex::new(
                 AdaptiveBatchManager::default(),
             )),
         }
@@ -338,10 +340,7 @@ impl AmpsyncDbEngine {
 
         let total_rows = batch.num_rows();
         let optimal_batch_size = {
-            let batch_manager = self
-                .batch_manager
-                .lock()
-                .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
+            let batch_manager = self.batch_manager.lock().await;
             batch_manager.get_optimal_batch_size(batch)
         };
 
@@ -371,10 +370,7 @@ impl AmpsyncDbEngine {
             match self.insert_batch_chunk(table_name, &chunk).await {
                 Ok(()) => {
                     let chunk_duration = chunk_start_time.elapsed();
-                    let mut batch_manager = self
-                        .batch_manager
-                        .lock()
-                        .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
+                    let mut batch_manager = self.batch_manager.lock().await;
                     batch_manager.record_success(chunk_duration, chunk_size);
 
                     tracing::debug!(
@@ -387,10 +383,7 @@ impl AmpsyncDbEngine {
                     );
                 }
                 Err(e) => {
-                    let mut batch_manager = self
-                        .batch_manager
-                        .lock()
-                        .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
+                    let mut batch_manager = self.batch_manager.lock().await;
                     batch_manager.record_error();
 
                     return Err(format!(
@@ -423,8 +416,13 @@ impl AmpsyncDbEngine {
         let mut encoder = ArrowToPostgresBinaryEncoder::try_new(batch.schema().as_ref())
             .map_err(|e| format!("Failed to create pgpq encoder: {:?}", e))?;
 
-        // Encode the batch to PostgreSQL binary format
-        let mut buffer = BytesMut::with_capacity(batch.num_rows() * 1024); // Estimate capacity
+        // Calculate exact buffer size needed to avoid reallocations
+        let buffer_size = encoder
+            .calculate_buffer_size(batch)
+            .map_err(|e| format!("Failed to calculate buffer size: {:?}", e))?;
+
+        // Pre-allocate exact capacity - much better than arbitrary estimate
+        let mut buffer = BytesMut::with_capacity(buffer_size);
 
         // Write header
         encoder.write_header(&mut buffer);

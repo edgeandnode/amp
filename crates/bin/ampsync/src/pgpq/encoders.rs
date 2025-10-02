@@ -167,6 +167,83 @@ impl_encode!(
 pub struct UInt64Encoder<'a> {
     arr: &'a arrow_array::UInt64Array,
 }
+/// Efficiently count the number of base-10000 digits needed to represent a value.
+/// For u64, max value is ~1.8e19, which requires at most 5 base-10000 digits.
+#[inline]
+fn count_base10000_digits(value: u64) -> usize {
+    if value == 0 {
+        return 0;
+    }
+
+    // Fast path using comparison instead of repeated division
+    // 10000^1 = 10,000
+    // 10000^2 = 100,000,000
+    // 10000^3 = 1,000,000,000,000
+    // 10000^4 = 10,000,000,000,000,000
+    // 10000^5 = 100,000,000,000,000,000,000 (exceeds u64::MAX)
+    if value < 10_000 {
+        return 1;
+    }
+    if value < 100_000_000 {
+        return 2;
+    }
+    if value < 1_000_000_000_000 {
+        return 3;
+    }
+    if value < 10_000_000_000_000_000 {
+        return 4;
+    }
+    5
+}
+
+/// Efficiently count base-10000 digits for i128 (used by Decimal128).
+#[inline]
+fn count_base10000_digits_i128(value: i128) -> usize {
+    let abs_value = value.unsigned_abs();
+    if abs_value == 0 {
+        return 0;
+    }
+
+    // For i128, we need more thresholds
+    // Using logarithmic search for better performance
+    if abs_value < 10_000 {
+        return 1;
+    }
+    if abs_value < 100_000_000 {
+        return 2;
+    }
+    if abs_value < 1_000_000_000_000 {
+        return 3;
+    }
+    if abs_value < 10_000_000_000_000_000 {
+        return 4;
+    }
+    if abs_value < 100_000_000_000_000_000_000 {
+        return 5;
+    }
+    if abs_value < 1_000_000_000_000_000_000_000_000 {
+        return 6;
+    }
+    if abs_value < 10_000_000_000_000_000_000_000_000_000 {
+        return 7;
+    }
+    if abs_value < 100_000_000_000_000_000_000_000_000_000_000 {
+        return 8;
+    }
+    if abs_value < 1_000_000_000_000_000_000_000_000_000_000_000_000 {
+        return 9;
+    }
+
+    // Fall back to division for very large numbers (rare)
+    let mut ndigits = 10;
+    let mut remaining = abs_value / 1_000_000_000_000_000_000_000_000_000_000_000_000;
+    while remaining > 0 {
+        ndigits += 1;
+        remaining /= 10000;
+    }
+    ndigits
+}
+
 impl<'a> Encode for UInt64Encoder<'a> {
     fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
         if self.arr.is_null(row) {
@@ -234,16 +311,8 @@ impl<'a> Encode for UInt64Encoder<'a> {
             if !self.arr.is_null(row) {
                 let value = self.arr.value(row);
 
-                // Count base-10000 digits
-                let mut ndigits = 0;
-                let mut remaining = value;
-                loop {
-                    ndigits += 1;
-                    remaining /= 10000;
-                    if remaining == 0 {
-                        break;
-                    }
-                }
+                // Count base-10000 digits efficiently
+                let ndigits = count_base10000_digits(value);
 
                 // Size: length(4) + header(8) + digits(ndigits * 2)
                 total += 4 + 8 + (ndigits * 2);
@@ -415,18 +484,10 @@ impl<'a> Encode for Decimal128Encoder<'a> {
         let mut total = 0;
         for row in 0..self.arr.len() {
             if !self.arr.is_null(row) {
-                let value = self.arr.value(row).abs();
+                let value = self.arr.value(row);
 
-                // Count base-10000 digits
-                let mut ndigits = 0;
-                let mut remaining = value;
-                loop {
-                    ndigits += 1;
-                    remaining /= 10000;
-                    if remaining == 0 {
-                        break;
-                    }
-                }
+                // Count base-10000 digits efficiently
+                let ndigits = count_base10000_digits_i128(value);
 
                 // Size = 4 (length prefix) + 8 (4 x i16 header) + (ndigits * 2)
                 total += 4 + 8 + (ndigits * 2);

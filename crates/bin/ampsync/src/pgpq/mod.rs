@@ -59,9 +59,8 @@ impl ArrowToPostgresBinaryEncoder {
 
     pub fn try_new_with_encoders(
         schema: &Schema,
-        encoders: &HashMap<String, EncoderBuilder>,
+        mut encoders: HashMap<String, EncoderBuilder>,
     ) -> Result<Self, ErrorKind> {
-        let mut encoders = encoders.clone();
         let maybe_encoder_builders: Result<Vec<EncoderBuilder>, ErrorKind> = schema
             .fields()
             .iter()
@@ -97,6 +96,44 @@ impl ArrowToPostgresBinaryEncoder {
                 .map(|(builder, field)| (field.name().clone(), builder.schema()))
                 .collect(),
         }
+    }
+
+    /// Calculate the total buffer size needed for encoding this batch.
+    /// This allows pre-allocating the exact capacity to avoid reallocations.
+    pub fn calculate_buffer_size(&self, batch: &RecordBatch) -> Result<usize, ErrorKind> {
+        assert_eq!(self.state, EncoderState::Created);
+        assert_eq!(
+            batch.num_columns(),
+            self.fields.len(),
+            "expected {} values but got {}",
+            self.fields.len(),
+            batch.num_columns()
+        );
+
+        // Header size: magic bytes (12) + flags (4) + extension (4) = 20 bytes
+        const HEADER_SIZE: usize = 20;
+        // Footer size: -1 as i16 = 2 bytes
+        const FOOTER_SIZE: usize = 2;
+
+        // Calculate data size
+        let n_rows = batch.num_rows();
+
+        let encoders = batch
+            .columns()
+            .iter()
+            .zip(&self.encoder_builders)
+            .map(|(col, builder)| builder.try_new(col))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut data_size: usize = 0;
+        for encoder in &encoders {
+            data_size += encoder.size_hint()?;
+        }
+
+        // Add row overhead: each row has a 2-byte column count
+        data_size += n_rows * 2;
+
+        Ok(HEADER_SIZE + data_size + FOOTER_SIZE)
     }
 
     pub fn write_header(&mut self, out: &mut BytesMut) {
@@ -210,7 +247,7 @@ mod tests {
             .collect();
         let encoder = ArrowToPostgresBinaryEncoder::try_new_with_encoders(
             &batch.schema(),
-            &encoders.into_iter().collect(),
+            encoders.into_iter().collect(),
         )
         .unwrap();
         let schema = encoder.schema();
