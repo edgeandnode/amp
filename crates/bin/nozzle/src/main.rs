@@ -15,6 +15,7 @@ use nozzle::dump_cmd;
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 #[derive(Debug, clap::Parser)]
+#[command(version = env!("VERGEN_GIT_DESCRIBE"))]
 struct Args {
     /// The configuration file to use. This file defines where to look for dataset definitions and
     /// providers, along with many other configuration options.
