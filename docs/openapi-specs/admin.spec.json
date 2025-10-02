@@ -1505,7 +1505,7 @@
         "properties": {
           "manifest": {
             "type": "string",
-            "description": "TOML or JSON string representation of the dataset manifest (required)"
+            "description": "JSON string representation of the dataset manifest (required)"
           },
           "name": {
             "type": "string",

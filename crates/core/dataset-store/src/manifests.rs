@@ -146,9 +146,7 @@ where
             return Ok(None);
         };
 
-        let manifest_file_path: ManifestPath = dataset
-            .manifest_path
-            .try_into()
+        let manifest_file_path = ManifestPath::try_from(dataset.manifest_path)
             .map_err(GetError::UnsupportedManifestFormat)?;
         fetch_manifest_content(&self.store, manifest_file_path)
             .await
@@ -185,21 +183,11 @@ where
         };
 
         // Extract the prefix by removing the file extension
-        let manifest_path: ManifestPath = dataset
-            .manifest_path
-            .try_into()
+        let manifest_path = ManifestPath::try_from(dataset.manifest_path)
             .map_err(GetSqlFilesError::UnsupportedManifestFormat)?;
 
-        let prefix: ObjectStorePath = match &manifest_path {
-            ManifestPath::Json(path) => {
-                let path_str = path.to_string();
-                path_str.trim_end_matches(".json").into()
-            }
-            ManifestPath::Toml(path) => {
-                let path_str = path.to_string();
-                path_str.trim_end_matches(".toml").into()
-            }
-        };
+        let path_str = manifest_path.to_string();
+        let prefix: ObjectStorePath = path_str.trim_end_matches(".json").into();
 
         // List all files with the prefix using regular list method
         let mut files = self.store.list(Some(&prefix));
@@ -308,12 +296,7 @@ where
             // Register the dataset in the metadata database
             match self
                 .metadata_db
-                .register_dataset(
-                    PLACEHOLDER_OWNER,
-                    &name,
-                    &version,
-                    &path.as_path().to_string(),
-                )
+                .register_dataset(PLACEHOLDER_OWNER, &name, &version, &path.to_string())
                 .await
             {
                 Ok(()) => {
@@ -321,7 +304,7 @@ where
                     tracing::debug!(
                         dataset_name = %name,
                         dataset_version = %version,
-                        manifest_path = %path.as_path(),
+                        manifest_path = %path,
                         "Successfully registered manifest in metadata database"
                     );
                 }
@@ -330,7 +313,7 @@ where
                     tracing::warn!(
                         dataset_name = %name,
                         dataset_version = %version,
-                        manifest_path = %path.as_path(),
+                        manifest_path = %path,
                         error = %err,
                         "Failed to register manifest in metadata database"
                     );
@@ -373,7 +356,7 @@ where
         };
 
         let manifest_path_str = file.location.to_string();
-        let manifest_path: ManifestPath = match file.location.try_into() {
+        let manifest_path = match ManifestPath::try_from(manifest_path_str.clone()) {
             Ok(path) => path,
             Err(err) => {
                 tracing::debug!(path = %manifest_path_str, error = ?err, "Skipping file with unsupported format");
@@ -382,14 +365,12 @@ where
         };
 
         // Skip any path with no file name
-        let Some(file_name) = manifest_path.as_path().filename() else {
+        let Some(file_name) = manifest_path.as_ref().filename() else {
             tracing::debug!(path = %manifest_path, "Skipping path with no filename");
             continue;
         };
 
-        let stem = file_name
-            .trim_end_matches(".json")
-            .trim_end_matches(".toml");
+        let stem = file_name.trim_end_matches(".json");
 
         let (name_str, version_str) = stem.rsplit_once("__").unwrap_or((stem, "0_0_0"));
 
@@ -474,51 +455,42 @@ pub enum GetSqlFilesError {
 
 /// Fetches manifest content from the object store
 ///
-/// Retrieves the content of a manifest file (either JSON or TOML format) from the provided
-/// object store. The function handles both supported manifest formats and gracefully handles
-/// missing files by returning `None`.
+/// Retrieves the content of a manifest file (JSON format) from the provided
+/// object store. The function gracefully handles missing files by returning `None`.
 async fn fetch_manifest_content<S>(
     store: &S,
-    file: ManifestPath,
+    path: ManifestPath,
 ) -> Result<Option<ManifestContent>, common::store::StoreError>
 where
     S: ObjectStore,
 {
-    match file {
-        ManifestPath::Json(path) => match store.get_string(path).await {
-            Ok(content) => Ok(Some(ManifestContent::Json(content))),
-            Err(err) if err.is_not_found() => Ok(None),
-            Err(err) => Err(err.into()),
-        },
-        ManifestPath::Toml(path) => match store.get_string(path).await {
-            Ok(content) => Ok(Some(ManifestContent::Toml(content))),
-            Err(err) if err.is_not_found() => Ok(None),
-            Err(err) => Err(err.into()),
-        },
+    match store.get_string(path.into_inner()).await {
+        Ok(content) => Ok(Some(ManifestContent(content))),
+        Err(err) if err.is_not_found() => Ok(None),
+        Err(err) => Err(err.into()),
     }
 }
 
+/// Newtype wrapper for dataset manifest paths (must be .json files)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum ManifestPath {
-    Json(ObjectStorePath),
-    Toml(ObjectStorePath),
-}
+pub struct ManifestPath(ObjectStorePath);
 
 impl ManifestPath {
-    fn as_path(&self) -> &ObjectStorePath {
-        match self {
-            ManifestPath::Json(path) => path,
-            ManifestPath::Toml(path) => path,
-        }
+    /// Get the inner ObjectStorePath
+    pub fn into_inner(self) -> ObjectStorePath {
+        self.0
+    }
+}
+
+impl AsRef<ObjectStorePath> for ManifestPath {
+    fn as_ref(&self) -> &ObjectStorePath {
+        &self.0
     }
 }
 
 impl From<ManifestPath> for ObjectStorePath {
-    fn from(value: ManifestPath) -> Self {
-        match value {
-            ManifestPath::Json(path) => path,
-            ManifestPath::Toml(path) => path,
-        }
+    fn from(path: ManifestPath) -> Self {
+        path.0
     }
 }
 
@@ -527,9 +499,7 @@ impl TryFrom<String> for ManifestPath {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.ends_with(".json") {
-            Ok(ManifestPath::Json(ObjectStorePath::from(value)))
-        } else if value.ends_with(".toml") {
-            Ok(ManifestPath::Toml(ObjectStorePath::from(value)))
+            Ok(ManifestPath(ObjectStorePath::from(value)))
         } else {
             Err(UnsupportedManifestFormat { format: value })
         }
@@ -540,22 +510,19 @@ impl TryFrom<ObjectStorePath> for ManifestPath {
     type Error = UnsupportedManifestFormat;
 
     fn try_from(value: ObjectStorePath) -> Result<Self, Self::Error> {
-        match value.filename() {
-            Some(filename) if filename.ends_with(".json") => Ok(ManifestPath::Json(value)),
-            Some(filename) if filename.ends_with(".toml") => Ok(ManifestPath::Toml(value)),
-            _ => Err(UnsupportedManifestFormat {
+        if value.as_ref().ends_with(".json") {
+            Ok(ManifestPath(value))
+        } else {
+            Err(UnsupportedManifestFormat {
                 format: value.to_string(),
-            }),
+            })
         }
     }
 }
 
 impl std::fmt::Display for ManifestPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestPath::Json(path) => path.fmt(f),
-            ManifestPath::Toml(path) => path.fmt(f),
-        }
+        self.0.fmt(f)
     }
 }
 
@@ -566,25 +533,15 @@ pub struct UnsupportedManifestFormat {
     pub format: String,
 }
 
-/// Represents a dataset definition source text, either in TOML or JSON format.
-pub enum ManifestContent {
-    Json(String),
-    Toml(String),
-}
+/// Newtype wrapper for dataset manifest content (JSON format only)
+pub struct ManifestContent(String);
 
 impl ManifestContent {
     pub fn try_into_manifest<T>(&self) -> Result<T, ManifestParseError>
     where
         T: serde::de::DeserializeOwned,
     {
-        match self {
-            ManifestContent::Json(src) => {
-                serde_json::from_str(src).map_err(ManifestParseError::JsonError)
-            }
-            ManifestContent::Toml(src) => {
-                toml::from_str(src).map_err(ManifestParseError::TomlError)
-            }
-        }
+        serde_json::from_str(&self.0).map_err(ManifestParseError::JsonError)
     }
 }
 
@@ -594,7 +551,4 @@ pub enum ManifestParseError {
     /// JSON parsing error
     #[error("JSON parsing error: {0}")]
     JsonError(#[source] serde_json::Error),
-    /// TOML parsing error
-    #[error("TOML parsing error: {0}")]
-    TomlError(#[source] toml::de::Error),
 }
