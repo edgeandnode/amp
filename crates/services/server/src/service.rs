@@ -31,7 +31,7 @@ use datafusion::{
 };
 use dataset_store::{
     CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
-    PlanningCtxForSqlError,
+    PlanningCtxForSqlError, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
@@ -207,7 +207,19 @@ pub struct Service {
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        let dataset_store = {
+            let provider_configs_store =
+                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+            let dataset_manifests_store = DatasetManifestsStore::new(
+                metadata_db.clone(),
+                config.dataset_defs_store.prefixed_store(),
+            );
+            DatasetStore::new(
+                metadata_db.clone(),
+                provider_configs_store,
+                dataset_manifests_store,
+            )
+        };
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
         Ok(Self {

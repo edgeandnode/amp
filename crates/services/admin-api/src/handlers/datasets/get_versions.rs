@@ -9,9 +9,11 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
-use http_common::{BoxRequestError, RequestError};
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Default number of dataset versions returned per page
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -22,13 +24,17 @@ const MAX_PAGE_LIMIT: usize = 1000;
 /// Query parameters for the dataset versions listing endpoint
 #[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::IntoParams))]
+#[cfg_attr(feature = "utoipa", into_params(parameter_in = Query))]
 pub struct QueryParams {
     /// Maximum number of dataset versions to return (default: 50, max: 1000)
     #[serde(default = "default_limit")]
+    #[cfg_attr(feature = "utoipa", param(minimum = 1, maximum = 1000))]
     limit: usize,
 
     /// Last version from the previous page for pagination
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
+    #[cfg_attr(feature = "utoipa", param(value_type = Option<String>))]
     last_version: Option<Version>,
 }
 
@@ -73,11 +79,30 @@ fn default_limit() -> usize {
 /// - Calls the metadata DB to list dataset versions with pagination
 /// - Returns a structured response with versions and next cursor
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/datasets/{name}/versions",
+        tag = "datasets",
+        operation_id = "datasets_list_versions",
+        params(
+            ("name" = String, Path, description = "Dataset name"),
+            QueryParams
+        ),
+        responses(
+            (status = 200, description = "Returns paginated dataset versions with next cursor", body = DatasetVersionsResponse),
+            (status = 400, description = "Invalid limit parameter or cursor format"),
+            (status = 404, description = "Dataset with the given name does not exist"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<Name>, PathRejection>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<Json<DatasetVersionsResponse>, BoxRequestError> {
+) -> Result<Json<DatasetVersionsResponse>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
@@ -132,12 +157,15 @@ pub async fn handler(
 /// Collection response for dataset versions listing with cursor-based pagination
 #[serde_with::serde_as]
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetVersionsResponse {
     /// List of dataset versions in this page
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
     pub versions: Vec<Version>,
     /// Cursor for the next page of results (None if no more results)
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub next_cursor: Option<Version>,
 }
 
@@ -195,7 +223,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     /// Returns the error code string for API responses
     ///
     /// These error codes are returned in the API response body to help

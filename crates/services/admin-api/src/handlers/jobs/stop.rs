@@ -4,10 +4,13 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::JobId;
 
-use crate::{ctx::Ctx, scheduler::StopJobError};
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+    scheduler::StopJobError,
+};
 
 /// Handler for the `PUT /jobs/{id}/stop` endpoint
 ///
@@ -54,10 +57,29 @@ use crate::{ctx::Ctx, scheduler::StopJobError};
 /// - Delegates to scheduler for atomic stop operation with worker notification
 /// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        put,
+        path = "/jobs/{id}/stop",
+        tag = "jobs",
+        operation_id = "jobs_stop",
+        params(
+            ("id" = i64, Path, description = "Job ID")
+        ),
+        responses(
+            (status = 200, description = "Job stop request processed successfully"),
+            (status = 400, description = "Invalid job ID"),
+            (status = 404, description = "Job not found"),
+            (status = 409, description = "Job cannot be stopped from current state"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<JobId>, PathRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
@@ -140,7 +162,7 @@ pub enum Error {
     Conflict { message: String },
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidId { .. } => "INVALID_JOB_ID",

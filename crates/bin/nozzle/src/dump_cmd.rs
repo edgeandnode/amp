@@ -10,7 +10,9 @@ use common::{
     store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use datasets_common::version::Version;
 use datasets_derived::{
     DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
@@ -44,7 +46,19 @@ pub async fn dump(
         }
         None => config.data_store.clone(),
     };
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store = DatasetManifestsStore::new(
+            metadata_db.clone(),
+            config.dataset_defs_store.prefixed_store(),
+        );
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
     let partition_size = partition_size_mb * 1024 * 1024;
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 

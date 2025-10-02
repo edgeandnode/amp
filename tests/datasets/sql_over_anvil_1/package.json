@@ -1,0 +1,5 @@
+{
+  "name": "@nozzle-datasets/sql-over-anvil-1",
+  "private": true,
+  "type": "module"
+}

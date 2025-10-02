@@ -72,6 +72,8 @@ importers:
         specifier: workspace:*
         version: link:../../../typescript/nozzle
 
+  tests/datasets/sql_stream_ds: {}
+
   typescript/nozzle:
     dependencies:
       '@bufbuild/protobuf':

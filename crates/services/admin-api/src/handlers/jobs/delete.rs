@@ -5,13 +5,16 @@ use axum::{
     http::StatusCode,
 };
 use common::BoxError;
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::JobStatus;
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Query parameters for the delete jobs endpoint
 #[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryParams {
     /// Status filter for which jobs to delete
     pub status: JobStatusFilter,
@@ -62,10 +65,27 @@ pub struct QueryParams {
 /// - Administrative maintenance
 /// - Freeing up database storage
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        delete,
+        path = "/jobs",
+        tag = "jobs",
+        operation_id = "jobs_delete_many",
+        params(
+            ("status" = JobStatusFilter, Query, description = "Status filter for jobs to delete")
+        ),
+        responses(
+            (status = 204, description = "Jobs deleted successfully"),
+            (status = 400, description = "Invalid query parameters"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let query = match query {
         Ok(Query(query)) => query,
         Err(err) => {
@@ -104,6 +124,8 @@ pub async fn handler(
 
 /// Status filter options for job deletion
 #[derive(Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", schema(as = String))]
 pub enum JobStatusFilter {
     /// Delete all jobs in terminal states (Completed, Stopped, Failed)
     Terminal,
@@ -166,7 +188,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidQueryParam { .. } => "INVALID_QUERY_PARAM",

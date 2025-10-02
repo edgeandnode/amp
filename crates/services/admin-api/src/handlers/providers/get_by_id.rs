@@ -5,10 +5,12 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 
 use super::provider_info::ProviderInfo;
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for the `GET /providers/{name}` endpoint
 ///
@@ -42,10 +44,28 @@ use crate::ctx::Ctx;
 /// Note: Empty provider names (e.g., `GET /providers/`) are handled by Axum's routing layer
 /// and return 404 before reaching this handler, ensuring no conflict with the get_all endpoint.
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/providers/{name}",
+        tag = "providers",
+        operation_id = "providers_get",
+        params(
+            ("name" = String, Path, description = "Provider name")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved provider information", body = ProviderInfo),
+            (status = 400, description = "Invalid provider name"),
+            (status = 404, description = "Provider not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<String>, PathRejection>,
-) -> Result<Json<ProviderInfo>, BoxRequestError> {
+) -> Result<Json<ProviderInfo>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
@@ -54,7 +74,7 @@ pub async fn handler(
         }
     };
 
-    let Some(config) = ctx.store.providers().get_by_name(&name).await else {
+    let Some(config) = ctx.dataset_store.providers().get_by_name(&name).await else {
         tracing::debug!(provider_name = %name, "provider not found");
         return Err(Error::NotFound { name }.into());
     };
@@ -114,7 +134,7 @@ pub enum Error {
     },
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidName { .. } => "INVALID_PROVIDER_NAME",

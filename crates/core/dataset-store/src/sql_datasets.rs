@@ -6,7 +6,8 @@ use std::{
 use common::{
     BoxError, Dataset, SPECIAL_BLOCK_NUM, Table,
     manifest::{derived::sort_tables_by_dependencies, sql_datasets::SqlDataset},
-    query_context::{parse_sql, prepend_special_block_num_field},
+    plan_visitors::prepend_special_block_num_field,
+    query_context::parse_sql,
 };
 use datafusion::sql::parser;
 use datasets_derived::sql_dataset::Manifest;

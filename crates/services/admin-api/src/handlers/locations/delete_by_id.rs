@@ -9,11 +9,13 @@ use axum::{
 };
 use common::{BoxError, store::object_store};
 use futures::{TryStreamExt, stream};
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::{JobId, LocationId};
 use object_store::path::Path as ObjectPath;
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Query parameters for the locations delete endpoint
 #[derive(Debug, serde::Deserialize)]
@@ -61,11 +63,31 @@ pub struct QueryParams {
 /// - Deletes the location from the metadata database
 /// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        delete,
+        path = "/locations/{id}",
+        tag = "locations",
+        operation_id = "locations_delete",
+        params(
+            ("id" = i64, Path, description = "Location ID"),
+            ("force" = Option<bool>, Query, description = "Force deletion even if location is active")
+        ),
+        responses(
+            (status = 204, description = "Location successfully deleted"),
+            (status = 400, description = "Invalid location ID or query parameters"),
+            (status = 404, description = "Location not found"),
+            (status = 409, description = "Location is active or has ongoing job"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<LocationId>, PathRejection>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let location_id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
@@ -286,7 +308,7 @@ pub enum Error {
     ObjectStoreError(BoxError),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidId { .. } => "INVALID_LOCATION_ID",

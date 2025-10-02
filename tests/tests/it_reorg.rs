@@ -9,7 +9,7 @@ use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
 use tests::testlib::{
     ctx::{TestCtx, TestCtxBuilder},
-    fixtures::{BlockInfo, FlightClient},
+    fixtures::{BlockInfo, DatasetPackage, FlightClient},
     helpers as test_helpers,
 };
 use tokio::sync::mpsc;
@@ -205,7 +205,6 @@ async fn streaming_reorg_desync() {
         "streaming_reorg_desync",
         &["anvil_rpc"],
         &["sql_over_anvil_1", "sql_over_anvil_2"],
-        &["sql_over_anvil_1/blocks", "sql_over_anvil_2/blocks"],
     )
     .await;
 
@@ -261,7 +260,6 @@ async fn streaming_reorg_rewind_shallow() {
         "streaming_reorg_rewind_shallow",
         &["anvil_rpc"],
         &["sql_over_anvil_1"],
-        &["sql_over_anvil_1/blocks"],
     )
     .await;
 
@@ -319,7 +317,6 @@ async fn streaming_reorg_rewind_deep() {
         "streaming_reorg_rewind_deep",
         &["anvil_rpc"],
         &["sql_over_anvil_1"],
-        &["sql_over_anvil_1/blocks"],
     )
     .await;
 
@@ -400,26 +397,32 @@ impl ReorgTestCtx {
     ///
     /// Takes separate parameters for explicit control:
     /// - `datasets`: Regular dataset manifests (e.g., "anvil_rpc")
-    /// - `sql_datasets`: SQL dataset manifests (e.g., "sql_over_anvil_1")
-    /// - `sql_datasets_files`: SQL query files (e.g., "sql_over_anvil_1/blocks")
+    /// - `derived_datasets`: Derived dataset names to register as TypeScript datasets (e.g., "sql_over_anvil_1")
     async fn setup_multi_dataset(
         test_name: &str,
         datasets: &[&str],
-        sql_datasets: &[&str],
-        sql_datasets_files: &[&str],
+        derived_datasets: &[&str],
     ) -> Self {
         logging::init();
 
         let builder = TestCtxBuilder::new(test_name)
             .with_anvil_ipc()
-            .with_dataset_manifests(datasets.iter().map(|&s| s.to_string()))
-            .with_dataset_manifests(sql_datasets.iter().map(|&s| s.to_string()))
-            .with_sql_dataset_files(sql_datasets_files.iter().map(|&s| s.to_string()));
+            .with_dataset_manifests(datasets.iter().map(|&s| s.to_string()));
 
         let ctx = builder
             .build()
             .await
             .expect("Failed to create test context");
+
+        // Register derived (TypeScript) datasets
+        let cli = ctx.new_nozzl_cli();
+        for dataset_name in derived_datasets {
+            let dataset = DatasetPackage::new(dataset_name, Some("nozzle.config.ts"));
+            dataset
+                .register(&cli)
+                .await
+                .unwrap_or_else(|e| panic!("Failed to register {} dataset: {}", dataset_name, e));
+        }
 
         Self { ctx }
     }

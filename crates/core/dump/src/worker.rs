@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use common::{BoxError, config::Config, notification_multiplexer};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tokio::time::{Interval, MissedTickBehavior};
@@ -42,7 +44,19 @@ impl Worker {
         metrics: Option<Arc<metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Self {
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        let dataset_store = {
+            let provider_configs_store =
+                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+            let dataset_manifests_store = DatasetManifestsStore::new(
+                metadata_db.clone(),
+                config.dataset_defs_store.prefixed_store(),
+            );
+            DatasetStore::new(
+                metadata_db.clone(),
+                provider_configs_store,
+                dataset_manifests_store,
+            )
+        };
         let data_store = config.data_store.clone();
         let meta = WorkerMetadataDb::new(metadata_db.clone());
 
