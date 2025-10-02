@@ -6,9 +6,9 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
-use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
+use worker::Worker;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]

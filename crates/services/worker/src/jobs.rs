@@ -1,11 +1,28 @@
+//! Type definitions for worker jobs
+
 use std::sync::Arc;
 
 use common::{BoxError, catalog::physical::PhysicalTable};
-use metadata_db::JobId;
-use tracing::instrument;
+pub use dump::Ctx;
+use dump::{default_partition_size, metrics};
+pub use metadata_db::JobStatus;
 
-pub use crate::core::Ctx;
-use crate::{core::dump_tables, default_partition_size, metrics};
+use crate::JobCreationError;
+
+mod id;
+mod notif;
+
+pub use self::{
+    id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
+    notif::{Action, Notification},
+};
+
+/// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
+/// metadata DB table.
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Descriptor {
+    Dump { end_block: Option<i64> },
+}
 
 /// The kind of job is inferred from the location and associated dataset information.
 ///
@@ -31,41 +48,50 @@ pub enum Job {
 
 impl Job {
     /// Try to build a job from a job ID and descriptor.
-    #[instrument(skip(ctx, job_id, job_desc, metrics), err)]
     pub async fn try_from_descriptor(
         ctx: Ctx,
         job_id: JobId,
-        job_desc: JobDesc,
+        job_desc: Descriptor,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Job, BoxError> {
-        let output_locations = ctx.metadata_db.output_locations(job_id).await?;
+    ) -> Result<Job, JobCreationError> {
+        let output_locations = ctx
+            .metadata_db
+            .output_locations(job_id)
+            .await
+            .map_err(JobCreationError::OutputLocationsFetchFailed)?;
+
         match job_desc {
-            JobDesc::Dump { end_block } => {
+            Descriptor::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
                     let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
                             .get_dataset(&location.dataset, dataset_version.as_ref())
-                            .await?
-                            .ok_or_else(|| format!("Dataset '{}' not found", location.dataset))?,
+                            .await
+                            .map_err(|err| JobCreationError::DatasetFetchFailed(err.into()))?
+                            .ok_or_else(|| JobCreationError::DatasetNotFound {
+                                dataset: location.dataset.clone(),
+                            })?,
                     );
+
                     let mut resolved_tables = dataset.resolved_tables();
                     let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
-                        return Err(format!(
-                            "Table `{}` not found in dataset `{}`",
-                            location.table, location.dataset
-                        )
-                        .into());
+                        return Err(JobCreationError::TableNotFound {
+                            table: location.table,
+                            dataset: location.dataset,
+                        });
                     };
+
                     tables.push(
                         PhysicalTable::new(
                             table.clone(),
                             location.url,
                             location.id,
                             ctx.metadata_db.clone(),
-                        )?
+                        )
+                        .map_err(JobCreationError::PhysicalTableCreationFailed)?
                         .into(),
                     );
                 }
@@ -90,7 +116,7 @@ impl Job {
                 metrics,
                 meter,
             } => {
-                dump_tables(
+                dump::dump_tables(
                     ctx.clone(),
                     &tables,
                     1,
@@ -121,11 +147,4 @@ impl std::fmt::Debug for Job {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
     }
-}
-
-/// The logical descriptor of an job, as stored in the `descriptor` column of the `jobs`
-/// metadata DB table.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum JobDesc {
-    Dump { end_block: Option<i64> },
 }

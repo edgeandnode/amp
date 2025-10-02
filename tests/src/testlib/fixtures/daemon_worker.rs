@@ -10,9 +10,9 @@ use common::{BoxError, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
-use dump::worker::{Worker, WorkerError};
-use metadata_db::{MetadataDb, WorkerNodeId};
+use metadata_db::MetadataDb;
 use tokio::task::JoinHandle;
+use worker::{Error as WorkerError, NodeId, Worker};
 
 /// Fixture for managing Nozzle daemon worker instances in tests.
 ///
@@ -20,7 +20,7 @@ use tokio::task::JoinHandle;
 /// and lifecycle management. The fixture automatically handles worker lifecycle and cleanup
 /// by aborting the worker task when dropped.
 pub struct DaemonWorker {
-    node_id: WorkerNodeId,
+    node_id: NodeId,
     config: Arc<Config>,
     dataset_store: Arc<DatasetStore>,
     _worker_task: JoinHandle<Result<(), WorkerError>>,
@@ -32,7 +32,7 @@ impl DaemonWorker {
     /// Starts a Nozzle worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        node_id: WorkerNodeId,
+        node_id: NodeId,
         config: Arc<Config>,
         metadb: MetadataDb,
         metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
@@ -52,7 +52,13 @@ impl DaemonWorker {
             )
         };
 
-        let worker = Worker::new(config.clone(), metadb, node_id.clone(), metrics, meter);
+        let worker = Worker::new(
+            config.clone(),
+            metadb,
+            node_id.clone().into(),
+            metrics,
+            meter,
+        );
 
         let worker_task = tokio::spawn(worker.run());
 
@@ -79,14 +85,14 @@ impl DaemonWorker {
         metadata_db: MetadataDb,
         worker_name: &str,
     ) -> Result<Self, BoxError> {
-        let worker_node_id = WorkerNodeId::from_str(worker_name)
+        let worker_node_id = NodeId::from_str(worker_name)
             .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
 
         Self::new(worker_node_id, config, metadata_db, None, None).await
     }
 
     /// Get the worker node ID.
-    pub fn node_id(&self) -> &WorkerNodeId {
+    pub fn node_id(&self) -> &NodeId {
         &self.node_id
     }
 

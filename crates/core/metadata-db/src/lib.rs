@@ -1,7 +1,8 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use futures::{
     StreamExt, TryStreamExt,
+    future::BoxFuture,
     stream::{BoxStream, Stream},
 };
 use sqlx::{
@@ -34,11 +35,7 @@ pub use self::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
         FileMetadataWithDetails, FooterBytes,
     },
-    jobs::{
-        Job, JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error, JobStatus,
-        JobStatusUpdateError, JobWithDetails,
-        events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    },
+    jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
         LocationWithDetails,
@@ -47,7 +44,10 @@ pub use self::{
             LocationNotification,
         },
     },
-    workers::{Worker, WorkerNodeId},
+    workers::{
+        NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker,
+        events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
+    },
 };
 
 /// Frequency on which to send a heartbeat.
@@ -72,10 +72,10 @@ pub enum Error {
     DbError(#[from] sqlx::Error),
 
     #[error("Error sending job notification: {0}")]
-    JobNotificationSendError(#[from] jobs::events::JobNotifSendError),
+    JobNotificationSendError(#[from] workers::events::NotifSendError),
 
     #[error("Error receiving job notification: {0}")]
-    JobNotificationRecvError(#[from] jobs::events::JobNotifRecvError),
+    JobNotificationRecvError(#[from] workers::events::NotifRecvError),
 
     #[error("Error sending location notification: {0}")]
     LocationNotificationSendError(#[from] locations::events::LocationNotifSendError),
@@ -241,31 +241,32 @@ impl MetadataDb {
     /// Registers a worker in the `workers` table, and updates the latest heartbeat timestamp.
     ///
     /// This operation is idempotent.
-    pub async fn register_worker(&self, node_id: &WorkerNodeId) -> Result<(), Error> {
-        workers::heartbeat::register_worker(&*self.pool, node_id).await?;
+    pub async fn register_worker(&self, node_id: impl Into<WorkerNodeId<'_>>) -> Result<(), Error> {
+        workers::heartbeat::register_worker(&*self.pool, node_id.into()).await?;
         Ok(())
     }
 
-    /// Establish a dedicated connection to the metadata DB, and return a [`Future`] that loops
+    /// Establish a dedicated connection to the metadata DB, and return a future that loops
     /// forever, updating the worker's heartbeat in the dedicated DB connection.
     ///
     /// If the initial connection fails, an error is returned.
     pub async fn worker_heartbeat_loop(
         &self,
-        node_id: WorkerNodeId,
-    ) -> Result<impl Future<Output = Result<(), Error>> + use<>, Error> {
+        node_id: impl Into<WorkerNodeIdOwned>,
+    ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let mut conn = DbConn::connect(&self.url).await?;
 
+        let node_id = node_id.into();
         let fut = async move {
             let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
                 interval.tick().await;
-                workers::heartbeat::update_heartbeat(&mut *conn, &node_id).await?;
+                workers::heartbeat::update_heartbeat(&mut *conn, node_id.clone()).await?;
             }
         };
 
-        Ok(fut)
+        Ok(Box::pin(fut))
     }
 
     /// Returns a list of active workers.
@@ -273,20 +274,50 @@ impl MetadataDb {
     /// A worker is active if it has sent a sufficiently recent heartbeat.
     ///
     /// The dead worker interval can be configured when instantiating the metadata DB.
-    pub async fn active_workers(&self) -> Result<Vec<WorkerNodeId>, Error> {
+    pub async fn active_workers(&self) -> Result<Vec<WorkerNodeIdOwned>, Error> {
         Ok(workers::heartbeat::get_active_workers(&*self.pool, self.dead_worker_interval).await?)
+    }
+
+    /// Listen to the worker actions notification channel for job notifications
+    ///
+    /// The listener will only yield notifications targeted to the specified `node_id`.
+    pub async fn listen_for_job_notifications<'a, N>(
+        &self,
+        node_id: N,
+    ) -> Result<WorkerNotifListener, Error>
+    where
+        N: Into<WorkerNodeId<'a>>,
+    {
+        workers::events::listen_url(&self.url, node_id.into().to_owned())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Send a job notification to a worker
+    ///
+    /// This function sends a notification with a custom payload to the specified worker node.
+    /// The payload must implement `serde::Serialize` and will be serialized to JSON.
+    ///
+    /// # Usage
+    ///
+    /// Typically called after successful job state transitions (e.g., after scheduling a job
+    /// or requesting a job stop) to notify the worker of the change.
+    #[instrument(skip(self, payload), err)]
+    pub async fn send_job_notification<T>(
+        &self,
+        node_id: impl Into<WorkerNodeIdOwned> + std::fmt::Debug,
+        payload: &T,
+    ) -> Result<(), Error>
+    where
+        T: serde::Serialize,
+    {
+        workers::events::notify(&*self.pool, node_id.into(), payload).await?;
+        Ok(())
     }
 }
 
 /// Job-related API
 impl MetadataDb {
-    /// Listen to the worker actions notification channel for job notifications
-    pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
-        jobs::events::listen_url(&self.url)
-            .await
-            .map_err(Into::into)
-    }
-
     /// Schedules a job on the given worker
     ///
     /// The job will only be scheduled if the locations are successfully locked.
@@ -295,80 +326,72 @@ impl MetadataDb {
     ///
     ///  1. Registers the job in the workers job queue
     ///  2. Locks the locations
-    ///  3. Sends a notification to the worker
     ///
-    /// If any of these steps fail, the transaction is rolled back, and no notification is sent.
+    /// If any of these steps fail, the transaction is rolled back.
+    ///
+    /// **Note:** This function does not send notifications. The caller is responsible for
+    /// calling `send_job_notification` after successful job scheduling if worker notification
+    /// is required.
     #[instrument(skip(self), err)]
     pub async fn schedule_job(
         &self,
-        node_id: &WorkerNodeId,
+        node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
         job_desc: &str,
         locations: &[LocationId],
     ) -> Result<JobId, Error> {
+        let node_id = node_id.into();
+
         // Use a transaction, such that the job will only be scheduled if the locations are
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = jobs::insert_with_default_status(&mut *tx, node_id, job_desc).await?;
+        let job_id = jobs::insert_with_default_status(&mut *tx, node_id.clone(), job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
-
-        // Notify the worker about the new job
-        jobs::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id)).await?;
 
         tx.commit().await?;
 
         Ok(job_id)
     }
 
-    /// Atomically update job status to StopRequested and notify worker
+    /// Update job status to StopRequested
     ///
     /// This function will only update the job status if it's currently in a valid state
     /// to be stopped (Scheduled or Running). If the job is already stopping, this is
     /// considered success (idempotent behavior). If the job is in a terminal state
     /// (Stopped, Completed, Failed), this returns a conflict error.
     ///
-    /// This function performs in a single transaction:
-    ///  1. Conditionally updates the job status to StopRequested
-    ///  2. Sends a notification to the worker if the update succeeded
-    ///
     /// Returns an error if the job doesn't exist, is in a terminal state, or if there's a database error.
+    ///
+    /// **Note:** This function does not send notifications. The caller is responsible for
+    /// calling `send_job_notification` after successful status update if worker notification
+    /// is required.
     #[instrument(skip(self), err)]
     pub async fn request_job_stop(
         &self,
-        job_id: &JobId,
-        node_id: &WorkerNodeId,
+        job_id: impl Into<JobId> + std::fmt::Debug,
     ) -> Result<(), Error> {
-        // Use transaction for atomic update and notification
-        let mut tx = self.pool.begin().await?;
+        let job_id = job_id.into();
 
         // Try to update job status
         match jobs::update_status_if_any_state(
-            &mut *tx,
+            &*self.pool,
             job_id,
             &[JobStatus::Running, JobStatus::Scheduled],
             JobStatus::StopRequested,
         )
         .await
         {
-            Ok(()) => {} // OK!
+            Ok(()) => Ok(()),
             // Check if the job is already stopping (idempotent behavior)
             Err(JobStatusUpdateError::StateConflict {
                 actual: JobStatus::StopRequested | JobStatus::Stopping,
                 ..
-            }) => {
-                return Ok(());
-            }
-            Err(other) => return Err(other.into()),
+            }) => Ok(()),
+            Err(other) => Err(other.into()),
         }
-
-        // Send notification to worker
-        jobs::events::notify(&mut *tx, JobNotification::stop(node_id.clone(), *job_id)).await?;
-
-        tx.commit().await?;
-        Ok(())
     }
 
     /// List jobs with cursor-based pagination support
@@ -393,10 +416,13 @@ impl MetadataDb {
     /// - [`JobStatus::Running`]
     ///
     /// This method is used to fetch all the jobs that the worker should be running after a restart.
-    pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
+    pub async fn get_scheduled_jobs(
+        &self,
+        node_id: impl Into<WorkerNodeId<'_>>,
+    ) -> Result<Vec<Job>, Error> {
         Ok(jobs::get_by_node_id_and_statuses(
             &*self.pool,
-            node_id,
+            node_id.into(),
             [JobStatus::Scheduled, JobStatus::Running],
         )
         .await?)
@@ -412,10 +438,13 @@ impl MetadataDb {
     /// When connection issues cause the job notification channel to miss notifications, a job reconciliation routine
     /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
     /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
-    pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
+    pub async fn get_active_jobs(
+        &self,
+        node_id: impl Into<WorkerNodeId<'_>>,
+    ) -> Result<Vec<Job>, Error> {
         Ok(jobs::get_by_node_id_and_statuses(
             &*self.pool,
-            node_id,
+            node_id.into(),
             [
                 JobStatus::Scheduled,
                 JobStatus::Running,
@@ -426,26 +455,26 @@ impl MetadataDb {
     }
 
     /// Returns the job with the given ID
-    pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
-        Ok(jobs::get_by_id(&*self.pool, id).await?)
+    pub async fn get_job(&self, id: impl Into<JobId>) -> Result<Option<Job>, Error> {
+        Ok(jobs::get_by_id(&*self.pool, id.into()).await?)
     }
 
     /// Get a job by ID with full details including timestamps
     pub async fn get_job_by_id_with_details(
         &self,
-        id: &JobId,
+        id: impl Into<JobId>,
     ) -> Result<Option<JobWithDetails>, Error> {
-        Ok(jobs::get_by_id_with_details(&*self.pool, id).await?)
+        Ok(jobs::get_by_id_with_details(&*self.pool, id.into()).await?)
     }
 
     /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
     ///
     /// This provides idempotent behavior - if the job is already running, completed, or failed,
     /// the appropriate error will be returned indicating the state conflict.
-    pub async fn mark_job_running(&self, id: &JobId) -> Result<(), Error> {
+    pub async fn mark_job_running(&self, id: impl Into<JobId>) -> Result<(), Error> {
         Ok(jobs::update_status_if_any_state(
             &*self.pool,
-            id,
+            id.into(),
             &[JobStatus::Scheduled],
             JobStatus::Running,
         )
@@ -455,10 +484,10 @@ impl MetadataDb {
     /// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
     ///
     /// This is typically used by workers to acknowledge a stop request.
-    pub async fn mark_job_stopping(&self, id: &JobId) -> Result<(), Error> {
+    pub async fn mark_job_stopping(&self, id: impl Into<JobId>) -> Result<(), Error> {
         Ok(jobs::update_status_if_any_state(
             &*self.pool,
-            id,
+            id.into(),
             &[JobStatus::StopRequested],
             JobStatus::Stopping,
         )
@@ -468,10 +497,10 @@ impl MetadataDb {
     /// Conditionally marks a job as `STOPPED` only if it's currently `STOPPING`
     ///
     /// This provides proper state transition from stopping to stopped.
-    pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
+    pub async fn mark_job_stopped(&self, id: impl Into<JobId>) -> Result<(), Error> {
         Ok(jobs::update_status_if_any_state(
             &*self.pool,
-            id,
+            id.into(),
             &[JobStatus::Stopping],
             JobStatus::Stopped,
         )
@@ -481,10 +510,10 @@ impl MetadataDb {
     /// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
     ///
     /// This ensures jobs can only be completed from a running state.
-    pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
+    pub async fn mark_job_completed(&self, id: impl Into<JobId>) -> Result<(), Error> {
         Ok(jobs::update_status_if_any_state(
             &*self.pool,
-            id,
+            id.into(),
             &[JobStatus::Running],
             JobStatus::Completed,
         )
@@ -494,10 +523,10 @@ impl MetadataDb {
     /// Conditionally marks a job as `FAILED` from either `RUNNING` or `SCHEDULED` states
     ///
     /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
-    pub async fn mark_job_failed(&self, id: &JobId) -> Result<(), Error> {
+    pub async fn mark_job_failed(&self, id: impl Into<JobId>) -> Result<(), Error> {
         Ok(jobs::update_status_if_any_state(
             &*self.pool,
-            id,
+            id.into(),
             &[JobStatus::Scheduled, JobStatus::Running],
             JobStatus::Failed,
         )
@@ -508,9 +537,9 @@ impl MetadataDb {
     ///
     /// This function will only delete the job if it exists and is in a terminal state
     /// (Completed, Stopped, or Failed). Returns true if a job was deleted, false otherwise.
-    pub async fn delete_job_if_terminal(&self, id: &JobId) -> Result<bool, Error> {
+    pub async fn delete_job_if_terminal(&self, id: impl Into<JobId>) -> Result<bool, Error> {
         Ok(
-            jobs::delete_by_id_and_statuses(&*self.pool, id, JobStatus::terminal_statuses())
+            jobs::delete_by_id_and_statuses(&*self.pool, id.into(), JobStatus::terminal_statuses())
                 .await?,
         )
     }
@@ -605,8 +634,8 @@ impl MetadataDb {
     ///
     /// This method queries the `locations` table for all locations where the given job
     /// was assigned as the writer, converting them to [`Location`] type.
-    pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
-        Ok(locations::get_by_job_id(&*self.pool, id).await?)
+    pub async fn output_locations(&self, id: impl Into<JobId>) -> Result<Vec<Location>, Error> {
+        Ok(locations::get_by_job_id(&*self.pool, id.into()).await?)
     }
 
     /// List locations with cursor-based pagination support
@@ -665,6 +694,7 @@ impl MetadataDb {
     ///
     /// Creates a new file metadata entry with the provided information. Uses
     /// ON CONFLICT DO NOTHING to make the operation idempotent.
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_file(
         &self,
         location_id: LocationId,
@@ -933,8 +963,10 @@ impl MetadataDb {
         file_ids: &[FileId],
         duration: Duration,
     ) -> Result<(), Error> {
-        let mut interval = PgInterval::default();
-        interval.microseconds = duration.as_micros() as i64;
+        let interval = PgInterval {
+            microseconds: duration.as_micros() as i64,
+            ..Default::default()
+        };
 
         let sql = "
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)

@@ -10,7 +10,6 @@ use common::{
     BoxError, BoxResult, arrow, config::Config, query_context::parse_sql,
     stream_helpers::is_streaming,
 };
-use dump::worker::Worker;
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
@@ -18,6 +17,7 @@ use metadata_db::MetadataDb;
 use server::service::Service;
 use tonic::transport::{Server, server::TcpIncoming};
 use tracing::instrument;
+use worker::Worker;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {

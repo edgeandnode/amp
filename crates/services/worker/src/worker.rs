@@ -1,47 +1,45 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{BoxError, config::Config, notification_multiplexer};
+use common::{config::Config, notification_multiplexer};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
+use dump::Ctx;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tokio::time::{Interval, MissedTickBehavior};
 use tokio_util::task::AbortOnDropHandle;
 
-mod job;
 mod job_set;
-mod meta;
 
-pub use self::job::JobDesc;
-use self::{
-    job::Job,
-    job_set::{JobSet, JoinError as JobSetJoinError},
-    meta::{
-        JobId, JobMeta, JobStatus, NotifAction as Action, NotifRecvError, WorkerMetadataDb,
-        WorkerNodeId,
-    },
+use self::job_set::{JobSet, JoinError as JobSetJoinError};
+use crate::{
+    AbortJobError, BootstrapError, Error, HeartbeatSetupError, HeartbeatTaskError, JobId,
+    JobResultError, MainLoopError, NodeId, NotificationError, NotificationSetupError,
+    ReconcileError, RegistrationError, SpawnJobError, StartActionError,
+    db::{JobMeta, JobStatus, MetadataDbRetryExt as _},
+    jobs::{Action, Job, Notification},
 };
-use crate::{Ctx, metrics};
 
 pub struct Worker {
-    node_id: WorkerNodeId,
+    node_id: NodeId,
     reconcile_interval: Interval,
 
-    meta: WorkerMetadataDb,
+    meta: MetadataDb,
     job_ctx: Ctx,
     job_set: JobSet,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
+    metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
 }
 
 impl Worker {
     /// Create a new worker instance
+    #[must_use]
     pub fn new(
         config: Arc<Config>,
         metadata_db: MetadataDb,
-        node_id: WorkerNodeId,
-        metrics: Option<Arc<metrics::MetricsRegistry>>,
+        node_id: NodeId,
+        metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let dataset_store = {
@@ -58,7 +56,6 @@ impl Worker {
             )
         };
         let data_store = config.data_store.clone();
-        let meta = WorkerMetadataDb::new(metadata_db.clone());
 
         let mut reconcile_interval = tokio::time::interval(Duration::from_secs(60));
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -69,7 +66,7 @@ impl Worker {
         Self {
             node_id,
             reconcile_interval,
-            meta,
+            meta: metadata_db.clone(),
             job_ctx: Ctx {
                 config,
                 metadata_db,
@@ -77,27 +74,32 @@ impl Worker {
                 data_store,
                 notification_multiplexer,
             },
-            job_set: Default::default(),
+            job_set: JobSet::default(),
             metrics,
             meter,
         }
     }
 
-    pub async fn run(mut self) -> Result<(), WorkerError> {
+    /// Run the worker main loop
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a fatal condition occurs that prevents the worker from continuing.
+    pub async fn run(mut self) -> Result<(), Error> {
         // Register the worker in the Metadata DB. and update the latest heartbeat timestamp.
         // Retry on failure
         self.meta
-            .register_worker(&self.node_id)
+            .register_worker_with_retry(&self.node_id)
             .await
-            .map_err(WorkerError::RegistrationFailed)?;
+            .map_err(|err| Error::Registration(RegistrationError(err)))?;
 
         // Establish a dedicated connection to the metadata DB, and start the heartbeat loop
         let mut heartbeat_loop_handle = {
             let fut = self
                 .meta
-                .worker_heartbeat_loop(&self.node_id)
+                .worker_heartbeat_loop_with_retry(self.node_id.clone())
                 .await
-                .map_err(WorkerError::HeartbeatConnectionError)?;
+                .map_err(|err| Error::HeartbeatSetup(HeartbeatSetupError(err)))?;
             AbortOnDropHandle::new(tokio::spawn(fut))
         };
 
@@ -105,13 +107,13 @@ impl Worker {
         let mut job_notification_stream = {
             let listener = self
                 .meta
-                .listen_for_job_notifications()
+                .listen_for_job_notifications_with_retry(&self.node_id)
                 .await
-                .map_err(WorkerError::JobNotifListenerConnectionError)?;
+                .map_err(|err| Error::NotificationSetup(NotificationSetupError(err)))?;
 
             let stream = listener
-                .into_stream()
-                .map_err(WorkerError::JobNotifRecvError);
+                .into_stream::<Notification>()
+                .map_err(NotificationError::DeserializationFailed);
             std::pin::pin!(stream)
         };
 
@@ -123,11 +125,17 @@ impl Worker {
         // set, ensuring the worker is in sync with the Metadata DB's jobs table state.
         let scheduled_jobs = self
             .meta
-            .get_scheduled_jobs(&self.node_id)
+            .get_scheduled_jobs_with_retry(&self.node_id)
             .await
-            .map_err(WorkerError::ActiveJobsFetchFailed)?;
+            .map_err(|err| Error::Bootstrap(BootstrapError::FetchScheduledJobsFailed(err)))?;
         for job in scheduled_jobs {
-            self.spawn_job(job).await?;
+            let job_id = job.id.into();
+            self.spawn_job(job).await.map_err(|error| {
+                Error::Bootstrap(BootstrapError::SpawnJobFailed {
+                    job_id,
+                    source: error,
+                })
+            })?;
         }
 
         // Main loop
@@ -136,63 +144,66 @@ impl Worker {
                 // 1. Poll the heartbeat loop task handle
                 res = &mut heartbeat_loop_handle => {
                     match res {
-                        Ok(Ok(_)) => {
+                        Ok(Ok(())) => {
                             // The heartbeat loop must never exit, this is a fatal error.
                             // Exit the worker
-                            return Err(WorkerError::HeartbeatTaskFailed(
-                                "heartbeat loop task exited".into(),
-                            ));
+                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                                HeartbeatTaskError::UnexpectedExit,
+                            )));
                         }
                         Ok(Err(err)) => {
                             // A fatal error occurred in the heartbeat loop.
                             // Exit the worker
-                            return Err(WorkerError::HeartbeatUpdateFailed(err));
+                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                                HeartbeatTaskError::UpdateFailed(err),
+                            )));
                         }
                         Err(err) => {
                             // A fatal error occurred in the heartbeat loop task.
                             // Exit the worker
-                            return Err(WorkerError::HeartbeatTaskFailed(err.into()));
+                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                                HeartbeatTaskError::Panicked(err.into()),
+                            )));
                         }
                     }
                 },
 
                 // 2. Poll the job notifications stream
                 next = job_notification_stream.try_next() => {
-                    let next = match next {
-                        Ok(next) => next,
-                        Err(WorkerError::JobNotifRecvError(NotifRecvError::DeserializationFailed(err))) => {
-                            tracing::error!(node_id=%self.node_id, error=%err, "job notification deserialization failed, skipping");
-                            continue;
-                        }
-                        // A fatal error occurred in the job notification stream, exit the worker
-                        Err(err) => return Err(err),
-                    };
-
-                    let (job_id, action) = match next {
-                        Some(notification) => {
-                            // Ignore notifications targeting other workers
-                            if self.node_id != notification.node_id {
-                                continue;
-                            }
-                            (notification.job_id, notification.action)
-                        }
-                        None => {
+                    let notif = match next {
+                        Ok(Some(notif)) => notif,
+                        Ok(None) => {
                             tracing::error!(node_id=%self.node_id, "job notification stream closed");
                             continue;
                         }
+                        Err(NotificationError::DeserializationFailed(err)) => {
+                            tracing::error!(node_id=%self.node_id, error=%err, "job notification deserialization failed, skipping");
+                            continue;
+                        }
+                        // These should never occur from the stream itself
+                        Err(err) => {
+                            tracing::error!(node_id=%self.node_id, error=%err, "unexpected notification error");
+                            continue;
+                        }
                     };
 
-                    self.handle_job_notification_action(job_id, action).await?;
+                    self.handle_job_notification_action(notif.job_id, notif.action)
+                        .await
+                        .map_err(|err| Error::MainLoop(MainLoopError::NotificationHandling(err)))?;
                 },
 
                 // 3. Poll the job set for job execution results
                 Some((job_id, result)) = self.job_set.join_next_with_id() => {
-                    self.handle_job_result(job_id, result).await?;
+                    self.handle_job_result(job_id, result)
+                        .await
+                        .map_err(|err| Error::MainLoop(MainLoopError::JobResultHandling(err)))?;
                 }
 
                 // 4. Periodically reconcile the jobs state with the Metadata DB jobs table state
                 _ = self.reconcile_interval.tick() => {
-                    self.reconcile_jobs().await?;
+                    self.reconcile_jobs()
+                        .await
+                        .map_err(|err| Error::MainLoop(MainLoopError::Reconciliation(err)))?;
                 }
             }
         }
@@ -206,30 +217,37 @@ impl Worker {
         &mut self,
         job_id: JobId,
         action: Action,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<(), NotificationError> {
         match action {
             Action::Start => {
                 // Load the job from the metadata DB (retry on failure)
-                let job = match self
-                    .meta
-                    .get_job(&job_id)
-                    .await
-                    .map_err(|err| WorkerError::JobLoadFailed(err.into()))?
-                {
-                    Some(job) => job,
-                    None => {
-                        // If the job is not found, just ignore the notification
-                        tracing::warn!(node_id=%self.node_id, %job_id, "job not found");
-                        return Ok(());
+                let job = self.meta.get_job_with_retry(&job_id).await.map_err(|err| {
+                    NotificationError::StartActionFailed {
+                        job_id,
+                        source: StartActionError::JobLoadFailed(err),
                     }
+                })?;
+
+                let Some(job) = job else {
+                    // If the job is not found, just ignore the notification
+                    tracing::warn!(node_id=%self.node_id, %job_id, "job not found");
+                    return Ok(());
                 };
 
-                self.spawn_job(job).await
+                self.spawn_job(job)
+                    .await
+                    .map_err(|error| NotificationError::StartActionFailed {
+                        job_id,
+                        source: StartActionError::SpawnFailed(error),
+                    })
             }
-            Action::Stop => self.abort_job(job_id).await,
-            _ => {
-                tracing::warn!(node_id=%self.node_id, %job_id, %action, "unhandled job action");
-                Ok(())
+            Action::Stop => {
+                self.abort_job(job_id)
+                    .await
+                    .map_err(|error| NotificationError::StopActionFailed {
+                        job_id,
+                        source: error,
+                    })
             }
         }
     }
@@ -242,43 +260,55 @@ impl Worker {
         &mut self,
         job_id: JobId,
         result: Result<(), JobSetJoinError>,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<(), JobResultError> {
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job completed successfully");
 
                 // Mark the job as COMPLETED (retry on failure)
                 self.meta
-                    .mark_job_completed(&job_id)
+                    .mark_job_completed_with_retry(&job_id)
                     .await
-                    .map_err(WorkerError::JobStatusUpdateFailed)?;
+                    .map_err(|error| JobResultError::MarkCompletedFailed {
+                        job_id,
+                        source: error,
+                    })?;
             }
             Err(JobSetJoinError::Failed(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, "job failed: {:?}", err);
 
                 // Mark the job as FAILED (retry on failure)
                 self.meta
-                    .mark_job_failed(&job_id)
+                    .mark_job_failed_with_retry(&job_id)
                     .await
-                    .map_err(WorkerError::JobStatusUpdateFailed)?;
+                    .map_err(|error| JobResultError::MarkFailedFailed {
+                        job_id,
+                        source: error,
+                    })?;
             }
             Err(JobSetJoinError::Aborted) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
 
                 // Mark the job as STOPPED (retry on failure)
                 self.meta
-                    .mark_job_stopped(&job_id)
+                    .mark_job_stopped_with_retry(&job_id)
                     .await
-                    .map_err(WorkerError::JobStatusUpdateFailed)?;
+                    .map_err(|error| JobResultError::MarkStoppedFailed {
+                        job_id,
+                        source: error,
+                    })?;
             }
             Err(JobSetJoinError::Panicked(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, "job panicked");
 
                 // Mark the job as FAILED (retry on failure)
                 self.meta
-                    .mark_job_failed(&job_id)
+                    .mark_job_failed_with_retry(&job_id)
                     .await
-                    .map_err(WorkerError::JobStatusUpdateFailed)?;
+                    .map_err(|error| JobResultError::MarkFailedFailed {
+                        job_id,
+                        source: error,
+                    })?;
             }
         }
 
@@ -294,12 +324,11 @@ impl Worker {
     /// reflect the DB state.
     ///
     /// This method is called periodically to maintain consistency between the worker and database state.
-    async fn reconcile_jobs(&mut self) -> Result<(), WorkerError> {
+    async fn reconcile_jobs(&mut self) -> Result<(), ReconcileError> {
         let active_jobs = match self
             .meta
-            .get_active_jobs(&self.node_id)
+            .get_active_jobs_with_retry(self.node_id.clone())
             .await
-            .map_err(WorkerError::ActiveJobsFetchFailed)
         {
             Ok(active_jobs) => active_jobs,
             Err(err) => {
@@ -313,10 +342,22 @@ impl Worker {
         for job in active_jobs {
             match job.status {
                 JobStatus::Scheduled | JobStatus::Running => {
-                    self.spawn_job(job).await?;
+                    let job_id = job.id.into();
+                    self.spawn_job(job)
+                        .await
+                        .map_err(|error| ReconcileError::SpawnJobFailed {
+                            job_id,
+                            source: error,
+                        })?;
                 }
                 JobStatus::StopRequested => {
-                    self.abort_job(job.id).await?;
+                    let job_id = job.id.into();
+                    self.abort_job(job_id).await.map_err(|error| {
+                        ReconcileError::AbortJobFailed {
+                            job_id,
+                            source: error,
+                        }
+                    })?;
                 }
                 _ => {} // No-op
             }
@@ -329,33 +370,33 @@ impl Worker {
     ///
     /// This method is called when a job is started by the user or the scheduler.
     /// It marks the job as RUNNING and spawns the job in the job set.
-    async fn spawn_job(&mut self, job: JobMeta) -> Result<(), WorkerError> {
+    async fn spawn_job(&mut self, job: JobMeta) -> Result<(), SpawnJobError> {
         tracing::info!(node_id=%self.node_id, %job.id, "job start requested");
 
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {
             self.meta
-                .mark_job_running(&job.id)
+                .mark_job_running_with_retry(&job.id.into())
                 .await
-                .map_err(WorkerError::JobStatusUpdateFailed)?;
+                .map_err(SpawnJobError::StatusUpdateFailed)?;
         }
 
         // Construct the job instance and spawn it in the job set
         let job_id = job.id;
-        let job_desc = serde_json::from_value(job.desc).map_err(|err| {
-            WorkerError::JobLoadFailed(format!("invalid job descriptor: {}", err).into())
-        })?;
+        let job_desc =
+            serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
         let job = Job::try_from_descriptor(
             self.job_ctx.clone(),
-            job_id,
+            job_id.into(),
             job_desc,
             self.metrics.clone(),
             self.meter.clone(),
         )
         .await
-        .map_err(WorkerError::JobLoadFailed)?;
-        self.job_set.spawn(job_id, job);
+        .map_err(SpawnJobError::JobCreationFailed)?;
+
+        self.job_set.spawn(job_id.into(), job);
 
         Ok(())
     }
@@ -364,59 +405,16 @@ impl Worker {
     ///
     /// To avoid job state update races, this method marks the job as STOPPING and
     /// then notifies the job set to abort the job.
-    async fn abort_job(&mut self, job_id: JobId) -> Result<(), WorkerError> {
+    async fn abort_job(&mut self, job_id: JobId) -> Result<(), AbortJobError> {
         tracing::info!(node_id=%self.node_id, %job_id, "job stop requested");
 
         // Mark the job as STOPPING (retry on failure)
         self.meta
-            .mark_job_stopping(&job_id)
+            .mark_job_stopping_with_retry(&job_id)
             .await
-            .map_err(WorkerError::JobStatusUpdateFailed)?;
+            .map_err(AbortJobError)?;
 
-        self.job_set.abort(&job_id);
+        self.job_set.abort(job_id);
         Ok(())
     }
-}
-
-/// Worker errors
-///
-/// These are fatal errors that should cause the worker to exit.
-#[derive(Debug, thiserror::Error)]
-pub enum WorkerError {
-    /// The worker failed to register in the metadata DB
-    #[error("worker registration failed: {0}")]
-    RegistrationFailed(metadata_db::Error),
-
-    /// A fatal error occurred while fetching active jobs at worker startup
-    #[error("failed to fetch active jobs: {0}")]
-    ActiveJobsFetchFailed(metadata_db::Error),
-
-    /// The worker heartbeat task connection failed to establish a dedicated connection to the metadata DB
-    #[error("worker heartbeat connection establishment failed: {0}")]
-    HeartbeatConnectionError(metadata_db::Error),
-
-    /// The worker failed to update its heartbeat in the metadata DB
-    #[error("worker heartbeat update failed: {0}")]
-    HeartbeatUpdateFailed(metadata_db::Error),
-
-    /// The worker heartbeat task failed
-    #[error("worker heartbeat task failed: {0}")]
-    HeartbeatTaskFailed(BoxError),
-
-    /// A fatal error occurred while establishing the job notification listener
-    /// connection to the metadata DB
-    #[error("error establishing job notification listener connection: {0}")]
-    JobNotifListenerConnectionError(metadata_db::Error),
-
-    /// A fatal error occurred while listening to job notifications
-    #[error("error listening to job notifications: {0}")]
-    JobNotifRecvError(metadata_db::JobNotifRecvError),
-
-    /// A fatal error occurred while loading a job
-    #[error("error loading job: {0}")]
-    JobLoadFailed(BoxError),
-
-    /// A fatal error occurred while updating a job status
-    #[error("failed to update job status: {0}")]
-    JobStatusUpdateFailed(metadata_db::Error),
 }
