@@ -54,7 +54,6 @@ pub struct TestCtxBuilder {
     daemon_config: DaemonConfig,
     anvil_fixture: Option<AnvilMode>,
     dataset_manifests_to_preload: BTreeSet<String>,
-    sql_dataset_files_to_preload: BTreeSet<String>,
     provider_configs_to_preload: BTreeSet<String>,
     dataset_snapshots_to_preload: BTreeSet<String>,
 }
@@ -67,7 +66,6 @@ impl TestCtxBuilder {
             daemon_config: Default::default(),
             anvil_fixture: None,
             dataset_manifests_to_preload: Default::default(),
-            sql_dataset_files_to_preload: Default::default(),
             provider_configs_to_preload: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
         }
@@ -137,68 +135,6 @@ impl TestCtxBuilder {
 
         self.dataset_manifests_to_preload
             .extend(manifests.into_iter());
-        self
-    }
-
-    /// Add a single SQL dataset file that this test environment needs.
-    ///
-    /// The `sql_file` parameter should contain paths like "sql_over_anvil_1/blocks"
-    /// which correspond to .sql files located in the fixture directories.
-    /// Only the specified SQL file will be copied from the source directory to the test environment.
-    /// This is a convenience method for adding one SQL file at a time.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the SQL file path is an absolute path or contains '..' segments.
-    pub fn with_sql_dataset_file(mut self, sql_file: impl Into<String>) -> Self {
-        let sql_file = sql_file.into();
-
-        if sql_file.starts_with("/") {
-            panic!("The SQL file path cannot be an absolute path: {}", sql_file);
-        }
-
-        if sql_file.contains("..") {
-            panic!(
-                "The SQL file path cannot contain '..' path segments: {}",
-                sql_file
-            );
-        }
-
-        self.sql_dataset_files_to_preload.insert(sql_file);
-        self
-    }
-
-    /// Add SQL dataset files that this test environment needs.
-    ///
-    /// The `sql_files` parameter should contain paths like "sql_over_anvil_1/blocks"
-    /// which correspond to .sql files located in the fixture directories.
-    /// Only the specified SQL files will be copied from the source directory to the test environment.
-    /// If no SQL files are specified, only regular dataset manifests will be loaded.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any SQL file path is an absolute path or contains '..' segments.
-    pub fn with_sql_dataset_files(
-        mut self,
-        sql_files: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        let sql_files = sql_files.into_iter().map(Into::into).collect::<Vec<_>>();
-
-        for sql_file in &sql_files {
-            if sql_file.starts_with("/") {
-                panic!("The SQL file path cannot be an absolute path: {}", sql_file);
-            }
-
-            if sql_file.contains("..") {
-                panic!(
-                    "The SQL file path cannot contain '..' path segments: {}",
-                    sql_file
-                );
-            }
-        }
-
-        self.sql_dataset_files_to_preload
-            .extend(sql_files.into_iter());
         self
     }
 
@@ -391,15 +327,6 @@ impl TestCtxBuilder {
             );
             daemon_state_dir
                 .preload_dataset_manifests(&self.dataset_manifests_to_preload)
-                .await?;
-        }
-        if !self.sql_dataset_files_to_preload.is_empty() {
-            tracing::info!(
-                "Preloading SQL dataset files: {:?}",
-                self.sql_dataset_files_to_preload
-            );
-            daemon_state_dir
-                .preload_sql_dataset_files(&self.sql_dataset_files_to_preload)
                 .await?;
         }
         if !self.provider_configs_to_preload.is_empty() {

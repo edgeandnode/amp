@@ -25,12 +25,6 @@
 //! - `config/manifests/`
 //!
 //! Pass filename stems (without `.json` extension) to `preload_dataset_manifests()`.
-//!
-//! ## SQL Dataset Files (.sql files)
-//! **Source directories:** Same as dataset manifests
-//!
-//! Pass file paths (without `.sql` extension) to `preload_sql_dataset_files()`.
-//!
 //! ## Provider Configurations (.toml files)
 //! **Source directories searched (in order):**
 //! - `tests/config/providers/`
@@ -281,57 +275,6 @@ impl DaemonStateDir {
 
             tracing::trace!(
                 "Copied dataset manifest: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Copy required SQL dataset query files to the daemon state directory.
-    ///
-    /// The `sql_files` parameter should contain paths like "sql_over_anvil_1/blocks"
-    /// which correspond to .sql files located in the fixture directories.
-    /// For example, passing "sql_over_anvil_1/blocks" will copy
-    /// sql_over_anvil_1/blocks.sql to the daemon state directory.
-    pub async fn preload_sql_dataset_files(
-        &self,
-        sql_files: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<(), BoxError> {
-        let target_dir = &self.manifests_dir_path;
-
-        // Create directory lazily if it doesn't exist
-        if !target_dir.exists() {
-            tracing::debug!("Dataset manifests directory doesn't exist, creating it lazily");
-            self.create_manifests_dir()?;
-        }
-
-        // Only copy specifically requested SQL files
-        for sql_file in sql_files {
-            let sql_file_path = sql_file.as_ref();
-            let mut path = PathBuf::from(sql_file_path);
-
-            // Set the extension to .sql for SQL query files
-            path.set_extension("sql");
-
-            // Resolve source directory by searching known fixture locations
-            let source_file_path =
-                resolve_fixture_source_file(&DATASET_MANIFESTS_FIXTURE_DIRS, &path).ok_or_else(
-                    || format!("Could not find SQL dataset file '{sql_file_path}' source file"),
-                )?;
-            let target_file_path = target_dir.join(&path);
-
-            tracing::debug!(
-                "Copying SQL dataset file: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-
-            copy_file(&source_file_path, &target_file_path)?;
-
-            tracing::trace!(
-                "Copied SQL dataset file: {} -> {}",
                 source_file_path.display(),
                 target_file_path.display()
             );
