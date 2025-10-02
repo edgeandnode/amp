@@ -7,25 +7,17 @@ Update or install nozzle with ease.
 ### Public Repository (once open-sourced)
 
 ```sh
-curl -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | bash
+curl -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/nozzleup/install | bash
 ```
 
 ### Private Repository (current)
 
-While the repository is private and nozzleup is in PR #857, you need to set `GITHUB_TOKEN`:
+While the repository is private you need to set `GITHUB_TOKEN`:
 
 ```sh
-curl -L "https://raw.githubusercontent.com/edgeandnode/project-nozzle/nozzleup/nozzleup/install" | GITHUB_TOKEN=$(gh auth token) bash
+export GITHUB_TOKEN=$(gh auth token)
+curl -H "Authorization: Bearer $GITHUB_TOKEN" -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/nozzleup/install | bash
 ```
-
-Or using a personal access token:
-
-```sh
-export GITHUB_TOKEN=ghp_yourtoken
-curl -L "https://raw.githubusercontent.com/edgeandnode/project-nozzle/nozzleup/nozzleup/install" | bash
-```
-
-**Note:** Once PR #857 is merged, change `nozzleup/nozzleup/install` to `main/nozzleup/install` in the URL above.
 
 This will install `nozzleup`. Then, run:
 
@@ -126,7 +118,7 @@ Binaries are stored in `~/.nozzle/versions/<version>/` and the active version is
 While the repository is private, set the `GITHUB_TOKEN` environment variable:
 
 ```sh
-export GITHUB_TOKEN=ghp_yourtoken
+export GITHUB_TOKEN=$(gh auth token)$
 nozzleup
 ```
 
