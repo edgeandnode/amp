@@ -31,17 +31,17 @@ const PLACEHOLDER_OWNER: &'static str = "no-owner";
 ///
 /// **Note**: External changes to the underlying store are immediately visible.
 #[derive(Debug, Clone)]
-pub struct ManifestsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
+pub struct DatasetManifestsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
     metadata_db: MetadataDb,
     store: S,
     initialized: Arc<OnceCell<()>>,
 }
 
-impl<S> ManifestsStore<S>
+impl<S> DatasetManifestsStore<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`ManifestsStore`] instance with the given metadata database and underlying store.
+    /// Create a new [`DatasetManifestsStore`] instance with the given metadata database and underlying store.
     pub fn new(metadata_db: MetadataDb, store: S) -> Self {
         Self {
             metadata_db,

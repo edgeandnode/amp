@@ -136,7 +136,7 @@ async fn handler_inner(
 
     // Get the dataset from the store
     // If version is None, the latest version is used
-    let dataset = match ctx.store.get_dataset(&name, version.as_ref()).await {
+    let dataset = match ctx.dataset_store.get_dataset(&name, version.as_ref()).await {
         Ok(Some(dataset)) => dataset,
         Ok(None) => {
             tracing::debug!(

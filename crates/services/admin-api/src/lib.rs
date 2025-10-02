@@ -17,6 +17,7 @@ pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
+use dataset_store::{manifests::DatasetManifestsStore, providers::ProviderConfigsStore};
 use handlers::{datasets, files, jobs, locations, providers, schema};
 use scheduler::Scheduler;
 
@@ -26,7 +27,19 @@ pub async fn serve(
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
-    let store = DatasetStore::new(config.clone(), metadata_db.clone());
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store = DatasetManifestsStore::new(
+            metadata_db.clone(),
+            config.dataset_defs_store.prefixed_store(),
+        );
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     // Register the routes
@@ -78,9 +91,8 @@ pub async fn serve(
         )
         .route("/schema", post(schema::handler))
         .with_state(Ctx {
-            config,
             metadata_db,
-            store,
+            dataset_store,
             scheduler,
         });
 

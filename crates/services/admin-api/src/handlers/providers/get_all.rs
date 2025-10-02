@@ -39,7 +39,7 @@ use crate::ctx::Ctx;
 )]
 pub async fn handler(State(ctx): State<Ctx>) -> Json<ProvidersResponse> {
     let providers = ctx
-        .store
+        .dataset_store
         .providers()
         .get_all()
         .await
