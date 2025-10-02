@@ -8,7 +8,7 @@ metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
-datasets-derived = { path = "../datasets-derived", features = ["sql_dataset"] }
+datasets-derived = { path = "../datasets-derived" }
 futures.workspace = true
 tracing.workspace = true
 object_store.workspace = true

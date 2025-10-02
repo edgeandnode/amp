@@ -4,7 +4,7 @@ use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
     catalog::physical::{Catalog, PhysicalTable},
     evm::{self, udfs::EthCall},
-    manifest::{common::schema_from_tables, derived, sql_datasets::SqlDataset},
+    manifest::{common::schema_from_tables, derived},
     query_context::QueryEnv,
     sql_visitors::all_function_names,
 };
@@ -14,7 +14,7 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
-use datasets_derived::{Manifest as DerivedManifest, sql_dataset::Manifest as SqlManifest};
+use datasets_derived::Manifest as DerivedManifest;
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
 };
@@ -40,7 +40,6 @@ mod dataset_kind;
 mod error;
 pub mod manifests;
 pub mod providers;
-pub mod sql_datasets;
 
 use self::{
     block_stream_client::BlockStreamClient,
@@ -52,8 +51,8 @@ pub use self::{
     error::{
         CatalogForSqlError, EthCallForDatasetError, ExtractDatasetFromFunctionNamesError,
         ExtractDatasetFromTableRefsError, GetAllDatasetsError, GetClientError, GetDatasetError,
-        GetLogicalCatalogError, GetPhysicalCatalogError, GetSqlDatasetError, IsRegisteredError,
-        PlanningCtxForSqlError, RegisterManifestError,
+        GetDerivedManifestError, GetLogicalCatalogError, GetPhysicalCatalogError,
+        IsRegisteredError, PlanningCtxForSqlError, RegisterManifestError,
     },
     manifests::StoreError,
 };
@@ -315,36 +314,6 @@ impl DatasetStore {
                 })?;
                 dataset
             }
-            DatasetKind::Sql => {
-                let manifest = manifest_content
-                    .try_into_manifest::<SqlManifest>()
-                    .map_err(|err| GetDatasetError::ManifestParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                // Fetch all SQL files for the dataset
-                let sql_files = self
-                    .dataset_manifests_store
-                    .get_sql_files(&name, &version)
-                    .await
-                    .map_err(|err| GetDatasetError::SqlFilesError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: format!("Failed to get SQL files: {}", err).into(),
-                    })?;
-
-                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
-                    .await
-                    .map_err(|err| GetDatasetError::SqlDatasetError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                sql_dataset.dataset
-            }
         };
 
         // Cache the dataset.
@@ -383,18 +352,19 @@ impl DatasetStore {
     }
 
     #[tracing::instrument(skip(self), err)]
-    pub async fn get_sql_dataset(
+    pub async fn get_derived_manifest(
         self: &Arc<Self>,
         name: &str,
         version: impl Into<Option<&Version>> + std::fmt::Debug,
-    ) -> Result<Option<SqlDataset>, GetSqlDatasetError> {
+    ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
         // Validate dataset name
-        let name = &name
-            .parse::<Name>()
-            .map_err(|err| GetSqlDatasetError::InvalidDatasetName {
-                name: name.to_string(),
-                source: err,
-            })?;
+        let name =
+            &name
+                .parse::<Name>()
+                .map_err(|err| GetDerivedManifestError::InvalidDatasetName {
+                    name: name.to_string(),
+                    source: err,
+                })?;
 
         // If no version is provided use a placeholder version (default version, i.e., v0.0.0).
         let version = &version.into().cloned().unwrap_or_default();
@@ -404,7 +374,7 @@ impl DatasetStore {
             .dataset_manifests_store
             .get(name, version)
             .await
-            .map_err(|err| GetSqlDatasetError::ManifestRetrievalError {
+            .map_err(|err| GetDerivedManifestError::ManifestRetrievalError {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: Box::new(err),
@@ -415,7 +385,7 @@ impl DatasetStore {
 
         let manifest = dataset_src
             .try_into_manifest::<CommonManifest>()
-            .map_err(|err| GetSqlDatasetError::ManifestParseError {
+            .map_err(|err| GetDerivedManifestError::ManifestParseError {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: err,
@@ -428,7 +398,7 @@ impl DatasetStore {
         );
 
         let kind = DatasetKind::from_str(&manifest.kind).map_err(|err: UnsupportedKindError| {
-            GetSqlDatasetError::UnsupportedKind {
+            GetDerivedManifestError::UnsupportedKind {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: err.kind,
@@ -440,60 +410,15 @@ impl DatasetStore {
                 let manifest =
                     dataset_src
                         .try_into_manifest::<DerivedManifest>()
-                        .map_err(|err| GetSqlDatasetError::ManifestParseError {
+                        .map_err(|err| GetDerivedManifestError::ManifestParseError {
                             name: name.to_string(),
                             version: Some(version.to_string()),
                             source: err,
                         })?;
 
-                let queries = derived::queries(&manifest).map_err(|err| {
-                    GetSqlDatasetError::SqlParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    }
-                })?;
-                let dataset = derived::dataset(manifest).map_err(|err| {
-                    GetSqlDatasetError::DerivedCreationError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    }
-                })?;
-
-                Ok(Some(SqlDataset { dataset, queries }))
+                Ok(Some(manifest))
             }
-            DatasetKind::Sql => {
-                let manifest = dataset_src
-                    .try_into_manifest::<SqlManifest>()
-                    .map_err(|err| GetSqlDatasetError::ManifestParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                // Fetch all SQL files for the dataset
-                let sql_files = self
-                    .dataset_manifests_store
-                    .get_sql_files(&name, version)
-                    .await
-                    .map_err(|err| GetSqlDatasetError::SqlFilesError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: format!("Failed to get SQL files: {}", err).into(),
-                    })?;
-
-                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
-                    .await
-                    .map_err(|err| GetSqlDatasetError::SqlDatasetError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                Ok(Some(sql_dataset))
-            }
-            _ => Err(GetSqlDatasetError::UnsupportedKind {
+            _ => Err(GetDerivedManifestError::UnsupportedKind {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: kind.to_string(),

@@ -16,6 +16,17 @@ use crate::{
     utils::dfs,
 };
 
+/// A derived dataset with its associated queries.
+///
+/// This structure represents a derived dataset that contains a dataset definition
+/// and a mapping of table names to their defining SQL queries.
+pub struct SqlDataset {
+    /// The underlying dataset definition
+    pub dataset: Dataset,
+    /// Maps table names to their defining SQL queries
+    pub queries: BTreeMap<String, parser::Statement>,
+}
+
 /// Extract all SQL queries from table views.
 pub fn queries(
     manifest: &Manifest,

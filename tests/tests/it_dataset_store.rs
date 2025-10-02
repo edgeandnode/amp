@@ -29,26 +29,27 @@ async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
 
     //* When
     let result = dataset_store
-        .get_sql_dataset("sql_over_anvil_1", None)
+        .get_derived_manifest("sql_over_anvil_1", None)
         .await
-        .expect("load_sql_dataset should succeed")
-        .expect("sql dataset should exist");
+        .expect("load derived manifest should succeed")
+        .expect("derived manifest should exist");
 
     //* Then
     assert_eq!(
-        result.dataset.kind, "manifest",
+        result.kind.to_string(),
+        "manifest",
         "dataset kind should be 'manifest' for TypeScript datasets"
     );
 
     // Assert that the dataset is registered in the metadata DB
     let db_dataset = metadata_db
-        .get_dataset_latest_version_with_details(&result.dataset.name)
+        .get_dataset_latest_version_with_details(&result.name)
         .await
         .expect("should query metadata DB");
     assert!(
         db_dataset.is_some(),
         "dataset {} should be registered in metadata DB",
-        result.dataset.name
+        result.name
     );
 }
 
@@ -72,14 +73,15 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
 
     //* When
     let result = dataset_store
-        .get_sql_dataset(&name, &version)
+        .get_derived_manifest(&name, &version)
         .await
-        .expect("load_sql_dataset should succeed")
-        .expect("sql dataset should exist");
+        .expect("load derived manifest should succeed")
+        .expect("derived manifest should exist");
 
     //* Then
     assert_eq!(
-        result.dataset.kind, "manifest",
+        result.kind.to_string(),
+        "manifest",
         "dataset kind should be 'manifest'"
     );
 

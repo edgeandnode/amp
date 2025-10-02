@@ -5,7 +5,6 @@ version.workspace = true
 
 [features]
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
-sql_dataset = []
 
 [dependencies]
 datafusion.workspace = true

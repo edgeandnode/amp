@@ -153,73 +153,6 @@ where
             .map_err(GetError::ObjectStoreFetch)
     }
 
-    /// Get SQL file contents for a dataset by name and version
-    ///
-    /// Returns a vector of tuples containing (table_name, sql_content).
-    /// The table name is extracted from the filename by removing the .sql extension.
-    /// This operation directly queries the underlying store without caching.
-    pub async fn get_sql_files(
-        &self,
-        name: &Name,
-        version: impl Into<Option<&Version>>,
-    ) -> Result<Vec<(String, String)>, GetSqlFilesError> {
-        self.init().await;
-
-        let res = match version.into() {
-            None => self
-                .metadata_db
-                .get_dataset_latest_version_with_details(name)
-                .await
-                .map_err(|err| GetSqlFilesError::MetadataDbError(err.to_string()))?,
-            Some(version) => self
-                .metadata_db
-                .get_dataset_with_details(name, version)
-                .await
-                .map_err(|err| GetSqlFilesError::MetadataDbError(err.to_string()))?,
-        };
-
-        let Some(dataset) = res else {
-            return Ok(vec![]);
-        };
-
-        // Extract the prefix by removing the file extension
-        let manifest_path = ManifestPath::try_from(dataset.manifest_path)
-            .map_err(GetSqlFilesError::UnsupportedManifestFormat)?;
-
-        let path_str = manifest_path.to_string();
-        let prefix: ObjectStorePath = path_str.trim_end_matches(".json").into();
-
-        // List all files with the prefix using regular list method
-        let mut files = self.store.list(Some(&prefix));
-
-        let mut sql_files = Vec::new();
-        while let Some(file) = files.next().await {
-            let file = file.map_err(GetSqlFilesError::ObjectStoreList)?;
-
-            // Filter for .sql files only
-            let filename = file.location.filename();
-            let Some(filename) = filename else {
-                continue;
-            };
-
-            // Skip non-.sql files and extract table name from filename
-            let Some(table_name) = filename.strip_suffix(".sql") else {
-                continue;
-            };
-
-            // Read the SQL file content
-            let content = self
-                .store
-                .get_string(file.location.clone())
-                .await
-                .map_err(GetSqlFilesError::ObjectStoreFetch)?;
-
-            sql_files.push((table_name.to_string(), content));
-        }
-
-        Ok(sql_files)
-    }
-
     /// Store a new dataset manifest in the underlying store
     ///
     /// Returns the path where the manifest was stored.
@@ -431,26 +364,6 @@ pub enum GetLatestVersionError {
     /// Failed to query metadata database for latest version
     #[error("Failed to query metadata database for latest version: {0}")]
     MetadataDbError(metadata_db::Error),
-}
-
-/// Errors specific to getting all SQL files operations
-#[derive(Debug, thiserror::Error)]
-pub enum GetSqlFilesError {
-    /// Failed to list files in object store
-    #[error("Failed to list files in object store: {0}")]
-    ObjectStoreList(object_store::Error),
-
-    /// Failed to fetch SQL file from object store
-    #[error("Failed to fetch SQL file from object store: {0}")]
-    ObjectStoreFetch(common::store::StoreError),
-
-    /// Failed to access metadata database
-    #[error("Metadata database error: {0}")]
-    MetadataDbError(String),
-
-    /// Unsupported manifest file format
-    #[error("Unsupported manifest file format: {}", .0.format)]
-    UnsupportedManifestFormat(#[source] UnsupportedManifestFormat),
 }
 
 /// Fetches manifest content from the object store
