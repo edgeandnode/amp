@@ -1,6 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode};
-use common::query_context::{
-    Error as QueryContextError, parse_sql, prepend_special_block_num_field,
+use common::{
+    plan_visitors::prepend_special_block_num_field,
+    query_context::{Error as QueryContextError, parse_sql},
 };
 use datasets_derived::manifest::TableSchema;
 use tracing::instrument;

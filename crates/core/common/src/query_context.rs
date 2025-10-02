@@ -7,12 +7,9 @@ use arrow::{array::ArrayRef, compute::concat_batches};
 use axum::response::IntoResponse;
 use datafusion::{
     self,
-    arrow::{
-        array::RecordBatch,
-        datatypes::{DataType, Field, Fields, SchemaRef},
-    },
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::{MemorySchemaProvider, TableProvider},
-    common::{DFSchema, not_impl_err},
+    common::not_impl_err,
     error::DataFusionError,
     execution::{
         SendableRecordBatchStream, SessionStateBuilder,
@@ -40,7 +37,7 @@ use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, SPECIAL_BLOCK_NUM, arrow, attestation, block_range_intersection,
+    BlockNum, BoxError, arrow, attestation, block_range_intersection,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -519,16 +516,6 @@ fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
     columns[plan_idx] = Arc::new(transformed);
 
     RecordBatch::try_new(batch.schema(), columns).unwrap()
-}
-
-pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {
-    let mut new_schema = DFSchema::from_unqualified_fields(
-        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
-        Default::default(),
-    )
-    .unwrap();
-    new_schema.merge(schema);
-    new_schema.into()
 }
 
 /// Prints the physical plan to a single line, for logging.
