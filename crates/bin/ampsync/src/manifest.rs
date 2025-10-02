@@ -19,14 +19,15 @@ use crate::{dataset_definition::DatasetDefinition, sql_validator};
 /// - JSON files: Direct parsing via serde_json
 /// - JS/TS files: AST parsing via oxc_parser to extract exported configuration
 ///
-/// Validates:
-/// - All SQL queries must not contain ORDER BY clauses (non-incremental queries not supported)
+/// Sanitization:
+/// - All SQL queries are sanitized to remove ORDER BY clauses (non-incremental queries not supported)
+/// - The sanitized SQL replaces the original SQL in the table definitions
 ///
 /// # Arguments
 /// * `config_path` - Path to the nozzle configuration file
 ///
 /// # Returns
-/// * `Result<DatasetDefinition, BoxError>` - Parsed dataset definition or error
+/// * `Result<DatasetDefinition, BoxError>` - Parsed dataset definition with sanitized SQL
 pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefinition, BoxError> {
     // Read the file contents
     let contents = fs::read_to_string(config_path)
@@ -38,7 +39,7 @@ pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefini
         .and_then(|ext| ext.to_str())
         .ok_or("Unable to determine file extension")?;
 
-    let dataset_def = match extension {
+    let mut dataset_def = match extension {
         "json" => {
             // Parse JSON directly using serde_json
             serde_json::from_str(&contents)
@@ -51,10 +52,11 @@ pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefini
         _ => Err(format!("Unsupported file extension: {}", extension).into()),
     }?;
 
-    // Validate all SQL queries in tables
-    for (table_name, table_def) in &dataset_def.tables {
-        sql_validator::validate_sql(&table_def.sql)
-            .map_err(|e| format!("Invalid SQL in table '{}': {}", table_name, e))?;
+    // Sanitize all SQL queries in tables (remove ORDER BY clauses)
+    for (table_name, table_def) in &mut dataset_def.tables {
+        let sanitized_sql = sql_validator::sanitize_sql(&table_def.sql)
+            .map_err(|e| format!("Failed to sanitize SQL in table '{}': {}", table_name, e))?;
+        table_def.sql = sanitized_sql;
     }
 
     Ok(dataset_def)

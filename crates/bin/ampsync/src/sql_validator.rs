@@ -1,8 +1,8 @@
-//! SQL validation for dataset queries.
+//! SQL sanitization for dataset queries.
 //!
-//! This module validates SQL queries to ensure they meet requirements for streaming datasets.
-//! Key validation:
-//! - Reject queries with ORDER BY clauses (non-incremental queries are not supported)
+//! This module sanitizes SQL queries to ensure they meet requirements for streaming datasets.
+//! Key sanitization:
+//! - Remove ORDER BY clauses (non-incremental queries are not supported)
 
 use common::BoxError;
 use datafusion::sql::{
@@ -10,128 +10,121 @@ use datafusion::sql::{
     sqlparser::ast::{Query, SetExpr, Statement, TableFactor, TableWithJoins},
 };
 
-/// Validate a SQL query for use in a streaming dataset.
+/// Sanitize a SQL query for use in a streaming dataset.
 ///
-/// # Validation Rules
-/// - Queries with ORDER BY clauses are rejected (non-incremental queries not supported)
+/// # Sanitization Rules
+/// - Removes ORDER BY clauses recursively (non-incremental queries not supported)
 ///
 /// # Arguments
-/// * `sql` - The SQL query to validate
+/// * `sql` - The SQL query to sanitize
 ///
 /// # Returns
-/// * `Ok(())` if the query is valid
-/// * `Err(BoxError)` with a description of the validation error
-pub fn validate_sql(sql: &str) -> Result<(), BoxError> {
+/// * `Ok(String)` containing either the original SQL (if valid) or sanitized SQL with ORDER BY removed
+/// * `Err(BoxError)` if the SQL cannot be parsed
+pub fn sanitize_sql(sql: &str) -> Result<String, BoxError> {
     // Parse the SQL using DataFusion's parser
-    let statements = DFParser::parse_sql(sql).map_err(|e| format!("Failed to parse SQL: {}", e))?;
+    let mut statements =
+        DFParser::parse_sql(sql).map_err(|e| format!("Failed to parse SQL: {}", e))?;
 
-    // Check each statement for ORDER BY clauses
-    for statement in statements {
-        check_order_by(&statement)?;
+    // Remove ORDER BY from each statement
+    for statement in &mut statements {
+        remove_order_by(statement);
     }
 
-    Ok(())
+    // Convert back to SQL string
+    let sanitized = statements
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    Ok(sanitized)
 }
 
-/// Check if a statement contains an ORDER BY clause (recursively)
-fn check_order_by(statement: &DFStatement) -> Result<(), BoxError> {
+/// Remove ORDER BY clauses from a statement (recursively, in-place)
+fn remove_order_by(statement: &mut DFStatement) {
     match statement {
         DFStatement::Statement(stmt) => {
-            // Unwrap the inner sqlparser Statement
-            match stmt.as_ref() {
+            // Unwrap the inner sqlparser Statement from Box
+            match stmt.as_mut() {
                 Statement::Query(query) => {
-                    check_query_order_by(query)?;
+                    remove_query_order_by(query);
                 }
-                // Other statement types (CREATE, INSERT, etc.) are allowed
+                // Other statement types (CREATE, INSERT, etc.) don't need modification
                 _ => {}
             }
         }
-        // DataFusion-specific statements don't need ORDER BY validation
+        // DataFusion-specific statements don't need ORDER BY removal
         _ => {}
     }
-
-    Ok(())
 }
 
-/// Check if a query contains an ORDER BY clause
-fn check_query_order_by(query: &Query) -> Result<(), BoxError> {
-    // Check the main query's ORDER BY
-    if query.order_by.is_some() {
-        return Err(
-            "ORDER BY clauses are not supported in streaming queries (non-incremental queries not allowed)"
-                .into(),
-        );
-    }
+/// Remove ORDER BY from a query (recursively)
+fn remove_query_order_by(query: &mut Query) {
+    // Remove the main query's ORDER BY
+    query.order_by = None;
 
-    // Recursively check subqueries
-    match &*query.body {
+    // Recursively process subqueries
+    match &mut *query.body {
         SetExpr::Select(select) => {
-            // Check FROM clause for subqueries
-            for table in &select.from {
-                check_table_with_joins(table)?;
+            // Process FROM clause for subqueries
+            for table in &mut select.from {
+                remove_table_with_joins_order_by(table);
             }
         }
         SetExpr::Query(subquery) => {
-            check_query_order_by(subquery)?;
+            remove_query_order_by(subquery);
         }
         SetExpr::SetOperation { left, right, .. } => {
-            check_set_expr(&**left)?;
-            check_set_expr(&**right)?;
+            remove_set_expr_order_by(left);
+            remove_set_expr_order_by(right);
         }
         _ => {}
     }
-
-    Ok(())
 }
 
-/// Check a SET expression for ORDER BY
-fn check_set_expr(expr: &SetExpr) -> Result<(), BoxError> {
+/// Remove ORDER BY from a SET expression
+fn remove_set_expr_order_by(expr: &mut SetExpr) {
     match expr {
         SetExpr::Select(select) => {
-            for table in &select.from {
-                check_table_with_joins(table)?;
+            for table in &mut select.from {
+                remove_table_with_joins_order_by(table);
             }
         }
         SetExpr::Query(query) => {
-            check_query_order_by(query)?;
+            remove_query_order_by(query);
         }
         SetExpr::SetOperation { left, right, .. } => {
-            check_set_expr(&**left)?;
-            check_set_expr(&**right)?;
+            remove_set_expr_order_by(left);
+            remove_set_expr_order_by(right);
         }
         _ => {}
     }
-
-    Ok(())
 }
 
-/// Check a table with joins for subqueries
-fn check_table_with_joins(table: &TableWithJoins) -> Result<(), BoxError> {
-    check_table_factor(&table.relation)?;
+/// Remove ORDER BY from tables with joins
+fn remove_table_with_joins_order_by(table: &mut TableWithJoins) {
+    remove_table_factor_order_by(&mut table.relation);
 
-    // Check joined tables
-    for join in &table.joins {
-        check_table_factor(&join.relation)?;
+    // Process joined tables
+    for join in &mut table.joins {
+        remove_table_factor_order_by(&mut join.relation);
     }
-
-    Ok(())
 }
 
-/// Check a table factor for subqueries with ORDER BY
-fn check_table_factor(table: &TableFactor) -> Result<(), BoxError> {
+/// Remove ORDER BY from a table factor (subqueries)
+fn remove_table_factor_order_by(table: &mut TableFactor) {
     match table {
         TableFactor::Derived { subquery, .. } => {
-            check_query_order_by(subquery)?;
+            remove_query_order_by(subquery);
         }
         TableFactor::NestedJoin {
             table_with_joins, ..
         } => {
-            check_table_with_joins(table_with_joins)?;
+            remove_table_with_joins_order_by(table_with_joins);
         }
         _ => {}
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -139,42 +132,100 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_valid_simple_query() {
+    fn test_simple_query_unchanged() {
         let sql = "SELECT * FROM blocks";
-        assert!(validate_sql(sql).is_ok());
+        let result = sanitize_sql(sql).unwrap();
+        // Should be unchanged (except for whitespace normalization)
+        assert!(result.contains("SELECT * FROM blocks"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 
     #[test]
-    fn test_valid_query_with_where() {
+    fn test_query_with_where_unchanged() {
         let sql = "SELECT * FROM blocks WHERE block_num > 1000";
-        assert!(validate_sql(sql).is_ok());
+        let result = sanitize_sql(sql).unwrap();
+        assert!(result.contains("WHERE"));
+        assert!(result.contains("block_num > 1000"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 
     #[test]
-    fn test_reject_order_by() {
+    fn test_remove_simple_order_by() {
         let sql = "SELECT * FROM blocks ORDER BY block_num";
-        let result = validate_sql(sql);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ORDER BY"));
+        let result = sanitize_sql(sql).unwrap();
+        // Should have ORDER BY removed
+        assert!(result.contains("SELECT * FROM blocks"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 
     #[test]
-    fn test_reject_order_by_in_subquery() {
+    fn test_remove_order_by_desc() {
+        let sql = "SELECT * FROM anvil.block ORDER BY block_num DESC";
+        let result = sanitize_sql(sql).unwrap();
+        // Should have ORDER BY DESC removed
+        assert!(result.contains("SELECT * FROM anvil.block"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
+        assert!(!result.to_uppercase().contains("DESC"));
+    }
+
+    #[test]
+    fn test_remove_order_by_in_subquery() {
         let sql = "SELECT * FROM (SELECT * FROM blocks ORDER BY block_num) AS b";
-        let result = validate_sql(sql);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ORDER BY"));
+        let result = sanitize_sql(sql).unwrap();
+        // Should have ORDER BY removed from subquery
+        assert!(result.contains("SELECT * FROM"));
+        assert!(result.contains("blocks"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 
     #[test]
-    fn test_valid_subquery_without_order_by() {
+    fn test_subquery_without_order_by_unchanged() {
         let sql = "SELECT * FROM (SELECT * FROM blocks WHERE block_num > 1000) AS b";
-        assert!(validate_sql(sql).is_ok());
+        let result = sanitize_sql(sql).unwrap();
+        assert!(result.contains("WHERE"));
+        assert!(result.contains("block_num > 1000"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 
     #[test]
-    fn test_valid_join() {
+    fn test_join_unchanged() {
         let sql = "SELECT * FROM blocks b JOIN transactions t ON b.hash = t.block_hash";
-        assert!(validate_sql(sql).is_ok());
+        let result = sanitize_sql(sql).unwrap();
+        assert!(result.to_uppercase().contains("JOIN"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_multiple_order_by_clauses() {
+        let sql = "SELECT * FROM (SELECT * FROM blocks ORDER BY block_num) AS b ORDER BY timestamp";
+        let result = sanitize_sql(sql).unwrap();
+        // Both ORDER BY clauses should be removed
+        assert!(!result.to_uppercase().contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_complex_query_with_order_by() {
+        let sql = r#"
+            SELECT a.*, b.count
+            FROM (SELECT * FROM blocks WHERE block_num > 100 ORDER BY block_num) AS a
+            JOIN (SELECT block_hash, COUNT(*) as count FROM transactions GROUP BY block_hash) AS b
+            ON a.hash = b.block_hash
+            ORDER BY a.block_num DESC
+        "#;
+        let result = sanitize_sql(sql).unwrap();
+        // All ORDER BY clauses should be removed
+        assert!(!result.to_uppercase().contains("ORDER BY"));
+        // But other parts should remain
+        assert!(result.to_uppercase().contains("JOIN"));
+        assert!(result.to_uppercase().contains("WHERE"));
+        assert!(result.to_uppercase().contains("GROUP BY"));
+    }
+
+    #[test]
+    fn test_union_with_order_by() {
+        let sql = "SELECT * FROM blocks WHERE block_num < 100 UNION SELECT * FROM blocks WHERE block_num > 1000 ORDER BY block_num";
+        let result = sanitize_sql(sql).unwrap();
+        assert!(result.to_uppercase().contains("UNION"));
+        assert!(!result.to_uppercase().contains("ORDER BY"));
     }
 }
