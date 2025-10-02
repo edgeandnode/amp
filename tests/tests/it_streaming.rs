@@ -5,9 +5,9 @@ use tests::{run_spec, testlib::ctx::TestCtxBuilder};
 async fn streaming_tests_basic() {
     logging::init();
     let test_ctx = TestCtxBuilder::new("sql_streaming_tests_basic")
-        .with_dataset_manifests(["eth_firehose", "eth_firehose_stream"])
-        .with_dataset_snapshots(["eth_firehose"])
-        .with_provider_configs(["firehose_eth_mainnet"])
+        .with_dataset_manifests(["eth_rpc"])
+        .with_dataset_snapshots(["eth_rpc"])
+        .with_provider_configs(["rpc_eth_mainnet"])
         .build()
         .await
         .expect("Failed to create test environment");
@@ -23,9 +23,9 @@ async fn streaming_tests_basic() {
 async fn streaming_tests_with_sql_datasets() {
     logging::init();
     let test_ctx = TestCtxBuilder::new("sql_streaming_tests_with_sql_datasets")
-        .with_provider_config("firehose_eth_mainnet")
-        .with_dataset_manifests(["eth_firehose"])
-        .with_dataset_snapshots(["eth_firehose"])
+        .with_provider_config("rpc_eth_mainnet")
+        .with_dataset_manifests(["eth_rpc"])
+        .with_dataset_snapshots(["eth_rpc"])
         .build()
         .await
         .expect("Failed to create test environment");

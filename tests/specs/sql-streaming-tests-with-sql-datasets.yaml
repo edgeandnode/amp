@@ -1,14 +1,14 @@
 # # Dump initial blocks
-- name: dump_eth_firehose
-  dataset: eth_firehose
+- name: dump_eth_rpc
+  dataset: eth_rpc
   end: 15000001
 
 # # Declare initial streams
 - name: select_block_num
-  stream: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  stream: SELECT block_num FROM eth_rpc.blocks WHERE block_num >= 15000000 SETTINGS stream = true
 
 - name: select_no_block_num
-  stream: SELECT hash FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  stream: SELECT hash FROM eth_rpc.blocks WHERE block_num >= 15000000 SETTINGS stream = true
 
 - name: select_block_num_2
   stream: select_block_num
@@ -29,8 +29,8 @@
     ]
 
 #   # Dump more blocks and check stream progress
-- name: dump_eth_firehose
-  dataset: eth_firehose
+- name: dump_eth_rpc
+  dataset: eth_rpc
   end: 15000004
 
 - name: select_block_num_5
@@ -129,7 +129,7 @@
     ]
 
 - name: union_all_multiple_datasets
-  query: SELECT 'eth' as src, block_num FROM eth_firehose.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
+  query: SELECT 'eth' as src, block_num FROM eth_rpc.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
   streamingOptions:
     atLeastRows: 8
   results: |
@@ -146,7 +146,7 @@
 
 - name: union_all_multiple_datasets_no_block_num
   query: |
-    SELECT 'eth' AS src, hash FROM eth_firehose.blocks
+    SELECT 'eth' AS src, hash FROM eth_rpc.blocks
     UNION ALL
     SELECT 'sql' AS src, hash FROM sql_stream_ds.even_blocks
     SETTINGS stream = true
