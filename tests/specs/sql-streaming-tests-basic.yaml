@@ -1,18 +1,18 @@
-- name: restore_eth_firehose
-  restore: eth_firehose
+- name: restore_eth_rpc
+  restore: eth_rpc
 
 - name: invalid_streaming_query1
-  query: SELECT count(*) FROM eth_firehose.blocks SETTINGS stream = true
+  query: SELECT count(*) FROM eth_rpc.blocks SETTINGS stream = true
   failure: |
     invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: `Aggregate`
 
 - name: invalid_streaming_query2
-  query: SELECT max(block_num) as block_num FROM eth_firehose.blocks SETTINGS stream = true
+  query: SELECT max(block_num) as block_num FROM eth_rpc.blocks SETTINGS stream = true
   failure: |
     invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: `Aggregate`
 
 - name: select_block_num
-  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  query: SELECT block_num FROM eth_rpc.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -23,7 +23,7 @@
 - name: select_special_block_num
   query: |
     SELECT _block_num, block_num
-    FROM eth_firehose.blocks
+    FROM eth_rpc.blocks
     WHERE block_num >= 15000000
     SETTINGS stream = true
   streamingOptions:
@@ -36,7 +36,7 @@
 - name: select_special_block_num_qualified
   query: |
     SELECT b._block_num, block_num
-    FROM eth_firehose.blocks AS b
+    FROM eth_rpc.blocks AS b
     WHERE block_num >= 15000000
     SETTINGS stream = true
   streamingOptions:
@@ -47,7 +47,7 @@
     ]
 
 - name: select_block_num_qualified
-  query: SELECT eth_firehose.blocks.block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  query: SELECT eth_rpc.blocks.block_num FROM eth_rpc.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -56,7 +56,7 @@
     ]
 
 - name: subquery
-  query: SELECT * FROM (select block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  query: SELECT * FROM (select block_num from eth_rpc.blocks) as t SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -65,7 +65,7 @@
     ]
 
 - name: subquery_select_block_num_qualified
-  query: SELECT eth_firehose.blocks.block_num FROM (select block_num from eth_firehose.blocks) SETTINGS stream = true
+  query: SELECT eth_rpc.blocks.block_num FROM (select block_num from eth_rpc.blocks) SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -74,7 +74,7 @@
     ]
 
 - name: subquery_no_block_num
-  query: SELECT * FROM (select hash from eth_firehose.blocks) as t SETTINGS stream = true
+  query: SELECT * FROM (select hash from eth_rpc.blocks) as t SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -83,7 +83,7 @@
     ]
 
 - name: subquery_no_block_num_on_top_level
-  query: SELECT hash FROM (select hash, block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  query: SELECT hash FROM (select hash, block_num from eth_rpc.blocks) as t SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -92,7 +92,7 @@
     ]
 
 - name: union_query
-  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10 SETTINGS stream = true
+  query: SELECT block_num FROM eth_rpc.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_rpc.blocks WHERE block_num > 10 SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
   results: |
@@ -102,9 +102,9 @@
 
 - name: union_query_no_block_num
   query: |
-    SELECT hash FROM eth_firehose.blocks WHERE block_num < 10
+    SELECT hash FROM eth_rpc.blocks WHERE block_num < 10
     UNION ALL
-    SELECT hash FROM eth_firehose.blocks WHERE block_num > 10
+    SELECT hash FROM eth_rpc.blocks WHERE block_num > 10
     SETTINGS stream = true
   streamingOptions:
     atLeastRows: 1
