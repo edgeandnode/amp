@@ -47,7 +47,7 @@ services:
       - "8545:8545"
 
   ampsync:
-    # Build from workspace root to include all dependencies
+    # Multi-stage build - compiles inside Docker for correct architecture
     build:
       context: ../../../../..
       dockerfile: crates/bin/ampsync/Dockerfile

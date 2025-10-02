@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack --port 3001",
     "build": "next build --turbopack",
-    "start": "next start",
+    "start": "next start --port 3001",
     "lint": "eslint",
     "lint:fix": "pnpm run lint --fix",
     "check": "tsc -b tsconfig.json",

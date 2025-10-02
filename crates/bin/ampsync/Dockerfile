@@ -1,17 +1,16 @@
 # Build stage
 FROM rustlang/rust:nightly-slim AS builder
 
-# Install build dependencies
+# Install build dependencies (including curl, python3 for v8, and cmake for snmalloc)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     build-essential \
-    git \
     curl \
+    python3 \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
 # Copy workspace files

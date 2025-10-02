@@ -1,6 +1,10 @@
+mod batch_utils;
 mod conn;
+mod dataset_definition;
 mod manifest;
 mod pgpq;
+mod schema_inference;
+mod sql_validator;
 mod sync_engine;
 
 use std::{env, path::PathBuf, sync::Arc};
@@ -12,6 +16,7 @@ use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
 use tracing::{error, info, warn};
 
 use crate::{
+    batch_utils::convert_nanosecond_timestamps,
     conn::{DEFAULT_POOL_SIZE, DbConnPool},
     sync_engine::AmpsyncDbEngine,
 };
@@ -111,9 +116,21 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                             metadata.ranges
                         );
 
+                        // Convert nanosecond timestamps to microseconds for PostgreSQL compatibility
+                        let converted_batch = match convert_nanosecond_timestamps(&data) {
+                            Ok(batch) => batch,
+                            Err(e) => {
+                                error!(
+                                    "Failed to convert timestamps for table '{}': {}",
+                                    table_name_clone, e
+                                );
+                                continue;
+                            }
+                        };
+
                         // High-performance bulk insert using pgpq
                         if let Err(e) = ampsync_db_engine_clone
-                            .insert_record_batch(&table_name_clone, &data)
+                            .insert_record_batch(&table_name_clone, &converted_batch)
                             .await
                         {
                             error!(
@@ -233,12 +250,13 @@ impl AmpsyncConfig {
             );
         }
 
-        // Load and parse the manifest
-        let manifest = Arc::new(manifest::load_manifest(&dataset_manifest).await?);
-
-        // Get Nozzle configuration
+        // Get Nozzle configuration (needed for schema inference)
         let nozzle_endpoint =
             env::var("NOZZLE_ENDPOINT").unwrap_or_else(|_| "http://localhost:1602".to_string());
+
+        // Load and parse the manifest (with schema inference from Nozzle)
+        let manifest =
+            Arc::new(manifest::load_manifest(&dataset_manifest, &nozzle_endpoint).await?);
 
         // First, try to get DATABASE_URL directly
         if let Ok(database_url) = env::var("DATABASE_URL") {

@@ -21,3 +21,5 @@ build/
 .idea
 .vscode/
 config.toml
+
+crates/bin/ampsync/bin*

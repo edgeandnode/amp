@@ -2,7 +2,7 @@ import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from "@electric-sql/client";
 
 import { env } from "@/env/server";
 
-const electricSqlUrl = new URL("/v1/shape", env.ELECTRIC_URL);
+const electricSqlUrl = new URL(`${env.ELECTRIC_URL}v1/shape`);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

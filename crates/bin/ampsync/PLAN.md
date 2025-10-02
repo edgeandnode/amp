@@ -4,30 +4,34 @@
 
 Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreSQL database.
 
-## Current Status: **Phase 5 Complete - Enterprise-Grade Sync Engine**
+## Current Status: **Phase 6 Complete - Schema Inference & Developer Experience**
 
 ### Completed Features:
 1. **JS/TS Config Parsing** - Advanced oxc_parser AST-based parsing for nozzle.config files
-2. **Manifest Loading** - Converts parsed config to Rust Manifest struct with Arc sharing
-3. **Database Schema Creation** - Comprehensive Arrow → PostgreSQL DDL conversion
-4. **Table Management** - Idempotent table creation with IF NOT EXISTS
-5. **Connection Pooling** - Production-ready sqlx PostgreSQL connection management with exponential backoff
-6. **Error Handling** - Robust error propagation and logging throughout
-7. **Streaming Implementation** - ResultStream queries with with_reorg for each table
-8. **High-Performance Data Insertion** - pgpq-based bulk copy for maximum throughput
-9. **Concurrent Processing** - Per-table async tasks for parallel data processing
-10. **Graceful Shutdown** - Docker-compatible signal handling (SIGTERM/SIGINT)
-11. **Clean Architecture** - Separation of concerns with pure functions and stateful operations
-12. **Blockchain Reorg Handling** - Automatic deletion of invalidated data with block range tracking
-13. **Exponential Backoff Retry Logic** - Database connection and operation retry with exponential backoff
-14. **Adaptive Batch Sizing** - Dynamic batch optimization based on performance metrics and memory constraints
-15. **Latest Dependencies** - Updated to oxc 0.93 (latest parser/AST libraries)
-16. **Clean Codebase** - Removed unused functions and optimized module structure
+2. **Two-Tier Architecture** - Separate user-facing DatasetDefinition from internal Manifest
+3. **Automatic Schema Inference** - Queries Nozzle server to infer Arrow schemas automatically
+4. **SQL Validation** - Rejects non-incremental queries (ORDER BY not supported)
+5. **Manifest Transformation** - Converts simple user config to full manifest with inferred schemas
+6. **Database Schema Creation** - Comprehensive Arrow → PostgreSQL DDL conversion
+7. **Table Management** - Idempotent table creation with IF NOT EXISTS
+8. **Connection Pooling** - Production-ready sqlx PostgreSQL connection management with exponential backoff
+9. **Error Handling** - Robust error propagation and logging throughout
+10. **Streaming Implementation** - ResultStream queries with with_reorg for each table
+11. **High-Performance Data Insertion** - pgpq-based bulk copy for maximum throughput
+12. **Concurrent Processing** - Per-table async tasks for parallel data processing
+13. **Graceful Shutdown** - Docker-compatible signal handling (SIGTERM/SIGINT)
+14. **Clean Architecture** - Separation of concerns with pure functions and stateful operations
+15. **Blockchain Reorg Handling** - Automatic deletion of invalidated data with block range tracking
+16. **Exponential Backoff Retry Logic** - Database connection and operation retry with exponential backoff
+17. **Adaptive Batch Sizing** - Dynamic batch optimization based on performance metrics and memory constraints
+18. **Latest Dependencies** - Updated to oxc 0.93 (latest parser/AST libraries)
+19. **Clean Codebase** - Removed unused functions and optimized module structure
 
-### Final Phase: Containerization
-- Docker containerization for production deployment
-- Multi-stage build optimization
-- Health checks and container best practices
+### Final Phase: Containerization ✅ **COMPLETED**
+- ✅ Optimized Docker build strategy with pre-built binaries
+- ✅ Minimal runtime image (debian:bookworm-slim)
+- ✅ Security best practices (non-root user, minimal dependencies)
+- ✅ Clean build process (binary built outside Docker, copied in)
 
 ## Architecture Context
 
@@ -41,11 +45,14 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 
 ## Goals & Tasks
 
-### 1. Docker Binary Setup
+### 1. Docker Binary Setup ✅ **COMPLETED**
 
-- [ ] Build a binary that is runnable as a Docker image
-- [ ] Configure Dockerfile with proper base image and dependencies
-- [ ] Set up proper entry point for the binary
+- [x] Build a binary that is runnable as a Docker image
+- [x] Configure Dockerfile with proper base image and dependencies
+- [x] Set up proper entry point for the binary
+- [x] Implement optimized build strategy (binary built outside Docker)
+- [x] Create build.sh script for local development
+- [x] Add .dockerignore for minimal image size
 
 ### 2. Configuration
 
@@ -120,11 +127,12 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 2. Connect listener events to database operations
 3. Add proper logging and monitoring
 
-### Phase 4: Containerization
+### Phase 4: Containerization ✅ **COMPLETED**
 
-1. Create Dockerfile
-2. Set up multi-stage build for optimization
-3. Configure health checks
+1. ✅ Create optimized Dockerfile (minimal runtime image)
+2. ✅ Implement efficient build strategy (binary built outside Docker, copied in)
+3. ✅ Configure security best practices (non-root user, minimal dependencies)
+4. ✅ Set up local development workflow with build.sh script
 
 ## Key Considerations
 
@@ -244,6 +252,45 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 
 ## 🚀 **Latest Major Accomplishments**
 
+### Phase 6: Schema Inference & Developer Experience (NEW!)
+
+#### Two-Tier Architecture
+- **User-Facing Format (DatasetDefinition)**: Simple structures developers write in nozzle.config
+  - Tables only require `sql` field - no schemas, no complex wrappers
+  - Functions and dependencies use string types for simplicity
+  - Focused on developer productivity and ease of use
+- **Internal Format (Manifest)**: Complete manifest with inferred schemas
+  - Full Arrow schema definitions for each table
+  - Proper type wrappers for names, versions, dependencies
+  - Ready for production use with all metadata
+
+#### Automatic Schema Inference System
+- **Query-Based Inference**: Executes SQL with `LIMIT 0` on Nozzle server to get schema without data
+- **Arrow Schema Extraction**: Extracts complete Arrow schema from query results
+- **Zero Configuration**: Developers don't write schemas - they're automatically derived
+- **Type Safety**: Arrow schemas ensure type correctness between Nozzle and PostgreSQL
+- **Module**: `src/schema_inference.rs` handles all schema inference logic
+
+#### SQL Validation Layer
+- **DataFusion Parser Integration**: Uses DataFusion's SQL parser for robust validation
+- **ORDER BY Detection**: Recursively validates queries and subqueries for non-incremental patterns
+- **Clear Error Messages**: Provides helpful error messages when validation fails
+- **Module**: `src/sql_validator.rs` with comprehensive test coverage
+
+#### Transformation Pipeline
+- **Parse**: Load DatasetDefinition from nozzle.config (JSON/TS/JS)
+- **Validate**: Check all SQL queries for ORDER BY clauses
+- **Infer**: Query Nozzle server to get Arrow schemas for each table
+- **Transform**: Convert DatasetDefinition → Manifest with inferred schemas
+- **Execute**: Stream data using complete manifest
+
+#### Developer Benefits
+- **Write Less Code**: Just write SQL queries, schemas are automatic
+- **No Schema Duplication**: Single source of truth (your SQL queries)
+- **Fast Iteration**: Change SQL, restart ampsync - schemas update automatically
+- **Type Safety**: Arrow schemas ensure correctness between systems
+- **Clear Errors**: Validation happens early with helpful error messages
+
 ### Performance-Optimized Data Pipeline
 - **pgpq Integration**: Implemented high-performance bulk data insertion using PostgreSQL's COPY protocol
 - **Binary Format**: Arrow RecordBatches are encoded directly to PostgreSQL binary format for maximum throughput
@@ -311,3 +358,34 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 - **Code Cleanup**: Removed unused functions to eliminate dead code warnings
 - **Clean Compilation**: Zero compilation warnings with lean, focused API surface
 - **Test Coverage**: Maintained 100% test pass rate through all refactoring
+
+## Docker Build Process
+
+### Multi-Stage Build Strategy
+The Docker setup uses a multi-stage build for consistent, cross-platform builds.
+
+### Build Process
+1. **Builder Stage**:
+   - Base: `rustlang/rust:nightly-slim`
+   - Installs build dependencies: cmake, curl, python3, build-essential
+   - Compiles release binary with `cargo build --release -p ampsync`
+   - Self-contained build environment
+
+2. **Runtime Stage**:
+   - Base: `debian:bookworm-slim` (minimal runtime)
+   - Runtime deps: `ca-certificates`, `libssl3`
+   - Security: non-root user (uid 1001)
+   - Copies only the compiled binary from builder stage
+
+3. **Local Development**:
+   ```bash
+   cd crates/bin/ampsync/examples/with-electricsql
+   docker compose up                             # Builds and runs
+   ```
+
+### Benefits
+- **Consistent Builds**: Same build environment across all platforms
+- **Minimal Image Size**: Runtime image only contains binary and essential libraries
+- **Cross-Platform**: Automatically builds for the correct architecture (x86_64, aarch64)
+- **No Cross-Compilation**: Docker handles platform-specific compilation
+- **Security**: Runs as non-root user with minimal attack surface

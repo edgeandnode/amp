@@ -37,6 +37,7 @@ pub enum Encoder<'a> {
     UInt8(UInt8Encoder<'a>),
     UInt16(UInt16Encoder<'a>),
     UInt32(UInt32Encoder<'a>),
+    UInt64(UInt64Encoder<'a>),
     Int8(Int8Encoder<'a>),
     Int16(Int16Encoder<'a>),
     Int32(Int32Encoder<'a>),
@@ -44,6 +45,7 @@ pub enum Encoder<'a> {
     Float16(Float16Encoder<'a>),
     Float32(Float32Encoder<'a>),
     Float64(Float64Encoder<'a>),
+    Decimal128(Decimal128Encoder<'a>),
     TimestampMicrosecond(TimestampMicrosecondEncoder<'a>),
     TimestampMillisecond(TimestampMillisecondEncoder<'a>),
     TimestampSecond(TimestampSecondEncoder<'a>),
@@ -56,6 +58,7 @@ pub enum Encoder<'a> {
     DurationSecond(DurationSecondEncoder<'a>),
     Binary(BinaryEncoder<'a>),
     LargeBinary(LargeBinaryEncoder<'a>),
+    FixedSizeBinary(FixedSizeBinaryEncoder<'a>),
     String(StringEncoder<'a>),
     LargeString(LargeStringEncoder<'a>),
     List(ListEncoder<'a>),
@@ -161,6 +164,99 @@ impl_encode!(
 );
 
 #[derive(Debug)]
+pub struct UInt64Encoder<'a> {
+    arr: &'a arrow_array::UInt64Array,
+}
+impl<'a> Encode for UInt64Encoder<'a> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+        if self.arr.is_null(row) {
+            buf.put_i32(-1)
+        } else {
+            let value = self.arr.value(row);
+
+            // PostgreSQL NUMERIC binary format (all fields as i16):
+            // - ndigits (i16): number of base-10000 digits
+            // - weight (i16): weight of first digit (10000^weight)
+            // - sign (i16): NUMERIC_POS = 0x0000, NUMERIC_NEG = 0x4000, NUMERIC_NAN = 0xC000
+            // - dscale (i16): display scale
+            // - digits (i16[]): base-10000 digits
+
+            const NUMERIC_POS: i16 = 0x0000;
+
+            // Handle zero as a special case
+            if value == 0 {
+                // Zero is encoded with ndigits=0, weight=0, sign=NUMERIC_POS, dscale=0
+                let size = 8; // Just the header, no digits
+                buf.put_i32(size as i32);
+                buf.put_i16(0); // ndigits
+                buf.put_i16(0); // weight
+                buf.put_i16(NUMERIC_POS); // sign
+                buf.put_i16(0); // dscale (scale is 0 for integers)
+                return Ok(());
+            }
+
+            // Convert to base-10000 digits
+            let mut digits = Vec::new();
+            let mut remaining = value;
+            while remaining > 0 {
+                digits.push((remaining % 10000) as i16);
+                remaining /= 10000;
+            }
+
+            // Reverse to get most significant digit first
+            digits.reverse();
+
+            let ndigits = digits.len() as i16;
+            let weight = (ndigits - 1) as i16; // Weight is position of first digit
+            let dscale = 0i16; // Scale is 0 for integers
+
+            // Calculate total size: 4 header i16s + (ndigits * 2 bytes)
+            let size = 8 + (ndigits as usize * 2);
+            buf.put_i32(size as i32);
+
+            // Write header (all as i16)
+            buf.put_i16(ndigits);
+            buf.put_i16(weight);
+            buf.put_i16(NUMERIC_POS);
+            buf.put_i16(dscale);
+
+            // Write digits
+            for digit in digits {
+                buf.put_i16(digit);
+            }
+        }
+        Ok(())
+    }
+    fn size_hint(&self) -> Result<usize, ErrorKind> {
+        // Calculate size for binary NUMERIC format
+        let mut total = 0;
+        for row in 0..self.arr.len() {
+            if !self.arr.is_null(row) {
+                let value = self.arr.value(row);
+
+                // Count base-10000 digits
+                let mut ndigits = 0;
+                let mut remaining = value;
+                loop {
+                    ndigits += 1;
+                    remaining /= 10000;
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+
+                // Size: length(4) + header(8) + digits(ndigits * 2)
+                total += 4 + 8 + (ndigits * 2);
+            } else {
+                // Null value
+                total += 4;
+            }
+        }
+        Ok(total)
+    }
+}
+
+#[derive(Debug)]
 pub struct Int8Encoder<'a> {
     arr: &'a arrow_array::Int8Array,
 }
@@ -236,6 +332,111 @@ impl_encode!(
     identity,
     BufMut::put_f64
 );
+
+#[derive(Debug)]
+pub struct Decimal128Encoder<'a> {
+    arr: &'a arrow_array::Decimal128Array,
+    #[allow(dead_code)]
+    field: String,
+}
+
+impl<'a> Encode for Decimal128Encoder<'a> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+        if self.arr.is_null(row) {
+            buf.put_i32(-1);
+        } else {
+            let value = self.arr.value(row);
+            let scale = self.arr.scale() as i16;
+
+            // PostgreSQL NUMERIC binary format (all fields as i16):
+            // - ndigits (i16): number of base-10000 digits
+            // - weight (i16): weight of first digit (10000^weight)
+            // - sign (i16): NUMERIC_POS = 0x0000, NUMERIC_NEG = 0x4000, NUMERIC_NAN = 0xC000
+            // - dscale (i16): display scale
+            // - digits (i16[]): base-10000 digits
+
+            const NUMERIC_POS: i16 = 0x0000;
+            const NUMERIC_NEG: i16 = 0x4000;
+
+            // Handle zero as a special case
+            if value == 0 {
+                // Zero is encoded with ndigits=0, weight=0, sign=NUMERIC_POS, dscale=0
+                let size = 8; // Just the header, no digits
+                buf.put_i32(size as i32);
+                buf.put_i16(0); // ndigits
+                buf.put_i16(0); // weight
+                buf.put_i16(NUMERIC_POS); // sign
+                buf.put_i16(scale); // dscale
+                return Ok(());
+            }
+
+            // Convert to absolute value and track sign
+            let (abs_value, sign) = if value < 0 {
+                (value.abs(), NUMERIC_NEG)
+            } else {
+                (value, NUMERIC_POS)
+            };
+
+            // Convert to base-10000 digits
+            let mut digits = Vec::new();
+            let mut remaining = abs_value;
+            while remaining > 0 {
+                digits.push((remaining % 10000) as i16);
+                remaining /= 10000;
+            }
+
+            // Reverse to get most significant digit first
+            digits.reverse();
+
+            let ndigits = digits.len() as i16;
+            let weight = (ndigits - 1) as i16; // Weight is position of first digit
+            let dscale = scale;
+
+            // Calculate total size: 4 header i16s + (ndigits * 2 bytes)
+            let size = 8 + (ndigits as usize * 2);
+            buf.put_i32(size as i32);
+
+            // Write header (all as i16)
+            buf.put_i16(ndigits);
+            buf.put_i16(weight);
+            buf.put_i16(sign);
+            buf.put_i16(dscale);
+
+            // Write digits
+            for digit in digits {
+                buf.put_i16(digit);
+            }
+        }
+        Ok(())
+    }
+
+    fn size_hint(&self) -> Result<usize, ErrorKind> {
+        // Calculate size for binary NUMERIC format
+        let mut total = 0;
+        for row in 0..self.arr.len() {
+            if !self.arr.is_null(row) {
+                let value = self.arr.value(row).abs();
+
+                // Count base-10000 digits
+                let mut ndigits = 0;
+                let mut remaining = value;
+                loop {
+                    ndigits += 1;
+                    remaining /= 10000;
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+
+                // Size = 4 (length prefix) + 8 (4 x i16 header) + (ndigits * 2)
+                total += 4 + 8 + (ndigits * 2);
+            } else {
+                total += 4; // 4 bytes for -1 (null indicator)
+            }
+        }
+        Ok(total)
+    }
+}
 
 const PG_BASE_TIMESTAMP_OFFSET_US: i64 = 946_684_800_000_000; // microseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 const PG_BASE_TIMESTAMP_OFFSET_MS: i64 = 946_684_800_000; // milliseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
@@ -480,6 +681,35 @@ impl<'a, T: OffsetSizeTrait> Encode for GenericBinaryEncoder<'a, T> {
 
 type BinaryEncoder<'a> = GenericBinaryEncoder<'a, i32>;
 type LargeBinaryEncoder<'a> = GenericBinaryEncoder<'a, i64>;
+
+#[derive(Debug)]
+pub struct FixedSizeBinaryEncoder<'a> {
+    arr: &'a arrow_array::FixedSizeBinaryArray,
+    field: String,
+}
+
+impl<'a> Encode for FixedSizeBinaryEncoder<'a> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+        if self.arr.is_null(row) {
+            buf.put_i32(-1);
+        } else {
+            let v = self.arr.value(row);
+            let len = v.len();
+            match i32::try_from(len) {
+                Ok(l) => buf.put_i32(l),
+                Err(_) => return Err(ErrorKind::field_too_large(&self.field, len)),
+            }
+            buf.extend_from_slice(v);
+        }
+        Ok(())
+    }
+    fn size_hint(&self) -> Result<usize, ErrorKind> {
+        let value_len = self.arr.value_length() as usize;
+        let null_count = self.arr.null_count();
+        let item_count = self.arr.len();
+        Ok((item_count - null_count) * value_len + item_count * 4)
+    }
+}
 
 #[derive(Debug)]
 pub struct GenericStringEncoder<'a, T: OffsetSizeTrait> {
@@ -764,6 +994,18 @@ impl_encoder_builder_stateless!(
 );
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UInt64EncoderBuilder {
+    field: Arc<Field>,
+}
+impl_encoder_builder_stateless!(
+    UInt64EncoderBuilder,
+    Encoder::UInt64,
+    UInt64Encoder,
+    PostgresType::Numeric,
+    |dt: &DataType| matches!(dt, DataType::UInt64)
+);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Int8EncoderBuilder {
     field: Arc<Field>,
     output: PostgresType,
@@ -847,6 +1089,18 @@ impl_encoder_builder_stateless!(
     Float64Encoder,
     PostgresType::Float8,
     |dt: &DataType| matches!(dt, DataType::Float64)
+);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decimal128EncoderBuilder {
+    field: Arc<Field>,
+}
+impl_encoder_builder_stateless_with_field!(
+    Decimal128EncoderBuilder,
+    Encoder::Decimal128,
+    Decimal128Encoder,
+    PostgresType::Numeric,
+    |dt: &DataType| matches!(dt, DataType::Decimal128(_, _))
 );
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1097,6 +1351,18 @@ impl_encoder_builder_stateless_with_field!(
     |dt: &DataType| matches!(dt, DataType::LargeBinary)
 );
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FixedSizeBinaryEncoderBuilder {
+    field: Arc<Field>,
+}
+impl_encoder_builder_stateless_with_field!(
+    FixedSizeBinaryEncoderBuilder,
+    Encoder::FixedSizeBinary,
+    FixedSizeBinaryEncoder,
+    PostgresType::Bytea,
+    |dt: &DataType| matches!(dt, DataType::FixedSizeBinary(_))
+);
+
 macro_rules! impl_list_encoder_builder {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident) => {
         #[allow(dead_code)]
@@ -1186,6 +1452,7 @@ pub enum EncoderBuilder {
     UInt8(UInt8EncoderBuilder),
     UInt16(UInt16EncoderBuilder),
     UInt32(UInt32EncoderBuilder),
+    UInt64(UInt64EncoderBuilder),
     Int8(Int8EncoderBuilder),
     Int16(Int16EncoderBuilder),
     Int32(Int32EncoderBuilder),
@@ -1193,6 +1460,7 @@ pub enum EncoderBuilder {
     Float16(Float16EncoderBuilder),
     Float32(Float32EncoderBuilder),
     Float64(Float64EncoderBuilder),
+    Decimal128(Decimal128EncoderBuilder),
     TimestampMicrosecond(TimestampMicrosecondEncoderBuilder),
     TimestampMillisecond(TimestampMillisecondEncoderBuilder),
     TimestampSecond(TimestampSecondEncoderBuilder),
@@ -1207,6 +1475,7 @@ pub enum EncoderBuilder {
     LargeString(LargeStringEncoderBuilder),
     Binary(BinaryEncoderBuilder),
     LargeBinary(LargeBinaryEncoderBuilder),
+    FixedSizeBinary(FixedSizeBinaryEncoderBuilder),
     List(ListEncoderBuilder),
     LargeList(LargeListEncoderBuilder),
 }
@@ -1219,6 +1488,7 @@ impl EncoderBuilder {
             DataType::UInt8 => Self::UInt8(UInt8EncoderBuilder { field }),
             DataType::UInt16 => Self::UInt16(UInt16EncoderBuilder { field }),
             DataType::UInt32 => Self::UInt32(UInt32EncoderBuilder { field }),
+            DataType::UInt64 => Self::UInt64(UInt64EncoderBuilder { field }),
             // Note that rust-postgres encodes int8 to CHAR by default
             DataType::Int8 => Self::Int8(Int8EncoderBuilder {
                 field,
@@ -1230,6 +1500,7 @@ impl EncoderBuilder {
             DataType::Float16 => Self::Float16(Float16EncoderBuilder { field }),
             DataType::Float32 => Self::Float32(Float32EncoderBuilder { field }),
             DataType::Float64 => Self::Float64(Float64EncoderBuilder { field }),
+            DataType::Decimal128(_, _) => Self::Decimal128(Decimal128EncoderBuilder { field }),
             DataType::Timestamp(unit, _) => match unit {
                 TimeUnit::Nanosecond => {
                     return Err(ErrorKind::type_unsupported(
@@ -1292,8 +1563,9 @@ impl EncoderBuilder {
                 output: StringOutputType::Text,
             }),
             DataType::Binary => Self::Binary(BinaryEncoderBuilder { field }),
-            DataType::LargeBinary | DataType::FixedSizeBinary(_) => {
-                Self::LargeBinary(LargeBinaryEncoderBuilder { field })
+            DataType::LargeBinary => Self::LargeBinary(LargeBinaryEncoderBuilder { field }),
+            DataType::FixedSizeBinary(_) => {
+                Self::FixedSizeBinary(FixedSizeBinaryEncoderBuilder { field })
             }
             DataType::List(inner) => {
                 if matches!(
@@ -1338,5 +1610,121 @@ impl EncoderBuilder {
             }
         };
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow_array::{Decimal128Array, FixedSizeBinaryArray, UInt64Array};
+    use arrow_schema::{DataType, Field};
+    use bytes::BytesMut;
+
+    use super::*;
+
+    #[test]
+    fn test_uint64_encoder() {
+        let array = UInt64Array::from(vec![0, 100, u64::MAX / 2, i64::MAX as u64]);
+        let field = Arc::new(Field::new("test", DataType::UInt64, false));
+        let builder = UInt64EncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+        encoder.encode(1, &mut buf).unwrap();
+        encoder.encode(2, &mut buf).unwrap();
+        encoder.encode(3, &mut buf).unwrap();
+
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_uint64_encoder_large_value() {
+        // Test that UInt64 can now handle the full u64 range using NUMERIC format
+        let array = UInt64Array::from(vec![u64::MAX]);
+        let field = Arc::new(Field::new("test", DataType::UInt64, false));
+        let builder = UInt64EncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // Should succeed now that we're using NUMERIC format
+        encoder.encode(0, &mut buf).unwrap();
+
+        // Verify non-zero buffer (means data was written)
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_decimal128_encoder_zero() {
+        let array = Decimal128Array::from(vec![0])
+            .with_precision_and_scale(38, 0)
+            .unwrap();
+        let field = Arc::new(Field::new("test", DataType::Decimal128(38, 0), false));
+        let builder = Decimal128EncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+
+        // Zero: length(4) + ndigits(2) + weight(2) + sign(2) + dscale(2) = 12 bytes
+        assert_eq!(buf.len(), 4 + 8);
+    }
+
+    #[test]
+    fn test_decimal128_encoder_positive() {
+        let array = Decimal128Array::from(vec![12345678])
+            .with_precision_and_scale(38, 0)
+            .unwrap();
+        let field = Arc::new(Field::new("test", DataType::Decimal128(38, 0), false));
+        let builder = Decimal128EncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+
+        assert!(buf.len() >= 4 + 8 + 2);
+    }
+
+    #[test]
+    fn test_fixed_size_binary_encoder() {
+        let values = vec![vec![0u8; 32], vec![255u8; 32], vec![42u8; 32]];
+        let array = FixedSizeBinaryArray::try_from_iter(values.into_iter()).unwrap();
+        let field = Arc::new(Field::new("test", DataType::FixedSizeBinary(32), false));
+        let builder = FixedSizeBinaryEncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+        encoder.encode(1, &mut buf).unwrap();
+        encoder.encode(2, &mut buf).unwrap();
+
+        assert_eq!(buf.len(), 108);
+    }
+
+    #[test]
+    fn test_nullable_fields() {
+        let array = UInt64Array::from(vec![Some(100), None, Some(200)]);
+        let field = Arc::new(Field::new("test", DataType::UInt64, true));
+        let builder = UInt64EncoderBuilder { field };
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+        encoder.encode(1, &mut buf).unwrap();
+        encoder.encode(2, &mut buf).unwrap();
+
+        // UInt64 now encodes as NUMERIC:
+        // Row 0 (Some(100)): 4-byte length + 8-byte header + 2-byte digit = 14 bytes
+        // Row 1 (None): 4-byte length (-1) = 4 bytes
+        // Row 2 (Some(200)): 4-byte length + 8-byte header + 2-byte digit = 14 bytes
+        // Total: 32 bytes
+        assert_eq!(buf.len(), 32);
     }
 }

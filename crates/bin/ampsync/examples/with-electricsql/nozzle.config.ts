@@ -13,7 +13,7 @@ export default defineDataset(() => ({
   },
   tables: {
     blocks: {
-      sql: `SELECT * FROM anvil.blocks ORDER BY block_num DESC`,
+      sql: `SELECT * FROM anvil.blocks`,
     },
   },
 }));

@@ -1,0 +1,58 @@
+# Rust build artifacts
+target/
+**/target/
+
+# Cargo files
+Cargo.lock
+**/Cargo.lock
+
+# Source code (not needed in the image)
+src/
+**/src/
+tests/
+**/tests/
+
+# Documentation
+*.md
+docs/
+**/docs/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+*.local
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Build scripts (not needed in image)
+build.sh
+Makefile
+justfile
+
+# Examples and development files
+examples/
+**/examples/
+
+# Keep only the bin directory with pre-built binaries
+!bin/
