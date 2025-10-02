@@ -53,6 +53,9 @@
       {"hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"}
     ]
 
+- name: deploy_sql_stream_ds
+  deploy: sql_stream_ds
+
 - name: dump_sql_stream_ds
   dataset: sql_stream_ds
   end: 15000004

@@ -10,7 +10,7 @@ use dump::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, helpers as test_helpers};
+use tests::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
 
 #[tokio::test]
 async fn sql_dataset_input_batch_size() {
@@ -92,14 +92,18 @@ impl TestCtx {
 
         let ctx = testlib::ctx::TestCtxBuilder::new(test_name)
             .with_provider_config("firehose_eth_mainnet")
-            .with_dataset_manifests(["eth_firehose", "sql_stream_ds"])
-            .with_sql_dataset_files([
-                "sql_stream_ds/even_blocks",
-                "sql_stream_ds/even_blocks_hashes_only",
-            ])
+            .with_dataset_manifests(["eth_firehose"])
             .build()
             .await
             .expect("Failed to create test context");
+
+        // Deploy the TypeScript dataset
+        let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("nozzle.config.ts"));
+        let cli = ctx.new_nozzl_cli();
+        sql_stream_ds
+            .register(&cli)
+            .await
+            .expect("Failed to register sql_stream_ds dataset");
 
         Self { ctx }
     }

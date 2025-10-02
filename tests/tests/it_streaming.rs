@@ -24,11 +24,7 @@ async fn streaming_tests_with_sql_datasets() {
     logging::init();
     let test_ctx = TestCtxBuilder::new("sql_streaming_tests_with_sql_datasets")
         .with_provider_config("firehose_eth_mainnet")
-        .with_dataset_manifests(["eth_firehose", "sql_stream_ds"])
-        .with_sql_dataset_files([
-            "sql_stream_ds/even_blocks",
-            "sql_stream_ds/even_blocks_hashes_only",
-        ])
+        .with_dataset_manifests(["eth_firehose"])
         .with_dataset_snapshots(["eth_firehose"])
         .build()
         .await
