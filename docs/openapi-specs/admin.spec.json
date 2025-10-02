@@ -1,0 +1,1583 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nozzle Admin API",
+    "description": "Administration API for Nozzle, a high-performance ETL system for blockchain data services on The Graph.\n\n## About\n\nThe Admin API provides a RESTful HTTP interface for managing Nozzle's ETL operations. This API serves as the primary administrative interface for monitoring and controlling the Nozzle data pipeline, allowing you to deploy datasets, trigger data extraction jobs, monitor job progress, manage distributed worker locations, configure external data providers, and perform operations on Parquet files and their metadata.\n\n## Key Capabilities\n\n### Dataset Management\nHandle the lifecycle of data extraction configurations and access dataset information:\n- List all registered datasets from the metadata database registry\n- Register new dataset configurations with versioning support\n- Trigger data extraction jobs for specific datasets or dataset versions\n- Retrieve dataset details including tables and active storage locations\n\n### Job Control\nControl and monitor data extraction and processing jobs:\n- List and retrieve job information with pagination\n- Trigger extraction jobs with optional end block configuration\n- Stop running jobs gracefully\n- Delete jobs in terminal states (Completed, Stopped, Failed)\n- Bulk cleanup operations for finalized jobs\n\n### Storage Management\nManage locations where dataset tables are stored:\n- Supports local filesystem, S3, GCS, and Azure Blob Storage\n- List storage locations and their associated files\n- Delete locations with comprehensive cleanup (removes files and metadata)\n- Query file information including Parquet metadata and statistics\n\n### Provider Configuration\nConfigure external blockchain data sources:\n- Create, retrieve, and delete provider configurations\n- Support for EVM RPC endpoints, Firehose streams, and Substreams packages\n- Providers are reusable across multiple dataset definitions\n- **Security Note**: Provider configurations may contain connection details; ensure sensitive information is properly managed\n\n### Schema Analysis\nValidate SQL queries and infer output schemas:\n- Validate queries against registered datasets without execution\n- Determine output schema using DataFusion's query planner\n- Useful for building dynamic query tools and validating dataset definitions\n\n## Pagination\n\nAll list endpoints use cursor-based pagination for efficient data retrieval:\n\n### Query Parameters\n- `limit`: Maximum items per page (default: 50, max: 1000)\n- `last_*_id`: Cursor from previous page's `next_cursor` field\n\n### Response Format\nPaginated responses include:\n- Array of items (e.g., `datasets`, `jobs`, `locations`, `files`)\n- `next_cursor`: Cursor for the next page (absent when no more results)\n\n### Usage Pattern\n\n**First Page Request:**\n```\nGET /jobs?limit=100\n```\n\n**First Page Response:**\n```json\n{\n  \"jobs\": [...],\n  \"next_cursor\": 12345\n}\n```\n\n**Next Page Request:**\n```\nGET /jobs?limit=100&last_job_id=12345\n```\n\n**Last Page Response:**\n```json\n{\n  \"jobs\": [...]\n  // No next_cursor field = end of results\n}\n```\n\n### Cursor Formats\n\nEndpoints use different cursor formats based on their data type:\n\n**Integer ID Cursors (64-bit integers):**\nMost endpoints use simple integer IDs as cursors:\n- Jobs: `last_job_id=12345`\n- Locations: `last_location_id=67890`\n- Files: `last_file_id=54321`\n\n**Version String Cursors:**\nDataset version endpoints use semantic version strings:\n- Example: `last_version=1.0.0`\n- Format: Standard semantic versioning\n\n**Composite String Cursors:**\nDataset listings use a composite `\"name:version\"` format:\n- Parameter: `last_dataset_id`\n- Format: `\"name:version\"` (e.g., `eth_mainnet:1.0.0`)\n- The colon (`:`) is valid per RFC 3986 and doesn't require URL encoding\n- Both encoded (`eth_mainnet%3A1.0.0`) and unencoded (`eth_mainnet:1.0.0`) formats are accepted\n- URL encoding the colon as `%3A` is recommended for maximum browser compatibility\n\nExample:\n```\nGET /datasets?limit=50&last_dataset_id=eth_mainnet:1.0.0\n```\n\n## Error Handling\n\nAll error responses follow a consistent format with:\n- `error_code`: Stable, machine-readable code (SCREAMING_SNAKE_CASE)\n- `error_message`: Human-readable error description\n\nError codes are stable across API versions and suitable for programmatic error handling. Messages may change and should only be used for display or logging.\n\n## Important Notes\n\n### Dataset Registration\nSupports two main scenarios:\n- **Derived datasets** (kind=\"manifest\"): Registered in both object store and metadata database\n- **SQL datasets** (other kinds): Dataset definitions stored in object store\n\n### Job Lifecycle\nJobs have the following terminal states that allow deletion:\n- **Completed**: Job finished successfully\n- **Stopped**: Job was manually stopped\n- **Failed**: Job encountered an error\n\nNon-terminal jobs (Scheduled, Running, StopRequested, Stopping) are protected from deletion.\n\n### Storage Locations\n- Locations can be active or inactive for queries\n- Deleting a location performs comprehensive cleanup including file removal from object store\n- Each location is associated with a specific dataset table and storage URL\n",
+    "license": {
+      "name": ""
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/datasets": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets` endpoint",
+        "description": "Retrieves and returns a paginated list of datasets from the metadata database registry.\n\n## Query Parameters\n- `limit`: Maximum number of datasets to return (default: 50, max: 1000)\n- `last_dataset_id`: Last dataset from previous page for pagination in \"name:version\" format (e.g., \"eth_mainnet:1.0.0\")\n  - The colon `:` character is valid per RFC 3986 and doesn't require URL encoding\n  - Both encoded (`eth_mainnet%3A1.0.0`) and unencoded (`eth_mainnet:1.0.0`) formats are accepted\n  - For maximum compatibility across browsers, URL encoding the colon as `%3A` is recommended\n\n## Response\n- **200 OK**: Returns paginated dataset data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000) or cursor format\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters format\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides comprehensive dataset information from the registry including:\n- Dataset names, versions, and owners from the metadata database\n- Cursor-based pagination for efficient traversal of large dataset lists\n- Proper ordering by dataset name ASC and version DESC (newest first within each dataset)\n\nThe handler:\n- Accepts query parameters for pagination (limit, last_dataset_id)\n- Validates the limit parameter (max 1000)\n- Parses and validates cursor format (\"name:version\")\n- Calls the metadata DB to list datasets with pagination\n- Returns a structured response with datasets and next cursor",
+        "operationId": "datasets_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of datasets to return (default: 50, max: 1000)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "last_dataset_id",
+            "in": "query",
+            "description": "Last dataset from the previous page for pagination in \"name:version\" format",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns paginated dataset data with next cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid limit parameter or cursor format"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `POST /datasets` endpoint",
+        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{name}/dump` - for latest version\n- `POST /datasets/{name}/versions/{version}/dump` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Version of the dataset to register (must be valid version string)\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **409 Conflict**: Dataset already exists with provided manifest, or manifest required but not provided\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_VALIDATION_ERROR`: Manifest name/version doesn't match request parameters\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not \"manifest\" or \"evm-rpc\" (only derived and evm-rpc datasets supported)\n- `STORE_ERROR`: Failed to load or access dataset store\n\n## Behavior\nThis handler supports derived and evm-rpc dataset registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Other raw datasets** (firehose, substreams, etc.) are **not supported** and will return an error\n- **Legacy SQL datasets** are **not supported** and will return an error\n\nBoth dataset types are registered using the same underlying `register_manifest` method to ensure consistency.\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is \"manifest\" or \"evm-rpc\"\n- Attempts to load existing dataset from store\n- Handles manifest registration in the server's local registry\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{name}/dump` or `POST /datasets/{name}/versions/{version}/dump` - Schedule data extraction",
+        "operationId": "datasets_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Dataset successfully registered"
+          },
+          "400": {
+            "description": "Invalid request format or manifest"
+          },
+          "409": {
+            "description": "Dataset already exists"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/datasets/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for dataset retrieval endpoint without version",
+        "description": "Retrieves detailed information about the latest version of a specific dataset,\nincluding its tables and active locations.\nURL pattern: `GET /datasets/{name}`\n\n## Path Parameters\n- `name`: Dataset name\n\n## Response\n- **200 OK**: Returns the dataset information as JSON\n- **400 Bad Request**: Invalid dataset name or invalid request parameters\n- **404 Not Found**: Dataset with the given name does not exist\n- **500 Internal Server Error**: Dataset store or database connection error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name is not valid (invalid name format or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n- `METADATA_DB_ERROR`: Database error while retrieving active locations for tables",
+        "operationId": "datasets_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved dataset information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{id}/dump": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for dataset dump endpoint without version",
+        "description": "Triggers a data extraction job for the specified dataset using the latest version.\nURL pattern: `POST /datasets/{name}/dump`\n\n## Path Parameters\n- `name`: Dataset name\n\n## Request Body\n- `end_block`: (optional) The last block number to extract (if not specified, extracts indefinitely)\n\n## Response\n- **200 OK**: Returns the ID of the scheduled dump job\n- **400 Bad Request**: Invalid dataset name or invalid request parameters\n- **404 Not Found**: Dataset with the given name does not exist\n- **500 Internal Server Error**: Scheduler, database, or store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name is not valid (invalid name format or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name\n- `DATASET_STORE_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule the dump job",
+        "operationId": "datasets_dump",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DumpOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully scheduled dump job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DumpResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name or request parameters"
+          },
+          "404": {
+            "description": "Dataset not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/datasets/{name}/versions": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{name}/versions` endpoint",
+        "description": "Retrieves and returns a paginated list of versions for a specific dataset from the metadata database registry.\n\n## Path Parameters\n- `name`: Dataset name\n\n## Query Parameters\n- `limit`: Maximum number of versions to return (default: 50, max: 1000)\n- `last_version`: Last version from previous page for pagination - version string (e.g., \"1.0.0\")\n\n## Response\n- **200 OK**: Returns paginated dataset versions with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000) or cursor format\n- **404 Not Found**: Dataset with the given name does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_SELECTOR`: Invalid dataset name format\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters format\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides comprehensive dataset version information from the registry including:\n- All versions for the specified dataset from the metadata database\n- Cursor-based pagination for efficient traversal of large version lists\n- Proper ordering by version DESC (newest first)\n\nThe handler:\n- Accepts path parameter for dataset name and query parameters for pagination (limit, last_version)\n- Validates the dataset name and limit parameter (max 1000)\n- Parses and validates version string format\n- Calls the metadata DB to list dataset versions with pagination\n- Returns a structured response with versions and next cursor",
+        "operationId": "datasets_list_versions",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of dataset versions to return (default: 50, max: 1000)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "last_version",
+            "in": "query",
+            "description": "Last version from the previous page for pagination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns paginated dataset versions with next cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetVersionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid limit parameter or cursor format"
+          },
+          "404": {
+            "description": "Dataset with the given name does not exist"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/datasets/{name}/versions/{version}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for dataset retrieval endpoint with specific version",
+        "description": "Retrieves detailed information about a specific version of a dataset,\nincluding its tables and active locations.\nURL pattern: `GET /datasets/{name}/versions/{version}`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Response\n- **200 OK**: Returns the dataset information as JSON\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store or database connection error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n- `METADATA_DB_ERROR`: Database error while retrieving active locations for tables",
+        "operationId": "datasets_get_version",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Dataset version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved dataset information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/versions/{version}/dump": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for dataset dump endpoint with specific version",
+        "description": "Triggers a data extraction job for the specified dataset version.\nURL pattern: `POST /datasets/{name}/versions/{version}/dump`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Request Body\n- `end_block`: (optional) The last block number to extract (if not specified, extracts indefinitely)\n\n## Response\n- **200 OK**: Returns the ID of the scheduled dump job\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Scheduler, database, or store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule the dump job",
+        "operationId": "datasets_dump_version",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Dataset version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DumpOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully scheduled dump job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DumpResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name or version"
+          },
+          "404": {
+            "description": "Dataset not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/files/{file_id}": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Handler for the `GET /files/{file_id}` endpoint",
+        "description": "Retrieves and returns a specific file by its ID from the metadata database.\n\n## Path Parameters\n- `file_id`: The unique identifier of the file to retrieve (must be a positive integer)\n\n## Response\n- **200 OK**: Returns the file information as JSON\n- **400 Bad Request**: Invalid file ID format (not a number, zero, or negative)\n- **404 Not Found**: File with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_FILE_ID`: The provided ID is not a valid positive integer\n- `FILE_NOT_FOUND`: No file exists with the given ID\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the file ID from the URL path\n- Queries the metadata database for the file with location information\n- Returns appropriate HTTP status codes and error messages",
+        "operationId": "files_get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "description": "File ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved file information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid file ID"
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs` endpoint",
+        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Accepts query parameters for pagination (limit, last_job_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list jobs with pagination\n- Returns a structured response with jobs and next cursor",
+        "operationId": "jobs_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of jobs to return (default: 50, max: 1000)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "last_job_id",
+            "in": "query",
+            "description": "ID of the last job from the previous page for pagination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `DELETE /jobs?status=<filter>` endpoint",
+        "description": "Deletes jobs based on status filter. Supports deleting jobs by various status criteria.\n\n## Query Parameters\n- `status=terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)\n- `status=completed`: Delete all completed jobs\n- `status=stopped`: Delete all stopped jobs\n- `status=error`: Delete all failed jobs\n\n## Response\n- **204 No Content**: Operation completed successfully\n- **400 Bad Request**: Invalid or missing status query parameter\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_QUERY_PARAM`: Invalid or missing status parameter\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides bulk job cleanup with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) are deleted\n- Non-terminal jobs are completely protected from deletion\n- Database layer ensures atomic bulk deletion\n- Safe to call even when no terminal jobs exist\n\n## Terminal States\nJobs are deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (never deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state\n\n## Usage\nThis endpoint is typically used for:\n- Periodic cleanup of completed jobs\n- Administrative maintenance\n- Freeing up database storage",
+        "operationId": "jobs_delete_many",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status filter for jobs to delete",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/String"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Jobs deleted successfully"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}` endpoint",
+        "description": "Retrieves and returns a specific job by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the job to retrieve (must be a valid JobId)\n\n## Response\n- **200 OK**: Returns the job information as JSON\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the job ID from the URL path\n- Queries the metadata database for the job with full details\n- Returns appropriate HTTP status codes and error messages",
+        "operationId": "jobs_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `DELETE /jobs/{id}` endpoint",
+        "description": "Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).\nThis is a safe operation that only removes finalized jobs from the system.\n\n## Path Parameters\n- `id`: The unique identifier of the job to delete (must be a valid JobId)\n\n## Response\n- **204 No Content**: Job was successfully deleted\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job exists but is not in a terminal state\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides safe job deletion with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) can be deleted\n- Non-terminal jobs are protected from accidental deletion\n- Clear error messages distinguish between non-existent jobs and non-terminal jobs\n- Database layer ensures atomic deletion\n\n## Terminal States\nJobs can only be deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (cannot be deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state",
+        "operationId": "jobs_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Job deleted successfully"
+          },
+          "400": {
+            "description": "Invalid job ID"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "409": {
+            "description": "Job cannot be deleted (not in terminal state)"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/{id}/stop": {
+      "put": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `PUT /jobs/{id}/stop` endpoint",
+        "description": "Stops a running job using the specified job ID. This is an idempotent\noperation that handles job termination requests safely.\n\n## Path Parameters\n- `id`: The unique identifier of the job to stop (must be a valid JobId)\n\n## Response\n- **200 OK**: Job stop request processed successfully\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job cannot be stopped from current state (already terminal or invalid transition)\n- **500 Internal Server Error**: Database connection or scheduler error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job is in a state that cannot be stopped (terminal or invalid transition)\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides idempotent job stopping with the following characteristics:\n- Jobs already in terminal states return conflict error\n- Only running/scheduled jobs can be transitioned to stop-requested\n- The scheduler handles atomic status updates and worker notifications\n- Database layer validates state transitions and prevents race conditions\n\n## State Transitions\nValid stop transitions:\n- Scheduled → StopRequested\n- Running → StopRequested\n\nInvalid transitions (return conflict):\n- Completed → (no change)\n- Failed → (no change)\n- Stopped → (no change)\n- Unknown → (no change)\n\nThe handler:\n- Validates and extracts the job ID from the URL path\n- Retrieves current job status to validate it exists\n- Delegates to scheduler for atomic stop operation with worker notification\n- Returns appropriate HTTP status codes and error messages",
+        "operationId": "jobs_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job stop request processed successfully"
+          },
+          "400": {
+            "description": "Invalid job ID"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "409": {
+            "description": "Job cannot be stopped from current state"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/locations": {
+      "get": {
+        "tags": [
+          "locations"
+        ],
+        "summary": "Handler for the `GET /locations` endpoint",
+        "description": "Retrieves and returns a paginated list of locations from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of locations to return (default: 50, max: 1000)\n- `last_location_id`: ID of the last location from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated location data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_REQUEST`: Invalid query parameters (limit out of range)\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Accepts query parameters for pagination (limit, last_location_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list locations with pagination\n- Returns a structured response with locations and next cursor",
+        "operationId": "locations_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of locations to return (default: 50, max: 1000)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "last_location_id",
+            "in": "query",
+            "description": "ID of the last location from the previous page for pagination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved locations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/locations/{id}": {
+      "get": {
+        "tags": [
+          "locations"
+        ],
+        "summary": "Handler for the `GET /locations/{id}` endpoint",
+        "description": "Retrieves and returns a specific location by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the location to retrieve (must be a positive integer)\n\n## Response\n- **200 OK**: Returns the location information as JSON\n- **400 Bad Request**: Invalid location ID format (not a number, zero, or negative)\n- **404 Not Found**: Location with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: The provided ID is not a valid positive integer\n- `LOCATION_NOT_FOUND`: No location exists with the given ID\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Queries the metadata database for the location\n- Returns appropriate HTTP status codes and error messages",
+        "operationId": "locations_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Location ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved location information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationInfoWithDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid location ID"
+          },
+          "404": {
+            "description": "Location not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "locations"
+        ],
+        "summary": "Handler for the `DELETE /locations/{id}` endpoint",
+        "description": "Deletes a specific location by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the location to delete (must be a positive integer)\n\n## Query Parameters\n- `force`: (optional, default: false) Force deletion even if location is active\n\n## Response\n- **204 No Content**: Location successfully deleted\n- **400 Bad Request**: Invalid location ID format or invalid query parameters\n- **404 Not Found**: Location with the given ID does not exist\n- **409 Conflict**: Location is active (without force=true) or has an ongoing job\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: The provided ID is not a valid positive integer\n- `INVALID_QUERY_PARAMETERS`: The query parameters cannot be parsed\n- `LOCATION_NOT_FOUND`: No location exists with the given ID\n- `ACTIVE_LOCATION_CONFLICT`: Location is active and cannot be deleted without force=true\n- `ONGOING_JOB_CONFLICT`: Location has an ongoing job and cannot be deleted\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Safety Checks\n- Active locations require `force=true` to be deleted\n- Locations with ongoing jobs cannot be deleted (even with force=true)\n- Users must stop active jobs before deleting associated locations\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Validates optional query parameters (force flag)\n- Performs safety checks for active locations and ongoing jobs\n- Deletes associated files from object store\n- Deletes the location from the metadata database\n- Returns appropriate HTTP status codes and error messages",
+        "operationId": "locations_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Location ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Force deletion even if location is active",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Location successfully deleted"
+          },
+          "400": {
+            "description": "Invalid location ID or query parameters"
+          },
+          "404": {
+            "description": "Location not found"
+          },
+          "409": {
+            "description": "Location is active or has ongoing job"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/locations/{location_id}/files": {
+      "get": {
+        "tags": [
+          "locations"
+        ],
+        "summary": "Handler for the `GET /locations/{location_id}/files` endpoint",
+        "description": "Retrieves and returns a paginated list of files for a specific location from the metadata database.\n\n## Path Parameters\n- `location_id`: The unique identifier of the location (must be a positive integer)\n\n## Query Parameters\n- `limit`: Maximum number of files to return (default: 50, max: 1000)\n- `last_file_id`: ID of the last file from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated file data with next cursor\n- **400 Bad Request**: Invalid location ID format or invalid limit parameter\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: Invalid location ID format\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (limit out of range)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Accepts query parameters for pagination (limit, last_file_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list files with pagination for the specified location\n- Returns a structured response with minimal file info and next cursor",
+        "operationId": "locations_list_files",
+        "parameters": [
+          {
+            "name": "location_id",
+            "in": "path",
+            "description": "Location ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved location files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationFilesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid location ID or query parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/providers": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Handler for the `GET /providers` endpoint",
+        "description": "Retrieves and returns complete information for all provider configurations from the dataset store.\n\n## Security Note\n\nThis endpoint returns the **complete provider configuration** including all configuration\ndetails stored in the provider files. Ensure that sensitive information such as API keys,\nconnection strings, and credentials are not stored in provider configuration files or\nare properly filtered before storage.\n\n## Response\n- **200 OK**: Returns provider metadata as JSON\n\nThis handler:\n- Accesses cached provider configurations from the dataset store\n- Transforms available provider configurations to API response format including full configuration\n- Cannot fail as it returns cached data; any store/parsing errors are logged during cache loading (explicit via `load_into_cache()` or lazy-loaded on first access)\n- Filters out providers that cannot be converted to valid API format (conversion errors are logged)",
+        "operationId": "providers_list",
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved all providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Handler for the `POST /providers` endpoint",
+        "description": "Creates a new provider configuration and stores it in the dataset store.\n\n## Request Body\n- JSON object containing provider configuration with required fields:\n  - `name`: The unique identifier for the provider\n  - `kind`: The type of provider (e.g., \"evm-rpc\", \"firehose\", \"substreams\")\n  - `network`: The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")\n  - Additional provider-specific configuration fields as needed\n\n## Response\n- **201 Created**: Provider created successfully\n- **400 Bad Request**: Invalid request body or provider configuration\n- **409 Conflict**: Provider with the same name already exists\n- **500 Internal Server Error**: Store error\n\n## Error Codes\n- `INVALID_REQUEST_BODY`: Malformed JSON request body\n- `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format\n- `PROVIDER_CONFLICT`: Provider name already exists\n- `STORE_ERROR`: Failed to save provider configuration\n\nThis handler:\n- Validates and extracts the provider data from the JSON request body\n- Converts additional JSON configuration fields to TOML format\n- Registers the provider configuration in the dataset store\n- Returns HTTP 201 on successful creation",
+        "operationId": "providers_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Provider created successfully"
+          },
+          "400": {
+            "description": "Invalid request body or provider configuration"
+          },
+          "409": {
+            "description": "Provider with the same name already exists"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/providers/{name}": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Handler for the `GET /providers/{name}` endpoint",
+        "description": "Retrieves and returns complete information for a specific provider configuration by its name from the dataset store.\n\n## Security Note\n\nThis endpoint returns the **complete provider configuration** including all configuration\ndetails stored in the provider files. Ensure that sensitive information such as API keys,\nconnection strings, and credentials are not stored in provider configuration files or\nare properly filtered before storage.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to retrieve\n\n## Response\n- **200 OK**: Returns the provider metadata as JSON\n- **400 Bad Request**: Invalid provider name format\n- **404 Not Found**: Provider with the given name does not exist\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `PROVIDER_NOT_FOUND`: No provider exists with the given name\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Accesses cached provider configurations from the dataset store\n- Returns 404 if provider not found in cache; store/parsing errors are logged during cache loading\n- Converts provider configuration to API response format including full configuration details\n\nNote: Empty provider names (e.g., `GET /providers/`) are handled by Axum's routing layer\nand return 404 before reaching this handler, ensuring no conflict with the get_all endpoint.",
+        "operationId": "providers_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Provider name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved provider information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider name"
+          },
+          "404": {
+            "description": "Provider not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Handler for the `DELETE /providers/{name}` endpoint",
+        "description": "Deletes a specific provider configuration by its name from the dataset store.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to delete\n\n## Response\n- **204 No Content**: Provider successfully deleted\n- **400 Bad Request**: Invalid provider name format\n- **404 Not Found**: Provider with the given name does not exist\n- **500 Internal Server Error**: Store error occurred during deletion\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `PROVIDER_NOT_FOUND`: No provider exists with the given name\n- `STORE_ERROR`: Failed to delete provider configuration from store\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Attempts to delete the provider configuration from both store and cache\n- Returns appropriate HTTP status codes and error messages\n\n## Safety Notes\n- Deletion removes both the configuration file from storage and the cached entry\n- Once deleted, the provider configuration cannot be recovered\n- Any datasets using this provider may fail until a new provider is configured",
+        "operationId": "providers_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Provider name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Provider successfully deleted"
+          },
+          "400": {
+            "description": "Invalid provider name"
+          },
+          "404": {
+            "description": "Provider not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/schema": {
+      "post": {
+        "tags": [
+          "schema"
+        ],
+        "summary": "Handler for the `/schema` endpoint that provides SQL schema analysis.",
+        "description": "This endpoint performs comprehensive SQL validation and schema inference by:\n1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser\n2. **Loading Datasets**: Retrieves actual dataset definitions from the registry\n3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets\n4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution\n5. **Special Fields**: Optionally prepends `SPECIAL_BLOCK_NUM` field for SQL datasets\n6. **Network Extraction**: Identifies which blockchain networks the query references\n\nThe validation works with real registered datasets and their actual schemas,\nensuring datasets exist, tables are valid, and column references are correct.\nThis enables accurate schema introspection for query builders and dataset development tools.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n- `is_sql_dataset`: (optional) Whether this is a SQL dataset (affects block number field inclusion)\n\n## Response\n- **200 OK**: Returns the schema and networks used by the query\n- **400 Bad Request**: SQL parse error\n- **500 Internal Server Error**: Dataset store or planning error\n\n## Error Codes\n- `SQL_PARSE_ERROR`: Failed to parse the SQL query\n- `DATASET_STORE_ERROR`: Failed to load datasets from store\n- `PLANNING_ERROR`: Failed to determine output schema",
+        "operationId": "schema_analyze",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutputSchemaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully analyzed SQL query and returned schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputSchemaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SQL parse error"
+          },
+          "500": {
+            "description": "Dataset store or planning error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DatasetInfo": {
+        "type": "object",
+        "description": "Represents dataset information for API responses from the dataset store",
+        "required": [
+          "name",
+          "version",
+          "kind",
+          "tables"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind/type of dataset (e.g., \"evm-rpc\", \"firehose\", \"substreams\", \"sql\")"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the dataset (validated identifier)"
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableInfo"
+            },
+            "description": "List of tables contained in the dataset with their details"
+          },
+          "version": {
+            "type": "string",
+            "description": "The version of the dataset using semantic versioning (e.g., \"1.0.0\")"
+          }
+        }
+      },
+      "DatasetRegistryInfo": {
+        "type": "object",
+        "description": "Represents dataset information for API responses from the metadata database registry",
+        "required": [
+          "name",
+          "version",
+          "owner"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the dataset"
+          },
+          "owner": {
+            "type": "string",
+            "description": "The owner of the dataset"
+          },
+          "version": {
+            "type": "string",
+            "description": "The version of the dataset"
+          }
+        }
+      },
+      "DatasetVersionsResponse": {
+        "type": "object",
+        "description": "Collection response for dataset versions listing with cursor-based pagination",
+        "required": [
+          "versions"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page of results (None if no more results)"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of dataset versions in this page"
+          }
+        }
+      },
+      "DatasetsResponse": {
+        "type": "object",
+        "description": "Collection response for dataset listings with cursor-based pagination",
+        "required": [
+          "datasets"
+        ],
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetRegistryInfo"
+            },
+            "description": "List of datasets in this page"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page of results (None if no more results)"
+          }
+        }
+      },
+      "DumpOptions": {
+        "type": "object",
+        "description": "Request options for dataset dump operations\n\nControls the behavior and scope of the data extraction job.\nThese options determine the range of blocks to extract.",
+        "properties": {
+          "end_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The last block number to extract (optional)\n\nIf not specified, the extraction will continue indefinitely\n(until manually stopped or the blockchain tip)."
+          }
+        }
+      },
+      "DumpResponse": {
+        "type": "object",
+        "description": "Response returned by the dataset dump endpoint\n\nContains the ID of the scheduled dump job for tracking purposes.",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The ID of the scheduled dump job (64-bit integer)"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Standard error response returned by the API\n\nThis struct represents error information returned in HTTP error responses.\nIt provides structured error details including a machine-readable error code\nand human-readable message.\n\n## Error Code Conventions\n- Error codes use SCREAMING_SNAKE_CASE (e.g., `DATASET_NOT_FOUND`)\n- Codes are stable and can be relied upon programmatically\n- Messages may change and should only be used for display/logging\n\n## Example JSON Response\n```json\n{\n  \"error_code\": \"DATASET_NOT_FOUND\",\n  \"error_message\": \"dataset 'eth_mainnet' version '1.0.0' not found\"\n}\n```",
+        "required": [
+          "error_code",
+          "error_message"
+        ],
+        "properties": {
+          "error_code": {
+            "type": "string",
+            "description": "Machine-readable error code in SCREAMING_SNAKE_CASE format\n\nError codes are stable across API versions and should be used\nfor programmatic error handling. Examples: `INVALID_SELECTOR`,\n`DATASET_NOT_FOUND`, `METADATA_DB_ERROR`"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Human-readable error message\n\nMessages provide detailed context about the error but may change\nover time. Use `error_code` for programmatic decisions."
+          }
+        }
+      },
+      "FileInfo": {
+        "type": "object",
+        "description": "File information returned by the API\n\nThis struct represents file metadata from the database in a format\nsuitable for API responses. It contains all the essential information\nabout Parquet files and their associated metadata within locations.",
+        "required": [
+          "id",
+          "location_id",
+          "file_name",
+          "url",
+          "metadata"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "Name of the file (e.g., \"blocks_0000000000_0000099999.parquet\")"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this file (64-bit integer)"
+          },
+          "location_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Location ID this file belongs to (64-bit integer)"
+          },
+          "metadata": {
+            "description": "Parquet file metadata as JSON containing schema and statistics"
+          },
+          "object_e_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ETag of the file object for caching and version identification"
+          },
+          "object_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size of the file object in bytes"
+          },
+          "object_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version identifier of the file object in the storage system"
+          },
+          "url": {
+            "type": "string",
+            "description": "Base location URL (e.g., \"s3://bucket/path/\") - combine with file_name for full file URL"
+          }
+        }
+      },
+      "FileListInfo": {
+        "type": "object",
+        "description": "Minimal file information for location file listings\n\nThis struct represents essential file metadata for list endpoints,\ncontaining only the most relevant information needed for file browsing\nwithin a location context.",
+        "required": [
+          "id",
+          "file_name"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "Name of the file (e.g., \"blocks_0000000000_0000099999.parquet\")"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this file (64-bit integer)"
+          },
+          "object_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size of the file object in bytes"
+          }
+        }
+      },
+      "JobInfo": {
+        "type": "object",
+        "description": "Job information returned by the API\n\nThis struct represents job metadata in a format suitable for API responses.\nIt contains essential information about a job without exposing internal\ndatabase implementation details.",
+        "required": [
+          "id",
+          "node_id",
+          "status",
+          "descriptor"
+        ],
+        "properties": {
+          "descriptor": {
+            "description": "Job descriptor containing job-specific parameters as JSON"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this job (64-bit integer)"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node this job is scheduled for"
+          },
+          "status": {
+            "type": "string",
+            "description": "Current status of the job (Scheduled, Running, Completed, Stopped, Failed, etc.)"
+          }
+        }
+      },
+      "JobsResponse": {
+        "type": "object",
+        "description": "API response containing job information",
+        "required": [
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobInfo"
+            },
+            "description": "List of jobs"
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cursor for the next page of results (None if no more results)"
+          }
+        }
+      },
+      "LocationFilesResponse": {
+        "type": "object",
+        "description": "Collection response for location file listings\n\nThis response structure provides paginated file data with\ncursor-based pagination support for efficient traversal.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileListInfo"
+            },
+            "description": "List of files in this page with minimal information"
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cursor for the next page of results - use as last_file_id in next request (None if no more results)"
+          }
+        }
+      },
+      "LocationInfo": {
+        "type": "object",
+        "description": "Location information returned by the API\n\nThis struct represents location metadata from the database in a format\nsuitable for API responses. It contains all the essential information\nabout where dataset table data is stored.",
+        "required": [
+          "id",
+          "dataset",
+          "dataset_version",
+          "table",
+          "url",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether this location is currently active for queries"
+          },
+          "dataset": {
+            "type": "string",
+            "description": "Name of the dataset this location belongs to"
+          },
+          "dataset_version": {
+            "type": "string",
+            "description": "Version of the dataset using semantic versioning (e.g., \"1.0.0\", or empty string for unversioned)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this location (64-bit integer)"
+          },
+          "table": {
+            "type": "string",
+            "description": "Name of the table within the dataset (e.g., \"blocks\", \"transactions\")"
+          },
+          "url": {
+            "type": "string",
+            "description": "Full URL to the storage location (e.g., \"s3://bucket/path/table.parquet\", \"file:///local/path/table.parquet\")"
+          },
+          "writer": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Writer job ID (64-bit integer, if one exists)"
+          }
+        }
+      },
+      "LocationInfoWithDetails": {
+        "type": "object",
+        "description": "Location information with writer job details",
+        "required": [
+          "id",
+          "dataset",
+          "dataset_version",
+          "table",
+          "url",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether this location is currently active for queries"
+          },
+          "dataset": {
+            "type": "string",
+            "description": "Name of the dataset this location belongs to"
+          },
+          "dataset_version": {
+            "type": "string",
+            "description": "Version of the dataset using semantic versioning (e.g., \"1.0.0\", or empty string for unversioned)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this location (64-bit integer)"
+          },
+          "table": {
+            "type": "string",
+            "description": "Name of the table within the dataset (e.g., \"blocks\", \"transactions\")"
+          },
+          "url": {
+            "type": "string",
+            "description": "Full URL to the storage location (e.g., \"s3://bucket/path/table.parquet\", \"file:///local/path/table.parquet\")"
+          },
+          "writer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobInfo",
+                "description": "Writer job information with full details (if one exists)"
+              }
+            ]
+          }
+        }
+      },
+      "LocationsResponse": {
+        "type": "object",
+        "description": "API response containing location information\n\nThis response structure provides paginated location data with\ncursor-based pagination support for efficient traversal.",
+        "required": [
+          "locations"
+        ],
+        "properties": {
+          "locations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocationInfo"
+            },
+            "description": "List of locations in this page"
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cursor for the next page of results (None if no more results)"
+          }
+        }
+      },
+      "OutputSchemaRequest": {
+        "type": "object",
+        "description": "Request payload for output schema analysis\n\nContains the SQL query to analyze and optional configuration flags.",
+        "required": [
+          "sql_query"
+        ],
+        "properties": {
+          "is_sql_dataset": {
+            "type": "boolean",
+            "description": "Whether this is a SQL dataset (affects block number field inclusion)\n\nWhen true, a special block number field is prepended to the schema.\nThis field tracks the block number for each row in SQL datasets."
+          },
+          "sql_query": {
+            "type": "string",
+            "description": "The SQL query to analyze for output schema determination"
+          }
+        }
+      },
+      "OutputSchemaResponse": {
+        "type": "object",
+        "description": "Response returned by the output schema endpoint\n\nContains the determined schema and list of networks referenced by the query.",
+        "required": [
+          "schema",
+          "networks"
+        ],
+        "properties": {
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of networks referenced by the query\n\nContains the network names of all datasets/tables referenced\nin the SQL query (e.g., \"mainnet\", \"polygon\", etc.)."
+          },
+          "schema": {
+            "description": "The output schema for the SQL query\n\nDescribes the structure and types of columns that will be returned\nwhen executing the provided SQL query against the dataset."
+          }
+        }
+      },
+      "ProviderInfo": {
+        "type": "object",
+        "description": "Provider information used for both API requests and responses\n\nThis struct represents provider metadata and configuration in a format\nsuitable for both creating providers (POST requests) and retrieving them\n(GET responses). It includes the complete provider configuration.\n\n## Security Note\n\nThe `rest` field contains the full provider configuration. Ensure that\nsensitive information like API keys and tokens are not stored in the\nprovider configuration if this data will be exposed through APIs.",
+        "required": [
+          "name",
+          "kind",
+          "network"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The type of provider (e.g., \"evm-rpc\", \"firehose\", \"substreams\")"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name/identifier of the provider"
+          },
+          "network": {
+            "type": "string",
+            "description": "The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")"
+          }
+        },
+        "additionalProperties": {
+          "description": "Additional provider-specific configuration fields"
+        }
+      },
+      "ProvidersResponse": {
+        "type": "object",
+        "description": "API response containing complete provider information\n\nThis response structure provides all provider configurations\navailable in the system, including their full configuration details.",
+        "required": [
+          "providers"
+        ],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfo"
+            },
+            "description": "List of all provider configurations with complete configuration details"
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "description": "Request payload for dataset registration\n\nContains the dataset name, version, and manifest.\nThe manifest will be registered in the local registry.",
+        "required": [
+          "name",
+          "version",
+          "manifest"
+        ],
+        "properties": {
+          "manifest": {
+            "type": "string",
+            "description": "TOML or JSON string representation of the dataset manifest (required)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the dataset to be registered (validated identifier format)"
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of the dataset to register using semantic versioning (e.g., \"1.0.0\")"
+          }
+        }
+      },
+      "String": {
+        "type": "string",
+        "description": "Status filter options for job deletion",
+        "enum": [
+          "Terminal",
+          "Completed",
+          "Stopped",
+          "Error"
+        ]
+      },
+      "TableInfo": {
+        "type": "object",
+        "description": "Represents table information within a dataset",
+        "required": [
+          "name",
+          "network"
+        ],
+        "properties": {
+          "active_location": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Currently active location URL for this table"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the table"
+          },
+          "network": {
+            "type": "string",
+            "description": "Associated network for this table"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "datasets",
+      "description": "Dataset management endpoints"
+    },
+    {
+      "name": "jobs",
+      "description": "Job management endpoints"
+    },
+    {
+      "name": "locations",
+      "description": "Location management endpoints"
+    },
+    {
+      "name": "providers",
+      "description": "Provider management endpoints"
+    },
+    {
+      "name": "files",
+      "description": "File access endpoints"
+    },
+    {
+      "name": "schema",
+      "description": "Schema generation endpoints"
+    }
+  ]
+}

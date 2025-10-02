@@ -5,11 +5,13 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::LocationId;
 
 use super::location_info::LocationInfo;
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Default number of locations returned per page
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -55,10 +57,28 @@ fn default_limit() -> usize {
 /// - Calls the metadata DB to list locations with pagination
 /// - Returns a structured response with locations and next cursor
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/locations",
+        tag = "locations",
+        operation_id = "locations_list",
+        params(
+            ("limit" = Option<usize>, Query, description = "Maximum number of locations to return (default: 50, max: 1000)"),
+            ("last_location_id" = Option<String>, Query, description = "ID of the last location from the previous page for pagination")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved locations", body = LocationsResponse),
+            (status = 400, description = "Invalid query parameters"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<Json<LocationsResponse>, BoxRequestError> {
+) -> Result<Json<LocationsResponse>, ErrorResponse> {
     let query = match query {
         Ok(Query(params)) => params,
         Err(err) => {
@@ -91,7 +111,7 @@ pub async fn handler(
         })?;
 
     // Determine next cursor (ID of the last location in this page)
-    let next_cursor = locations.last().map(|location| location.id);
+    let next_cursor = locations.last().map(|location| *location.id);
     let locations = locations.into_iter().take(limit).map(Into::into).collect();
 
     Ok(Json(LocationsResponse {
@@ -105,12 +125,13 @@ pub async fn handler(
 /// This response structure provides paginated location data with
 /// cursor-based pagination support for efficient traversal.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LocationsResponse {
     /// List of locations in this page
     pub locations: Vec<LocationInfo>,
     /// Cursor for the next page of results (None if no more results)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<LocationId>,
+    pub next_cursor: Option<i64>,
 }
 
 /// Errors that can occur during location listing
@@ -157,7 +178,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     /// Returns the error code string for API responses
     ///
     /// These error codes are returned in the API response body to help

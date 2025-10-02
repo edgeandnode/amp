@@ -1,0 +1,14 @@
+[package]
+name = "admin-api-gen"
+edition.workspace = true
+publish = false
+
+# Schema generation dependencies (see README.md "OpenAPI Schema Generation" section)
+# These dependencies are only included when the gen_openapi_spec cfg flag is enabled
+[target.'cfg(gen_openapi_spec)'.build-dependencies]
+admin-api = { path = "..", features = ["utoipa"] }
+serde_json.workspace = true
+
+[lints.rust]
+# Allow the gen_openapi_spec cfg flag used for conditional OpenAPI schema generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_openapi_spec)'] }

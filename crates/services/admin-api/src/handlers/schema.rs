@@ -3,10 +3,15 @@ use common::query_context::{
     Error as QueryContextError, parse_sql, prepend_special_block_num_field,
 };
 use datasets_derived::manifest::TableSchema;
-use http_common::{BoxRequestError, RequestError};
 use tracing::instrument;
 
-use crate::{ctx::Ctx, handlers::common::NonEmptyString};
+use crate::{
+    ctx::Ctx,
+    handlers::{
+        common::NonEmptyString,
+        error::{ErrorResponse, IntoErrorResponse},
+    },
+};
 
 /// Handler for the `/schema` endpoint that provides SQL schema analysis.
 ///
@@ -36,13 +41,28 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 /// - `DATASET_STORE_ERROR`: Failed to load datasets from store
 /// - `PLANNING_ERROR`: Failed to determine output schema
 #[instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        post,
+        path = "/schema",
+        tag = "schema",
+        operation_id = "schema_analyze",
+        request_body = OutputSchemaRequest,
+        responses(
+            (status = 200, description = "Successfully analyzed SQL query and returned schema", body = OutputSchemaResponse),
+            (status = 400, description = "SQL parse error"),
+            (status = 500, description = "Dataset store or planning error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     Json(OutputSchemaRequest {
         sql_query,
         is_sql_dataset,
     }): Json<OutputSchemaRequest>,
-) -> Result<Json<OutputSchemaResponse>, BoxRequestError> {
+) -> Result<Json<OutputSchemaResponse>, ErrorResponse> {
     let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParseError)?;
 
     let query_ctx = ctx
@@ -81,8 +101,10 @@ pub async fn handler(
 ///
 /// Contains the SQL query to analyze and optional configuration flags.
 #[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct OutputSchemaRequest {
     /// The SQL query to analyze for output schema determination
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     sql_query: NonEmptyString,
     /// Whether this is a SQL dataset (affects block number field inclusion)
     ///
@@ -96,11 +118,13 @@ pub struct OutputSchemaRequest {
 ///
 /// Contains the determined schema and list of networks referenced by the query.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct OutputSchemaResponse {
     /// The output schema for the SQL query
     ///
     /// Describes the structure and types of columns that will be returned
     /// when executing the provided SQL query against the dataset.
+    #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
     schema: TableSchema,
     /// List of networks referenced by the query
     ///
@@ -138,7 +162,7 @@ enum Error {
     PlanningError(QueryContextError),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::SqlParseError(_) => "SQL_PARSE_ERROR",

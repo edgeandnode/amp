@@ -25,6 +25,18 @@ use crate::ctx::Ctx;
 /// - Cannot fail as it returns cached data; any store/parsing errors are logged during cache loading (explicit via `load_into_cache()` or lazy-loaded on first access)
 /// - Filters out providers that cannot be converted to valid API format (conversion errors are logged)
 #[tracing::instrument(skip_all)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/providers",
+        tag = "providers",
+        operation_id = "providers_list",
+        responses(
+            (status = 200, description = "Successfully retrieved all providers", body = ProvidersResponse)
+        )
+    )
+)]
 pub async fn handler(State(ctx): State<Ctx>) -> Json<ProvidersResponse> {
     let providers = ctx
         .store
@@ -55,6 +67,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Json<ProvidersResponse> {
 /// This response structure provides all provider configurations
 /// available in the system, including their full configuration details.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ProvidersResponse {
     /// List of all provider configurations with complete configuration details
     pub providers: Vec<ProviderInfo>,

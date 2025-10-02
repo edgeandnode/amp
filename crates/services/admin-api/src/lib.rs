@@ -5,9 +5,12 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 use axum::{
     Router,
     routing::{get, post, put},
+    serve::{Listener as _, ListenerExt as _},
 };
 use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
+use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 mod ctx;
 pub mod handlers;
@@ -81,5 +84,97 @@ pub async fn serve(
             scheduler,
         });
 
-    http_common::serve_at(at, app).await
+    let listener = TcpListener::bind(at)
+        .await?
+        .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
+    let addr = listener.local_addr()?;
+
+    let app = app.layer(CorsLayer::permissive());
+    let server = async move { axum::serve(listener, app).await.map_err(Into::into) };
+    Ok((addr, server))
+}
+
+#[cfg(feature = "utoipa")]
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    info(
+        title = "Nozzle Admin API",
+        version = "1.0.0",
+        description = include_str!("../SPEC_DESCRIPTION.md")
+    ),
+    paths(
+        // Dataset endpoints
+        handlers::datasets::get_all::handler,
+        handlers::datasets::get_by_id::handler,
+        handlers::datasets::get_by_id::handler_with_version,
+        handlers::datasets::get_versions::handler,
+        handlers::datasets::register::handler,
+        handlers::datasets::dump::handler,
+        handlers::datasets::dump::handler_with_version,
+        // Job endpoints
+        handlers::jobs::get_all::handler,
+        handlers::jobs::get_by_id::handler,
+        handlers::jobs::stop::handler,
+        handlers::jobs::delete::handler,
+        handlers::jobs::delete_by_id::handler,
+        // Location endpoints
+        handlers::locations::get_all::handler,
+        handlers::locations::get_by_id::handler,
+        handlers::locations::delete_by_id::handler,
+        handlers::locations::get_files::handler,
+        // Provider endpoints
+        handlers::providers::get_all::handler,
+        handlers::providers::get_by_id::handler,
+        handlers::providers::create::handler,
+        handlers::providers::delete_by_id::handler,
+        // Files endpoints
+        handlers::files::get_by_id::handler,
+        // Schema endpoints
+        handlers::schema::handler,
+    ),
+    components(schemas(
+        // Common schemas
+        handlers::error::ErrorResponse,
+        // Dataset schemas
+        handlers::datasets::get_by_id::DatasetInfo,
+        handlers::datasets::get_by_id::TableInfo,
+        handlers::datasets::get_all::DatasetsResponse,
+        handlers::datasets::get_all::DatasetRegistryInfo,
+        handlers::datasets::get_versions::DatasetVersionsResponse,
+        handlers::datasets::register::RegisterRequest,
+        handlers::datasets::dump::DumpOptions,
+        handlers::datasets::dump::DumpResponse,
+        // Job schemas
+        handlers::jobs::job_info::JobInfo,
+        handlers::jobs::get_all::JobsResponse,
+        handlers::jobs::delete::JobStatusFilter,
+        // Location schemas
+        handlers::locations::location_info::LocationInfoWithDetails,
+        handlers::locations::location_info::LocationInfo,
+        handlers::locations::get_all::LocationsResponse,
+        handlers::locations::get_files::LocationFilesResponse,
+        // Provider schemas
+        handlers::providers::provider_info::ProviderInfo,
+        handlers::providers::get_all::ProvidersResponse,
+        // File schemas
+        handlers::files::get_by_id::FileInfo,
+        handlers::locations::get_files::FileListInfo,
+        // Schema schemas
+        handlers::schema::OutputSchemaRequest,
+        handlers::schema::OutputSchemaResponse,
+    )),
+    tags(
+        (name = "datasets", description = "Dataset management endpoints"),
+        (name = "jobs", description = "Job management endpoints"),
+        (name = "locations", description = "Location management endpoints"),
+        (name = "providers", description = "Provider management endpoints"),
+        (name = "files", description = "File access endpoints"),
+        (name = "schema", description = "Schema generation endpoints")
+    )
+)]
+struct ApiDoc;
+
+#[cfg(feature = "utoipa")]
+pub fn generate_openapi_spec() -> utoipa::openapi::OpenApi {
+    <ApiDoc as utoipa::OpenApi>::openapi()
 }

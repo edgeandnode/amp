@@ -4,11 +4,14 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::JobId;
 
 use super::tracing::display_selector_version;
-use crate::{ctx::Ctx, scheduler::ScheduleJobError};
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+    scheduler::ScheduleJobError,
+};
 
 /// Handler for dataset dump endpoint without version
 ///
@@ -33,11 +36,30 @@ use crate::{ctx::Ctx, scheduler::ScheduleJobError};
 /// - `DATASET_STORE_ERROR`: Failed to load dataset from store
 /// - `SCHEDULER_ERROR`: Failed to schedule the dump job
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        post,
+        path = "/datasets/{id}/dump",
+        tag = "datasets",
+        operation_id = "datasets_dump",
+        params(
+            ("id" = String, Path, description = "Dataset name")
+        ),
+        request_body = DumpOptions,
+        responses(
+            (status = 200, description = "Successfully scheduled dump job", body = DumpResponse),
+            (status = 400, description = "Invalid dataset name or request parameters"),
+            (status = 404, description = "Dataset not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<Name>, PathRejection>,
     Json(options): Json<DumpOptions>,
-) -> Result<Json<DumpResponse>, BoxRequestError> {
+) -> Result<Json<DumpResponse>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
@@ -73,11 +95,31 @@ pub async fn handler(
 /// - `DATASET_STORE_ERROR`: Failed to load dataset from store
 /// - `SCHEDULER_ERROR`: Failed to schedule the dump job
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        post,
+        path = "/datasets/{name}/versions/{version}/dump",
+        tag = "datasets",
+        operation_id = "datasets_dump_version",
+        params(
+            ("name" = String, Path, description = "Dataset name"),
+            ("version" = String, Path, description = "Dataset version")
+        ),
+        request_body = DumpOptions,
+        responses(
+            (status = 200, description = "Successfully scheduled dump job", body = DumpResponse),
+            (status = 400, description = "Invalid dataset name or version"),
+            (status = 404, description = "Dataset not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler_with_version(
     State(ctx): State<Ctx>,
     path: Result<Path<(Name, Version)>, PathRejection>,
     Json(options): Json<DumpOptions>,
-) -> Result<Json<DumpResponse>, BoxRequestError> {
+) -> Result<Json<DumpResponse>, ErrorResponse> {
     let (name, version) = match path {
         Ok(Path((name, version))) => (name, version),
         Err(err) => {
@@ -95,7 +137,7 @@ async fn handler_inner(
     name: Name,
     version: Option<Version>,
     options: DumpOptions,
-) -> Result<Json<DumpResponse>, BoxRequestError> {
+) -> Result<Json<DumpResponse>, ErrorResponse> {
     tracing::debug!(
         dataset_name=%name,
         dataset_version=%display_selector_version(&version),
@@ -151,6 +193,7 @@ async fn handler_inner(
 /// Controls the behavior and scope of the data extraction job.
 /// These options determine the range of blocks to extract.
 #[derive(serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DumpOptions {
     /// The last block number to extract (optional)
     ///
@@ -164,8 +207,10 @@ pub struct DumpOptions {
 ///
 /// Contains the ID of the scheduled dump job for tracking purposes.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DumpResponse {
-    /// The ID of the scheduled dump job
+    /// The ID of the scheduled dump job (64-bit integer)
+    #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub job_id: JobId,
 }
 
@@ -218,7 +263,7 @@ pub enum Error {
     SchedulerError(#[from] ScheduleJobError),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidSelector(_) => "INVALID_SELECTOR",

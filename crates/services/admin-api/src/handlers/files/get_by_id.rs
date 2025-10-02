@@ -5,10 +5,12 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::{FileId, LocationId};
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for the `GET /files/{file_id}` endpoint
 ///
@@ -33,10 +35,28 @@ use crate::ctx::Ctx;
 /// - Queries the metadata database for the file with location information
 /// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/files/{file_id}",
+        tag = "files",
+        operation_id = "files_get",
+        params(
+            ("file_id" = i64, Path, description = "File ID")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved file information", body = FileInfo),
+            (status = 400, description = "Invalid file ID"),
+            (status = 404, description = "File not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<FileId>, PathRejection>,
-) -> Result<Json<FileInfo>, BoxRequestError> {
+) -> Result<Json<FileInfo>, ErrorResponse> {
     let file_id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
@@ -68,10 +88,13 @@ pub async fn handler(
 /// suitable for API responses. It contains all the essential information
 /// about Parquet files and their associated metadata within locations.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FileInfo {
-    /// Unique identifier for this file
+    /// Unique identifier for this file (64-bit integer)
+    #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub id: FileId,
-    /// Location ID this file belongs to
+    /// Location ID this file belongs to (64-bit integer)
+    #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub location_id: LocationId,
     /// Name of the file (e.g., "blocks_0000000000_0000099999.parquet")
     pub file_name: String,
@@ -80,13 +103,14 @@ pub struct FileInfo {
     /// Size of the file object in bytes
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object_size: Option<i64>,
-    /// ETag of the file object (for caching and versioning)
+    /// ETag of the file object for caching and version identification
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object_e_tag: Option<String>,
-    /// Version identifier of the file object
+    /// Version identifier of the file object in the storage system
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object_version: Option<String>,
-    /// Parquet file metadata as JSON
+    /// Parquet file metadata as JSON containing schema and statistics
+    #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
     pub metadata: serde_json::Value,
 }
 
@@ -147,7 +171,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidId { .. } => "INVALID_FILE_ID",

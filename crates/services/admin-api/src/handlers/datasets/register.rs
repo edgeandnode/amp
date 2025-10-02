@@ -8,9 +8,14 @@ use dataset_store::RegisterManifestError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest};
 use evm_rpc_datasets::{DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest};
-use http_common::{BoxRequestError, RequestError};
 
-use crate::{ctx::Ctx, handlers::common::NonEmptyString};
+use crate::{
+    ctx::Ctx,
+    handlers::{
+        common::NonEmptyString,
+        error::{ErrorResponse, IntoErrorResponse},
+    },
+};
 
 /// Handler for the `POST /datasets` endpoint
 ///
@@ -63,10 +68,26 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 /// 1. `POST /datasets` - Register the dataset (this endpoint)
 /// 2. `POST /datasets/{name}/dump` or `POST /datasets/{name}/versions/{version}/dump` - Schedule data extraction
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        post,
+        path = "/datasets",
+        tag = "datasets",
+        operation_id = "datasets_register",
+        request_body = RegisterRequest,
+        responses(
+            (status = 201, description = "Dataset successfully registered"),
+            (status = 400, description = "Invalid request format or manifest"),
+            (status = 409, description = "Dataset already exists"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     payload: Result<Json<RegisterRequest>, JsonRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let payload = match payload {
         Ok(Json(payload)) => payload,
         Err(err) => {
@@ -200,12 +221,16 @@ pub async fn handler(
 /// Contains the dataset name, version, and manifest.
 /// The manifest will be registered in the local registry.
 #[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RegisterRequest {
-    /// Name of the dataset to be registered (automatically validated)
+    /// Name of the dataset to be registered (validated identifier format)
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: Name,
-    /// Version of the dataset to register
+    /// Version of the dataset to register using semantic versioning (e.g., "1.0.0")
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
-    /// JSON string representation of the dataset manifest (required)
+    /// TOML or JSON string representation of the dataset manifest (required)
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub manifest: NonEmptyString,
 }
 
@@ -279,7 +304,7 @@ pub enum Error {
     StoreError(#[source] BoxError),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidPayloadFormat => "INVALID_PAYLOAD_FORMAT",

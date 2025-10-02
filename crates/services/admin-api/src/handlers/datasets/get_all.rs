@@ -9,9 +9,11 @@ use datasets_common::{
     name::{Name, NameError},
     version::{Version, VersionError},
 };
-use http_common::{BoxRequestError, RequestError};
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Default number of datasets returned per page
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -22,13 +24,17 @@ const MAX_PAGE_LIMIT: usize = 1000;
 /// Query parameters for the datasets listing endpoint
 #[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::IntoParams))]
+#[cfg_attr(feature = "utoipa", into_params(parameter_in = Query))]
 pub struct QueryParams {
     /// Maximum number of datasets to return (default: 50, max: 1000)
     #[serde(default = "default_limit")]
+    #[cfg_attr(feature = "utoipa", param(minimum = 1, maximum = 1000))]
     limit: usize,
 
     /// Last dataset from the previous page for pagination in "name:version" format
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
+    #[cfg_attr(feature = "utoipa", param(value_type = Option<String>))]
     last_dataset_id: Option<Cursor>,
 }
 
@@ -71,10 +77,25 @@ fn default_limit() -> usize {
 /// - Calls the metadata DB to list datasets with pagination
 /// - Returns a structured response with datasets and next cursor
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/datasets",
+        tag = "datasets",
+        operation_id = "datasets_list",
+        params(QueryParams),
+        responses(
+            (status = 200, description = "Returns paginated dataset data with next cursor", body = DatasetsResponse),
+            (status = 400, description = "Invalid limit parameter or cursor format"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<Json<DatasetsResponse>, BoxRequestError> {
+) -> Result<Json<DatasetsResponse>, ErrorResponse> {
     let query = match query {
         Ok(Query(params)) => params,
         Err(err) => {
@@ -128,10 +149,13 @@ pub async fn handler(
 
 /// Represents dataset information for API responses from the metadata database registry
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetRegistryInfo {
     /// The name of the dataset
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: Name,
     /// The version of the dataset
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
     /// The owner of the dataset
     pub owner: String,
@@ -150,12 +174,14 @@ impl From<metadata_db::Dataset> for DatasetRegistryInfo {
 /// Collection response for dataset listings with cursor-based pagination
 #[serde_with::serde_as]
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetsResponse {
     /// List of datasets in this page
     pub datasets: Vec<DatasetRegistryInfo>,
     /// Cursor for the next page of results (None if no more results)
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub next_cursor: Option<Cursor>,
 }
 
@@ -259,7 +285,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     /// Returns the error code string for API responses
     ///
     /// These error codes are returned in the API response body to help
