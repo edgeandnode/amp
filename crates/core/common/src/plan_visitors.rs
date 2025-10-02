@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prepend_special_block_num_field_idempotent() {
+    fn prepend_special_block_num_field_with_various_schemas_behaves_correctly() {
         use datafusion::{
             arrow::datatypes::{DataType, Field, Schema},
             common::DFSchema,
