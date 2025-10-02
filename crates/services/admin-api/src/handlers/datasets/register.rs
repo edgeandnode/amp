@@ -229,7 +229,7 @@ pub struct RegisterRequest {
     /// Version of the dataset to register using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
-    /// TOML or JSON string representation of the dataset manifest (required)
+    /// JSON string representation of the dataset manifest (required)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub manifest: NonEmptyString,
 }
