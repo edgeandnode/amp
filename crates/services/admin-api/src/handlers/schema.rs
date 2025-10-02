@@ -66,7 +66,7 @@ pub async fn handler(
     let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParseError)?;
 
     let query_ctx = ctx
-        .store
+        .dataset_store
         .planning_ctx_for_sql(&stmt)
         .await
         .map_err(Error::DatasetStoreError)?;

@@ -80,7 +80,7 @@ pub async fn handler(
         rest: provider_rest_table,
     };
 
-    ctx.store
+    ctx.dataset_store
         .providers()
         .register(provider_config)
         .await

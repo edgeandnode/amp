@@ -7,7 +7,9 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use common::{BoxError, BoxResult, config::Config};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use metadata_db::MetadataDb;
 use nozzle::server::BoundAddrs;
 use tokio::task::JoinHandle;
@@ -36,7 +38,19 @@ impl DaemonServer {
         enable_jsonl: bool,
         enable_admin_api: bool,
     ) -> Result<Self, BoxError> {
-        let dataset_store = DatasetStore::new(config.clone(), metadb.clone());
+        let dataset_store = {
+            let provider_configs_store =
+                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+            let dataset_manifests_store = DatasetManifestsStore::new(
+                metadb.clone(),
+                config.dataset_defs_store.prefixed_store(),
+            );
+            DatasetStore::new(
+                metadb.clone(),
+                provider_configs_store,
+                dataset_manifests_store,
+            )
+        };
 
         let (server_addrs, server) = nozzle::server::run(
             config.clone(),

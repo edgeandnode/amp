@@ -4,7 +4,7 @@ use object_store::{ObjectStore, memory::InMemory, path::Path};
 
 use crate::{
     DatasetKind,
-    providers::{ProviderConfig, ProvidersConfigStore},
+    providers::{ProviderConfig, ProviderConfigsStore},
 };
 
 #[tokio::test]
@@ -486,10 +486,10 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
 
 /// Create a test ProvidersStore backed by in-memory storage
 /// Returns (ProvidersStore, underlying Arc<InMemory>) for testing caching logic
-fn create_test_providers_store() -> (ProvidersConfigStore, Arc<dyn ObjectStore>) {
+fn create_test_providers_store() -> (ProviderConfigsStore, Arc<dyn ObjectStore>) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProvidersConfigStore::new(store.clone());
+    let providers_store = ProviderConfigsStore::new(store.clone());
     (providers_store, store)
 }
 

@@ -98,7 +98,7 @@ pub async fn handler(
 
     // Early check if dataset already exists in the store to avoid unnecessary processing
     let dataset_exists = ctx
-        .store
+        .dataset_store
         .is_registered(&payload.name, &payload.version)
         .await
         .map_err(|err| {
@@ -154,7 +154,7 @@ pub async fn handler(
                     Error::InvalidManifest(err)
                 })?;
 
-            ctx.store
+            ctx.dataset_store
                 .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
                 .map_err(|err| {
@@ -188,7 +188,7 @@ pub async fn handler(
                     Error::InvalidManifest(err)
                 })?;
 
-            ctx.store
+            ctx.dataset_store
                 .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
                 .map_err(|err| {

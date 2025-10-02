@@ -2,7 +2,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
 use common::{BoxError, config::Config};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
@@ -176,7 +178,19 @@ async fn main_inner() -> Result<(), BoxError> {
             }
 
             let mut datasets_to_dump = Vec::new();
-            let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+            let dataset_store = {
+                let provider_configs_store =
+                    ProviderConfigsStore::new(config.providers_store.prefixed_store());
+                let dataset_manifests_store = DatasetManifestsStore::new(
+                    metadata_db.clone(),
+                    config.dataset_defs_store.prefixed_store(),
+                );
+                DatasetStore::new(
+                    metadata_db.clone(),
+                    provider_configs_store,
+                    dataset_manifests_store,
+                )
+            };
 
             for dataset in datasets {
                 if dataset.ends_with(".json") {

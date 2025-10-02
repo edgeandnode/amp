@@ -49,7 +49,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use common::{BoxError, config::Config};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -165,7 +167,19 @@ async fn main() {
                     .expect("Failed to load config"),
             );
             let metadata_db = temp_db.metadata_db().clone();
-            let dataset_store = DatasetStore::new(config.clone(), temp_db.metadata_db().clone());
+            let dataset_store = {
+                let provider_configs_store =
+                    ProviderConfigsStore::new(config.providers_store.prefixed_store());
+                let dataset_manifests_store = DatasetManifestsStore::new(
+                    temp_db.metadata_db().clone(),
+                    config.dataset_defs_store.prefixed_store(),
+                );
+                DatasetStore::new(
+                    temp_db.metadata_db().clone(),
+                    provider_configs_store,
+                    dataset_manifests_store,
+                )
+            };
 
             // Run blessing procedure
             bless(

@@ -69,7 +69,7 @@ pub async fn handler(
         }
     };
 
-    ctx.store
+    ctx.dataset_store
         .providers()
         .delete(&name)
         .await

@@ -46,16 +46,16 @@ use crate::dataset_kind::DatasetKind;
 /// **Note**: External changes to the underlying store will not be reflected in the cache
 /// until the process is restarted, as there is no automatic cache invalidation mechanism.
 #[derive(Debug, Clone)]
-pub struct ProvidersConfigStore<S: ObjectStore = Arc<dyn ObjectStore>> {
+pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
     store: S,
     cache: Arc<RwLock<BTreeMap<String, ProviderConfig>>>,
 }
 
-impl<S> ProvidersConfigStore<S>
+impl<S> ProviderConfigsStore<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`ProvidersConfigStore`] instance with the given underlying store.
+    /// Create a new [`ProviderConfigsStore`] instance with the given underlying store.
     pub fn new(store: S) -> Self {
         Self {
             store,
