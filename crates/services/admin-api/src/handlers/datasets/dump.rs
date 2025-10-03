@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
-use metadata_db::JobId;
+use worker::JobId;
 
 use super::tracing::display_selector_version;
 use crate::{

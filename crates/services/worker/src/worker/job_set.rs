@@ -1,10 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use common::BoxError;
-use metadata_db::JobId;
 use tokio::task::{AbortHandle, Id as TaskId, JoinSet};
 
-use super::job::Job;
+use crate::jobs::{Job, JobId};
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].
 ///
@@ -17,7 +16,7 @@ use super::job::Job;
 /// [`Worker`]: crate::worker::Worker
 #[derive(Debug, Default)]
 pub struct JobSet {
-    /// The mapping of job IDs to their abort handles.  
+    /// The mapping of job IDs to their abort handles.
     job_id_to_handle: BTreeMap<JobId, AbortHandle>,
     /// The mapping of task IDs to their job IDs.
     // NOTE: The task ID does not implement `Ord`, this is a tokio limitation.
@@ -48,13 +47,10 @@ impl JobSet {
     }
 
     /// Abort a job by its ID
-    pub fn abort(&mut self, job_id: &JobId) {
-        let handle = match self.job_id_to_handle.get(job_id) {
-            Some(handle) => handle,
-            None => {
-                tracing::debug!(%job_id, "Job not found, skipping.");
-                return;
-            }
+    pub fn abort(&mut self, job_id: JobId) {
+        let Some(handle) = self.job_id_to_handle.get(&job_id) else {
+            tracing::debug!(%job_id, "Job not found, skipping.");
+            return;
         };
 
         handle.abort();
@@ -83,11 +79,11 @@ impl JobSet {
         let job_id = self
             .task_id_to_job_id
             .remove(&task_id)
-            .expect(&format!("Task ID {task_id} is not tracked by the set"));
+            .unwrap_or_else(|| panic!("Task ID {task_id} is not tracked by the set"));
         let _handle = self
             .job_id_to_handle
             .remove(&job_id)
-            .expect(&format!("Job ID {job_id} is not tracked by the set"));
+            .unwrap_or_else(|| panic!("Job ID {job_id} is not tracked by the set"));
 
         let next = match result {
             // The job completed successfully

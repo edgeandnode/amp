@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::JobId;
+use worker::JobId;
 
 use crate::{
     ctx::Ctx,
@@ -84,7 +84,7 @@ pub async fn handler(
     };
 
     // First, check if the job exists and get its status
-    let job = ctx.metadata_db.get_job(&id).await.map_err(|err| {
+    let job = ctx.metadata_db.get_job(id).await.map_err(|err| {
         tracing::debug!(job_id=%id, error=?err, "failed to get job");
         Error::MetadataDbError(err)
     })?;
@@ -117,7 +117,7 @@ pub async fn handler(
     if deleted {
         tracing::info!(job_id=%id, "successfully deleted terminal job");
     } else {
-        tracing::warn!(job_id=?id, "deletion did not affect any rows, but job should have been deletable");
+        tracing::warn!(job_id=%id, "deletion did not affect any rows, but job should have been deletable");
     }
 
     Ok(StatusCode::NO_CONTENT)

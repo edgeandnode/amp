@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
-use dump::worker::JobDesc;
-use metadata_db::{
-    Error as MetadataDbError, JobId, JobStatus, JobStatusUpdateError, MetadataDb, WorkerNodeId,
-};
+use metadata_db::{Error as MetadataDbError, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
+use worker::{JobDescriptor, JobId, JobNotification, NodeId};
 
 #[derive(Clone)]
 pub struct Scheduler {
@@ -36,7 +34,7 @@ impl Scheduler {
         // The worker node should then receive the notification and start the dump run.
 
         let candidates = self.metadata_db.active_workers().await?;
-        let Some(node_id) = candidates.choose(&mut rand::rng()) else {
+        let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
             return Err(ScheduleJobError::NoAvailableWorkers);
         };
 
@@ -55,10 +53,16 @@ impl Scheduler {
             locations.push(physical_table.location_id());
         }
 
-        let job_desc = serde_json::to_string(&JobDesc::Dump { end_block })?;
+        let job_desc = serde_json::to_string(&JobDescriptor::Dump { end_block })?;
         let job_id = self
             .metadata_db
-            .schedule_job(node_id, &job_desc, &locations)
+            .schedule_job(&node_id, &job_desc, &locations)
+            .await
+            .map(Into::into)?;
+
+        // Notify the worker about the new job
+        self.metadata_db
+            .send_job_notification(node_id, &JobNotification::start(job_id))
             .await?;
 
         Ok(job_id)
@@ -68,14 +72,9 @@ impl Scheduler {
     ///
     /// Note: This method assumes validation has already been performed by the caller.
     /// It directly delegates to the atomic MetadataDb operation.
-    pub async fn stop_job(
-        &self,
-        job_id: &JobId,
-        node_id: &WorkerNodeId,
-    ) -> Result<(), StopJobError> {
-        Ok(self
-            .metadata_db
-            .request_job_stop(job_id, node_id)
+    pub async fn stop_job(&self, job_id: &JobId, node_id: &NodeId) -> Result<(), StopJobError> {
+        self.metadata_db
+            .request_job_stop(job_id)
             .await
             .map_err(|err| match err {
                 MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::NotFound) => {
@@ -93,7 +92,15 @@ impl Scheduler {
                     },
                 },
                 other => StopJobError::MetadataDb(other),
-            })?)
+            })?;
+
+        // Notify the worker about the stop request
+        self.metadata_db
+            .send_job_notification(node_id.to_owned(), &JobNotification::stop(job_id.clone()))
+            .await
+            .map_err(StopJobError::MetadataDb)?;
+
+        Ok(())
     }
 }
 

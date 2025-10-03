@@ -8,24 +8,23 @@ use sqlx::types::{
     chrono::{DateTime, Utc},
 };
 
-pub mod events;
 mod job_id;
 mod job_status;
 mod pagination;
 
 pub use self::{
-    job_id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
+    job_id::JobId,
     job_status::JobStatus,
     pagination::{list_first_page, list_next_page},
 };
-use crate::workers::WorkerNodeId;
+use crate::workers::{NodeId, NodeIdOwned};
 
 /// Insert a new job into the queue
 ///
 /// The job will be assigned to the given worker node with the specified status.
 pub async fn insert<'c, E>(
     exe: E,
-    node_id: &WorkerNodeId,
+    node_id: NodeId<'_>,
     descriptor: &str,
     status: JobStatus,
 ) -> Result<JobId, sqlx::Error>
@@ -38,7 +37,7 @@ where
         RETURNING id
     "#};
     let res = sqlx::query_scalar(query)
-        .bind(node_id)
+        .bind(&node_id)
         .bind(descriptor)
         .bind(status)
         .fetch_one(exe)
@@ -52,7 +51,7 @@ where
 #[inline]
 pub async fn insert_with_default_status<'c, E>(
     exe: E,
-    node_id: &WorkerNodeId,
+    node_id: NodeId<'_>,
     descriptor: &str,
 ) -> Result<JobId, sqlx::Error>
 where
@@ -68,7 +67,7 @@ where
 /// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
 pub async fn update_status_if_any_state<'c, E>(
     exe: E,
-    id: &JobId,
+    id: JobId,
     expected_statuses: &[JobStatus],
     new_status: JobStatus,
 ) -> Result<(), JobStatusUpdateError>
@@ -142,7 +141,7 @@ pub enum JobStatusUpdateError {
 }
 
 /// Get a job by its ID
-pub async fn get_by_id<'c, E>(exe: E, id: &JobId) -> Result<Option<Job>, sqlx::Error>
+pub async fn get_by_id<'c, E>(exe: E, id: JobId) -> Result<Option<Job>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
@@ -158,7 +157,7 @@ where
 /// Get a job by ID with full details including timestamps
 pub async fn get_by_id_with_details<'c, E>(
     exe: E,
-    id: &JobId,
+    id: JobId,
 ) -> Result<Option<JobWithDetails>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
@@ -181,7 +180,7 @@ where
 /// Get jobs for a given worker node with any of the specified statuses
 pub async fn get_by_node_id_and_statuses<'c, E, const N: usize>(
     exe: E,
-    node_id: &WorkerNodeId,
+    node_id: NodeId<'_>,
     statuses: [JobStatus; N],
 ) -> Result<Vec<Job>, sqlx::Error>
 where
@@ -211,7 +210,7 @@ where
 /// Returns true if a job was deleted, false otherwise.
 pub async fn delete_by_id_and_statuses<'c, E, const N: usize>(
     exe: E,
-    id: &JobId,
+    id: JobId,
     statuses: [JobStatus; N],
 ) -> Result<bool, sqlx::Error>
 where
@@ -277,7 +276,7 @@ pub struct Job {
     pub id: JobId,
 
     /// ID of the worker node this job is scheduled for
-    pub node_id: WorkerNodeId,
+    pub node_id: NodeIdOwned,
 
     /// Current status of the job
     pub status: JobStatus,
@@ -294,7 +293,7 @@ pub struct JobWithDetails {
     pub id: JobId,
 
     /// ID of the worker node this job is scheduled for
-    pub node_id: WorkerNodeId,
+    pub node_id: NodeIdOwned,
 
     /// Current status of the job
     pub status: JobStatus,
@@ -313,6 +312,5 @@ pub struct JobWithDetails {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
-    mod it_events;
     mod it_jobs;
 }

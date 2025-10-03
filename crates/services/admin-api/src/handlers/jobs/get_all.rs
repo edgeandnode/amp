@@ -5,8 +5,8 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
-use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
+use worker::JobId;
 
 use super::job_info::JobInfo;
 use crate::{
@@ -105,7 +105,7 @@ pub async fn handler(
     // Fetch jobs from metadata DB
     let jobs = ctx
         .metadata_db
-        .list_jobs_with_details(limit as i64, query.last_job_id) // SAFETY: limit is capped at 1000 by validation above
+        .list_jobs_with_details(limit as i64, query.last_job_id.map(Into::into)) // SAFETY: limit is capped at 1000 by validation above
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, "failed to list jobs");
@@ -113,7 +113,7 @@ pub async fn handler(
         })?;
 
     // Determine next cursor (ID of the last job in this page)
-    let next_cursor = jobs.last().map(|job| job.id);
+    let next_cursor = jobs.last().map(|job| job.id.into());
     let jobs = jobs
         .into_iter()
         .take(limit)

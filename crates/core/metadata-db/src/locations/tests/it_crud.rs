@@ -4,7 +4,7 @@ use pgtemp::PgTempDB;
 use url::Url;
 
 use crate::{
-    TableId,
+    TableId, WorkerNodeId,
     conn::DbConn,
     jobs::{self, JobId},
     locations::{self, LocationId},
@@ -402,17 +402,15 @@ async fn get_by_job_id_returns_locations_written_by_job() {
         .expect("Failed to run migrations");
 
     // Create a worker and job
-    let worker_id = "test-worker"
-        .parse()
-        .expect("Failed to parse test-worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref("test-worker");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"operation": "dump"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -511,17 +509,15 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         .expect("Failed to run migrations");
 
     // Create a worker and job
-    let worker_id = "test-writer-worker"
-        .parse()
-        .expect("Failed to parse test-writer-worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref("test-writer-worker");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"operation": "write"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 

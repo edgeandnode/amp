@@ -73,8 +73,7 @@ impl std::str::FromStr for FileId {
     /// - `FileIdFromStrError::NonPositive` if the parsed value is zero or negative
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let id = s.parse::<i64>().map_err(FileIdFromStrError::ParseError)?;
-        id.try_into()
-            .map_err(|err| FileIdFromStrError::NonPositive(err))
+        id.try_into().map_err(FileIdFromStrError::NonPositive)
     }
 }
 
