@@ -59,6 +59,12 @@ services:
       # Nozzle server connection
       NOZZLE_ENDPOINT: http://amp:1602
 
+      # Connection to the nozzle metadata-db to fetch manifest table schema
+      AMP_METADATA_DB_URL: postgres://postgres:postgres@db:5432/amp?sslmode=disable
+
+      # Path to dataset manifests directory (shared with amp service)
+      AMP_DATASET_MANIFESTS_PATH: /var/lib/amp/datasets
+
       # Database connection to sync data to
       DATABASE_HOST: db
       DATABASE_PORT: 5432
@@ -80,6 +86,8 @@ services:
     volumes:
       # Mount the nozzle config file (updated path for non-root user home)
       - ./nozzle.config.ts:/home/ampsync/nozzle.config.ts:ro
+      # Mount the dataset manifests directory (shared with amp service)
+      - ./infra/amp/datasets:/var/lib/amp/datasets:ro
 
     restart: unless-stopped
 

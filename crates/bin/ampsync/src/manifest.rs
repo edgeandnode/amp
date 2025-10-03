@@ -1,6 +1,8 @@
 use std::{fs, path::Path};
 
 use common::BoxError;
+use dataset_store::manifests::DatasetManifestsStore;
+use datasets_common::{name::Name, version::Version};
 use datasets_derived::manifest::Manifest;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
@@ -97,163 +99,114 @@ fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefini
     extractor.extract_manifest()
 }
 
-/// Transform a DatasetDefinition to a full Manifest by inferring schemas from Nozzle server.
+/// Load a complete Manifest from the metadata-db registry using dataset name and version.
 ///
-/// This function takes a simple user-facing dataset definition and transforms it into
-/// a complete manifest with inferred Arrow schemas for all tables.
+/// This function:
+/// 1. Parses a local dataset definition file (TS/JS/JSON) to extract name and version
+/// 2. Queries the metadata-db registry to get the manifest path
+/// 3. Fetches the complete manifest JSON from the ObjectStore
+/// 4. Returns the manifest with pre-computed schemas (no Nozzle server query needed)
 ///
-/// # Arguments
-/// * `dataset_def` - The user-facing dataset definition
-/// * `nozzle_endpoint` - Nozzle server endpoint for schema inference
-///
-/// # Returns
-/// * `Result<Manifest, BoxError>` - Complete manifest with inferred schemas
-pub async fn transform_to_manifest(
-    dataset_def: DatasetDefinition,
-    nozzle_endpoint: &str,
-) -> Result<Manifest, BoxError> {
-    use std::collections::BTreeMap;
-
-    use datasets_derived::manifest::{Table, TableInput, TableSchema, View};
-    use nozzle_client::SqlClient;
-
-    // Connect to Nozzle server for schema inference
-    let mut sql_client = SqlClient::new(nozzle_endpoint)
-        .await
-        .map_err(|e| format!("Failed to connect to Nozzle server: {}", e))?;
-
-    // Transform tables with schema inference
-    let mut tables = BTreeMap::new();
-
-    for (table_name, table_def) in dataset_def.tables {
-        // Infer the schema by querying Nozzle with dataset context
-        let schema = crate::schema_inference::infer_schema(
-            &mut sql_client,
-            &table_def.sql,
-            &dataset_def.name,
-            &table_name,
-        )
-        .await
-        .map_err(|e| format!("Failed to infer schema for table '{}': {}", table_name, e))?;
-
-        // Create Table with inferred schema
-        let table = Table {
-            input: TableInput::View(View { sql: table_def.sql }),
-            schema: TableSchema { arrow: schema },
-            network: dataset_def.network.clone(),
-        };
-
-        tables.insert(table_name, table);
-    }
-
-    // Transform functions
-    let functions = dataset_def
-        .functions
-        .into_iter()
-        .map(|(name, func_def)| {
-            use std::sync::Arc;
-
-            use datasets_derived::manifest::{Function, FunctionSource};
-
-            (
-                name,
-                Function {
-                    input_types: func_def
-                        .input_types
-                        .into_iter()
-                        .map(|type_str| {
-                            // Parse the type string to DataType
-                            // For now, this is a placeholder - we'll need to implement proper parsing
-                            use datafusion::arrow::datatypes::DataType as ArrowDataType;
-                            use datasets_common::manifest::DataType;
-
-                            // Simple type parsing - extend as needed
-                            let arrow_type = match type_str.as_str() {
-                                "Int64" => ArrowDataType::Int64,
-                                "Utf8" => ArrowDataType::Utf8,
-                                "Boolean" => ArrowDataType::Boolean,
-                                "Float64" => ArrowDataType::Float64,
-                                _ => ArrowDataType::Utf8, // Default fallback
-                            };
-
-                            DataType(arrow_type)
-                        })
-                        .collect(),
-                    output_type: {
-                        use datafusion::arrow::datatypes::DataType as ArrowDataType;
-                        use datasets_common::manifest::DataType;
-
-                        let arrow_type = match func_def.output_type.as_str() {
-                            "Int64" => ArrowDataType::Int64,
-                            "Utf8" => ArrowDataType::Utf8,
-                            "Boolean" => ArrowDataType::Boolean,
-                            "Float64" => ArrowDataType::Float64,
-                            _ => ArrowDataType::Utf8, // Default fallback
-                        };
-
-                        DataType(arrow_type)
-                    },
-                    source: FunctionSource {
-                        source: Arc::from(func_def.source.source),
-                        filename: func_def.source.filename,
-                    },
-                },
-            )
-        })
-        .collect();
-
-    // Transform dependencies
-    let dependencies = dataset_def
-        .dependencies
-        .into_iter()
-        .map(|(name, dep)| {
-            use datasets_common::manifest::VersionReq;
-            use datasets_derived::manifest::Dependency;
-
-            (
-                name, // String key
-                Dependency {
-                    owner: dep.owner, // String, not Name
-                    name: dep.name,   // String, not Name
-                    version: dep.version.parse::<VersionReq>().unwrap(),
-                },
-            )
-        })
-        .collect();
-
-    use datasets_common::{name::Name, version::Version};
-    use datasets_derived::DerivedDatasetKind;
-
-    Ok(Manifest {
-        name: dataset_def.name.parse::<Name>()?,
-        version: dataset_def.version.parse::<Version>()?,
-        kind: DerivedDatasetKind,
-        network: dataset_def.network, // String, not Name
-        dependencies,
-        tables,
-        functions,
-    })
-}
-
-/// Load and transform a nozzle configuration file into a complete Manifest.
-///
-/// This is the main entry point that combines parsing and transformation.
+/// This approach solves the "empty table" problem because schemas are retrieved from
+/// the registry instead of being inferred by querying live data.
 ///
 /// # Arguments
-/// * `config_path` - Path to the nozzle configuration file
-/// * `nozzle_endpoint` - Nozzle server endpoint for schema inference
+/// * `config_path` - Path to the nozzle configuration file (to extract name/version)
+/// * `dataset_manifests_store` - Store for fetching manifest from registry
 ///
 /// # Returns
-/// * `Result<Manifest, BoxError>` - Complete manifest with inferred schemas
-pub async fn load_manifest(
+/// * `Result<Manifest, BoxError>` - Complete manifest with pre-computed schemas
+///
+/// # Errors
+/// * If the config file cannot be read or parsed
+/// * If the dataset is not found in the registry
+/// * If the manifest JSON cannot be fetched or parsed
+pub async fn load_manifest_from_registry(
     config_path: &Path,
-    nozzle_endpoint: &str,
+    dataset_manifests_store: &DatasetManifestsStore,
 ) -> Result<Manifest, BoxError> {
-    // Load the dataset definition
-    let dataset_def = load_dataset_definition(config_path).await?;
+    tracing::info!(
+        "Loading manifest from registry for config: {}",
+        config_path.display()
+    );
 
-    // Transform to manifest with schema inference
-    transform_to_manifest(dataset_def, nozzle_endpoint).await
+    // Load the dataset definition to extract name and version
+    let dataset_def = load_dataset_definition(config_path).await.map_err(|e| {
+        format!(
+            "Failed to load dataset definition from '{}': {}",
+            config_path.display(),
+            e
+        )
+    })?;
+
+    // Parse name and version
+    let name: Name = dataset_def.name.parse().map_err(|e| {
+        format!(
+            "Invalid dataset name '{}' in config '{}': {}",
+            dataset_def.name,
+            config_path.display(),
+            e
+        )
+    })?;
+
+    let version: Version = dataset_def.version.parse().map_err(|e| {
+        format!(
+            "Invalid dataset version '{}' in config '{}': {}",
+            dataset_def.version,
+            config_path.display(),
+            e
+        )
+    })?;
+
+    tracing::info!(
+        "Fetching latest manifest for dataset '{}' from registry (config version: '{}')",
+        name,
+        version
+    );
+
+    // Fetch latest manifest from registry
+    // Note: We use None to get the latest version instead of exact version matching,
+    // because registry versions may include build metadata (e.g., "0.1.0-MjcwMDUxMTA3")
+    // while config versions are typically clean semver (e.g., "0.1.0")
+    let manifest_content = dataset_manifests_store
+        .get(&name, None)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to fetch manifest for '{}' from registry: {}",
+                name, e
+            )
+        })?
+        .ok_or_else(|| {
+            format!(
+                "Manifest not found in registry for dataset '{}'. \
+                 Ensure the dataset is registered in the metadata database.",
+                name
+            )
+        })?;
+
+    tracing::debug!(
+        "Successfully fetched manifest content for '{}' v'{}'",
+        name,
+        version
+    );
+
+    // Parse the manifest JSON
+    let manifest: Manifest = manifest_content.try_into_manifest().map_err(|e| {
+        format!(
+            "Failed to parse manifest JSON for '{}' v'{}': {}",
+            name, version, e
+        )
+    })?;
+
+    tracing::info!(
+        "Successfully loaded manifest for '{}' v'{}' with {} tables",
+        manifest.name,
+        manifest.version,
+        manifest.tables.len()
+    );
+
+    Ok(manifest)
 }
 
 /// AST visitor that extracts manifest configuration from JavaScript/TypeScript files
@@ -575,6 +528,104 @@ mod tests {
             }
             Err(e) => {
                 panic!("Failed to parse defineDataset pattern: {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_manifest_from_registry() {
+        use std::sync::Arc;
+
+        use dataset_store::manifests::DatasetManifestsStore;
+        use metadata_db::MetadataDb;
+        use object_store::local::LocalFileSystem;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for manifests
+        let temp_dir = TempDir::new().unwrap();
+        let manifests_path = temp_dir.path();
+
+        // Create a test manifest JSON file
+        let manifest_json = r#"{
+            "name": "test_dataset",
+            "version": "1.0.0",
+            "kind": "manifest",
+            "network": "mainnet",
+            "dependencies": {},
+            "tables": {
+                "test_table": {
+                    "input": {"sql": "SELECT * FROM source"},
+                    "schema": {
+                        "arrow": {
+                            "fields": [
+                                {"name": "id", "type": "UInt64", "nullable": false},
+                                {"name": "value", "type": "Utf8", "nullable": true}
+                            ]
+                        }
+                    },
+                    "network": "mainnet"
+                }
+            },
+            "functions": {}
+        }"#;
+
+        // Write manifest to file
+        let manifest_path = manifests_path.join("test_dataset__1_0_0.json");
+        std::fs::write(&manifest_path, manifest_json).unwrap();
+
+        // Create a temporary config file
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "version": "1.0.0",
+                "network": "mainnet",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+
+        // Set up metadata database (using temp-db feature for testing)
+        let temp_db = metadata_db::temp_metadata_db(false, MetadataDb::default_pool_size()).await;
+        let metadata_db = MetadataDb::connect(temp_db.url(), MetadataDb::default_pool_size())
+            .await
+            .unwrap();
+
+        // Register the dataset in metadata-db
+        let name: datasets_common::name::Name = "test_dataset".parse().unwrap();
+        let version: datasets_common::version::Version = "1.0.0".parse().unwrap();
+        metadata_db
+            .register_dataset("test-owner", &name, &version, "test_dataset__1_0_0.json")
+            .await
+            .unwrap();
+
+        // Create ObjectStore and DatasetManifestsStore
+        let object_store: Arc<dyn object_store::ObjectStore> =
+            Arc::new(LocalFileSystem::new_with_prefix(manifests_path).unwrap());
+        let dataset_manifests_store = DatasetManifestsStore::new(metadata_db, object_store);
+
+        // Test: Load manifest from registry
+        let result =
+            load_manifest_from_registry(config_file.path(), &dataset_manifests_store).await;
+
+        match result {
+            Ok(manifest) => {
+                assert_eq!(manifest.name.to_string(), "test_dataset");
+                assert_eq!(manifest.version.to_string(), "1.0.0");
+                assert_eq!(manifest.network, "mainnet");
+                assert!(manifest.tables.contains_key("test_table"));
+
+                // Verify schema was loaded correctly
+                let table = manifest.tables.get("test_table").unwrap();
+                assert_eq!(table.schema.arrow.fields.len(), 2);
+                assert_eq!(table.schema.arrow.fields[0].name, "id");
+                assert_eq!(table.schema.arrow.fields[1].name, "value");
+            }
+            Err(e) => {
+                panic!("Failed to load manifest from registry: {}", e);
             }
         }
     }

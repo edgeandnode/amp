@@ -26,12 +26,16 @@ backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
 datafusion.workspace = true
+dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 enum_dispatch = "0.3.13"
 futures.workspace = true
+lazy_static = "1.5.0"
+metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 nozzle-client = { path = "../../client" }
+object_store.workspace = true
 oxc_allocator = "0.93"
 oxc_ast = "0.93"
 oxc_ast_visit = "0.93"

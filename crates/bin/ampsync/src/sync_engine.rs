@@ -9,19 +9,52 @@ use bytes::BytesMut;
 use common::{BoxError, arrow::array::RecordBatch};
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use datasets_derived::manifest::{ArrowSchema, Field};
+use lazy_static::lazy_static;
 use nozzle_client::InvalidationRange;
 use sqlx::{Pool, Postgres};
 
 use crate::{conn::DbConnPool, pgpq::ArrowToPostgresBinaryEncoder};
 
+lazy_static! {
+    /// Create a static HashSet of reserved SQL keywords.
+    /// If a column in the derived arrow schema exists in this list, it needs to be wrapped in quotes,
+    /// or the CREATE TABLE call will fail.
+    static ref RESERVED_KEYWORDS: std::collections::HashSet<String> = {
+        let mut reserved_sql_keywords = std::collections::HashSet::new();
+        reserved_sql_keywords.insert("as".to_string());
+        reserved_sql_keywords.insert("from".to_string());
+        reserved_sql_keywords.insert("to".to_string());
+        reserved_sql_keywords.insert("select".to_string());
+        reserved_sql_keywords.insert("array".to_string());
+        reserved_sql_keywords.insert("sum".to_string());
+        reserved_sql_keywords.insert("all".to_string());
+        reserved_sql_keywords.insert("allocate".to_string());
+        reserved_sql_keywords.insert("alter".to_string());
+        reserved_sql_keywords.insert("table".to_string());
+        reserved_sql_keywords.insert("blob".to_string());
+
+        reserved_sql_keywords
+    };
+}
+
 /// Convert Arrow schema to PostgreSQL CREATE TABLE statement
+///
+/// Deduplicates fields by name - if multiple fields have the same name,
+/// only the first occurrence is used. This handles cases where manifests
+/// contain duplicate field definitions.
 pub fn arrow_schema_to_postgres_ddl(
     table_name: &str,
     schema: &ArrowSchema,
 ) -> Result<String, BoxError> {
     let mut columns = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
 
     for field in &schema.fields {
+        // Skip duplicate field names
+        if !seen_names.insert(field.name.clone()) {
+            continue;
+        }
+
         let column_def = arrow_field_to_postgres_column(field)?;
         columns.push(column_def);
     }
@@ -40,7 +73,14 @@ fn arrow_field_to_postgres_column(field: &Field) -> Result<String, BoxError> {
     let pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
     let nullable = if field.nullable { "" } else { " NOT NULL" };
 
-    Ok(format!("{} {}{}", field.name, pg_type, nullable))
+    // wrap reserved keywords in quotes
+    let column_name = if RESERVED_KEYWORDS.contains(&field.name) {
+        format!("\"{}\"", field.name.clone())
+    } else {
+        field.name.clone()
+    };
+
+    Ok(format!("{} {}{}", column_name, pg_type, nullable))
 }
 
 /// Map Arrow DataType to PostgreSQL type
@@ -563,7 +603,10 @@ impl AmpsyncDbEngine {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use datafusion::arrow::datatypes::DataType as ArrowDataType;
+    use datasets_common::manifest::DataType;
 
     use super::*;
 
@@ -589,5 +632,207 @@ mod tests {
             arrow_type_to_postgres_type(&ArrowDataType::Binary).unwrap(),
             "BYTEA"
         );
+    }
+
+    #[test]
+    fn test_arrow_type_mappings_comprehensive() {
+        use datafusion::arrow::datatypes::TimeUnit;
+
+        // Integer types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Int8).unwrap(),
+            "SMALLINT"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Int16).unwrap(),
+            "SMALLINT"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Int64).unwrap(),
+            "BIGINT"
+        );
+
+        // Unsigned integer types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::UInt8).unwrap(),
+            "SMALLINT"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::UInt32).unwrap(),
+            "BIGINT"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::UInt64).unwrap(),
+            "NUMERIC(20)"
+        );
+
+        // Float types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Float32).unwrap(),
+            "REAL"
+        );
+
+        // String types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::LargeUtf8).unwrap(),
+            "TEXT"
+        );
+
+        // Binary types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::LargeBinary).unwrap(),
+            "BYTEA"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::FixedSizeBinary(32)).unwrap(),
+            "BYTEA"
+        );
+
+        // Date/Time types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Date32).unwrap(),
+            "DATE"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Timestamp(TimeUnit::Microsecond, None))
+                .unwrap(),
+            "TIMESTAMP"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Timestamp(
+                TimeUnit::Microsecond,
+                Some("+00:00".into())
+            ))
+            .unwrap(),
+            "TIMESTAMPTZ"
+        );
+
+        // Decimal type
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::Decimal128(38, 10)).unwrap(),
+            "NUMERIC(38, 10)"
+        );
+
+        // Complex types
+        assert_eq!(
+            arrow_type_to_postgres_type(&ArrowDataType::List(Arc::new(
+                datafusion::arrow::datatypes::Field::new("item", ArrowDataType::Int32, true)
+            )))
+            .unwrap(),
+            "JSONB"
+        );
+    }
+
+    #[test]
+    fn test_arrow_field_to_postgres_column() {
+        use datasets_common::manifest::DataType;
+
+        // Non-nullable field
+        let field = Field {
+            name: "id".to_string(),
+            type_: DataType(ArrowDataType::Int64),
+            nullable: false,
+        };
+        assert_eq!(
+            arrow_field_to_postgres_column(&field).unwrap(),
+            "id BIGINT NOT NULL"
+        );
+
+        // Nullable field
+        let field = Field {
+            name: "name".to_string(),
+            type_: DataType(ArrowDataType::Utf8),
+            nullable: true,
+        };
+        assert_eq!(arrow_field_to_postgres_column(&field).unwrap(), "name TEXT");
+
+        // Binary field
+        let field = Field {
+            name: "hash".to_string(),
+            type_: DataType(ArrowDataType::FixedSizeBinary(32)),
+            nullable: false,
+        };
+        assert_eq!(
+            arrow_field_to_postgres_column(&field).unwrap(),
+            "hash BYTEA NOT NULL"
+        );
+    }
+
+    #[test]
+    fn test_wraps_reserved_words_in_quotes() {
+        let field = Field {
+            name: "to".to_string(),
+            type_: DataType(ArrowDataType::FixedSizeBinary(32)),
+            nullable: false,
+        };
+        assert_eq!(
+            arrow_field_to_postgres_column(&field).unwrap(),
+            "\"to\" BYTEA NOT NULL"
+        );
+
+        let field = Field {
+            name: "from".to_string(),
+            type_: DataType(ArrowDataType::FixedSizeBinary(32)),
+            nullable: false,
+        };
+        assert_eq!(
+            arrow_field_to_postgres_column(&field).unwrap(),
+            "\"from\" BYTEA NOT NULL"
+        );
+    }
+
+    #[test]
+    fn test_arrow_schema_to_postgres_ddl() {
+        use datasets_common::manifest::DataType;
+
+        let schema = ArrowSchema {
+            fields: vec![
+                Field {
+                    name: "id".to_string(),
+                    type_: DataType(ArrowDataType::UInt64),
+                    nullable: false,
+                },
+                Field {
+                    name: "name".to_string(),
+                    type_: DataType(ArrowDataType::Utf8),
+                    nullable: true,
+                },
+                Field {
+                    name: "balance".to_string(),
+                    type_: DataType(ArrowDataType::Decimal128(38, 18)),
+                    nullable: false,
+                },
+                Field {
+                    name: "created_at".to_string(),
+                    type_: DataType(ArrowDataType::Timestamp(
+                        datafusion::arrow::datatypes::TimeUnit::Microsecond,
+                        Some("+00:00".into()),
+                    )),
+                    nullable: false,
+                },
+            ],
+        };
+
+        let ddl = arrow_schema_to_postgres_ddl("test_table", &schema).unwrap();
+
+        // Verify the DDL structure
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS test_table"));
+        assert!(ddl.contains("id NUMERIC(20) NOT NULL"));
+        assert!(ddl.contains("name TEXT"));
+        assert!(ddl.contains("balance NUMERIC(38, 18) NOT NULL"));
+        assert!(ddl.contains("created_at TIMESTAMPTZ NOT NULL"));
+
+        // Verify fields are separated by commas and newlines
+        assert!(ddl.contains(",\n"));
+    }
+
+    #[test]
+    fn test_arrow_schema_to_postgres_ddl_empty_schema() {
+        let schema = ArrowSchema { fields: vec![] };
+
+        let ddl = arrow_schema_to_postgres_ddl("empty_table", &schema).unwrap();
+
+        // Should still create a valid (though empty) table
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS empty_table"));
     }
 }
