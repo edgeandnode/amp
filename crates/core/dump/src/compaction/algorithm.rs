@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    ops::Deref,
+    ops::{Deref, Not},
     time::Duration,
 };
 
@@ -18,43 +18,43 @@ use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
 ///
 /// ## Fields
 /// - `base_duration`: The base duration used to calculate
-/// the cooldown period for files based on their generation.
+///   the cooldown period for files based on their generation.
 /// - `upper_bound`: The upper bound for segment size limits.
-/// Files exceeding this limit will not be compacted together. This
-/// value must be non-unbounded.
+///   Files exceeding this limit will not be compacted together. This
+///   value must be non-unbounded.
 /// - `lower_bound`: The lower bound for segment size limits. This
-/// value can be unbounded, indicating no lower limit for compaction.
+///   value can be unbounded, indicating no lower limit for compaction.
 ///
 /// ## Logic
 ///
 /// ### Eager Compaction
 /// > If the lower bound is set to >= the upper bound, all files are considered `Live`,
-/// and will be compacted together as long as they do not exceed the upper bound
-/// size limits, regardless of their generation or age.
+/// > and will be compacted together as long as they do not exceed the upper bound
+/// > size limits, regardless of their generation or age.
 ///
 /// ### Exponential Compaction
 /// > If the lower bound is unbounded, and the base duration for cooldown
-/// is set to zero, all files are considered `Hot`, and will be compacted
-/// together as long as they do not exceed the upper bound size limits and
-/// share the same generation.
+/// > is set to zero, all files are considered `Hot`, and will be compacted
+/// > together as long as they do not exceed the upper bound size limits and
+/// > share the same generation.
 ///
 /// ### Relaxed Exponential Compaction
 /// > If the lower bound is unbounded, and the base duration for cooldown
-/// is set to a non-zero value, files are considered `Hot` or `Cold`
-/// based on their age and the cooldown period. As long as the total size
-/// of the candidate group does not exceed the upper bound, `Hot` files
-/// will only be compacted with other files of the same generation, while
-/// `Cold` files can be compacted regardless of generation.
+/// > is set to a non-zero value, files are considered `Hot` or `Cold`
+/// > based on their age and the cooldown period. As long as the total size
+/// > of the candidate group does not exceed the upper bound, `Hot` files
+/// > will only be compacted with other files of the same generation, while
+/// > `Cold` files can be compacted regardless of generation.
 ///
 /// ### Hybrid Compaction
 /// > If the lower bound is set to a non-unbounded value that is less than
-/// the upper bound, and the base duration for cooldown is set to a non-zero
-/// value, files are considered `Live`, `Hot`, or `Cold` based on their
-/// size and age. As long as the total size of the candidate group does not
-/// exceed the upper bound, `Live` files will be compacted together if
-/// they do not exceed the lower bound limits, `Hot` files will only be
-/// compacted with other files of the same generation, and `Cold` files
-/// can be compacted regardless of generation.
+/// > the upper bound, and the base duration for cooldown is set to a non-zero
+/// > value, files are considered `Live`, `Hot`, or `Cold` based on their
+/// > size and age. As long as the total size of the candidate group does not
+/// > exceed the upper bound, `Live` files will be compacted together if
+/// > they do not exceed the lower bound limits, `Hot` files will only be
+/// > compacted with other files of the same generation, and `Cold` files
+/// > can be compacted regardless of generation.
 #[derive(Clone, Copy)]
 pub struct CompactionAlgorithm {
     pub base_cooldown: Duration,
@@ -90,9 +90,9 @@ impl CompactionAlgorithm {
     /// Determines the state of a file based on its size and age.
     /// - `Live`: The file is within the lower bound limits, if any.
     /// - `Hot`: The file has exceeded lower bound limits (if any)
-    /// but is still within its cooldown period.
+    ///   but is still within its cooldown period.
     /// - `Cold`: The file has exceeded lower bound limits and is outside
-    /// its cooldown period.
+    ///   its cooldown period.
     fn file_state(&self, segment: &SegmentSize) -> FileState {
         let is_live = self.is_live(segment);
 
@@ -103,9 +103,9 @@ impl CompactionAlgorithm {
         let is_hot = self.is_hot(segment);
 
         match is_hot {
-            TestResult::Skipped => return FileState::Hot,
-            TestResult::Activated(true) => return FileState::Hot,
-            TestResult::Activated(false) => return FileState::Cold,
+            TestResult::Skipped => FileState::Hot,
+            TestResult::Activated(true) => FileState::Hot,
+            TestResult::Activated(false) => FileState::Cold,
         }
     }
 
@@ -114,7 +114,7 @@ impl CompactionAlgorithm {
     /// Returns `true` if the candidate file can be compacted with the group,
     /// `false` otherwise. The decision is based on the combined size of the
     /// files, their states (Live, Hot, Cold), and their generations.
-    pub fn predicate<'a>(&self, group: &CompactionGroup, candidate: &CompactionFile) -> bool {
+    pub fn predicate(&self, group: &CompactionGroup, candidate: &CompactionFile) -> bool {
         let state = self
             .file_state(&group.size)
             .max(self.file_state(&candidate.size));
@@ -127,15 +127,15 @@ impl CompactionAlgorithm {
             // For live files, only compact if size limit is not exceeded.
             // If it's the tail file, also require length limit to be exceeded
             // (for cases where a minimum number of segments is desired before compaction).
-            return !*size_exceeded && (!candidate.is_tail || *length_exceeded);
+            *size_exceeded && (!candidate.is_tail || *length_exceeded)
         } else if state == FileState::Hot {
             // For hot files, only compact if size limit is not exceeded,
             // and both files share the same generation.
-            return group.size.generation == candidate.size.generation && !*size_exceeded;
+            group.size.generation == candidate.size.generation && !*size_exceeded
         } else {
             // For cold files, compact regardless of generation,
             // as long as size limit is not exceeded.
-            return !*size_exceeded;
+            !*size_exceeded
         }
     }
 }
@@ -218,19 +218,19 @@ impl Cooldown {
             self.0
                 .as_micros()
                 .try_into()
-                .unwrap_or_else(|_| u64::MAX)
+                .unwrap_or(u64::MAX)
                 .saturating_mul(*self.1),
         )
     }
 
     pub(super) fn is_hot(&self, created_at: u128) -> TestResult {
         if self.0.is_zero() {
-            return TestResult::Skipped;
+            TestResult::Skipped
         } else {
             let now = Timestamp::now();
-            return TestResult::Activated(
+            TestResult::Activated(
                 created_at.saturating_add(self.as_duration().as_micros()) > now.0.as_micros(),
-            );
+            )
         }
     }
 }
@@ -250,14 +250,14 @@ impl Display for Cooldown {
 /// Represents the state of a file for compaction purposes.
 /// The states are ordered like so:
 /// `Live < Hot < Cold`
-#[derive(Debug, PartialEq, Eq, Ord)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FileState {
     Live,
     Hot,
     Cold,
 }
 
-impl PartialOrd for FileState {
+impl Ord for FileState {
     /// Defines a partial ordering for `FileState`:
     /// - `Cold` is greater than both `Live` and `Hot`.
     /// - `Hot` is greater than `Live` but less than `Cold`.
@@ -281,16 +281,22 @@ impl PartialOrd for FileState {
     /// assert_eq!(FileState::Hot, FileState::Hot);
     /// assert_eq!(FileState::Live, FileState::Live);
     /// ```
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
             (FileState::Cold, FileState::Cold)
             | (FileState::Live, FileState::Live)
-            | (FileState::Hot, FileState::Hot) => Some(std::cmp::Ordering::Equal),
-            (FileState::Cold, _) => Some(std::cmp::Ordering::Greater),
-            (_, FileState::Cold) => Some(std::cmp::Ordering::Less),
-            (FileState::Hot, _) => Some(std::cmp::Ordering::Greater),
-            (_, FileState::Hot) => Some(std::cmp::Ordering::Less),
+            | (FileState::Hot, FileState::Hot) => std::cmp::Ordering::Equal,
+            (FileState::Cold, _) => std::cmp::Ordering::Greater,
+            (_, FileState::Cold) => std::cmp::Ordering::Less,
+            (FileState::Hot, _) => std::cmp::Ordering::Greater,
+            (_, FileState::Hot) => std::cmp::Ordering::Less,
         }
+    }
+}
+
+impl PartialOrd for FileState {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -356,11 +362,11 @@ impl SegmentSizeLimit {
     ///
     /// ## Note:
     /// - Tested dimensions are considered exceeded if they are greater than
-    /// or equal to the corresponding limit.
+    ///   or equal to the corresponding limit.
     /// - Dimensions with limit value `-1` or `0` are considered
-    /// as unbounded and are [`TestResult::Skipped`] in the evaluation.
+    ///   as unbounded and are [`TestResult::Skipped`] in the evaluation.
     /// - The blocks, bytes, and rows dimensions are combined using [`TestResult::and`],
-    /// meaning skipped dimensions do not propagate a failure if other dimensions exceed their limits.
+    ///   meaning skipped dimensions do not propagate a failure if other dimensions exceed their limits.
     ///
     /// ## Arguments
     /// - `segment`: [`SegmentSize`] - The segment to check against the limits
@@ -407,7 +413,7 @@ impl SegmentSizeLimit {
             .into();
 
         (
-            blocks_ge.and(bytes_ge).and(rows_ge),
+            blocks_ge.or(bytes_ge).or(rows_ge),
             length_ge,
             generation_ge,
         )
@@ -430,16 +436,16 @@ impl Display for SegmentSizeLimit {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let size_string = format!("{}", self.0);
         if size_string.contains("null") {
-            return write!(f, "{{ unbounded }}");
+            write!(f, "{{ unbounded }}")
         } else if !(self.1.0.get() == 1 && self.1.1.get() == 1) {
             // Only display overflow if it's not the default of 1
-            return write!(
+            write!(
                 f,
                 "{}",
                 size_string.replace(" }", &format!(", overflow: {} }}", self.1))
-            );
+            )
         } else {
-            return write!(f, "{}", size_string);
+            write!(f, "{}", size_string)
         }
     }
 }
@@ -538,25 +544,6 @@ impl TestResult {
             (a, TestResult::Skipped) => a,
         }
     }
-
-    /// Logical NOT operation.
-    ///
-    /// Implements kleene-style negation. If the operand is `Skipped`,
-    /// the result is also `Skipped`. If the operand is `Activated`,
-    /// the result is the logical NOT of its value.
-    ///
-    /// # Truth Table
-    /// | A                | NOT A            | Deref(NOT A)     |
-    /// |------------------|------------------|------------------|
-    /// | Activated(true)  | Activated(false) | false            |
-    /// | Activated(false) | Activated(true)  | true             |
-    /// | Skipped          | Skipped          | false            |
-    pub fn not(self) -> TestResult {
-        match self {
-            TestResult::Activated(a) => TestResult::Activated(!a),
-            TestResult::Skipped => TestResult::Skipped,
-        }
-    }
 }
 
 impl Deref for TestResult {
@@ -585,6 +572,29 @@ impl PartialEq for TestResult {
             (TestResult::Activated(a), TestResult::Activated(b)) => a == b,
             (TestResult::Skipped, TestResult::Skipped) => true,
             _ => false,
+        }
+    }
+}
+
+impl Not for TestResult {
+    type Output = TestResult;
+
+    /// Logical NOT operation.
+    ///
+    /// Implements kleene-style negation. If the operand is `Skipped`,
+    /// the result is also `Skipped`. If the operand is `Activated`,
+    /// the result is the logical NOT of its value.
+    ///
+    /// # Truth Table
+    /// | A                | NOT A            | Deref(NOT A)     |
+    /// |------------------|------------------|------------------|
+    /// | Activated(true)  | Activated(false) | false            |
+    /// | Activated(false) | Activated(true)  | true             |
+    /// | Skipped          | Skipped          | false            |
+    fn not(self) -> TestResult {
+        match self {
+            TestResult::Activated(a) => TestResult::Activated(!a),
+            TestResult::Skipped => TestResult::Skipped,
         }
     }
 }
@@ -661,6 +671,7 @@ mod tests {
 
     #[test]
     fn test_result_not() {
+        use std::ops::Not;
         use super::TestResult::{Activated as A, Skipped as S};
         assert_eq!(A(true).not(), A(false));
         assert_eq!(A(false).not(), A(true));
@@ -670,8 +681,8 @@ mod tests {
     #[test]
     fn test_result_deref() {
         use super::TestResult::{Activated as A, Skipped as S};
-        assert_eq!(*A(true), true);
-        assert_eq!(*A(false), false);
-        assert_eq!(*S, false);
+        assert!(*A(true));
+        assert!(!*A(false));
+        assert!(!*S);
     }
 }

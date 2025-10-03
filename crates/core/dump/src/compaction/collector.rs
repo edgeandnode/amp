@@ -1,5 +1,6 @@
 use std::{
     fmt::{Debug, Display, Formatter},
+    ops::Deref,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -79,7 +80,7 @@ impl Collector {
                     output.update_metrics(metrics, dataset, table_name);
                 }
 
-                output.update_manifest(&metadata_db).await.map_err(
+                output.update_manifest(metadata_db).await.map_err(
                     CollectorError::manifest_update_error(
                         [output.successes, output.not_found].concat(),
                     ),
@@ -235,7 +236,10 @@ impl DeletionOutput {
         }
 
         let file_ids = [self.successes(), self.not_found()].concat();
-        tracing::debug!("Deleting {:?} from metadata-db", file_ids);
+        tracing::debug!(
+            "Deleting {:?} from metadata-db",
+            file_ids.iter().map(Deref::deref)
+        );
 
         metadata_db.delete_file_ids(&file_ids).await
     }
@@ -279,7 +283,7 @@ impl DeletionOutput {
     }
 
     fn insert_error(&mut self, file_id: FileId, err: ObjectStoreError) {
-        tracing::error!("Error deleting file {file_id}: {err}");
+        tracing::warn!("Error deleting file {file_id}: {err}");
         self.errors.push((file_id, Box::new(err)));
     }
 }

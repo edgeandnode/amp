@@ -106,7 +106,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
             && self
                 .elapsed_since_previous()
                 // if None, consider it ready
-                .map_or(true, |elapsed| elapsed >= T::interval(&self.opts))
+                .is_none_or(|elapsed| elapsed >= T::interval(&self.opts))
             && T::active(&self.opts)
     }
 
@@ -170,7 +170,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         if err.is_cancellation() {
             Self::deactivate(opts);
             tracing::info!("{this:?} was cancelled");
-            return this;
+            this
         } else if err.is_debug() {
             tracing::debug!("{err}");
             this

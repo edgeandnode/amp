@@ -16,8 +16,7 @@ use object_store::Error as ObjectStoreError;
 use tokio::task::JoinError;
 
 use crate::{
-    ConsistencyCheckError,
-    compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor},
+    ConsistencyCheckError, WriterProperties, compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor}
 };
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
@@ -58,7 +57,7 @@ where
     /// Catching errors while creating a compaction writer
     CreateWriterError {
         err: BoxError,
-        opts: ParquetWriterProperties,
+        opts: Box<ParquetWriterProperties>,
     },
     /// Catching errors while writing data to a parquet file
     FileWriteError { err: BoxError },
@@ -102,9 +101,9 @@ impl CompactorError {
         }
     }
 
-    pub fn create_writer_error(opts: &ParquetWriterProperties) -> impl FnOnce(BoxError) -> Self {
+    pub fn create_writer_error(opts: &Arc<WriterProperties>) -> impl FnOnce(BoxError) -> Self {
         move |err| CompactorError::CreateWriterError {
-            opts: opts.clone(),
+            opts: opts.parquet.clone().into(),
             err,
         }
     }

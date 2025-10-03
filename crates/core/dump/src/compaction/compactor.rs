@@ -201,7 +201,7 @@ impl CompactionGroup {
         };
 
         let mut writer = ParquetFileWriter::new(Arc::clone(&self.table), &self.opts, range.start())
-            .map_err(CompactorError::create_writer_error(&self.opts.parquet))?;
+            .map_err(CompactorError::create_writer_error(&self.opts))?;
 
         let mut parent_ids = Vec::with_capacity(self.streams.len());
         for mut file in self.streams {

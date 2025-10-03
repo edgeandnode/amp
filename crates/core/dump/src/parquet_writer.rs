@@ -90,7 +90,7 @@ impl ParquetFileWriter {
         self.writer.write(batch).await
     }
 
-    #[must_use]
+    #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]
     #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
