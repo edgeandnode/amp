@@ -54,6 +54,7 @@ pub mod fixtures {
     mod anvil;
     mod cli;
     mod daemon_config;
+    mod daemon_controller;
     mod daemon_server;
     mod daemon_state_dir;
     mod daemon_worker;
@@ -67,6 +68,7 @@ pub mod fixtures {
     pub use anvil::*;
     pub use cli::*;
     pub use daemon_config::*;
+    pub use daemon_controller::*;
     pub use daemon_server::*;
     pub use daemon_state_dir::*;
     pub use daemon_worker::*;

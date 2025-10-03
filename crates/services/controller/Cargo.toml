@@ -1,0 +1,9 @@
+[package]
+name = "controller"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+admin-api = { path = "../admin-api" }
+common = { path = "../../core/common" }
+monitoring = { path = "../../core/monitoring" }

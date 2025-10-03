@@ -22,7 +22,6 @@ use tracing::instrument;
 pub struct BoundAddrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,
-    pub admin_api_addr: SocketAddr,
 }
 
 pub async fn run(
@@ -30,7 +29,6 @@ pub async fn run(
     metadata_db: MetadataDb,
     enable_flight: bool,
     enable_jsonl: bool,
-    enable_admin: bool,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
@@ -50,7 +48,6 @@ pub async fn run(
     let mut bound_addrs = BoundAddrs {
         flight_addr: config.addrs.flight_addr,
         jsonl_addr: config.addrs.jsonl_addr,
-        admin_api_addr: config.addrs.admin_api_addr,
     };
 
     // Start Arrow Flight Server if enabled
@@ -87,21 +84,6 @@ pub async fn run(
         services_futures.push(jsonl_server);
         bound_addrs.jsonl_addr = jsonl_addr;
         tracing::info!("Serving JSON lines at {}", jsonl_addr);
-    }
-
-    // Start Admin API Server if enabled
-    if enable_admin {
-        let (admin_api_addr, admin_api) =
-            admin_api::serve(config.addrs.admin_api_addr, config, meter).await?;
-        let admin_api = admin_api
-            .map_err(|e| {
-                tracing::error!("Admin API error: {}", e);
-                e
-            })
-            .boxed();
-        services_futures.push(admin_api);
-        bound_addrs.admin_api_addr = admin_api_addr;
-        tracing::info!("Admin API running at {}", admin_api_addr);
     }
 
     // Wait for the services to finish, either due to graceful shutdown or error.
