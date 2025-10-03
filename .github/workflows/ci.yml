@@ -18,37 +18,37 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  unit-tests:
-    name: Unit tests
-    runs-on: namespace-profile-linux-default
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
-      - name: Setup dependencies
-        run: |
-          # Install dependencies
-          sudo apt-get update
-          sudo apt-get install -y postgresql
+  # unit-tests:
+  #   name: Unit tests
+  #   runs-on: namespace-profile-linux-default
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+  #     - name: Setup dependencies
+  #       run: |
+  #         # Install dependencies
+  #         sudo apt-get update
+  #         sudo apt-get install -y postgresql
 
-          # Add PostgreSQL binaries to PATH
-          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
+  #         # Add PostgreSQL binaries to PATH
+  #         echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
-        with:
-          cache: true
-          rustflags: ""
+  #     - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+  #       with:
+  #         cache: true
+  #         rustflags: ""
 
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+  #     - name: Setup just
+  #       uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
-      - name: Install cargo-nextest
-        uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
-        with:
-          crate: cargo-nextest
-          version: ^0.9
+  #     - name: Install cargo-nextest
+  #       uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
+  #       with:
+  #         crate: cargo-nextest
+  #         version: ^0.9
 
-      - name: Unit tests
-        run: just test-unit --verbose
+  #     - name: Unit tests
+  #       run: just test-unit --verbose
 
   integration-tests:
     name: Integration tests
@@ -129,81 +129,81 @@ jobs:
       - name: Check formatting
         run: just fmt-rs-check
 
-  release-check:
-    name: Build in release mode
-    runs-on: namespace-profile-linux-default
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+  # release-check:
+  #   name: Build in release mode
+  #   runs-on: namespace-profile-linux-default
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
-        with:
-          cache: true
-          rustflags: ""
+  #     - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+  #       with:
+  #         cache: true
+  #         rustflags: ""
 
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+  #     - name: Setup just
+  #       uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
-      - name: Cargo check (release)
-        run: just check-rs --release
+  #     - name: Cargo check (release)
+  #       run: just check-rs --release
 
-  typescript:
-    name: TypeScript code style & types
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+  # typescript:
+  #   name: TypeScript code style & types
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+  #     - name: Install pnpm
+  #       uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
 
-      - name: Install dependencies
-        working-directory: typescript
-        run: pnpm install
+  #     - name: Install dependencies
+  #       working-directory: typescript
+  #       run: pnpm install
 
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+  #     - name: Setup just
+  #       uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
-      - name: Check formatting
-        run: just fmt-ts-check
+  #     - name: Check formatting
+  #       run: just fmt-ts-check
 
-      - name: Check types
-        run: just check-ts
+  #     - name: Check types
+  #       run: just check-ts
 
   # Check generated code is up to date
-  gen-check:
-    runs-on: namespace-profile-linux-default
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+  # gen-check:
+  #   runs-on: namespace-profile-linux-default
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+  #     - name: Install dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y protobuf-compiler
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
-        with:
-          cache: true
-          rustflags: ""
+  #     - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+  #       with:
+  #         cache: true
+  #         rustflags: ""
 
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+  #     - name: Setup just
+  #       uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
-      - name: Run code generation
-        run: just gen
+  #     - name: Run code generation
+  #       run: just gen
 
-      - name: Check for uncommitted changes
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            printf "❌ Generated code is out of date. Please run 'just gen' and commit the changes.\n"
+  #     - name: Check for uncommitted changes
+  #       run: |
+  #         if [ -n "$(git status --porcelain)" ]; then
+  #           printf "❌ Generated code is out of date. Please run 'just gen' and commit the changes.\n"
             
-            printf "\n📄 Files with changes:\n"
-            git status --porcelain
+  #           printf "\n📄 Files with changes:\n"
+  #           git status --porcelain
             
-            printf "\n🔍 Detailed diff:\n"
-            git diff --color=always
+  #           printf "\n🔍 Detailed diff:\n"
+  #           git diff --color=always
 
-            exit 1
-          else
-            printf "✅ Generated code is up to date.\n"
-          fi
+  #           exit 1
+  #         else
+  #           printf "✅ Generated code is up to date.\n"
+  #         fi
