@@ -103,10 +103,22 @@ export class TableInfo extends Schema.Class<TableInfo>("TableInfo")({
   activeLocation: Schema.String.pipe(Schema.optional, Schema.fromKey("active_location")),
 }) {}
 
+export class TableSchemaInfo extends Schema.Class<TableSchemaInfo>("TableSchemaInfo")({
+  name: Schema.String,
+  network: Network,
+  schema: Schema.Record({ key: Schema.String, value: Schema.Any }),
+}) {}
+
 export class DatasetInfo extends Schema.Class<DatasetInfo>("DatasetInfo")({
   name: DatasetName,
   kind: DatasetKind,
   tables: Schema.Array(TableInfo),
+}) {}
+
+export class DatasetSchemaResponse extends Schema.Class<DatasetSchemaResponse>("DatasetSchemaResponse")({
+  name: DatasetName,
+  version: DatasetVersion,
+  tables: Schema.Array(TableSchemaInfo),
 }) {}
 
 export class DatasetRegistryInfo extends Schema.Class<DatasetRegistryInfo>("DatasetRegistryInfo")({
