@@ -15,7 +15,7 @@ use futures::StreamExt;
 use metadata_db::MetadataDb;
 use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
 use object_store::local::LocalFileSystem;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     batch_utils::convert_nanosecond_timestamps,
@@ -51,7 +51,6 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     info!("Starting ampsync...");
 
     let config = AmpsyncConfig::from_env().await?;
-    info!("Configuration loaded from environment");
     info!(
         "Loaded manifest: {} v{} for network {}",
         config.manifest.name, config.manifest.version, config.manifest.network
@@ -59,7 +58,6 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     // Connect to target database
     let db_pool = DbConnPool::connect(&config.database_url, DEFAULT_POOL_SIZE).await?;
-    info!("Connected to target database");
 
     // Connect to Nozzle server
     let mut sql_client = SqlClient::new(&config.nozzle_endpoint).await?;
@@ -80,7 +78,7 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     // Process each table: create table and set up streaming
     for (table_name, table) in &config.manifest.tables {
-        info!("Processing table: {}", table_name);
+        debug!("Processing table: {}", table_name);
 
         // Create the table based on the Arrow schema (uses IF NOT EXISTS)
         ampsync_db_engine
@@ -94,7 +92,7 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
         // Add streaming settings to the query
         let streaming_query = format!("{} SETTINGS stream = true", sql_query);
-        info!(
+        debug!(
             "Executing streaming query for '{}': {}",
             table_name, streaming_query
         );
@@ -196,8 +194,6 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         });
     }
 
-    info!("All streaming queries set up successfully");
-
     // Keep the main task alive and wait for shutdown signals
     // Handle both SIGTERM (Docker stop) and SIGINT (Ctrl+C)
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -281,11 +277,9 @@ impl AmpsyncConfig {
             .map_err(|_| "AMP_METADATA_DB_URL environment variable is required")?;
 
         // Connect to metadata database
-        info!("Connecting to metadata database");
         let metadata_db = MetadataDb::connect(&metadata_db_url, MetadataDb::default_pool_size())
             .await
             .map_err(|e| format!("Failed to connect to metadata database: {}", e))?;
-        info!("Successfully connected to metadata database");
 
         // Get dataset manifests path - required
         let dataset_manifests_path = env::var("AMP_DATASET_MANIFESTS_PATH")
@@ -309,10 +303,6 @@ impl AmpsyncConfig {
         }
 
         // Create LocalFileSystem ObjectStore for dataset manifests
-        info!(
-            "Initializing dataset manifests store at: {}",
-            dataset_manifests_path
-        );
         let manifests_store: Arc<dyn object_store::ObjectStore> = Arc::new(
             LocalFileSystem::new_with_prefix(&dataset_manifests_path).map_err(|e| {
                 format!(
@@ -325,7 +315,6 @@ impl AmpsyncConfig {
         // Create DatasetManifestsStore
         let dataset_manifests_store =
             DatasetManifestsStore::new(metadata_db.clone(), manifests_store);
-        info!("Dataset manifests store initialized successfully");
 
         // Load manifest from registry (no Nozzle server query needed - solves empty table problem)
         let manifest = Arc::new(

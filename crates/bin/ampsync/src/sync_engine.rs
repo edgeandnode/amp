@@ -349,7 +349,7 @@ impl AmpsyncDbEngine {
     ) -> Result<(), BoxError> {
         let ddl = arrow_schema_to_postgres_ddl(table_name, schema)?;
 
-        tracing::info!("Ensuring table '{}' exists with DDL: {}", table_name, ddl);
+        tracing::debug!("Ensuring table '{}' exists with DDL: {}", table_name, ddl);
 
         let pool = self.pool.clone();
         let ddl_query = ddl.clone();
