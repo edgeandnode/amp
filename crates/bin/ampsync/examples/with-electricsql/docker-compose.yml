@@ -25,7 +25,7 @@ services:
       retries: 5
 
   amp:
-    image: ghcr.io/edgeandnode/nozzle:sha-4f710c1
+    image: ghcr.io/edgeandnode/nozzle:sha-e731d64
     command: ["--config", "/var/lib/amp/config.toml", "server", "--dev"]
     depends_on:
       db:
@@ -56,14 +56,10 @@ services:
       # Dataset manifest configuration
       DATASET_MANIFEST: /home/ampsync/nozzle.config.ts
 
-      # Nozzle server connection
-      NOZZLE_ENDPOINT: http://amp:1602
-
-      # Connection to the nozzle metadata-db to fetch manifest table schema
-      AMP_METADATA_DB_URL: postgres://postgres:postgres@db:5432/amp?sslmode=disable
-
-      # Path to dataset manifests directory (shared with amp service)
-      AMP_DATASET_MANIFESTS_PATH: /var/lib/amp/datasets
+      # Amp ArrowFlight URL. Used to perform queries on amp dataset
+      AMP_FLIGHT_ADDR: http://amp:1602
+      # Amp AdminApi URL. Used to fetch the manifest table schema
+      AMP_ADMIN_API_ADDR: http://amp:1610
 
       # Database connection to sync data to
       DATABASE_HOST: db

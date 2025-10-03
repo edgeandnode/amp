@@ -1,9 +1,11 @@
 use std::{fs, path::Path};
 
+use admin_api::handlers::datasets::{
+    get_version_schema::DatasetSchemaResponse, get_versions::DatasetVersionsResponse,
+};
 use common::BoxError;
-use dataset_store::manifests::DatasetManifestsStore;
 use datasets_common::{name::Name, version::Version};
-use datasets_derived::manifest::Manifest;
+use datasets_derived::{DerivedDatasetKind, Manifest, manifest::Table};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
@@ -99,38 +101,114 @@ fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefini
     extractor.extract_manifest()
 }
 
-/// Load a complete Manifest from the metadata-db registry using dataset name and version.
+/// Resolve a simple version (e.g., "0.2.0") to a fully qualified version (e.g., "0.2.0-LTcyNjgzMjc1NA").
 ///
-/// This function:
-/// 1. Parses a local dataset definition file (TS/JS/JSON) to extract name and version
-/// 2. Queries the metadata-db registry to get the manifest path
-/// 3. Fetches the complete manifest JSON from the ObjectStore
-/// 4. Returns the manifest with pre-computed schemas (no Nozzle server query needed)
-///
-/// This approach solves the "empty table" problem because schemas are retrieved from
-/// the registry instead of being inferred by querying live data.
+/// This function queries the admin-api to get all versions for a dataset and finds the first
+/// version that starts with the given version prefix.
 ///
 /// # Arguments
-/// * `config_path` - Path to the nozzle configuration file (to extract name/version)
-/// * `dataset_manifests_store` - Store for fetching manifest from registry
+/// * `admin_api_addr` - Base URL of the admin-api service
+/// * `name` - Dataset name
+/// * `version` - Simple version from the config (e.g., "0.2.0")
 ///
 /// # Returns
-/// * `Result<Manifest, BoxError>` - Complete manifest with pre-computed schemas
-///
-/// # Errors
-/// * If the config file cannot be read or parsed
-/// * If the dataset is not found in the registry
-/// * If the manifest JSON cannot be fetched or parsed
-pub async fn load_manifest_from_registry(
-    config_path: &Path,
-    dataset_manifests_store: &DatasetManifestsStore,
-) -> Result<Manifest, BoxError> {
+/// * `Ok(Version)` - The fully qualified version
+/// * `Err(BoxError)` - If the version cannot be found or HTTP request fails
+async fn resolve_qualified_version(
+    admin_api_addr: &str,
+    name: &Name,
+    version: &Version,
+) -> Result<Version, BoxError> {
+    let admin_api_client = reqwest::Client::new();
+    let versions_resp = admin_api_client
+        .get(format!(
+            "{}/datasets/{}/versions?limit=1000",
+            admin_api_addr, name
+        ))
+        .send()
+        .await?;
+
+    // Check for HTTP errors
+    let status = versions_resp.status();
+    if !status.is_success() {
+        return Err(format!(
+            "Failed to fetch versions from admin-api: HTTP {} for dataset '{}'",
+            status, name
+        )
+        .into());
+    }
+
+    let versions_data: DatasetVersionsResponse = versions_resp.json().await?;
+
+    // Check if any versions exist
+    if versions_data.versions.is_empty() {
+        return Err(format!("No versions found for dataset '{}' in admin-api", name).into());
+    }
+
+    // Find the first version that matches our config version prefix
+    // The config has a simple version like "0.2.0", but we need the fully qualified
+    // version like "0.2.0-LTcyNjgzMjc1NA"
+    let version_prefix = version.to_string();
+    let qualified_version = versions_data
+        .versions
+        .iter()
+        .find(|v| v.to_string().starts_with(&version_prefix))
+        .ok_or_else(|| {
+            format!(
+                "No version found matching prefix '{}' for dataset '{}'. Available versions: {:?}",
+                version_prefix,
+                name,
+                versions_data
+                    .versions
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+            )
+        })?
+        .clone();
+
     tracing::info!(
-        "Loading manifest from registry for config: {}",
-        config_path.display()
+        "Resolved version '{}' to qualified version '{}' for dataset '{}'",
+        version,
+        qualified_version,
+        name
     );
 
-    // Load the dataset definition to extract name and version
+    Ok(qualified_version)
+}
+
+/// Fetch and construct a dataset Manifest by combining schema from admin-api with local config.
+///
+/// This function performs the following steps:
+/// 1. Loads the local dataset definition from the config file to get SQL queries
+/// 2. Parses and validates the dataset name and version
+/// 3. Fetches the schema information from the admin-api endpoint
+/// 4. Combines the schema (from admin-api) with SQL queries (from local config)
+///
+/// # Arguments
+/// * `admin_api_addr` - Base URL of the admin-api service (e.g., "http://localhost:1610")
+/// * `config_path` - Path to the local nozzle configuration file (.json, .js, .ts)
+///
+/// # Returns
+/// * `Ok(Manifest)` - A complete manifest with schema and SQL combined
+/// * `Err(BoxError)` - Various errors:
+///   - Failed to load or parse local config file
+///   - Invalid dataset name or version
+///   - HTTP request failure to admin-api
+///   - Schema mismatch between admin-api and local config
+///
+/// # Example
+/// ```ignore
+/// let manifest = fetch_manifest(
+///     "http://localhost:1610",
+///     Path::new("./nozzle.config.ts")
+/// ).await?;
+/// ```
+pub async fn fetch_manifest(
+    admin_api_addr: &str,
+    config_path: &Path,
+) -> Result<Manifest, BoxError> {
+    // Load the dataset definition to extract name, version, and SQL queries
     let dataset_def = load_dataset_definition(config_path).await.map_err(|e| {
         format!(
             "Failed to load dataset definition from '{}': {}",
@@ -139,7 +217,7 @@ pub async fn load_manifest_from_registry(
         )
     })?;
 
-    // Parse name and version
+    // Parse and validate dataset name
     let name: Name = dataset_def.name.parse().map_err(|e| {
         format!(
             "Invalid dataset name '{}' in config '{}': {}",
@@ -149,6 +227,7 @@ pub async fn load_manifest_from_registry(
         )
     })?;
 
+    // Parse and validate dataset version
     let version: Version = dataset_def.version.parse().map_err(|e| {
         format!(
             "Invalid dataset version '{}' in config '{}': {}",
@@ -158,55 +237,76 @@ pub async fn load_manifest_from_registry(
         )
     })?;
 
+    // Resolve the simple version from config to a fully qualified version
+    let qualified_version = resolve_qualified_version(admin_api_addr, &name, &version).await?;
+
     tracing::info!(
-        "Fetching latest manifest for dataset '{}' from registry (config version: '{}')",
+        "Fetching schema for dataset '{}' version '{}' from admin-api at {}",
         name,
-        version
+        qualified_version,
+        admin_api_addr
     );
 
-    // Fetch latest manifest from registry
-    // Note: We use None to get the latest version instead of exact version matching,
-    // because registry versions may include build metadata (e.g., "0.1.0-MjcwMDUxMTA3")
-    // while config versions are typically clean semver (e.g., "0.1.0")
-    let manifest_content = dataset_manifests_store
-        .get(&name, None)
-        .await
-        .map_err(|e| {
-            format!(
-                "Failed to fetch manifest for '{}' from registry: {}",
-                name, e
-            )
-        })?
-        .ok_or_else(|| {
-            format!(
-                "Manifest not found in registry for dataset '{}'. \
-                 Ensure the dataset is registered in the metadata database.",
-                name
-            )
-        })?;
+    // Fetch schema from admin-api using the qualified version
+    let admin_api_client = reqwest::Client::new();
+    let schema_resp = admin_api_client
+        .get(format!(
+            "{}/datasets/{}/versions/{}/schema",
+            admin_api_addr, name, qualified_version
+        ))
+        .send()
+        .await?;
 
-    tracing::debug!(
-        "Successfully fetched manifest content for '{}' v'{}'",
-        name,
-        version
-    );
-
-    // Parse the manifest JSON
-    let manifest: Manifest = manifest_content.try_into_manifest().map_err(|e| {
-        format!(
-            "Failed to parse manifest JSON for '{}' v'{}': {}",
-            name, version, e
+    // Check for HTTP errors
+    let status = schema_resp.status();
+    if !status.is_success() {
+        return Err(format!(
+            "Failed to fetch schema from admin-api: HTTP {} for dataset '{}' version '{}'",
+            status, name, qualified_version
         )
-    })?;
+        .into());
+    }
 
-    tracing::info!(
-        "Successfully loaded manifest for '{}' v'{}' with {} tables",
-        manifest.name,
-        manifest.version,
-        manifest.tables.len()
-    );
+    let schema_response: DatasetSchemaResponse = schema_resp.json().await?;
 
-    Ok(manifest)
+    // Combine schema from admin-api with SQL from local config
+    let mut tables = std::collections::BTreeMap::<String, Table>::new();
+
+    for table_info in schema_response.tables {
+        // Look up the corresponding SQL from the local config
+        let sql = dataset_def
+            .tables
+            .get(&table_info.name)
+            .map(|t| &t.sql)
+            .ok_or_else(|| {
+                format!(
+                    "Schema mismatch: table '{}' exists in admin-api schema but not in local config '{}'",
+                    table_info.name,
+                    config_path.display()
+                )
+            })?;
+
+        tables.insert(
+            table_info.name.clone(),
+            Table {
+                input: datasets_derived::manifest::TableInput::View(
+                    datasets_derived::manifest::View { sql: sql.clone() },
+                ),
+                schema: table_info.schema,
+                network: table_info.network,
+            },
+        );
+    }
+
+    Ok(Manifest {
+        name,
+        version: qualified_version,
+        kind: DerivedDatasetKind,
+        network: dataset_def.network,
+        functions: std::collections::BTreeMap::new(),
+        dependencies: std::collections::BTreeMap::new(),
+        tables,
+    })
 }
 
 /// AST visitor that extracts manifest configuration from JavaScript/TypeScript files
@@ -444,6 +544,439 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_fetch_manifest_success() {
+        use admin_api::handlers::datasets::get_version_schema::TableSchemaInfo;
+        use datasets_common::manifest::DataType;
+        use datasets_derived::manifest::{ArrowSchema, Field, TableSchema};
+
+        // Create a temporary JSON config file
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{
+                    "blocks": {{
+                        "sql": "SELECT * FROM source.blocks"
+                    }},
+                    "transactions": {{
+                        "sql": "SELECT * FROM source.transactions"
+                    }}
+                }},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        // Start a mock HTTP server
+        let mut server = mockito::Server::new_async().await;
+
+        // Mock the versions endpoint to return a qualified version
+        let versions_mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec![
+                        "1.0.0-ABC123".parse().unwrap(),
+                        "0.9.0-XYZ789".parse().unwrap(),
+                    ],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Mock the schema endpoint with the qualified version
+        let schema_mock = server
+            .mock("GET", "/datasets/test_dataset/versions/1.0.0-ABC123/schema")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetSchemaResponse {
+                    name: "test_dataset".parse().unwrap(),
+                    version: "1.0.0".parse().unwrap(),
+                    tables: vec![
+                        TableSchemaInfo {
+                            name: "blocks".to_string(),
+                            network: "mainnet".to_string(),
+                            schema: TableSchema {
+                                arrow: ArrowSchema {
+                                    fields: vec![
+                                        Field {
+                                            name: "number".to_string(),
+                                            type_: DataType(arrow_schema::DataType::UInt64),
+                                            nullable: false,
+                                        },
+                                        Field {
+                                            name: "hash".to_string(),
+                                            type_: DataType(arrow_schema::DataType::Utf8),
+                                            nullable: false,
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                        TableSchemaInfo {
+                            name: "transactions".to_string(),
+                            network: "mainnet".to_string(),
+                            schema: TableSchema {
+                                arrow: ArrowSchema {
+                                    fields: vec![Field {
+                                        name: "hash".to_string(),
+                                        type_: DataType(arrow_schema::DataType::Utf8),
+                                        nullable: false,
+                                    }],
+                                },
+                            },
+                        },
+                    ],
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Call fetch_manifest
+        let result = fetch_manifest(&server.url(), config_file.path()).await;
+
+        // Verify both mocks were called
+        versions_mock.assert_async().await;
+        schema_mock.assert_async().await;
+
+        // Verify the result
+        match result {
+            Ok(manifest) => {
+                assert_eq!(manifest.name.as_ref(), "test_dataset");
+                assert_eq!(manifest.version.to_string(), "1.0.0-ABC123");
+                assert_eq!(manifest.network, "mainnet");
+                assert_eq!(manifest.tables.len(), 2);
+
+                // Verify blocks table
+                let blocks = manifest.tables.get("blocks").unwrap();
+                assert_eq!(blocks.network, "mainnet");
+                assert_eq!(blocks.schema.arrow.fields.len(), 2);
+                match &blocks.input {
+                    datasets_derived::manifest::TableInput::View(view) => {
+                        assert_eq!(view.sql, "SELECT * FROM source.blocks");
+                    }
+                }
+
+                // Verify transactions table
+                let transactions = manifest.tables.get("transactions").unwrap();
+                assert_eq!(transactions.network, "mainnet");
+                assert_eq!(transactions.schema.arrow.fields.len(), 1);
+                match &transactions.input {
+                    datasets_derived::manifest::TableInput::View(view) => {
+                        assert_eq!(view.sql, "SELECT * FROM source.transactions");
+                    }
+                }
+            }
+            Err(e) => {
+                panic!("fetch_manifest should succeed: {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_http_error() {
+        // Create a temporary JSON config file
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        // Start a mock HTTP server that returns 404 on versions endpoint
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(404)
+            .with_body("Not Found")
+            .create_async()
+            .await;
+
+        // Call fetch_manifest
+        let result = fetch_manifest(&server.url(), config_file.path()).await;
+
+        // Verify the mock was called
+        mock.assert_async().await;
+
+        // Verify the error
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("404"));
+        assert!(err_msg.contains("test_dataset"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_schema_mismatch() {
+        use admin_api::handlers::datasets::get_version_schema::TableSchemaInfo;
+        use datasets_derived::manifest::{ArrowSchema, TableSchema};
+
+        // Create a config with only one table
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{
+                    "blocks": {{
+                        "sql": "SELECT * FROM source.blocks"
+                    }}
+                }},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        // Start a mock HTTP server
+        let mut server = mockito::Server::new_async().await;
+
+        // Mock versions endpoint
+        let versions_mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec!["1.0.0-ABC123".parse().unwrap()],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Mock schema endpoint that returns schema with extra table
+        let schema_mock = server
+            .mock("GET", "/datasets/test_dataset/versions/1.0.0-ABC123/schema")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetSchemaResponse {
+                    name: "test_dataset".parse().unwrap(),
+                    version: "1.0.0-ABC123".parse().unwrap(),
+                    tables: vec![
+                        TableSchemaInfo {
+                            name: "blocks".to_string(),
+                            network: "mainnet".to_string(),
+                            schema: TableSchema {
+                                arrow: ArrowSchema { fields: vec![] },
+                            },
+                        },
+                        TableSchemaInfo {
+                            name: "transactions".to_string(), // This table is NOT in local config
+                            network: "mainnet".to_string(),
+                            schema: TableSchema {
+                                arrow: ArrowSchema { fields: vec![] },
+                            },
+                        },
+                    ],
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Call fetch_manifest
+        let result = fetch_manifest(&server.url(), config_file.path()).await;
+
+        // Verify both mocks were called
+        versions_mock.assert_async().await;
+        schema_mock.assert_async().await;
+
+        // Verify the error
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Schema mismatch"));
+        assert!(err_msg.contains("transactions"));
+        assert!(err_msg.contains("local config"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_invalid_config_name() {
+        // Create a config with invalid name
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "invalid name with spaces",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let server = mockito::Server::new_async().await;
+
+        // Call fetch_manifest
+        let result = fetch_manifest(&server.url(), config_file.path()).await;
+
+        // Should fail during name parsing, before making HTTP request
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid dataset name"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_invalid_version() {
+        // Create a config with invalid version
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "not-a-semver",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let server = mockito::Server::new_async().await;
+
+        // Call fetch_manifest
+        let result = fetch_manifest(&server.url(), config_file.path()).await;
+
+        // Should fail during version parsing
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid dataset version") || err_msg.contains("version"),
+            "Expected version error but got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_qualified_version_no_versions() {
+        // Test when no versions are returned
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec![],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        let name: Name = "test_dataset".parse().unwrap();
+        let version: Version = "1.0.0".parse().unwrap();
+
+        let result = resolve_qualified_version(&server.url(), &name, &version).await;
+
+        mock.assert_async().await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("No versions found"));
+        assert!(err_msg.contains("test_dataset"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_qualified_version_no_match() {
+        // Test when versions exist but none match the prefix
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec![
+                        "2.0.0-ABC123".parse().unwrap(),
+                        "1.9.0-XYZ789".parse().unwrap(),
+                    ],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        let name: Name = "test_dataset".parse().unwrap();
+        let version: Version = "1.0.0".parse().unwrap();
+
+        let result = resolve_qualified_version(&server.url(), &name, &version).await;
+
+        mock.assert_async().await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("No version found matching prefix"));
+        assert!(err_msg.contains("1.0.0"));
+        assert!(err_msg.contains("2.0.0-ABC123"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_qualified_version_success() {
+        // Test successful resolution
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec![
+                        "1.0.0-ABC123".parse().unwrap(),
+                        "1.0.0-DEF456".parse().unwrap(),
+                        "0.9.0-XYZ789".parse().unwrap(),
+                    ],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        let name: Name = "test_dataset".parse().unwrap();
+        let version: Version = "1.0.0".parse().unwrap();
+
+        let result = resolve_qualified_version(&server.url(), &name, &version).await;
+
+        mock.assert_async().await;
+
+        assert!(result.is_ok());
+        let qualified = result.unwrap();
+        // Should return the first matching version
+        assert_eq!(qualified.to_string(), "1.0.0-ABC123");
+    }
+
+    #[tokio::test]
     async fn test_load_json_dataset_definition() {
         // Create a temporary JSON file with a minimal dataset definition
         let mut file = NamedTempFile::with_suffix(".json").unwrap();
@@ -528,104 +1061,6 @@ mod tests {
             }
             Err(e) => {
                 panic!("Failed to parse defineDataset pattern: {}", e);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_load_manifest_from_registry() {
-        use std::sync::Arc;
-
-        use dataset_store::manifests::DatasetManifestsStore;
-        use metadata_db::MetadataDb;
-        use object_store::local::LocalFileSystem;
-        use tempfile::TempDir;
-
-        // Create a temporary directory for manifests
-        let temp_dir = TempDir::new().unwrap();
-        let manifests_path = temp_dir.path();
-
-        // Create a test manifest JSON file
-        let manifest_json = r#"{
-            "name": "test_dataset",
-            "version": "1.0.0",
-            "kind": "manifest",
-            "network": "mainnet",
-            "dependencies": {},
-            "tables": {
-                "test_table": {
-                    "input": {"sql": "SELECT * FROM source"},
-                    "schema": {
-                        "arrow": {
-                            "fields": [
-                                {"name": "id", "type": "UInt64", "nullable": false},
-                                {"name": "value", "type": "Utf8", "nullable": true}
-                            ]
-                        }
-                    },
-                    "network": "mainnet"
-                }
-            },
-            "functions": {}
-        }"#;
-
-        // Write manifest to file
-        let manifest_path = manifests_path.join("test_dataset__1_0_0.json");
-        std::fs::write(&manifest_path, manifest_json).unwrap();
-
-        // Create a temporary config file
-        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
-        writeln!(
-            config_file,
-            r#"{{
-                "name": "test_dataset",
-                "version": "1.0.0",
-                "network": "mainnet",
-                "dependencies": {{}},
-                "tables": {{}},
-                "functions": {{}}
-            }}"#
-        )
-        .unwrap();
-
-        // Set up metadata database (using temp-db feature for testing)
-        let temp_db = metadata_db::temp_metadata_db(false, MetadataDb::default_pool_size()).await;
-        let metadata_db = MetadataDb::connect(temp_db.url(), MetadataDb::default_pool_size())
-            .await
-            .unwrap();
-
-        // Register the dataset in metadata-db
-        let name: datasets_common::name::Name = "test_dataset".parse().unwrap();
-        let version: datasets_common::version::Version = "1.0.0".parse().unwrap();
-        metadata_db
-            .register_dataset("test-owner", &name, &version, "test_dataset__1_0_0.json")
-            .await
-            .unwrap();
-
-        // Create ObjectStore and DatasetManifestsStore
-        let object_store: Arc<dyn object_store::ObjectStore> =
-            Arc::new(LocalFileSystem::new_with_prefix(manifests_path).unwrap());
-        let dataset_manifests_store = DatasetManifestsStore::new(metadata_db, object_store);
-
-        // Test: Load manifest from registry
-        let result =
-            load_manifest_from_registry(config_file.path(), &dataset_manifests_store).await;
-
-        match result {
-            Ok(manifest) => {
-                assert_eq!(manifest.name.to_string(), "test_dataset");
-                assert_eq!(manifest.version.to_string(), "1.0.0");
-                assert_eq!(manifest.network, "mainnet");
-                assert!(manifest.tables.contains_key("test_table"));
-
-                // Verify schema was loaded correctly
-                let table = manifest.tables.get("test_table").unwrap();
-                assert_eq!(table.schema.arrow.fields.len(), 2);
-                assert_eq!(table.schema.arrow.fields[0].name, "id");
-                assert_eq!(table.schema.arrow.fields[1].name, "value");
-            }
-            Err(e) => {
-                panic!("Failed to load manifest from registry: {}", e);
             }
         }
     }

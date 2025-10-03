@@ -20,27 +20,26 @@ default = ["snmalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
+admin-api = { path = "../../services/admin-api" }
 arrow-array = { version = "55.2.0", default-features = false }
 arrow-schema = { version = "55.2.0" }
 backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
 datafusion.workspace = true
-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 enum_dispatch = "0.3.13"
 futures.workspace = true
 lazy_static = "1.5.0"
-metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 nozzle-client = { path = "../../client" }
-object_store.workspace = true
 oxc_allocator = "0.93"
 oxc_ast = "0.93"
 oxc_ast_visit = "0.93"
 oxc_parser = "0.93"
 oxc_span = "0.93"
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 snmalloc-rs = { version = "0.3.8", optional = true }
@@ -59,5 +58,6 @@ tracing.workspace = true
 vergen-gitcl = { version = "1.0.8", features = ["build"] }
 
 [dev-dependencies]
+mockito = "1.7.0"
 pgtemp = "0.6.0"
 tempfile.workspace = true

@@ -156,7 +156,7 @@ pub async fn handler(
 
 /// Collection response for dataset versions listing with cursor-based pagination
 #[serde_with::serde_as]
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetVersionsResponse {
     /// List of dataset versions in this page

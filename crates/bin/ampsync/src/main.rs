@@ -9,12 +9,9 @@ mod sync_engine;
 use std::{env, path::PathBuf, sync::Arc};
 
 use common::BoxError;
-use dataset_store::manifests::DatasetManifestsStore;
-use datasets_derived::manifest::{Manifest, TableInput};
+use datasets_derived::{Manifest, manifest::TableInput};
 use futures::StreamExt;
-use metadata_db::MetadataDb;
 use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
-use object_store::local::LocalFileSystem;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -52,16 +49,16 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     let config = AmpsyncConfig::from_env().await?;
     info!(
-        "Loaded manifest: {} v{} for network {}",
-        config.manifest.name, config.manifest.version, config.manifest.network
+        "Loaded manifest: {} v{}",
+        config.manifest.name, config.manifest.version
     );
 
     // Connect to target database
     let db_pool = DbConnPool::connect(&config.database_url, DEFAULT_POOL_SIZE).await?;
 
     // Connect to Nozzle server
-    let mut sql_client = SqlClient::new(&config.nozzle_endpoint).await?;
-    info!("Connected to Nozzle server at {}", config.nozzle_endpoint);
+    let mut sql_client = SqlClient::new(&config.amp_flight_addr).await?;
+    info!("Connected to Nozzle server at {}", config.amp_flight_addr);
 
     info!("Preparing to sync dataset: {}", config.manifest.name);
 
@@ -215,12 +212,8 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 pub struct AmpsyncConfig {
     /// Ampsync database url to connect.
     pub database_url: String,
-    /// Nozzle server endpoint to connect to.
-    pub nozzle_endpoint: String,
-    /// Metadata database connection.
-    pub metadata_db: MetadataDb,
-    /// Dataset manifests store for fetching manifest schemas.
-    pub dataset_manifests_store: DatasetManifestsStore,
+    /// Amp ArrowFlight server endpoint to connect to.
+    pub amp_flight_addr: String,
     /// Parsed dataset manifest.
     pub manifest: Arc<Manifest>,
 }
@@ -269,66 +262,21 @@ impl AmpsyncConfig {
         }
 
         // Get Nozzle configuration (needed for schema inference)
-        let nozzle_endpoint =
-            env::var("NOZZLE_ENDPOINT").unwrap_or_else(|_| "http://localhost:1602".to_string());
-
-        // Get metadata database URL - required
-        let metadata_db_url = env::var("AMP_METADATA_DB_URL")
-            .map_err(|_| "AMP_METADATA_DB_URL environment variable is required")?;
-
-        // Connect to metadata database
-        let metadata_db = MetadataDb::connect(&metadata_db_url, MetadataDb::default_pool_size())
-            .await
-            .map_err(|e| format!("Failed to connect to metadata database: {}", e))?;
-
-        // Get dataset manifests path - required
-        let dataset_manifests_path = env::var("AMP_DATASET_MANIFESTS_PATH")
-            .map_err(|_| "AMP_DATASET_MANIFESTS_PATH environment variable is required")?;
-
-        // Validate that the path exists and is a directory
-        let manifests_path_buf = PathBuf::from(&dataset_manifests_path);
-        if !manifests_path_buf.exists() {
-            return Err(format!(
-                "Dataset manifests path does not exist: {}",
-                dataset_manifests_path
-            )
-            .into());
-        }
-        if !manifests_path_buf.is_dir() {
-            return Err(format!(
-                "Dataset manifests path is not a directory: {}",
-                dataset_manifests_path
-            )
-            .into());
-        }
-
-        // Create LocalFileSystem ObjectStore for dataset manifests
-        let manifests_store: Arc<dyn object_store::ObjectStore> = Arc::new(
-            LocalFileSystem::new_with_prefix(&dataset_manifests_path).map_err(|e| {
-                format!(
-                    "Failed to create ObjectStore for path '{}': {}",
-                    dataset_manifests_path, e
-                )
-            })?,
-        );
-
-        // Create DatasetManifestsStore
-        let dataset_manifests_store =
-            DatasetManifestsStore::new(metadata_db.clone(), manifests_store);
+        let amp_flight_addr =
+            env::var("AMP_FLIGHT_ADDR").unwrap_or_else(|_| "http://localhost:1602".to_string());
+        // Wire up the Amp admin api (used to fetch the manifest schema)
+        let amp_admin_api_addr =
+            env::var("AMP_ADMIN_API_ADDR").unwrap_or_else(|_| "http://localhost:1610".to_string());
 
         // Load manifest from registry (no Nozzle server query needed - solves empty table problem)
-        let manifest = Arc::new(
-            manifest::load_manifest_from_registry(&dataset_manifest, &dataset_manifests_store)
-                .await?,
-        );
+        let manifest =
+            Arc::new(manifest::fetch_manifest(&amp_admin_api_addr, &dataset_manifest).await?);
 
         // First, try to get DATABASE_URL directly
         if let Ok(database_url) = env::var("DATABASE_URL") {
             return Ok(Self {
                 database_url,
-                nozzle_endpoint,
-                metadata_db,
-                dataset_manifests_store,
+                amp_flight_addr,
                 manifest,
             });
         }
@@ -374,9 +322,7 @@ impl AmpsyncConfig {
 
         Ok(Self {
             database_url,
-            nozzle_endpoint,
-            metadata_db,
-            dataset_manifests_store,
+            amp_flight_addr,
             manifest,
         })
     }

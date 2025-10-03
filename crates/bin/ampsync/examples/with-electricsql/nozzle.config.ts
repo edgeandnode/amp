@@ -3,7 +3,7 @@ import { defineDataset } from "nozzl";
 export default defineDataset(() => ({
   name: "ampsync_example",
   network: "mainnet",
-  version: "0.2.0",
+  version: "0.2.1",
   dependencies: {
     anvil: {
       owner: "graphprotocol",
