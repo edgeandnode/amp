@@ -51,7 +51,8 @@ fmt-ts-check:
 
 # Format specific TypeScript file (pnpm lint --fix <file>)
 fmt-ts-file FILE:
-    pnpm lint --fix {{replace_regex(FILE, '^(.*/)?typescript/', '')}}
+    #!/usr/bin/env bash
+    file="{{FILE}}"; [[ "$file" =~ ^(/|typescript/) ]] || file="typescript/$file"; pnpm lint --fix "$file"
 
 
 ## Check
@@ -189,8 +190,6 @@ gen-derived-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
-    @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/sql_schema.json | head -1) {{DEST_DIR}}/sql.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/sql.spec.json"
 
 # Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
 gen-evm-rpc-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:

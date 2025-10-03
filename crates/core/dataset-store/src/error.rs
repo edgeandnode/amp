@@ -1,4 +1,4 @@
-use common::{BoxError, query_context};
+use common::BoxError;
 use datasets_common::{
     name::{Name, NameError},
     version::Version,
@@ -147,30 +147,6 @@ pub enum GetDatasetError {
         version: Option<String>,
         source: BoxError,
     },
-
-    /// Failed to retrieve SQL files for a SQL dataset.
-    ///
-    /// This occurs specifically for SQL datasets when fetching the associated SQL
-    /// query files from the manifest store fails, which could be due to missing files,
-    /// permissions, or storage issues.
-    #[error("Failed to get SQL files for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SqlFilesError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
-
-    /// Failed to create a SQL dataset instance.
-    ///
-    /// This occurs during SQL dataset initialization, which may fail due to invalid
-    /// SQL syntax, missing dependencies, circular references, or other SQL processing
-    /// errors.
-    #[error("Failed to create SQL dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SqlDatasetError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
 }
 
 /// Error that occurs when getting all datasets from the manifest store.
@@ -181,9 +157,9 @@ pub enum GetDatasetError {
 #[error("Failed to get dataset: {0}")]
 pub struct GetAllDatasetsError(#[from] pub GetDatasetError);
 
-/// Errors specific to getting SQL dataset operations (SQL and Derived dataset kinds)
+/// Errors specific to getting derived dataset manifest operations
 #[derive(Debug, thiserror::Error)]
-pub enum GetSqlDatasetError {
+pub enum GetDerivedManifestError {
     /// The provided dataset name failed to parse according to the naming rules.
     ///
     /// This occurs during the initial validation of the dataset name string before
@@ -225,53 +201,6 @@ pub enum GetSqlDatasetError {
         name: String,
         version: Option<String>,
         kind: String,
-    },
-
-    /// Failed to parse SQL queries in a Derived dataset.
-    ///
-    /// This occurs specifically for Derived datasets when the SQL queries defined
-    /// in the manifest contain syntax errors or are otherwise invalid.
-    #[error("Failed to parse SQL queries for Derived dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SqlParseError {
-        name: String,
-        version: Option<String>,
-        source: query_context::Error,
-    },
-
-    /// Failed to retrieve SQL files for a SQL dataset.
-    ///
-    /// This occurs specifically for SQL datasets when fetching the associated SQL
-    /// query files from the manifest store fails, which could be due to missing files,
-    /// permissions, or storage issues.
-    #[error("Failed to get SQL files for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SqlFilesError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
-
-    /// Failed to create a SQL dataset instance.
-    ///
-    /// This occurs during SQL dataset initialization, which may fail due to invalid
-    /// SQL syntax, missing dependencies, circular references, or other SQL processing
-    /// errors.
-    #[error("Failed to create SQL dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SqlDatasetError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
-
-    /// Failed to create a Derived dataset instance.
-    ///
-    /// This occurs when processing a derived dataset manifest, which may fail due to
-    /// invalid configuration, dependency resolution issues, or logical errors in the
-    /// dataset definition.
-    #[error("Failed to create Derived dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    DerivedCreationError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
     },
 }
 
