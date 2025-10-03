@@ -257,7 +257,7 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
             ExponentialBuilder::default()
                 .with_min_delay(Duration::from_secs(2))
                 .with_max_delay(Duration::from_secs(20))
-                .with_max_times(10),
+                .with_max_times(1),
         )
         .notify(|err, dur| {
             tracing::warn!(
