@@ -51,7 +51,8 @@ fmt-ts-check:
 
 # Format specific TypeScript file (pnpm lint --fix <file>)
 fmt-ts-file FILE:
-    pnpm lint --fix {{replace_regex(FILE, '^(.*/)?typescript/', '')}}
+    #!/usr/bin/env bash
+    file="{{FILE}}"; [[ "$file" =~ ^(/|typescript/) ]] || file="typescript/$file"; pnpm lint --fix "$file"
 
 
 ## Check

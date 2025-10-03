@@ -401,6 +401,78 @@
         }
       }
     },
+    "/datasets/{name}/versions/{version}/schema": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for dataset schema retrieval endpoint with specific version",
+        "description": "Retrieves the schema for all tables in a specific version of a dataset.\nURL pattern: `GET /datasets/{name}/versions/{version}/schema`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Response\n- **200 OK**: Returns the dataset schema information as JSON\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n\nThis handler:\n- Validates and extracts the dataset name and version from the URL path\n- Loads the dataset from the dataset store\n- Converts table schemas to TableSchemaInfo format with Arrow field details\n- Returns the dataset schema information as JSON",
+        "operationId": "datasets_get_version_schema",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Dataset version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved dataset schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetSchemaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/files/{file_id}": {
       "get": {
         "tags": [
@@ -1043,6 +1115,32 @@
           }
         }
       },
+      "DatasetSchemaResponse": {
+        "type": "object",
+        "description": "Represents dataset schema information for API responses",
+        "required": [
+          "name",
+          "version",
+          "tables"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the dataset (validated identifier)"
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableSchemaInfo"
+            },
+            "description": "List of tables with their schemas"
+          },
+          "version": {
+            "type": "string",
+            "description": "The version of the dataset using semantic versioning (e.g., \"1.0.0\")"
+          }
+        }
+      },
       "DatasetVersionsResponse": {
         "type": "object",
         "description": "Collection response for dataset versions listing with cursor-based pagination",
@@ -1549,6 +1647,28 @@
           "network": {
             "type": "string",
             "description": "Associated network for this table"
+          }
+        }
+      },
+      "TableSchemaInfo": {
+        "type": "object",
+        "description": "Represents table schema information within a dataset",
+        "required": [
+          "name",
+          "network",
+          "schema"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the table"
+          },
+          "network": {
+            "type": "string",
+            "description": "Associated network for this table"
+          },
+          "schema": {
+            "description": "The schema for this table"
           }
         }
       }

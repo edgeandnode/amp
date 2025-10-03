@@ -57,6 +57,10 @@ pub async fn serve(
             "/datasets/{name}/versions/{version}",
             get(datasets::get_by_id::handler_with_version),
         )
+        .route(
+            "/datasets/{name}/versions/{version}/schema",
+            get(datasets::get_version_schema::handler_with_version),
+        )
         .route("/datasets/{name}/dump", post(datasets::dump::handler))
         .route(
             "/datasets/{name}/versions/{version}/dump",
@@ -120,6 +124,7 @@ pub async fn serve(
         handlers::datasets::get_by_id::handler,
         handlers::datasets::get_by_id::handler_with_version,
         handlers::datasets::get_versions::handler,
+        handlers::datasets::get_version_schema::handler_with_version,
         handlers::datasets::register::handler,
         handlers::datasets::dump::handler,
         handlers::datasets::dump::handler_with_version,
@@ -153,6 +158,8 @@ pub async fn serve(
         handlers::datasets::get_all::DatasetsResponse,
         handlers::datasets::get_all::DatasetRegistryInfo,
         handlers::datasets::get_versions::DatasetVersionsResponse,
+        handlers::datasets::get_version_schema::DatasetSchemaResponse,
+        handlers::datasets::get_version_schema::TableSchemaInfo,
         handlers::datasets::register::RegisterRequest,
         handlers::datasets::dump::DumpOptions,
         handlers::datasets::dump::DumpResponse,
