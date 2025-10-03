@@ -57,6 +57,7 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
 /// List of crates in the workspace.
 const NOZZLE_CRATES: &[&str] = &[
     "admin_api",
+    "ampsync",
     "common",
     "dataset_store",
     "datasets_common",
