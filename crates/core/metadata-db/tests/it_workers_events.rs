@@ -21,7 +21,7 @@ async fn schedule_job_and_receive_notification() {
             .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
-    let worker_id = WorkerNodeId::from_ref("test-worker-events");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
     metadata_db
         .register_worker(&worker_id)
         .await

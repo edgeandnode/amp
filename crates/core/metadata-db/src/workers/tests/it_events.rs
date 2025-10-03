@@ -30,8 +30,8 @@ async fn send_and_receive_start_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-notify");
-    let job_id = JobId::from_i64(1i64);
+    let worker_id = NodeId::from_ref_unchecked("test-worker-notify");
+    let job_id = JobId::from_i64_unchecked(1i64);
 
     // Create listener for this specific worker
     let listener = events::listen_url(&temp_db.connection_uri(), worker_id.to_owned())
@@ -70,8 +70,8 @@ async fn send_and_receive_stop_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-stop");
-    let job_id = JobId::from_i64(2i64);
+    let worker_id = NodeId::from_ref_unchecked("test-worker-stop");
+    let job_id = JobId::from_i64_unchecked(2i64);
 
     let listener = events::listen_url(&temp_db.connection_uri(), worker_id.to_owned())
         .await
@@ -109,8 +109,8 @@ async fn multiple_listeners_receive_same_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-multi");
-    let job_id = JobId::from_i64(4i64);
+    let worker_id = NodeId::from_ref_unchecked("test-worker-multi");
+    let job_id = JobId::from_i64_unchecked(4i64);
 
     // Create multiple listeners both listening for the same worker
     let listener1 = events::listen_url(&temp_db.connection_uri(), worker_id.to_owned())
@@ -163,9 +163,9 @@ async fn listener_stream_yields_notifications() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-stream");
-    let job_id1 = JobId::from_i64(5i64);
-    let job_id2 = JobId::from_i64(6i64);
+    let worker_id = NodeId::from_ref_unchecked("test-worker-stream");
+    let job_id1 = JobId::from_i64_unchecked(5i64);
+    let job_id2 = JobId::from_i64_unchecked(6i64);
 
     let listener = events::listen_url(&temp_db.connection_uri(), worker_id.to_owned())
         .await
@@ -220,8 +220,8 @@ async fn notification_not_received_before_listen() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-timing");
-    let job_id = JobId::from_i64(7i64);
+    let worker_id = NodeId::from_ref_unchecked("test-worker-timing");
+    let job_id = JobId::from_i64_unchecked(7i64);
 
     //* When - Send notification BEFORE creating listener
     let payload = TestJobPayload {

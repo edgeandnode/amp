@@ -1,7 +1,20 @@
-//! Worker node ID type wrapper for efficient storage and manipulation
+//! Worker node ID new-type wrapper for database values
 //!
-//! This module provides a [`NodeId`] _new-type_ wrapper around [`Cow<str>`] that ensures
-//! efficient handling of worker node IDs with support for both borrowed and owned strings.
+//! This module provides a [`NodeId`] new-type wrapper around [`Cow<str>`] that maintains
+//! worker node ID invariants for database operations. The type provides efficient handling
+//! with support for both borrowed and owned strings.
+//!
+//! ## Validation Strategy
+//!
+//! This type **maintains invariants but does not validate** input data. Validation occurs
+//! at system boundaries through types like [`worker::NodeId`], which enforce the required
+//! format before converting into this database-layer type. Database values are trusted as
+//! already valid, following the principle of "validate at boundaries, trust database data."
+//!
+//! Types that convert into [`NodeId`] are responsible for ensuring invariants are met:
+//! - Worker node IDs must start with a letter (`a-z`, `A-Z`)
+//! - Worker node IDs must contain only alphanumeric characters, underscores, hyphens, and dots
+//! - Worker node IDs must not be empty
 
 use std::borrow::Cow;
 
@@ -13,11 +26,14 @@ use std::borrow::Cow;
 /// rather than just representing a worker node ID with owned storage in general.
 pub type NodeIdOwned = NodeId<'static>;
 
-/// A worker node ID wrapper that provides efficient string handling.
+/// A worker node ID wrapper for database values.
 ///
-/// This _new-type_ wrapper around `Cow<str>` provides efficient handling of worker node IDs
-/// with support for both borrowed and owned strings. It can handle both owned and borrowed
-/// IDs efficiently through the use of copy-on-write semantics.
+/// This new-type wrapper around `Cow<str>` maintains worker node ID invariants for database
+/// operations. It supports both borrowed and owned strings through copy-on-write semantics,
+/// enabling efficient handling without unnecessary allocations.
+///
+/// The type trusts that values are already validated. Validation must occur at system
+/// boundaries before conversion into this type.
 ///
 /// ## Format Requirements
 ///
@@ -30,12 +46,22 @@ pub struct NodeId<'a>(Cow<'a, str>);
 
 impl<'a> NodeId<'a> {
     /// Create a new NodeId wrapper from a reference to str (borrowed)
-    pub fn from_ref(id: &'a str) -> Self {
+    ///
+    /// # Safety
+    /// The caller must ensure the provided ID upholds the worker node ID invariants.
+    /// This method does not perform validation. Failure to uphold the invariants may
+    /// cause undefined behavior.
+    pub fn from_ref_unchecked(id: &'a str) -> Self {
         Self(Cow::Borrowed(id))
     }
 
     /// Create a new NodeId wrapper from an owned String
-    pub fn from_owned(id: String) -> NodeIdOwned {
+    ///
+    /// # Safety
+    /// The caller must ensure the provided ID upholds the worker node ID invariants.
+    /// This method does not perform validation. Failure to uphold the invariants may
+    /// cause undefined behavior.
+    pub fn from_owned_unchecked(id: String) -> NodeIdOwned {
         NodeId(Cow::Owned(id))
     }
 
@@ -49,7 +75,8 @@ impl<'a> NodeId<'a> {
 
     /// Get an owned version of this NodeId
     pub fn to_owned(&self) -> NodeIdOwned {
-        Self::from_owned(self.0.to_string())
+        // SAFETY: Source already upholds invariants; conversion maintains them.
+        Self::from_owned_unchecked(self.0.to_string())
     }
 
     /// Get a reference to the inner str
@@ -114,43 +141,28 @@ impl<'a> sqlx::Encode<'_, sqlx::Postgres> for NodeId<'a> {
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for NodeIdOwned {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(NodeId::from_owned(s))
+        // SAFETY: Database values are trusted to uphold invariants; validation occurs at boundaries before insertion.
+        Ok(NodeId::from_owned_unchecked(s))
     }
 }
 
 impl<'a> From<&'a str> for NodeId<'a> {
     fn from(s: &'a str) -> Self {
-        NodeId::from_ref(s)
+        // SAFETY: Internal use within metadata-db where caller ensures invariants are upheld.
+        NodeId::from_ref_unchecked(s)
     }
 }
 
 impl From<String> for NodeIdOwned {
     fn from(s: String) -> Self {
-        NodeId::from_owned(s)
+        // SAFETY: Internal use within metadata-db where caller ensures invariants are upheld.
+        NodeId::from_owned_unchecked(s)
     }
 }
 
 impl<'a> From<&'a NodeIdOwned> for NodeId<'a> {
     fn from(id: &'a NodeIdOwned) -> Self {
-        NodeId::from_ref(id.as_str())
-    }
-}
-
-impl serde::Serialize for NodeId<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.as_str().serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for NodeIdOwned {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(NodeId::from_owned(s))
+        // SAFETY: Source already upholds invariants; conversion maintains them.
+        NodeId::from_ref_unchecked(id.as_str())
     }
 }

@@ -15,7 +15,7 @@ async fn register_worker() {
             .await
             .expect("Failed to connect to metadata db");
 
-    let worker_id = WorkerNodeId::from_ref("test-worker-id");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
 
     //* When
     metadata_db
@@ -49,7 +49,7 @@ async fn detect_inactive_worker() {
             .with_dead_worker_interval(ACTIVE_INTERVAL);
 
     // Pre-register a worker
-    let worker_id = WorkerNodeId::from_ref("test-worker-id");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     metadata_db
         .register_worker(&worker_id)
         .await

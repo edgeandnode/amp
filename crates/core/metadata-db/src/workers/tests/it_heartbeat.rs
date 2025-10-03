@@ -23,7 +23,7 @@ async fn new_worker_is_active_on_registration() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-new");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-new");
 
     //* When
     heartbeat::register_worker(&mut *conn, worker_id.clone())
@@ -51,7 +51,7 @@ async fn reregistration_updates_heartbeat() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-reregister");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-reregister");
 
     // Initial registration
     heartbeat::register_worker(&mut *conn, worker_id.clone())
@@ -91,7 +91,7 @@ async fn heartbeat_update_maintains_activity() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-heartbeat");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-heartbeat");
 
     heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
@@ -129,7 +129,7 @@ async fn worker_is_inactive_after_interval() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("test-worker-inactive");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-inactive");
 
     heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
@@ -172,7 +172,7 @@ async fn heartbeat_on_unknown_worker_is_noop() {
         .await
         .expect("Failed to run migrations");
 
-    let non_existent_worker_id = NodeId::from_ref("worker-does-not-exist");
+    let non_existent_worker_id = NodeId::from_ref_unchecked("worker-does-not-exist");
 
     //* When
     let res = heartbeat::update_heartbeat(&mut *conn, non_existent_worker_id.clone()).await;
@@ -227,7 +227,7 @@ async fn registration_conflict_updates_timestamp() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref("conflict-worker");
+    let worker_id = NodeId::from_ref_unchecked("conflict-worker");
 
     // First registration
     heartbeat::register_worker(&mut *conn, worker_id.clone())

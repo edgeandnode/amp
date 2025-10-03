@@ -1,7 +1,21 @@
-//! Dataset name type wrapper for efficient storage and manipulation
+//! Dataset name new-type wrapper for database values
 //!
-//! This module provides a [`Name`] _new-type_ wrapper around [`Cow<str>`] that ensures
-//! efficient handling of dataset names with support for both borrowed and owned strings.
+//! This module provides a [`Name`] new-type wrapper around [`Cow<str>`] that maintains
+//! dataset name invariants for database operations. The type provides efficient handling
+//! with support for both borrowed and owned strings.
+//!
+//! ## Validation Strategy
+//!
+//! This type **maintains invariants but does not validate** input data. Validation occurs
+//! at system boundaries through types like [`datasets_common::Name`], which enforce the
+//! required format before converting into this database-layer type. Database values are
+//! trusted as already valid, following the principle of "validate at boundaries, trust
+//! database data."
+//!
+//! Types that convert into [`Name`] are responsible for ensuring invariants are met:
+//! - Dataset names must start with a lowercase letter or underscore
+//! - Dataset names must contain only lowercase letters, digits, and underscores
+//! - Dataset names must not be empty
 
 use std::borrow::Cow;
 
@@ -13,22 +27,35 @@ use std::borrow::Cow;
 /// rather than just representing a dataset name with owned storage in general.
 pub type NameOwned = Name<'static>;
 
-/// A dataset name wrapper that provides efficient string handling.
+/// A dataset name wrapper for database values.
 ///
-/// This _new-type_ wrapper around `Cow<str>` provides efficient handling of dataset names
-/// with support for both borrowed and owned strings. It can handle both owned and borrowed
-/// names efficiently through the use of copy-on-write semantics.
+/// This new-type wrapper around `Cow<str>` maintains dataset name invariants for database
+/// operations. It supports both borrowed and owned strings through copy-on-write semantics,
+/// enabling efficient handling without unnecessary allocations.
+///
+/// The type trusts that values are already validated. Validation must occur at system
+/// boundaries before conversion into this type.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Name<'a>(Cow<'a, str>);
 
 impl<'a> Name<'a> {
     /// Create a new Name wrapper from a reference to str (borrowed)
-    pub fn from_ref(name: &'a str) -> Self {
+    ///
+    /// # Safety
+    /// The caller must ensure the provided name upholds the dataset name invariants.
+    /// This method does not perform validation. Failure to uphold the invariants may
+    /// cause undefined behavior.
+    pub fn from_ref_unchecked(name: &'a str) -> Self {
         Self(Cow::Borrowed(name))
     }
 
     /// Create a new Name wrapper from an owned String
-    pub fn from_owned(name: String) -> Name<'static> {
+    ///
+    /// # Safety
+    /// The caller must ensure the provided name upholds the dataset name invariants.
+    /// This method does not perform validation. Failure to uphold the invariants may
+    /// cause undefined behavior.
+    pub fn from_owned_unchecked(name: String) -> Name<'static> {
         Name(Cow::Owned(name))
     }
 
@@ -102,6 +129,7 @@ impl<'a> sqlx::Encode<'_, sqlx::Postgres> for Name<'a> {
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for NameOwned {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(Name::from_owned(s))
+        // SAFETY: Database values are trusted to uphold invariants; validation occurs at boundaries before insertion.
+        Ok(Name::from_owned_unchecked(s))
     }
 }

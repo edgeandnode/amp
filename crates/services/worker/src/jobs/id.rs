@@ -52,7 +52,7 @@ impl From<JobId> for metadata_db::JobId {
     fn from(value: JobId) -> Self {
         // SAFETY: worker JobId is always valid (positive i64)
         // It is safe to convert without additional checks
-        Self::from_i64(*value)
+        Self::from_i64_unchecked(*value)
     }
 }
 
@@ -60,7 +60,7 @@ impl From<&JobId> for metadata_db::JobId {
     fn from(value: &JobId) -> Self {
         // SAFETY: worker JobId is always valid (positive i64)
         // It is safe to convert without additional checks
-        Self::from_i64(**value)
+        Self::from_i64_unchecked(**value)
     }
 }
 
