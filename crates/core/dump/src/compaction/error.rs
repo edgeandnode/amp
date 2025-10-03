@@ -16,7 +16,8 @@ use object_store::Error as ObjectStoreError;
 use tokio::task::JoinError;
 
 use crate::{
-    ConsistencyCheckError, WriterProperties, compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor}
+    ConsistencyCheckError, WriterProperties,
+    compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor},
 };
 
 pub type CompactionResult<T> = Result<T, CompactorError>;

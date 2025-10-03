@@ -412,11 +412,7 @@ impl SegmentSizeLimit {
             .then_some(segment.length.ge(&self.1.soft_limit(self.0.length)))
             .into();
 
-        (
-            blocks_ge.or(bytes_ge).or(rows_ge),
-            length_ge,
-            generation_ge,
-        )
+        (blocks_ge.or(bytes_ge).or(rows_ge), length_ge, generation_ge)
     }
 
     pub fn is_live(&self, segment: &SegmentSize) -> TestResult {
@@ -672,6 +668,7 @@ mod tests {
     #[test]
     fn test_result_not() {
         use std::ops::Not;
+
         use super::TestResult::{Activated as A, Skipped as S};
         assert_eq!(A(true).not(), A(false));
         assert_eq!(A(false).not(), A(true));
