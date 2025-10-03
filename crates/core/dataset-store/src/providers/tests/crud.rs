@@ -4,7 +4,7 @@ use object_store::{ObjectStore, memory::InMemory};
 
 use crate::{
     DatasetKind,
-    providers::{ProviderConfig, ProvidersConfigStore, RegisterError},
+    providers::{ProviderConfig, ProviderConfigsStore, RegisterError},
 };
 
 #[tokio::test]
@@ -231,10 +231,10 @@ async fn delete_with_subdirectory_path_removes_correct_file() {
 
 /// Create a test ProvidersStore backed by in-memory storage
 /// Returns (ProvidersStore, underlying Arc<InMemory>) for testing caching logic
-fn create_test_providers_store() -> (ProvidersConfigStore, Arc<dyn ObjectStore>) {
+fn create_test_providers_store() -> (ProviderConfigsStore, Arc<dyn ObjectStore>) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProvidersConfigStore::new(store);
+    let providers_store = ProviderConfigsStore::new(store);
     (providers_store, in_memory_store)
 }
 

@@ -6,10 +6,12 @@ use axum::{
     http::StatusCode,
 };
 use dataset_store::providers::{ProviderConfig, RegisterError};
-use http_common::BoxRequestError;
 
 use super::{convert, provider_info::ProviderInfo};
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for the `POST /providers` endpoint
 ///
@@ -40,10 +42,26 @@ use crate::ctx::Ctx;
 /// - Registers the provider configuration in the dataset store
 /// - Returns HTTP 201 on successful creation
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        post,
+        path = "/providers",
+        tag = "providers",
+        operation_id = "providers_create",
+        request_body = ProviderInfo,
+        responses(
+            (status = 201, description = "Provider created successfully"),
+            (status = 400, description = "Invalid request body or provider configuration"),
+            (status = 409, description = "Provider with the same name already exists"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     body: Result<Json<ProviderInfo>, JsonRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let provider_info = match body {
         Ok(Json(provider_info)) => provider_info,
         Err(err) => {
@@ -62,7 +80,7 @@ pub async fn handler(
         rest: provider_rest_table,
     };
 
-    ctx.store
+    ctx.dataset_store
         .providers()
         .register(provider_config)
         .await
@@ -139,7 +157,7 @@ pub enum Error {
     StoreError(#[from] RegisterError),
 }
 
-impl http_common::RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidRequestBody { .. } => "INVALID_REQUEST_BODY",

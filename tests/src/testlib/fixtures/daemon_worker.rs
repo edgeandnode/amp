@@ -7,7 +7,9 @@
 use std::{str::FromStr as _, sync::Arc};
 
 use common::{BoxError, config::Config};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use dump::worker::{Worker, WorkerError};
 use metadata_db::{MetadataDb, WorkerNodeId};
 use tokio::task::JoinHandle;
@@ -36,7 +38,19 @@ impl DaemonWorker {
         metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
-        let dataset_store = DatasetStore::new(config.clone(), metadb.clone());
+        let dataset_store = {
+            let provider_configs_store =
+                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+            let dataset_manifests_store = DatasetManifestsStore::new(
+                metadb.clone(),
+                config.dataset_defs_store.prefixed_store(),
+            );
+            DatasetStore::new(
+                metadb.clone(),
+                provider_configs_store,
+                dataset_manifests_store,
+            )
+        };
 
         let worker = Worker::new(config.clone(), metadb, node_id.clone(), metrics, meter);
 

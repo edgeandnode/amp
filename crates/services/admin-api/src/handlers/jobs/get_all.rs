@@ -5,12 +5,14 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 
 use super::job_info::JobInfo;
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Default number of jobs returned per page
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -58,10 +60,28 @@ fn default_limit() -> usize {
 /// - Calls the metadata DB to list jobs with pagination
 /// - Returns a structured response with jobs and next cursor
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/jobs",
+        tag = "jobs",
+        operation_id = "jobs_list",
+        params(
+            ("limit" = Option<usize>, Query, description = "Maximum number of jobs to return (default: 50, max: 1000)"),
+            ("last_job_id" = Option<String>, Query, description = "ID of the last job from the previous page for pagination")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved jobs", body = JobsResponse),
+            (status = 400, description = "Invalid query parameters"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<Json<JobsResponse>, BoxRequestError> {
+) -> Result<Json<JobsResponse>, ErrorResponse> {
     let query = match query {
         Ok(Query(query)) => query,
         Err(err) => {
@@ -105,11 +125,13 @@ pub async fn handler(
 
 /// API response containing job information
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct JobsResponse {
     /// List of jobs
     pub jobs: Vec<JobInfo>,
     /// Cursor for the next page of results (None if no more results)
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<i64>))]
     pub next_cursor: Option<JobId>,
 }
 
@@ -150,7 +172,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidQueryParams { .. } => "INVALID_QUERY_PARAMETERS",

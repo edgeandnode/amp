@@ -99,12 +99,12 @@ use std::{ops::RangeInclusive, sync::Arc};
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
-    manifest::sql_datasets::SqlDataset,
     metadata::{Generation, segments::ResumeWatermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::IncrementalCheck,
-    query_context::QueryEnv,
+    query_context::{QueryEnv, parse_sql},
 };
+use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use tracing::instrument;
 
@@ -117,11 +117,11 @@ use crate::{
     streaming_query::{QueryMessage, StreamingQuery},
 };
 
-/// Dumps a SQL dataset table
-#[instrument(skip_all, fields(dataset = %dataset.dataset.name), err)]
+/// Dumps a derived dataset table
+#[instrument(skip_all, fields(dataset = %manifest.name), err)]
 pub async fn dump_table(
     ctx: Ctx,
-    dataset: SqlDataset,
+    manifest: DerivedManifest,
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
     opts: &Arc<WriterProperties>,
@@ -129,18 +129,24 @@ pub async fn dump_table(
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
-    let dataset_name = dataset.dataset.name.clone();
+    let dataset_name = manifest.name.clone();
     let table_name = table.table_name().to_string();
-    let query = dataset
-        .queries
-        .get(&table_name)
-        .ok_or_else(|| {
-            format!(
-                "table `{}` not found in dataset `{}`",
-                table_name, dataset_name
-            )
-        })?
-        .clone();
+
+    // Get the table definition from the manifest
+    let table_def = manifest.tables.get(&table_name).ok_or_else(|| {
+        format!(
+            "table `{}` not found in dataset `{}`",
+            table_name, dataset_name
+        )
+    })?;
+
+    // Extract SQL query from the table input
+    let query_sql = match &table_def.input {
+        TableInput::View(view) => &view.sql,
+    };
+
+    // Parse the SQL query
+    let query = parse_sql(query_sql)?;
 
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     let dataset_store = ctx.dataset_store.clone();
@@ -208,7 +214,7 @@ pub async fn dump_table(
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%dataset.dataset.name, error=%err, "dataset dump failed");
+        tracing::error!(dataset=%manifest.name, error=%err, "dataset dump failed");
         return Err(err.into_box_error());
     }
 

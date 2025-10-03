@@ -234,6 +234,26 @@ const getDatasetVersion = HttpApiEndpoint.get(
 export type GetDatasetVersionError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
 
 /**
+ * The get dataset schema by name and version endpoint (GET /datasets/{name}/versions/{version}/schema).
+ */
+const getDatasetVersionSchema = HttpApiEndpoint.get(
+  "getDatasetVersionSchema",
+)`/datasets/${datasetName}/versions/${datasetVersion}/schema`
+  .addError(Error.InvalidSelector)
+  .addError(Error.DatasetNotFound)
+  .addError(Error.DatasetStoreError)
+  .addSuccess(Model.DatasetSchemaResponse)
+
+/**
+ * Error type for the `getDatasetVersionSchema` endpoint.
+ *
+ * - InvalidSelector: The dataset selector is invalid.
+ * - DatasetNotFound: The dataset was not found.
+ * - DatasetStoreError: Failed to load dataset from store.
+ */
+export type GetDatasetVersionSchemaError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
+
+/**
  * The get jobs endpoint (GET /jobs).
  */
 const getJobs = HttpApiEndpoint.get("getJobs")`/jobs`
@@ -424,6 +444,7 @@ export class DatasetGroup extends HttpApiGroup.make("dataset")
   .add(dumpDatasetVersion)
   .add(getDataset)
   .add(getDatasetVersion)
+  .add(getDatasetVersionSchema)
   .add(getDatasets)
   .add(getDatasetVersions)
 {}
@@ -560,6 +581,18 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
     name: string,
     version: string,
   ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
+
+  /**
+   * Get the schema for a dataset by name and version.
+   *
+   * @param name The name of the dataset.
+   * @param version The version of the dataset.
+   * @return The dataset schema information.
+   */
+  readonly getDatasetVersionSchema: (
+    name: string,
+    version: string,
+  ) => Effect.Effect<Model.DatasetSchemaResponse, HttpClientError.HttpClientError | GetDatasetVersionSchemaError>
 
   /**
    * Get all datasets with pagination.
@@ -795,6 +828,24 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
+  const getDatasetVersionSchema = Effect.fn("getDatasetVersionSchema")(function*(name: string, version: string) {
+    const request = client.dataset.getDatasetVersionSchema({
+      path: {
+        name,
+        version,
+      },
+    })
+
+    const result = yield* request.pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
   const getDatasets = Effect.fn("getDatasets")(function*(options?: {
     limit?: number | undefined
     lastDatasetId?: Model.DatasetCursor | undefined
@@ -985,6 +1036,7 @@ export const make = Effect.fn(function*(url: string) {
     registerDataset,
     getDataset,
     getDatasetVersion,
+    getDatasetVersionSchema,
     getDatasets,
     getDatasetVersions,
     getJobs,

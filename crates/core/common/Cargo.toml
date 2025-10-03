@@ -43,7 +43,7 @@ tower.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
-datasets-derived = { version = "0.1.0", path = "../datasets-derived", features = ["sql_dataset"] }
+datasets-derived = { version = "0.1.0", path = "../datasets-derived" }
 
 [dev-dependencies]
 chrono.workspace = true

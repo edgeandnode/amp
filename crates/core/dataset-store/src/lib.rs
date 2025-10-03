@@ -3,9 +3,8 @@ use std::{collections::BTreeSet, num::NonZeroU32, str::FromStr, sync::Arc};
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
     catalog::physical::{Catalog, PhysicalTable},
-    config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{common::schema_from_tables, derived, sql_datasets::SqlDataset},
+    manifest::{common::schema_from_tables, derived},
     query_context::QueryEnv,
     sql_visitors::all_function_names,
 };
@@ -15,7 +14,7 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
-use datasets_derived::{Manifest as DerivedManifest, sql_dataset::Manifest as SqlManifest};
+use datasets_derived::Manifest as DerivedManifest;
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
 };
@@ -39,22 +38,21 @@ use url::Url;
 mod block_stream_client;
 mod dataset_kind;
 mod error;
-mod manifests;
+pub mod manifests;
 pub mod providers;
-pub mod sql_datasets;
 
 use self::{
     block_stream_client::BlockStreamClient,
-    manifests::{GetLatestVersionError, ManifestsStore},
-    providers::{ProviderConfig, ProvidersConfigStore},
+    manifests::{DatasetManifestsStore, GetLatestVersionError},
+    providers::{ProviderConfig, ProviderConfigsStore},
 };
 pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
     error::{
         CatalogForSqlError, EthCallForDatasetError, ExtractDatasetFromFunctionNamesError,
         ExtractDatasetFromTableRefsError, GetAllDatasetsError, GetClientError, GetDatasetError,
-        GetLogicalCatalogError, GetPhysicalCatalogError, GetSqlDatasetError, IsRegisteredError,
-        PlanningCtxForSqlError, RegisterManifestError,
+        GetDerivedManifestError, GetLogicalCatalogError, GetPhysicalCatalogError,
+        IsRegisteredError, PlanningCtxForSqlError, RegisterManifestError,
     },
     manifests::StoreError,
 };
@@ -64,29 +62,28 @@ const PLACEHOLDER_OWNER: &'static str = "no-owner";
 #[derive(Clone)]
 pub struct DatasetStore {
     metadata_db: MetadataDb,
+    // Provider store for managing provider configurations and caching.
+    provider_configs_store: ProviderConfigsStore,
+    // Store for dataset definitions (manifests).
+    dataset_manifests_store: DatasetManifestsStore,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
     dataset_cache: Arc<RwLock<HashMap<String, Dataset>>>,
-    // Provider store for managing provider configurations and caching.
-    providers: ProvidersConfigStore,
-    // Store for dataset definitions (manifests).
-    manifests_store: ManifestsStore,
 }
 
 impl DatasetStore {
-    pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Arc<Self> {
-        let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
-        let manifests_store = ManifestsStore::new(
-            metadata_db.clone(),
-            config.dataset_defs_store.prefixed_store(),
-        );
+    pub fn new(
+        metadata_db: MetadataDb,
+        provider_configs_store: ProviderConfigsStore,
+        dataset_manifests_store: DatasetManifestsStore,
+    ) -> Arc<Self> {
         Arc::new(Self {
             metadata_db,
+            provider_configs_store,
+            dataset_manifests_store,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
-            providers: providers_store,
-            manifests_store,
         })
     }
 
@@ -96,12 +93,12 @@ impl DatasetStore {
     /// metadata database. It's idempotent and will only register manifests that don't already exist.
     /// The initialization runs only once per instance.
     pub async fn init(&self) {
-        self.manifests_store.init().await
+        self.dataset_manifests_store.init().await
     }
 
     /// Get a reference to the providers configuration store
-    pub fn providers(&self) -> &ProvidersConfigStore {
-        &self.providers
+    pub fn providers(&self) -> &ProviderConfigsStore {
+        &self.provider_configs_store
     }
 
     /// Register a dataset manifest in both the dataset store and metadata database.
@@ -126,7 +123,10 @@ impl DatasetStore {
         }
 
         // Store manifest in the underlying store first
-        let manifest_path = self.manifests_store.store(name, version, manifest).await?;
+        let manifest_path = self
+            .dataset_manifests_store
+            .store(name, version, manifest)
+            .await?;
 
         // Register dataset metadata in database
         // TODO: Extract the dataset owner from the manifest
@@ -172,7 +172,7 @@ impl DatasetStore {
         let version = match version.into() {
             Some(v) => v.clone(),
             None => self
-                .manifests_store
+                .dataset_manifests_store
                 .get_latest_version(name)
                 .await
                 .map_err(|GetLatestVersionError::MetadataDbError(source)| {
@@ -202,15 +202,15 @@ impl DatasetStore {
         );
 
         // Try to load the dataset manifest using ManifestsStore
-        let Some(manifest_content) =
-            self.manifests_store
-                .get(name, &version)
-                .await
-                .map_err(|err| GetDatasetError::ManifestRetrievalError {
-                    name: name.to_string(),
-                    version: Some(version.to_string()),
-                    source: Box::new(err),
-                })?
+        let Some(manifest_content) = self
+            .dataset_manifests_store
+            .get(name, &version)
+            .await
+            .map_err(|err| GetDatasetError::ManifestRetrievalError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(err),
+            })?
         else {
             return Ok(None);
         };
@@ -314,36 +314,6 @@ impl DatasetStore {
                 })?;
                 dataset
             }
-            DatasetKind::Sql => {
-                let manifest = manifest_content
-                    .try_into_manifest::<SqlManifest>()
-                    .map_err(|err| GetDatasetError::ManifestParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                // Fetch all SQL files for the dataset
-                let sql_files = self
-                    .manifests_store
-                    .get_sql_files(&name, &version)
-                    .await
-                    .map_err(|err| GetDatasetError::SqlFilesError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: format!("Failed to get SQL files: {}", err).into(),
-                    })?;
-
-                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
-                    .await
-                    .map_err(|err| GetDatasetError::SqlDatasetError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                sql_dataset.dataset
-            }
         };
 
         // Cache the dataset.
@@ -362,7 +332,7 @@ impl DatasetStore {
     }
 
     pub async fn get_all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, GetAllDatasetsError> {
-        let list = self.manifests_store.list().await;
+        let list = self.dataset_manifests_store.list().await;
 
         let mut datasets = Vec::new();
         for (name, version) in list {
@@ -382,28 +352,29 @@ impl DatasetStore {
     }
 
     #[tracing::instrument(skip(self), err)]
-    pub async fn get_sql_dataset(
+    pub async fn get_derived_manifest(
         self: &Arc<Self>,
         name: &str,
         version: impl Into<Option<&Version>> + std::fmt::Debug,
-    ) -> Result<Option<SqlDataset>, GetSqlDatasetError> {
+    ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
         // Validate dataset name
-        let name = &name
-            .parse::<Name>()
-            .map_err(|err| GetSqlDatasetError::InvalidDatasetName {
-                name: name.to_string(),
-                source: err,
-            })?;
+        let name =
+            &name
+                .parse::<Name>()
+                .map_err(|err| GetDerivedManifestError::InvalidDatasetName {
+                    name: name.to_string(),
+                    source: err,
+                })?;
 
         // If no version is provided use a placeholder version (default version, i.e., v0.0.0).
         let version = &version.into().cloned().unwrap_or_default();
 
         // Try to load the dataset manifest using ManifestsStore
         let Some(dataset_src) = self
-            .manifests_store
+            .dataset_manifests_store
             .get(name, version)
             .await
-            .map_err(|err| GetSqlDatasetError::ManifestRetrievalError {
+            .map_err(|err| GetDerivedManifestError::ManifestRetrievalError {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: Box::new(err),
@@ -414,7 +385,7 @@ impl DatasetStore {
 
         let manifest = dataset_src
             .try_into_manifest::<CommonManifest>()
-            .map_err(|err| GetSqlDatasetError::ManifestParseError {
+            .map_err(|err| GetDerivedManifestError::ManifestParseError {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: err,
@@ -427,77 +398,30 @@ impl DatasetStore {
         );
 
         let kind = DatasetKind::from_str(&manifest.kind).map_err(|err: UnsupportedKindError| {
-            GetSqlDatasetError::UnsupportedKind {
+            GetDerivedManifestError::UnsupportedKind {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: err.kind,
             }
         })?;
 
-        match kind {
-            DatasetKind::Derived => {
-                let manifest =
-                    dataset_src
-                        .try_into_manifest::<DerivedManifest>()
-                        .map_err(|err| GetSqlDatasetError::ManifestParseError {
-                            name: name.to_string(),
-                            version: Some(version.to_string()),
-                            source: err,
-                        })?;
-
-                let queries = derived::queries(&manifest).map_err(|err| {
-                    GetSqlDatasetError::SqlParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    }
-                })?;
-                let dataset = derived::dataset(manifest).map_err(|err| {
-                    GetSqlDatasetError::DerivedCreationError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    }
-                })?;
-
-                Ok(Some(SqlDataset { dataset, queries }))
-            }
-            DatasetKind::Sql => {
-                let manifest = dataset_src
-                    .try_into_manifest::<SqlManifest>()
-                    .map_err(|err| GetSqlDatasetError::ManifestParseError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                // Fetch all SQL files for the dataset
-                let sql_files = self
-                    .manifests_store
-                    .get_sql_files(&name, version)
-                    .await
-                    .map_err(|err| GetSqlDatasetError::SqlFilesError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: format!("Failed to get SQL files: {}", err).into(),
-                    })?;
-
-                let sql_dataset = sql_datasets::dataset(Arc::clone(self), manifest, sql_files)
-                    .await
-                    .map_err(|err| GetSqlDatasetError::SqlDatasetError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err,
-                    })?;
-
-                Ok(Some(sql_dataset))
-            }
-            _ => Err(GetSqlDatasetError::UnsupportedKind {
+        if kind != DatasetKind::Derived {
+            return Err(GetDerivedManifestError::UnsupportedKind {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: kind.to_string(),
-            }),
+            });
         }
+
+        let manifest = dataset_src
+            .try_into_manifest::<DerivedManifest>()
+            .map_err(|err| GetDerivedManifestError::ManifestParseError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: err,
+            })?;
+
+        Ok(Some(manifest))
     }
 
     #[tracing::instrument(skip(self), err)]
@@ -519,7 +443,7 @@ impl DatasetStore {
 
         // Get the dataset manifest for the given name and version
         let Some(manifest_content) = self
-            .manifests_store
+            .dataset_manifests_store
             .get(dataset_name, dataset_version)
             .await
             .map_err(|err| GetClientError::ManifestRetrievalError {
@@ -650,7 +574,7 @@ impl DatasetStore {
     async fn find_provider(&self, kind: DatasetKind, network: String) -> Option<ProviderConfig> {
         // Collect matching provider configurations into a vector for shuffling
         let mut matching_providers = self
-            .providers
+            .provider_configs_store
             .get_all()
             .await
             .values()

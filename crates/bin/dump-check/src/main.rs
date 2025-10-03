@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 use common::{BoxError, config::Config};
-use dataset_store::DatasetStore;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use dump_check::metrics;
 use monitoring::{
     logging,
@@ -72,7 +74,19 @@ async fn main() -> Result<(), BoxError> {
 
     let config = Arc::new(Config::load(config_path, true, None, false).await?);
     let metadata_db = config.metadata_db().await?;
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store = DatasetManifestsStore::new(
+            metadata_db.clone(),
+            config.dataset_defs_store.prefixed_store(),
+        );
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
 
     if end_block == 0 {
         return Err("The end block number must be greater than 0".into());

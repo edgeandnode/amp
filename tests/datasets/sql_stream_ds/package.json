@@ -1,0 +1,5 @@
+{
+  "name": "@nozzle-datasets/sql-stream-ds",
+  "private": true,
+  "type": "module"
+}

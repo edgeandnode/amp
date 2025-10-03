@@ -16,13 +16,17 @@ use crate::handlers::common::NonEmptyString;
 /// provider configuration if this data will be exposed through APIs.
 #[serde_with::serde_as]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ProviderInfo {
     /// The name/identifier of the provider
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: NonEmptyString,
     /// The type of provider (e.g., "evm-rpc", "firehose", "substreams")
     #[serde_as(as = "serde_with::DisplayFromStr")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub kind: dataset_store::DatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub network: NonEmptyString,
     /// Additional provider-specific configuration fields
     #[serde(flatten)]

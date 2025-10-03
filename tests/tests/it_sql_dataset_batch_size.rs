@@ -13,16 +13,16 @@ use dump::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, helpers as test_helpers};
+use tests::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
 
 #[tokio::test]
 async fn sql_dataset_input_batch_size() {
     let test = TestCtx::setup("sql_dataset_input_batch_size").await;
 
-    // 2. First dump eth_firehose dependency on the spot
+    // 2. First dump eth_rpc dependency on the spot
     let start = test
         .dataset_store()
-        .get_dataset("eth_firehose", None)
+        .get_dataset("eth_rpc", None)
         .await
         .unwrap()
         .expect("Dataset should exist")
@@ -30,7 +30,7 @@ async fn sql_dataset_input_batch_size() {
         .unwrap();
     let end = start + 3;
 
-    test.dump_dataset("eth_firehose", end, 1, None).await;
+    test.dump_dataset("eth_rpc", end, 1, None).await;
 
     // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
     let dataset_name = "sql_stream_ds";
@@ -94,15 +94,19 @@ impl TestCtx {
         logging::init();
 
         let ctx = testlib::ctx::TestCtxBuilder::new(test_name)
-            .with_provider_config("firehose_eth_mainnet")
-            .with_dataset_manifests(["eth_firehose", "sql_stream_ds"])
-            .with_sql_dataset_files([
-                "sql_stream_ds/even_blocks",
-                "sql_stream_ds/even_blocks_hashes_only",
-            ])
+            .with_provider_config("rpc_eth_mainnet")
+            .with_dataset_manifests(["eth_rpc"])
             .build()
             .await
             .expect("Failed to create test context");
+
+        // Deploy the TypeScript dataset
+        let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("nozzle.config.ts"));
+        let cli = ctx.new_nozzl_cli();
+        sql_stream_ds
+            .register(&cli)
+            .await
+            .expect("Failed to register sql_stream_ds dataset");
 
         Self { ctx }
     }

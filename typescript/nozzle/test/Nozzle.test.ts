@@ -57,6 +57,18 @@ Testing.layer((it) => {
   )
 
   it.effect(
+    "can fetch the schema for a dataset version",
+    Effect.fn(function*() {
+      const api = yield* Admin.Admin
+      const result = yield* api.getDatasetVersionSchema("anvil", "0.1.0")
+      assertInstanceOf(result, Model.DatasetSchemaResponse)
+      assertEquals(result.name, "anvil")
+      assertEquals(result.version, "0.1.0")
+      deepStrictEqual(Array.isArray(result.tables), true)
+    }),
+  )
+
+  it.effect(
     "can fetch the output schema of a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin

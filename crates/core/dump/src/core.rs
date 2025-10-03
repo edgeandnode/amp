@@ -13,9 +13,7 @@ use common::{
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
-use datasets_derived::{
-    DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
-};
+use datasets_derived::DATASET_KIND as DERIVED_DATASET_KIND;
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
@@ -117,7 +115,7 @@ pub async fn dump_raw_tables(
             )
             .await?;
         }
-        DatasetKind::Sql | DatasetKind::Derived => {
+        DatasetKind::Derived => {
             return Err(format!(
                 "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
                 dataset.name, kind,
@@ -151,40 +149,34 @@ pub async fn dump_user_tables(
 
         let dataset = table.table().dataset();
 
-        let dataset = match dataset.kind.as_str() {
-            SQL_DATASET_KIND => ctx
-                .dataset_store
-                .get_sql_dataset(&dataset.name, None)
-                .await?
-                .ok_or_else(|| format!("SQL dataset '{}' not found", dataset.name))?,
-            DERIVED_DATASET_KIND => ctx
-                .dataset_store
-                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
-                .await?
-                .ok_or_else(|| {
-                    format!(
-                        "Derived dataset '{}' version '{}' not found",
-                        dataset.name,
-                        dataset
-                            .version
-                            .as_ref()
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "latest".to_string())
-                    )
-                })?,
-            _ => {
-                return Err(format!(
-                    "Unsupported dataset kind {} for table {}",
-                    dataset.kind,
-                    table.table_ref()
+        if dataset.kind.as_str() != DERIVED_DATASET_KIND {
+            return Err(format!(
+                "Unsupported dataset kind {} for table {}",
+                dataset.kind,
+                table.table_ref()
+            )
+            .into());
+        }
+
+        let manifest = ctx
+            .dataset_store
+            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .await?
+            .ok_or_else(|| {
+                format!(
+                    "Derived dataset '{}' version '{}' not found",
+                    dataset.name,
+                    dataset
+                        .version
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "latest".to_string())
                 )
-                .into());
-            }
-        };
+            })?;
 
         sql_dump::dump_table(
             ctx.clone(),
-            dataset,
+            manifest,
             &env,
             table.clone(),
             &opts,

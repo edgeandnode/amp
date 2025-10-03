@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use dataset_store::DatasetKind;
 use datasets_common::{name::Name, version::Version};
-use tests::testlib;
+use tests::testlib::{self, fixtures::DatasetPackage};
 
 #[tokio::test]
 async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
@@ -10,32 +10,46 @@ async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
 
     //* Given
     let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_sql_dataset")
-        .with_dataset_manifest("sql_over_anvil_1")
+        .with_dataset_manifest("anvil_rpc")
+        .with_anvil_ipc()
         .build()
         .await
         .expect("should create test context");
+
+    // Register the TypeScript dataset
+    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("nozzle.config.ts"));
+    let cli = ctx.new_nozzl_cli();
+    sql_over_anvil_1
+        .register(&cli)
+        .await
+        .expect("Failed to register sql_over_anvil_1 dataset");
+
     let metadata_db = ctx.metadata_db();
     let dataset_store = ctx.daemon_server().dataset_store();
 
     //* When
     let result = dataset_store
-        .get_sql_dataset("sql_over_anvil_1", None)
+        .get_derived_manifest("sql_over_anvil_1", None)
         .await
-        .expect("load_sql_dataset should succeed")
-        .expect("sql dataset should exist");
+        .expect("load derived manifest should succeed")
+        .expect("derived manifest should exist");
 
     //* Then
-    assert_eq!(result.dataset.kind, "sql", "dataset kind should be 'sql'");
+    assert_eq!(
+        result.kind.to_string(),
+        "manifest",
+        "dataset kind should be 'manifest' for TypeScript datasets"
+    );
 
     // Assert that the dataset is registered in the metadata DB
     let db_dataset = metadata_db
-        .get_dataset_latest_version_with_details(&result.dataset.name)
+        .get_dataset_latest_version_with_details(&result.name)
         .await
         .expect("should query metadata DB");
     assert!(
         db_dataset.is_some(),
         "dataset {} should be registered in metadata DB",
-        result.dataset.name
+        result.name
     );
 }
 
@@ -59,14 +73,15 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
 
     //* When
     let result = dataset_store
-        .get_sql_dataset(&name, &version)
+        .get_derived_manifest(&name, &version)
         .await
-        .expect("load_sql_dataset should succeed")
-        .expect("sql dataset should exist");
+        .expect("load derived manifest should succeed")
+        .expect("derived manifest should exist");
 
     //* Then
     assert_eq!(
-        result.dataset.kind, "manifest",
+        result.kind.to_string(),
+        "manifest",
         "dataset kind should be 'manifest'"
     );
 
@@ -89,12 +104,22 @@ async fn all_datasets_returns_available_datasets_without_error() {
 
     //* Given
     let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_all_datasets")
+        .with_dataset_manifest("anvil_rpc")
         .with_dataset_manifest("eth_rpc")
-        .with_dataset_manifest("sql_over_anvil_1")
         .with_dataset_manifest("register_test_dataset__1_0_0")
+        .with_anvil_ipc()
         .build()
         .await
         .expect("should create test context");
+
+    // Register the TypeScript dataset
+    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("nozzle.config.ts"));
+    let cli = ctx.new_nozzl_cli();
+    sql_over_anvil_1
+        .register(&cli)
+        .await
+        .expect("Failed to register sql_over_anvil_1 dataset");
+
     let metadata_db = ctx.metadata_db();
     let dataset_store = ctx.daemon_server().dataset_store();
 
