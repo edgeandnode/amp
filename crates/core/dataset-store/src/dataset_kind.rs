@@ -10,13 +10,12 @@
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
 //! - **Substreams**: Processing of Substreams packages with dynamic schema inference
 //! - **Derived**: Modern manifest-based dataset definitions
-//! - **SQL**: SQL-based dataset definitions (deprecated in favor of Derived)
 
 /// Represents the different types of datasets supported by the system.
 ///
 /// Dataset kinds determine how data is extracted, processed, and served.
 /// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) extract data directly
-/// from blockchain sources, while derived datasets (`Derived`, `Sql`)
+/// from blockchain sources, while derived datasets (`Derived`)
 /// transform data from other datasets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetKind {
@@ -32,9 +31,6 @@ pub enum DatasetKind {
     ///
     /// Modern dataset definition using structured configuration.
     Derived,
-    /// SQL-based dataset definition using `.sql` files.
-    // TODO: #[deprecated(note = "Use `Derived` instead")]
-    Sql, // Will be deprecated in favor of `Derived`
 }
 
 impl DatasetKind {
@@ -61,7 +57,6 @@ impl DatasetKind {
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Derived => datasets_derived::DATASET_KIND,
-            Self::Sql => datasets_derived::sql_dataset::DATASET_KIND,
         }
     }
 }
@@ -70,11 +65,10 @@ impl std::fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
-            Self::EthBeacon => f.write_str(evm_rpc_datasets::DATASET_KIND),
+            Self::EthBeacon => f.write_str(eth_beacon_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Derived => f.write_str(datasets_derived::DATASET_KIND),
-            Self::Sql => f.write_str(datasets_derived::sql_dataset::DATASET_KIND),
         }
     }
 }
@@ -89,7 +83,6 @@ impl std::str::FromStr for DatasetKind {
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             datasets_derived::DATASET_KIND => Ok(Self::Derived),
-            datasets_derived::sql_dataset::DATASET_KIND => Ok(Self::Sql),
             k => Err(UnsupportedKindError {
                 kind: k.to_string(),
             }),

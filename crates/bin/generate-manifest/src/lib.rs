@@ -45,9 +45,6 @@ pub async fn run<T: io::Write>(
             };
             schema_from_tables(&substreams_datasets::tables(manifest).await?)
         }
-        dataset_store::DatasetKind::Sql => {
-            return Err("`DatasetKind::Sql` doesn't support dataset generation".into());
-        }
         dataset_store::DatasetKind::Derived => {
             return Err("`DatasetKind::Derived` doesn't support dataset generation".into());
         }

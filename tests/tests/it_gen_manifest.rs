@@ -106,30 +106,6 @@ async fn generate_manifest_substreams() {
 }
 
 #[tokio::test]
-async fn generate_manifest_sql() {
-    logging::init();
-
-    let network = "mainnet".to_string();
-    let kind = "sql".to_string();
-    let name = "sql_stream_ds".to_string();
-
-    let mut out = Vec::new();
-
-    let err = generate_manifest::run(
-        network.clone(),
-        kind.clone(),
-        name.clone(),
-        None,
-        None,
-        &mut out,
-    )
-    .await
-    .unwrap_err()
-    .to_string();
-    assert!(err.contains("doesn't support dataset generation"));
-}
-
-#[tokio::test]
 async fn generate_manifest_manifest_builtin() {
     logging::init();
 

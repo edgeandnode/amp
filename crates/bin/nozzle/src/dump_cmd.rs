@@ -7,16 +7,14 @@ use std::{
 
 use common::{
     BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
-    store::ObjectStoreUrl, utils::dfs,
+    query_context::parse_sql, store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::version::Version;
-use datasets_derived::{
-    DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
-};
+use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, manifest::TableInput};
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;
@@ -190,13 +188,9 @@ pub async fn datasets_and_dependencies(
             return Err(format!("Dataset '{}' not found", dataset_name).into());
         };
 
-        let sql_dataset = match dataset.kind.as_str() {
-            SQL_DATASET_KIND => store
-                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
-                .await?
-                .ok_or_else(|| format!("SQL dataset '{}' not found", dataset.name))?,
+        let manifest = match dataset.kind.as_str() {
             DERIVED_DATASET_KIND => store
-                .get_sql_dataset(&dataset.name, dataset.version.as_ref())
+                .get_derived_manifest(&dataset.name, dataset.version.as_ref())
                 .await?
                 .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?,
             _ => {
@@ -206,8 +200,13 @@ pub async fn datasets_and_dependencies(
         };
 
         let mut refs: Vec<String> = Default::default();
-        for query in sql_dataset.queries.values() {
-            let (tables, _) = resolve_table_references(query, true)?;
+        for table in manifest.tables.values() {
+            // Extract SQL from table input
+            let sql = match &table.input {
+                TableInput::View(view) => &view.sql,
+            };
+            let query = parse_sql(sql)?;
+            let (tables, _) = resolve_table_references(&query, true)?;
             refs.append(
                 &mut tables
                     .iter()
