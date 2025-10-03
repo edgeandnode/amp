@@ -13,31 +13,29 @@
     "nozzl": "nozzl"
   },
   "dependencies": {
-    "@electric-sql/client": "^1.0.10",
-    "@electric-sql/react": "^1.0.10",
+    "@electric-sql/client": "^1.0.13",
+    "@electric-sql/react": "^1.0.13",
     "@graphprotocol/gds-react": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@31e7393",
     "@t3-oss/env-nextjs": "^0.13.8",
-    "@tanstack/electric-db-collection": "^0.1.25",
-    "@tanstack/react-db": "^0.1.23",
-    "dotenv": "^17.2.2",
+    "dotenv": "^17.2.3",
     "effect": "^3.18.1",
     "next": "15.5.4",
     "nozzl": "^0.0.20",
-    "react": "19.1.1",
-    "react-dom": "19.1.1",
-    "viem": "^2.37.9",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "viem": "^2.37.11",
     "zod": "^4.1.11"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
-    "@tailwindcss/postcss": "^4.1.13",
-    "@types/node": "^24.5.2",
-    "@types/react": "^19.1.15",
-    "@types/react-dom": "^19.1.9",
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/node": "^24.6.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "eslint": "^9.36.0",
     "eslint-config-next": "15.5.4",
-    "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.2"
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.9.3"
   },
   "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a",
   "engines": {
