@@ -156,31 +156,30 @@ pub async fn dump_user_tables(
 
         let dataset = table.table().dataset();
 
-        let manifest = match dataset.kind.as_str() {
-            DERIVED_DATASET_KIND => ctx
-                .dataset_store
-                .get_derived_manifest(&dataset.name, dataset.version.as_ref())
-                .await?
-                .ok_or_else(|| {
-                    format!(
-                        "Derived dataset '{}' version '{}' not found",
-                        dataset.name,
-                        dataset
-                            .version
-                            .as_ref()
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "latest".to_string())
-                    )
-                })?,
-            _ => {
-                return Err(format!(
-                    "Unsupported dataset kind {} for table {}",
-                    dataset.kind,
-                    table.table_ref()
+        if dataset.kind.as_str() != DERIVED_DATASET_KIND {
+            return Err(format!(
+                "Unsupported dataset kind {} for table {}",
+                dataset.kind,
+                table.table_ref()
+            )
+            .into());
+        }
+
+        let manifest = ctx
+            .dataset_store
+            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .await?
+            .ok_or_else(|| {
+                format!(
+                    "Derived dataset '{}' version '{}' not found",
+                    dataset.name,
+                    dataset
+                        .version
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "latest".to_string())
                 )
-                .into());
-            }
-        };
+            })?;
 
         sql_dump::dump_table(
             ctx.clone(),

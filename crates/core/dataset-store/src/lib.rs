@@ -405,25 +405,23 @@ impl DatasetStore {
             }
         })?;
 
-        match kind {
-            DatasetKind::Derived => {
-                let manifest =
-                    dataset_src
-                        .try_into_manifest::<DerivedManifest>()
-                        .map_err(|err| GetDerivedManifestError::ManifestParseError {
-                            name: name.to_string(),
-                            version: Some(version.to_string()),
-                            source: err,
-                        })?;
-
-                Ok(Some(manifest))
-            }
-            _ => Err(GetDerivedManifestError::UnsupportedKind {
+        if kind != DatasetKind::Derived {
+            return Err(GetDerivedManifestError::UnsupportedKind {
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: kind.to_string(),
-            }),
+            });
         }
+
+        let manifest = dataset_src
+            .try_into_manifest::<DerivedManifest>()
+            .map_err(|err| GetDerivedManifestError::ManifestParseError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: err,
+            })?;
+
+        Ok(Some(manifest))
     }
 
     #[tracing::instrument(skip(self), err)]
