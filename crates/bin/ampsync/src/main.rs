@@ -6,7 +6,7 @@ mod pgpq;
 mod sql_validator;
 mod sync_engine;
 
-use std::{env, path::PathBuf, sync::Arc};
+use std::{env, path::PathBuf, sync::Arc, time::Duration};
 
 use common::BoxError;
 use datasets_derived::{Manifest, manifest::TableInput};
@@ -19,6 +19,18 @@ use crate::{
     conn::{DEFAULT_POOL_SIZE, DbConnPool},
     sync_engine::AmpsyncDbEngine,
 };
+
+/// Default maximum number of concurrent batch operations across all tables
+const DEFAULT_MAX_CONCURRENT_BATCHES: usize = 10;
+
+/// Maximum number of stream reconnection attempts before giving up
+const MAX_STREAM_RETRIES: u32 = 5;
+
+/// Maximum delay between reconnection attempts (in seconds)
+const MAX_RETRY_DELAY_SECS: u64 = 60;
+
+/// Graceful shutdown timeout - maximum time to wait for in-flight operations (in seconds)
+const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -57,21 +69,29 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     let db_pool = DbConnPool::connect(&config.database_url, DEFAULT_POOL_SIZE).await?;
 
     // Connect to Nozzle server
-    let mut sql_client = SqlClient::new(&config.amp_flight_addr).await?;
+    let sql_client = SqlClient::new(&config.amp_flight_addr).await?;
     info!("Connected to Nozzle server at {}", config.amp_flight_addr);
 
     info!("Preparing to sync dataset: {}", config.manifest.name);
 
     let ampsync_db_engine = AmpsyncDbEngine::new(&db_pool);
 
+    // Create a shutdown token to coordinate graceful shutdown across all tasks
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+
     // Create a semaphore to limit concurrent batch processing across all tables
-    // This prevents OOM when many tables receive large batches simultaneously
+    // This provides backpressure to prevent OOM when many tables receive large batches simultaneously.
+    // When all permits are taken, the stream processing will wait at semaphore.acquire(),
+    // preventing the stream from pulling more data until processing capacity is available.
     // Default: Allow 10 concurrent batch operations (configurable via env)
     let max_concurrent_batches = env::var("MAX_CONCURRENT_BATCHES")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(10);
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_BATCHES);
     let batch_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_batches));
+
+    // Collect task handles for graceful shutdown
+    let mut task_handles = Vec::new();
 
     // Process each table: create table and set up streaming
     for (table_name, table) in &config.manifest.tables {
@@ -94,101 +114,176 @@ async fn ampsync_runner() -> Result<(), BoxError> {
             table_name, streaming_query
         );
 
-        // Execute the query to get ResultStream
-        let result_stream = match sql_client.query(&streaming_query, None, None).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                error!("Failed to execute query for table '{}': {}", table_name, e);
-                continue;
-            }
-        };
-
         // Wrap with with_reorg and spawn a task to handle the stream
-        // Use Arc<str> instead of cloning String - more efficient
-        let table_name_arc: Arc<str> = Arc::from(table_name.as_str());
+        let table_name_owned = table_name.clone();
         let ampsync_db_engine_clone = ampsync_db_engine.clone();
         let batch_semaphore_clone = batch_semaphore.clone();
-        tokio::spawn(async move {
-            let mut reorg_stream = with_reorg(result_stream);
+        let mut sql_client_clone = sql_client.clone();
+        let streaming_query_clone = streaming_query.clone();
+        let shutdown_token_clone = shutdown_token.clone();
 
-            info!("Started reorg stream for table: {}", table_name_arc);
+        let task_handle = tokio::spawn(async move {
+            let mut retry_count = 0u32;
+            let max_retries = MAX_STREAM_RETRIES;
 
-            while let Some(result) = reorg_stream.next().await {
-                match result {
-                    Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
-                        info!(
-                            "Received data batch for table '{}': {} rows, block ranges: {:?}",
-                            table_name_arc,
-                            data.num_rows(),
-                            metadata.ranges
-                        );
+            loop {
+                // Check if shutdown has been requested
+                if shutdown_token_clone.is_cancelled() {
+                    info!(
+                        "Shutdown requested for table '{}', stopping gracefully",
+                        table_name_owned
+                    );
+                    return;
+                }
 
-                        // Acquire semaphore permit before processing batch
-                        // This provides backpressure to prevent OOM when many tables
-                        // receive large batches simultaneously
-                        let _permit = batch_semaphore_clone.acquire().await.unwrap();
-
-                        // Convert nanosecond timestamps to microseconds for PostgreSQL compatibility
-                        let converted_batch = match convert_nanosecond_timestamps(data) {
-                            Ok(batch) => batch,
-                            Err(e) => {
-                                error!(
-                                    "Failed to convert timestamps for table '{}': {}",
-                                    table_name_arc, e
-                                );
-                                continue;
-                            }
-                        };
-
-                        // High-performance bulk insert using pgpq
-                        if let Err(e) = ampsync_db_engine_clone
-                            .insert_record_batch(&table_name_arc, &converted_batch)
-                            .await
-                        {
-                            error!(
-                                "Failed to insert data for table '{}': {}",
-                                table_name_arc, e
-                            );
-                        } else {
-                            info!(
-                                "Successfully bulk inserted {} rows into table '{}'",
-                                converted_batch.num_rows(),
-                                table_name_arc
-                            );
-                        }
-                        // Permit is automatically released when _permit is dropped
-                    }
-                    Ok(ResponseBatchWithReorg::Reorg { invalidation }) => {
-                        warn!(
-                            "Reorg detected for table '{}', invalidating ranges: {:?}",
-                            table_name_arc, invalidation
-                        );
-
-                        // Acquire semaphore permit for reorg handling too
-                        let _permit = batch_semaphore_clone.acquire().await.unwrap();
-
-                        // Handle reorg by deleting affected rows
-                        if let Err(e) = ampsync_db_engine_clone
-                            .handle_reorg(&table_name_arc, &invalidation)
-                            .await
-                        {
-                            error!(
-                                "Failed to handle reorg for table '{}': {}",
-                                table_name_arc, e
-                            );
-                        } else {
-                            info!("Successfully handled reorg for table '{}'", table_name_arc);
-                        }
-                    }
+                let result_stream = match sql_client_clone
+                    .query(&streaming_query_clone, None, None)
+                    .await
+                {
+                    Ok(stream) => stream,
                     Err(e) => {
-                        error!("Stream error for table '{}': {}", table_name_arc, e);
-                        break;
+                        error!(
+                            "Failed to create stream for table '{}' (attempt {}/{}): {}",
+                            table_name_owned,
+                            retry_count + 1,
+                            max_retries,
+                            e
+                        );
+
+                        if retry_count >= max_retries {
+                            error!(
+                                "Max retries ({}) reached for table '{}'. Stream will not be retried.",
+                                max_retries, table_name_owned
+                            );
+                            return;
+                        }
+
+                        // Exponential backoff: 2^retry_count seconds, capped at MAX_RETRY_DELAY_SECS
+                        let delay_secs = std::cmp::min(2u64.pow(retry_count), MAX_RETRY_DELAY_SECS);
+                        warn!(
+                            "Retrying stream for table '{}' in {} seconds...",
+                            table_name_owned, delay_secs
+                        );
+                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                        retry_count += 1;
+                        continue;
+                    }
+                };
+
+                let mut reorg_stream = with_reorg(result_stream);
+                info!("Started reorg stream for table: {}", table_name_owned);
+
+                // Reset retry count on successful connection
+                retry_count = 0;
+
+                while let Some(result) = reorg_stream.next().await {
+                    match result {
+                        Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
+                            info!(
+                                "Received data batch for table '{}': {} rows, block ranges: {:?}",
+                                table_name_owned,
+                                data.num_rows(),
+                                metadata.ranges
+                            );
+
+                            // Acquire semaphore permit before processing batch
+                            // This provides backpressure to prevent OOM when many tables
+                            // receive large batches simultaneously. The stream won't pull
+                            // more data until we release this permit after processing.
+                            let _permit = match batch_semaphore_clone.acquire().await {
+                                Ok(permit) => permit,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to acquire semaphore for table '{}': {}",
+                                        table_name_owned, e
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            // Convert nanosecond timestamps to microseconds for PostgreSQL compatibility
+                            let converted_batch = match convert_nanosecond_timestamps(data) {
+                                Ok(batch) => batch,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to convert timestamps for table '{}': {}",
+                                        table_name_owned, e
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            // High-performance bulk insert using pgpq
+                            if let Err(e) = ampsync_db_engine_clone
+                                .insert_record_batch(&table_name_owned, &converted_batch)
+                                .await
+                            {
+                                error!(
+                                    "Failed to insert data for table '{}': {}",
+                                    table_name_owned, e
+                                );
+                            } else {
+                                info!(
+                                    "Successfully bulk inserted {} rows into table '{}'",
+                                    converted_batch.num_rows(),
+                                    table_name_owned
+                                );
+                            }
+                            // Permit is automatically released when _permit is dropped
+                        }
+                        Ok(ResponseBatchWithReorg::Reorg { invalidation }) => {
+                            warn!(
+                                "Reorg detected for table '{}', invalidating ranges: {:?}",
+                                table_name_owned, invalidation
+                            );
+
+                            // Acquire semaphore permit for reorg handling too
+                            let _permit = match batch_semaphore_clone.acquire().await {
+                                Ok(permit) => permit,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to acquire semaphore for reorg on table '{}': {}",
+                                        table_name_owned, e
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            // Handle reorg by deleting affected rows
+                            if let Err(e) = ampsync_db_engine_clone
+                                .handle_reorg(&table_name_owned, &invalidation)
+                                .await
+                            {
+                                error!(
+                                    "Failed to handle reorg for table '{}': {}",
+                                    table_name_owned, e
+                                );
+                            } else {
+                                info!(
+                                    "Successfully handled reorg for table '{}'",
+                                    table_name_owned
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Stream error for table '{}': {}. Will attempt to reconnect...",
+                                table_name_owned, e
+                            );
+                            break; // Break inner loop to trigger reconnection
+                        }
                     }
                 }
-            }
 
-            warn!("Stream ended for table: {}", table_name_arc);
+                // Stream ended - will retry with exponential backoff in outer loop
+                warn!(
+                    "Stream ended for table '{}'. Attempting reconnection...",
+                    table_name_owned
+                );
+            }
         });
+
+        task_handles.push(task_handle);
     }
 
     // Keep the main task alive and wait for shutdown signals
@@ -205,6 +300,34 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         }
     }
 
+    // Signal all tasks to shut down
+    shutdown_token.cancel();
+    info!("Shutdown signal sent to all stream processing tasks");
+
+    // Wait for all tasks to complete with timeout
+    let shutdown_future = async {
+        for (i, handle) in task_handles.into_iter().enumerate() {
+            match handle.await {
+                Ok(_) => debug!("Task {} completed successfully", i),
+                Err(e) => warn!("Task {} join error: {}", i, e),
+            }
+        }
+    };
+
+    match tokio::time::timeout(
+        Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT_SECS),
+        shutdown_future,
+    )
+    .await
+    {
+        Ok(_) => info!("All tasks shut down gracefully"),
+        Err(_) => warn!(
+            "Graceful shutdown timeout reached after {}s, some tasks may still be running",
+            GRACEFUL_SHUTDOWN_TIMEOUT_SECS
+        ),
+    }
+
+    info!("Shutdown complete");
     Ok(())
 }
 

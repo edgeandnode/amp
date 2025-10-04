@@ -9,33 +9,30 @@ use bytes::BytesMut;
 use common::{BoxError, arrow::array::RecordBatch};
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use datasets_derived::manifest::{ArrowSchema, Field};
-use lazy_static::lazy_static;
 use nozzle_client::InvalidationRange;
+use phf::phf_set;
 use sqlx::{Pool, Postgres};
 
 use crate::{conn::DbConnPool, pgpq::ArrowToPostgresBinaryEncoder};
 
-lazy_static! {
-    /// Create a static HashSet of reserved SQL keywords.
-    /// If a column in the derived arrow schema exists in this list, it needs to be wrapped in quotes,
-    /// or the CREATE TABLE call will fail.
-    static ref RESERVED_KEYWORDS: std::collections::HashSet<String> = {
-        let mut reserved_sql_keywords = std::collections::HashSet::new();
-        reserved_sql_keywords.insert("as".to_string());
-        reserved_sql_keywords.insert("from".to_string());
-        reserved_sql_keywords.insert("to".to_string());
-        reserved_sql_keywords.insert("select".to_string());
-        reserved_sql_keywords.insert("array".to_string());
-        reserved_sql_keywords.insert("sum".to_string());
-        reserved_sql_keywords.insert("all".to_string());
-        reserved_sql_keywords.insert("allocate".to_string());
-        reserved_sql_keywords.insert("alter".to_string());
-        reserved_sql_keywords.insert("table".to_string());
-        reserved_sql_keywords.insert("blob".to_string());
-
-        reserved_sql_keywords
-    };
-}
+/// Compile-time perfect hash set of reserved SQL keywords.
+///
+/// If a column in the derived arrow schema exists in this set, it needs to be wrapped in quotes,
+/// or the CREATE TABLE call will fail. Using phf (perfect hash function) provides O(1) lookups
+/// with zero runtime initialization cost and no heap allocations.
+static RESERVED_KEYWORDS: phf::Set<&'static str> = phf_set! {
+    "as",
+    "from",
+    "to",
+    "select",
+    "array",
+    "sum",
+    "all",
+    "allocate",
+    "alter",
+    "table",
+    "blob",
+};
 
 /// Convert Arrow schema to PostgreSQL CREATE TABLE statement
 ///
@@ -74,8 +71,8 @@ fn arrow_field_to_postgres_column(field: &Field) -> Result<String, BoxError> {
     let nullable = if field.nullable { "" } else { " NOT NULL" };
 
     // wrap reserved keywords in quotes
-    let column_name = if RESERVED_KEYWORDS.contains(&field.name) {
-        format!("\"{}\"", field.name.clone())
+    let column_name = if RESERVED_KEYWORDS.contains(field.name.as_str()) {
+        format!("\"{}\"", field.name)
     } else {
         field.name.clone()
     };
@@ -351,19 +348,15 @@ impl AmpsyncDbEngine {
 
         tracing::debug!("Ensuring table '{}' exists with DDL: {}", table_name, ddl);
 
-        let pool = self.pool.clone();
-        let ddl_query = ddl.clone();
+        let pool = &self.pool;
+        let ddl_query = &ddl;
 
-        (|| {
-            let pool = pool.clone();
-            let ddl_query = ddl_query.clone();
-            async move { sqlx::query(&ddl_query).execute(&pool).await }
-        })
-        .retry(Self::db_retry_policy())
-        .when(Self::is_retryable_db_error)
-        .notify(Self::notify_db_retry)
-        .await
-        .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
+        (|| async move { sqlx::query(ddl_query).execute(pool).await })
+            .retry(Self::db_retry_policy())
+            .when(Self::is_retryable_db_error)
+            .notify(Self::notify_db_retry)
+            .await
+            .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
 
         Ok(())
     }
@@ -492,37 +485,33 @@ impl AmpsyncDbEngine {
             table_name, columns_clause
         );
 
-        let pool = self.pool.clone();
-        let query = copy_query.clone();
-        let buffer_data = buffer.freeze();
+        let pool = &self.pool;
+        let query = &copy_query;
+        let buffer_data = &buffer.freeze();
+        let num_rows = batch.num_rows();
 
         // Use retry logic for the entire COPY operation
-        (|| {
-            let pool = pool.clone();
-            let query = query.clone();
-            let buffer_data = buffer_data.clone();
-            async move {
-                // Get a connection from the pool and execute the COPY command
-                let mut conn = pool.acquire().await?;
+        (|| async move {
+            // Get a connection from the pool and execute the COPY command
+            let mut conn = pool.acquire().await?;
 
-                // Use PostgreSQL's COPY protocol for maximum performance
-                let mut copy_in = conn.copy_in_raw(&query).await?;
+            // Use PostgreSQL's COPY protocol for maximum performance
+            let mut copy_in = conn.copy_in_raw(query).await?;
 
-                // Send the binary data
-                copy_in.send(buffer_data).await?;
+            // Send the binary data (Bytes is cheap to clone - it's Arc under the hood)
+            copy_in.send(buffer_data.clone()).await?;
 
-                // Finish the copy operation
-                let rows_affected = copy_in.finish().await?;
+            // Finish the copy operation
+            let rows_affected = copy_in.finish().await?;
 
-                tracing::trace!(
-                    "COPY operation completed: {} rows affected for {} input rows in table '{}'",
-                    rows_affected,
-                    batch.num_rows(),
-                    table_name
-                );
+            tracing::trace!(
+                "COPY operation completed: {} rows affected for {} input rows in table '{}'",
+                rows_affected,
+                num_rows,
+                table_name
+            );
 
-                Ok::<(), sqlx::Error>(())
-            }
+            Ok::<(), sqlx::Error>(())
         })
         .retry(Self::db_retry_policy())
         .when(Self::is_retryable_db_error)
@@ -544,17 +533,24 @@ impl AmpsyncDbEngine {
         }
 
         // Build a WHERE clause that covers all invalidation ranges
-        let mut where_conditions = Vec::new();
-        for range in invalidation_ranges {
-            let condition = format!(
+        // Pre-allocate capacity to avoid reallocations: estimate ~50 chars per condition
+        let estimated_capacity = invalidation_ranges.len() * 50;
+        let mut where_clause = String::with_capacity(estimated_capacity);
+
+        for (i, range) in invalidation_ranges.iter().enumerate() {
+            if i > 0 {
+                where_clause.push_str(" OR ");
+            }
+            use std::fmt::Write;
+            write!(
+                &mut where_clause,
                 "(block_num >= {} AND block_num <= {})",
                 range.numbers.start(),
                 range.numbers.end()
-            );
-            where_conditions.push(condition);
+            )
+            .unwrap(); // Writing to String never fails
         }
 
-        let where_clause = where_conditions.join(" OR ");
         let delete_query = format!("DELETE FROM {} WHERE {}", table_name, where_clause);
 
         tracing::info!(
@@ -564,24 +560,20 @@ impl AmpsyncDbEngine {
             delete_query
         );
 
-        let pool = self.pool.clone();
-        let query = delete_query.clone();
+        let pool = &self.pool;
+        let query = &delete_query;
 
-        let result = (|| {
-            let pool = pool.clone();
-            let query = query.clone();
-            async move { sqlx::query(&query).execute(&pool).await }
-        })
-        .retry(Self::db_retry_policy())
-        .when(Self::is_retryable_db_error)
-        .notify(Self::notify_db_retry)
-        .await
-        .map_err(|e| {
-            format!(
-                "Failed to delete invalidated rows from table '{}': {}",
-                table_name, e
-            )
-        })?;
+        let result = (|| async move { sqlx::query(query).execute(pool).await })
+            .retry(Self::db_retry_policy())
+            .when(Self::is_retryable_db_error)
+            .notify(Self::notify_db_retry)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to delete invalidated rows from table '{}': {}",
+                    table_name, e
+                )
+            })?;
 
         let rows_deleted = result.rows_affected();
         if rows_deleted > 0 {

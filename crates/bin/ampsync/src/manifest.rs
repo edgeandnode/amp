@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{path::Path, time::Duration};
 
 use admin_api::handlers::datasets::{
     get_version_schema::DatasetSchemaResponse, get_versions::DatasetVersionsResponse,
@@ -6,6 +6,7 @@ use admin_api::handlers::datasets::{
 use common::BoxError;
 use datasets_common::{name::Name, version::Version};
 use datasets_derived::{DerivedDatasetKind, Manifest, manifest::Table};
+use lazy_static::lazy_static;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
@@ -14,6 +15,22 @@ use oxc_span::SourceType;
 use serde_json::Value;
 
 use crate::{dataset_definition::DatasetDefinition, sql_validator};
+
+/// Maximum number of dataset versions to fetch from admin-api when resolving version
+const ADMIN_API_VERSION_LIMIT: usize = 1000;
+
+lazy_static! {
+    /// Shared HTTP client for admin-api requests with optimized connection pooling.
+    ///
+    /// Creating a new client for each request is expensive as it spawns new connection pools,
+    /// DNS resolvers, and TLS session caches. This shared client reuses connections efficiently.
+    static ref ADMIN_API_CLIENT: reqwest::Client = reqwest::Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .tcp_keepalive(Duration::from_secs(60))
+        .build()
+        .expect("Failed to create HTTP client");
+}
 
 /// Load and parse a nozzle configuration file into a DatasetDefinition.
 ///
@@ -33,8 +50,9 @@ use crate::{dataset_definition::DatasetDefinition, sql_validator};
 /// # Returns
 /// * `Result<DatasetDefinition, BoxError>` - Parsed dataset definition with sanitized SQL
 pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefinition, BoxError> {
-    // Read the file contents
-    let contents = fs::read_to_string(config_path)
+    // Read the file contents asynchronously to avoid blocking the executor
+    let contents = tokio::fs::read_to_string(config_path)
+        .await
         .map_err(|e| format!("Failed to read manifest file: {}", e))?;
 
     // Determine how to parse based on file extension
@@ -119,11 +137,10 @@ async fn resolve_qualified_version(
     name: &Name,
     version: &Version,
 ) -> Result<Version, BoxError> {
-    let admin_api_client = reqwest::Client::new();
-    let versions_resp = admin_api_client
+    let versions_resp = ADMIN_API_CLIENT
         .get(format!(
-            "{}/datasets/{}/versions?limit=1000",
-            admin_api_addr, name
+            "{}/datasets/{}/versions?limit={}",
+            admin_api_addr, name, ADMIN_API_VERSION_LIMIT
         ))
         .send()
         .await?;
@@ -248,8 +265,7 @@ pub async fn fetch_manifest(
     );
 
     // Fetch schema from admin-api using the qualified version
-    let admin_api_client = reqwest::Client::new();
-    let schema_resp = admin_api_client
+    let schema_resp = ADMIN_API_CLIENT
         .get(format!(
             "{}/datasets/{}/versions/{}/schema",
             admin_api_addr, name, qualified_version
