@@ -3,11 +3,12 @@
 //! This module sanitizes SQL queries to ensure they meet requirements for streaming datasets.
 //! Key sanitization:
 //! - Remove ORDER BY clauses (non-incremental queries are not supported)
+//! - Extract column names from SELECT statements for schema filtering
 
 use common::BoxError;
 use datafusion::sql::{
     parser::{DFParser, Statement as DFStatement},
-    sqlparser::ast::{Query, SetExpr, Statement, TableFactor, TableWithJoins},
+    sqlparser::ast::{Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins},
 };
 
 /// Sanitize a SQL query for use in a streaming dataset.
@@ -127,6 +128,91 @@ fn remove_table_factor_order_by(table: &mut TableFactor) {
     }
 }
 
+/// Represents the result of analyzing SELECT columns from a SQL query
+#[derive(Debug, PartialEq)]
+pub enum SelectColumns {
+    /// SELECT * - all columns should be included
+    All,
+    /// SELECT col1, col2, ... - specific columns listed
+    Specific(Vec<String>),
+}
+
+/// Extract the list of columns from a SELECT statement
+///
+/// Returns:
+/// - `SelectColumns::All` if the query uses `SELECT *`
+/// - `SelectColumns::Specific(vec)` if specific columns are selected
+///
+/// # Arguments
+/// * `sql` - The SQL SELECT query to analyze
+///
+/// # Returns
+/// * `Ok(SelectColumns)` with the column information
+/// * `Err(BoxError)` if the SQL cannot be parsed or is not a SELECT statement
+pub fn extract_select_columns(sql: &str) -> Result<SelectColumns, BoxError> {
+    // Parse the SQL using DataFusion's parser
+    let statements = DFParser::parse_sql(sql).map_err(|e| format!("Failed to parse SQL: {}", e))?;
+
+    if statements.is_empty() {
+        return Err("No SQL statement found".into());
+    }
+
+    // Get the first statement
+    let statement = &statements[0];
+
+    match statement {
+        DFStatement::Statement(stmt) => match stmt.as_ref() {
+            Statement::Query(query) => extract_columns_from_query(query),
+            _ => Err("Expected a SELECT query".into()),
+        },
+        _ => Err("Expected a SQL query statement".into()),
+    }
+}
+
+/// Extract columns from a Query AST node
+fn extract_columns_from_query(query: &Query) -> Result<SelectColumns, BoxError> {
+    match &*query.body {
+        SetExpr::Select(select) => extract_columns_from_select(select),
+        _ => Err("Complex queries (UNION, etc.) are not supported for column extraction".into()),
+    }
+}
+
+/// Extract columns from a Select AST node
+fn extract_columns_from_select(select: &Select) -> Result<SelectColumns, BoxError> {
+    // Check if it's SELECT *
+    if select.projection.len() == 1 && matches!(select.projection[0], SelectItem::Wildcard(_)) {
+        return Ok(SelectColumns::All);
+    }
+
+    // Extract specific column names
+    let mut columns = Vec::new();
+
+    for item in &select.projection {
+        match item {
+            SelectItem::UnnamedExpr(expr) => {
+                // For simple column references, extract the column name
+                // For expressions, we'll use the expression as-is (might not be perfect)
+                let col_name = expr.to_string();
+                columns.push(col_name);
+            }
+            SelectItem::ExprWithAlias { alias, .. } => {
+                // Use the alias as the column name
+                columns.push(alias.value.clone());
+            }
+            SelectItem::Wildcard(_) => {
+                // If we see *, it should be the only item (handled above)
+                return Ok(SelectColumns::All);
+            }
+            SelectItem::QualifiedWildcard(_, _) => {
+                // table.* - treat as SELECT *
+                return Ok(SelectColumns::All);
+            }
+        }
+    }
+
+    Ok(SelectColumns::Specific(columns))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +305,43 @@ mod tests {
         assert!(result.to_uppercase().contains("JOIN"));
         assert!(result.to_uppercase().contains("WHERE"));
         assert!(result.to_uppercase().contains("GROUP BY"));
+    }
+
+    #[test]
+    fn test_extract_select_all() {
+        let sql = "SELECT * FROM anvil.logs";
+        let result = extract_select_columns(sql).unwrap();
+        assert_eq!(result, SelectColumns::All);
+    }
+
+    #[test]
+    fn test_extract_specific_columns() {
+        let sql = "SELECT block_num, timestamp, hash, nonce FROM anvil.blocks";
+        let result = extract_select_columns(sql).unwrap();
+        match result {
+            SelectColumns::Specific(cols) => {
+                assert_eq!(cols.len(), 4);
+                assert!(cols.contains(&"block_num".to_string()));
+                assert!(cols.contains(&"timestamp".to_string()));
+                assert!(cols.contains(&"hash".to_string()));
+                assert!(cols.contains(&"nonce".to_string()));
+            }
+            _ => panic!("Expected Specific columns, got All"),
+        }
+    }
+
+    #[test]
+    fn test_extract_columns_with_alias() {
+        let sql = "SELECT block_num as num, hash FROM blocks";
+        let result = extract_select_columns(sql).unwrap();
+        match result {
+            SelectColumns::Specific(cols) => {
+                assert_eq!(cols.len(), 2);
+                assert!(cols.contains(&"num".to_string()));
+                assert!(cols.contains(&"hash".to_string()));
+            }
+            _ => panic!("Expected Specific columns"),
+        }
     }
 
     #[test]

@@ -97,15 +97,104 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     for (table_name, table) in &config.manifest.tables {
         debug!("Processing table: {}", table_name);
 
-        // Create the table based on the Arrow schema (uses IF NOT EXISTS)
-        ampsync_db_engine
-            .create_table_from_schema(table_name, &table.schema.arrow)
-            .await?;
-
         // Get the SQL query from the table definition
         let sql_query = match &table.input {
             TableInput::View(view) => &view.sql,
         };
+
+        // Extract which columns are selected in the SQL query
+        use crate::sql_validator::{SelectColumns, extract_select_columns};
+        let selected_columns = extract_select_columns(sql_query)
+            .map_err(|e| format!("Failed to parse SQL for table '{}': {}", table_name, e))?;
+
+        // Filter the manifest schema based on what columns are actually selected
+        let arrow_schema = match selected_columns {
+            SelectColumns::All => {
+                // SELECT * - use the full manifest schema
+                info!(
+                    "Table '{}' uses SELECT * - creating table with all {} columns from manifest",
+                    table_name,
+                    table.schema.arrow.fields.len()
+                );
+                table.schema.arrow.clone()
+            }
+            SelectColumns::Specific(column_names) => {
+                // SELECT col1, col2, ... - filter manifest schema to only include these columns
+                info!(
+                    "Table '{}' selects {} specific columns: {}",
+                    table_name,
+                    column_names.len(),
+                    column_names.join(", ")
+                );
+
+                // Build a HashMap for O(1) lookups of manifest fields
+                // Key: unqualified column name (last segment after '.')
+                // Value: reference to the field
+                let mut field_map: std::collections::HashMap<
+                    &str,
+                    &datasets_derived::manifest::Field,
+                > = std::collections::HashMap::new();
+
+                for field in &table.schema.arrow.fields {
+                    // Extract the unqualified column name (e.g., "block_num" from "anvil.blocks.block_num")
+                    let unqualified_name = field.name.rsplit('.').next().unwrap_or(&field.name);
+                    field_map.insert(unqualified_name, field);
+
+                    // Also insert the fully qualified name for exact matches
+                    field_map.insert(&field.name, field);
+                }
+
+                // Create a filtered schema with only the selected columns
+                let mut filtered_fields = Vec::new();
+                for col_name in &column_names {
+                    // Extract unqualified name from the selected column
+                    // (handles cases like "anvil.blocks.block_num" or just "block_num")
+                    let unqualified_col = col_name.rsplit('.').next().unwrap_or(col_name);
+
+                    // Try exact match first, then unqualified match
+                    if let Some(field) = field_map
+                        .get(col_name.as_str())
+                        .or_else(|| field_map.get(unqualified_col))
+                    {
+                        filtered_fields.push((*field).clone());
+                    } else {
+                        warn!(
+                            "Column '{}' selected in SQL for table '{}' not found in manifest schema. \
+                             This may be an expression or computed column.",
+                            col_name, table_name
+                        );
+                        // For expressions/computed columns, we'll need to handle them dynamically
+                        // For now, skip them - they'll be handled when we get actual data
+                    }
+                }
+
+                if filtered_fields.is_empty() {
+                    return Err(format!(
+                        "No matching columns found in manifest schema for table '{}'. \
+                         Selected columns: {:?}, Available fields: {:?}",
+                        table_name,
+                        column_names,
+                        table
+                            .schema
+                            .arrow
+                            .fields
+                            .iter()
+                            .map(|f| &f.name)
+                            .collect::<Vec<_>>()
+                    )
+                    .into());
+                }
+
+                datasets_derived::manifest::ArrowSchema {
+                    fields: filtered_fields,
+                }
+            }
+        };
+
+        // Create the table based on the filtered schema
+        ampsync_db_engine
+            .create_table_from_schema(table_name, &arrow_schema)
+            .await?;
 
         // Add streaming settings to the query
         let streaming_query = format!("{} SETTINGS stream = true", sql_query);
@@ -192,12 +281,13 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                             // more data until we release this permit after processing.
                             let _permit = match batch_semaphore_clone.acquire().await {
                                 Ok(permit) => permit,
-                                Err(e) => {
-                                    error!(
-                                        "Failed to acquire semaphore for table '{}': {}",
-                                        table_name_owned, e
+                                Err(_) => {
+                                    // Semaphore is closed - this means shutdown is in progress
+                                    warn!(
+                                        "Semaphore closed for table '{}', shutting down stream",
+                                        table_name_owned
                                     );
-                                    continue;
+                                    return;
                                 }
                             };
 
@@ -206,10 +296,12 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                                 Ok(batch) => batch,
                                 Err(e) => {
                                     error!(
-                                        "Failed to convert timestamps for table '{}': {}",
+                                        "CRITICAL: Failed to convert timestamps for table '{}': {}. \
+                                         This batch will be lost. Halting stream to prevent data loss.",
                                         table_name_owned, e
                                     );
-                                    continue;
+                                    // Break to trigger stream reconnection and retry from last good position
+                                    break;
                                 }
                             };
 
@@ -219,9 +311,15 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                                 .await
                             {
                                 error!(
-                                    "Failed to insert data for table '{}': {}",
-                                    table_name_owned, e
+                                    "CRITICAL: Failed to insert {} rows for table '{}': {}. \
+                                     Halting stream to prevent data loss and trigger reconnection.",
+                                    converted_batch.num_rows(),
+                                    table_name_owned,
+                                    e
                                 );
+                                // Break to trigger stream reconnection
+                                // This ensures we don't silently drop data
+                                break;
                             } else {
                                 info!(
                                     "Successfully bulk inserted {} rows into table '{}'",
@@ -240,12 +338,13 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                             // Acquire semaphore permit for reorg handling too
                             let _permit = match batch_semaphore_clone.acquire().await {
                                 Ok(permit) => permit,
-                                Err(e) => {
-                                    error!(
-                                        "Failed to acquire semaphore for reorg on table '{}': {}",
-                                        table_name_owned, e
+                                Err(_) => {
+                                    // Semaphore is closed - this means shutdown is in progress
+                                    warn!(
+                                        "Semaphore closed during reorg for table '{}', shutting down stream",
+                                        table_name_owned
                                     );
-                                    continue;
+                                    return;
                                 }
                             };
 
@@ -255,9 +354,13 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                                 .await
                             {
                                 error!(
-                                    "Failed to handle reorg for table '{}': {}",
+                                    "CRITICAL: Failed to handle reorg for table '{}': {}. \
+                                     Halting stream to ensure data consistency.",
                                     table_name_owned, e
                                 );
+                                // Break to trigger stream reconnection
+                                // Reorgs must be handled correctly for data consistency
+                                break;
                             } else {
                                 info!(
                                     "Successfully handled reorg for table '{}'",
@@ -331,6 +434,41 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// Sanitize a database URL for safe logging by redacting the password
+///
+/// Converts: postgresql://user:password@host:5432/db
+/// To:       postgresql://user:***@host:5432/db
+///
+/// Handles passwords containing special characters including '@'
+fn sanitize_database_url(url: &str) -> String {
+    // Find password section (between : and last @ before /)
+    if let Some(scheme_end) = url.find("://") {
+        let after_scheme = &url[scheme_end + 3..];
+
+        // Find the host/port section by looking for the last @ before any /
+        // This handles passwords with @ in them
+        let host_start = if let Some(slash_pos) = after_scheme.find('/') {
+            // There's a database path - find last @ before it
+            after_scheme[..slash_pos].rfind('@')
+        } else {
+            // No database path - find last @
+            after_scheme.rfind('@')
+        };
+
+        if let Some(at_pos) = host_start {
+            // Found @ - check if there's a password (look for : before @)
+            if let Some(colon_pos) = after_scheme[..at_pos].find(':') {
+                // Password exists - replace it with ***
+                let before_password = &url[..scheme_end + 3 + colon_pos + 1];
+                let after_password = &url[scheme_end + 3 + at_pos..];
+                return format!("{}***{}", before_password, after_password);
+            }
+        }
+    }
+    // No password found or parsing failed - return as-is
+    url.to_string()
+}
+
 #[derive(Clone)]
 pub struct AmpsyncConfig {
     /// Ampsync database url to connect.
@@ -341,6 +479,12 @@ pub struct AmpsyncConfig {
     pub manifest: Arc<Manifest>,
 }
 impl AmpsyncConfig {
+    /// Get a sanitized version of the database URL safe for logging
+    /// (redacts password if present)
+    pub fn sanitized_database_url(&self) -> String {
+        sanitize_database_url(&self.database_url)
+    }
+
     pub async fn from_env() -> Result<Self, BoxError> {
         // Get dataset manifest path - required
         let dataset_manifest_path = env::var("DATASET_MANIFEST")
@@ -448,5 +592,43 @@ impl AmpsyncConfig {
             amp_flight_addr,
             manifest,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_database_url_with_password() {
+        let url = "postgresql://user:secret_pass@localhost:5432/mydb";
+        let sanitized = sanitize_database_url(url);
+        assert_eq!(sanitized, "postgresql://user:***@localhost:5432/mydb");
+        assert!(!sanitized.contains("secret_pass"));
+    }
+
+    #[test]
+    fn test_sanitize_database_url_without_password() {
+        let url = "postgresql://user@localhost:5432/mydb";
+        let sanitized = sanitize_database_url(url);
+        assert_eq!(sanitized, "postgresql://user@localhost:5432/mydb");
+    }
+
+    #[test]
+    fn test_sanitize_database_url_complex_password() {
+        let url = "postgresql://admin:p@ssw0rd!@#$@db.example.com:5432/production";
+        let sanitized = sanitize_database_url(url);
+        assert_eq!(
+            sanitized,
+            "postgresql://admin:***@db.example.com:5432/production"
+        );
+        assert!(!sanitized.contains("p@ssw0rd!@#$"));
+    }
+
+    #[test]
+    fn test_sanitize_database_url_invalid_format() {
+        let url = "not-a-valid-url";
+        let sanitized = sanitize_database_url(url);
+        assert_eq!(sanitized, "not-a-valid-url");
     }
 }

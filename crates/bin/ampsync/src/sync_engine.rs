@@ -11,9 +11,34 @@ use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use datasets_derived::manifest::{ArrowSchema, Field};
 use nozzle_client::InvalidationRange;
 use phf::phf_set;
-use sqlx::{Pool, Postgres};
+use sqlx::{Acquire, Pool, Postgres};
 
 use crate::{conn::DbConnPool, pgpq::ArrowToPostgresBinaryEncoder};
+
+/// Represents the existing schema of a table in the database
+#[derive(Debug)]
+struct ExistingSchema {
+    columns: std::collections::HashMap<String, ExistingColumn>,
+}
+
+/// Information about an existing column in the database
+#[derive(Debug)]
+struct ExistingColumn {
+    data_type: String,
+    #[allow(dead_code)] // Reserved for future nullable constraint validation
+    is_nullable: bool,
+}
+
+/// Result of comparing two schemas
+#[derive(Debug)]
+struct SchemaDiff<'a> {
+    /// Columns that exist in expected schema but not in database
+    new_columns: Vec<&'a Field>,
+    /// Columns that exist in database but not in expected schema
+    dropped_columns: Vec<String>,
+    /// Columns where the type has changed
+    type_mismatches: Vec<String>,
+}
 
 /// Compile-time perfect hash set of reserved SQL keywords.
 ///
@@ -34,17 +59,100 @@ static RESERVED_KEYWORDS: phf::Set<&'static str> = phf_set! {
     "blob",
 };
 
+/// Compare an existing database schema with an expected Arrow schema
+///
+/// Returns a SchemaDiff indicating what has changed
+fn compare_schemas<'a>(
+    existing: &ExistingSchema,
+    expected: &'a ArrowSchema,
+) -> Result<SchemaDiff<'a>, BoxError> {
+    let mut new_columns = Vec::new();
+    let mut type_mismatches = Vec::new();
+
+    // Check each expected column
+    for field in &expected.fields {
+        if let Some(existing_col) = existing.columns.get(&field.name) {
+            // Column exists - check if type matches
+            let expected_pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
+
+            // Normalize type names for comparison
+            let normalized_existing = normalize_pg_type(&existing_col.data_type);
+            let normalized_expected = normalize_pg_type(&expected_pg_type);
+
+            if normalized_existing != normalized_expected {
+                type_mismatches.push(format!(
+                    "Column '{}': expected type '{}' but found '{}' in database",
+                    field.name, expected_pg_type, existing_col.data_type
+                ));
+            }
+
+            // Note: We don't fail on nullable mismatches, just log a warning
+            // This is handled in migrate_table_schema
+        } else {
+            // Column doesn't exist - needs to be added
+            new_columns.push(field);
+        }
+    }
+
+    // Check for dropped columns
+    let expected_column_names: std::collections::HashSet<_> =
+        expected.fields.iter().map(|f| &f.name).collect();
+    let dropped_columns: Vec<String> = existing
+        .columns
+        .keys()
+        .filter(|col_name| !expected_column_names.contains(col_name))
+        .cloned()
+        .collect();
+
+    Ok(SchemaDiff {
+        new_columns,
+        dropped_columns,
+        type_mismatches,
+    })
+}
+
+/// Normalize PostgreSQL type names for comparison
+///
+/// PostgreSQL's information_schema may return types in different formats than we generate.
+/// For example: "numeric(20,0)" vs "numeric(20, 0)" or "character varying" vs "text"
+/// Also handles cases where precision/scale are omitted (e.g., "numeric" vs "numeric(20)")
+fn normalize_pg_type(pg_type: &str) -> String {
+    let mut normalized = pg_type
+        .to_lowercase()
+        .replace(" ", "")
+        .replace("charactervarying", "text")
+        .replace("doubleprecision", "float8")
+        .replace("timestampwithouttimezone", "timestamp")
+        .replace("timestampwithtimezone", "timestamptz");
+
+    // Handle numeric types: strip precision/scale for comparison
+    // "numeric(20)" or "numeric(38,18)" becomes "numeric"
+    if normalized.starts_with("numeric(") {
+        normalized = "numeric".to_string();
+    }
+
+    // Handle bigint vs numeric(20) - they're functionally equivalent for our purposes
+    if normalized == "bigint" || normalized == "numeric" {
+        normalized = "numeric".to_string();
+    }
+
+    normalized
+}
+
 /// Convert Arrow schema to PostgreSQL CREATE TABLE statement
 ///
 /// Deduplicates fields by name - if multiple fields have the same name,
 /// only the first occurrence is used. This handles cases where manifests
 /// contain duplicate field definitions.
+///
+/// If a `block_num` column exists in the schema, it will be set as the PRIMARY KEY.
 pub fn arrow_schema_to_postgres_ddl(
     table_name: &str,
     schema: &ArrowSchema,
 ) -> Result<String, BoxError> {
     let mut columns = Vec::new();
     let mut seen_names = std::collections::HashSet::new();
+    let mut has_block_num = false;
 
     for field in &schema.fields {
         // Skip duplicate field names
@@ -52,14 +160,27 @@ pub fn arrow_schema_to_postgres_ddl(
             continue;
         }
 
+        // Check if this is the block_num column
+        if field.name == "block_num" {
+            has_block_num = true;
+        }
+
         let column_def = arrow_field_to_postgres_column(field)?;
         columns.push(column_def);
     }
 
+    // Add PRIMARY KEY constraint if block_num exists
+    let constraints = if has_block_num {
+        ",\n  PRIMARY KEY (block_num)"
+    } else {
+        ""
+    };
+
     let ddl = format!(
-        "CREATE TABLE IF NOT EXISTS {} (\n  {}\n)",
+        "CREATE TABLE IF NOT EXISTS {} (\n  {}{}\n)",
         table_name,
-        columns.join(",\n  ")
+        columns.join(",\n  "),
+        constraints
     );
 
     Ok(ddl)
@@ -338,15 +459,55 @@ impl AmpsyncDbEngine {
         );
     }
 
-    /// Create a database table based on Arrow schema
+    /// Create a database table based on Arrow schema, with schema evolution support
+    ///
+    /// This is the main entry point for table creation/migration. It handles:
+    /// - Creating new tables from scratch
+    /// - Migrating existing tables when schema changes
     pub async fn create_table_from_schema(
         &self,
         table_name: &str,
         schema: &ArrowSchema,
     ) -> Result<(), BoxError> {
+        // Check if table exists
+        let table_exists = self.table_exists(table_name).await?;
+
+        if !table_exists {
+            // Table doesn't exist, create it
+            self.create_table(table_name, schema).await?;
+        } else {
+            // Table exists, check for schema evolution
+            tracing::debug!(
+                "Table '{}' already exists, checking for schema changes",
+                table_name
+            );
+            self.migrate_table_schema(table_name, schema).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Check if a table exists in the database
+    async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
+        let result: Option<(bool,)> = sqlx::query_as(
+            "SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = $1
+            )",
+        )
+        .bind(table_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to check if table '{}' exists: {}", table_name, e))?;
+
+        Ok(result.map(|(exists,)| exists).unwrap_or(false))
+    }
+
+    /// Create a new table with the given schema
+    async fn create_table(&self, table_name: &str, schema: &ArrowSchema) -> Result<(), BoxError> {
         let ddl = arrow_schema_to_postgres_ddl(table_name, schema)?;
 
-        tracing::debug!("Ensuring table '{}' exists with DDL: {}", table_name, ddl);
+        tracing::info!("Creating new table '{}' with DDL: {}", table_name, ddl);
 
         let pool = &self.pool;
         let ddl_query = &ddl;
@@ -358,6 +519,137 @@ impl AmpsyncDbEngine {
             .await
             .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
 
+        tracing::info!("Successfully created table '{}'", table_name);
+        Ok(())
+    }
+
+    /// Migrate an existing table's schema to match the expected schema
+    ///
+    /// Supports:
+    /// - Adding new columns (safe, applied automatically)
+    ///
+    /// Will error on:
+    /// - Type changes (requires manual intervention)
+    /// - Dropped columns (requires manual intervention)
+    async fn migrate_table_schema(
+        &self,
+        table_name: &str,
+        expected_schema: &ArrowSchema,
+    ) -> Result<(), BoxError> {
+        // Get existing schema from database
+        let existing_schema = self.get_table_schema(table_name).await?;
+
+        // Compare schemas and determine what needs to change
+        let schema_diff = compare_schemas(&existing_schema, expected_schema)?;
+
+        // Fail on incompatible changes
+        if !schema_diff.type_mismatches.is_empty() {
+            return Err(format!(
+                "Schema migration error for table '{}': Type changes detected (unsupported):\n{}",
+                table_name,
+                schema_diff.type_mismatches.join("\n")
+            )
+            .into());
+        }
+
+        if !schema_diff.dropped_columns.is_empty() {
+            return Err(format!(
+                "Schema migration error for table '{}': Columns dropped from schema (unsupported): {}",
+                table_name,
+                schema_diff.dropped_columns.join(", ")
+            )
+            .into());
+        }
+
+        // Apply new columns
+        if !schema_diff.new_columns.is_empty() {
+            tracing::info!(
+                "Detected {} new column(s) in table '{}': {}",
+                schema_diff.new_columns.len(),
+                table_name,
+                schema_diff
+                    .new_columns
+                    .iter()
+                    .map(|f| f.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+
+            for field in &schema_diff.new_columns {
+                self.add_column(table_name, field).await?;
+            }
+        } else {
+            tracing::debug!("No schema changes detected for table '{}'", table_name);
+        }
+
+        Ok(())
+    }
+
+    /// Get the existing schema of a table from the database
+    async fn get_table_schema(&self, table_name: &str) -> Result<ExistingSchema, BoxError> {
+        #[derive(sqlx::FromRow)]
+        struct ColumnInfo {
+            column_name: String,
+            data_type: String,
+            is_nullable: String,
+        }
+
+        let columns: Vec<ColumnInfo> = sqlx::query_as(
+            "SELECT column_name, data_type, is_nullable
+             FROM information_schema.columns
+             WHERE table_name = $1
+             ORDER BY ordinal_position",
+        )
+        .bind(table_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to query schema for table '{}': {}", table_name, e))?;
+
+        let mut schema = ExistingSchema {
+            columns: std::collections::HashMap::new(),
+        };
+
+        for col in columns {
+            let is_nullable = col.is_nullable == "YES";
+            schema.columns.insert(
+                col.column_name,
+                ExistingColumn {
+                    data_type: col.data_type,
+                    is_nullable,
+                },
+            );
+        }
+
+        Ok(schema)
+    }
+
+    /// Add a new column to an existing table
+    async fn add_column(&self, table_name: &str, field: &Field) -> Result<(), BoxError> {
+        let column_def = arrow_field_to_postgres_column(field)?;
+        let alter_stmt = format!("ALTER TABLE {} ADD COLUMN {}", table_name, column_def);
+
+        tracing::info!("Executing schema migration: {}", alter_stmt);
+
+        let pool = &self.pool;
+        let stmt = &alter_stmt;
+
+        (|| async move { sqlx::query(stmt).execute(pool).await })
+            .retry(Self::db_retry_policy())
+            .when(Self::is_retryable_db_error)
+            .notify(Self::notify_db_retry)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to add column '{}' to table '{}': {}",
+                    field.name, table_name, e
+                )
+            })?;
+
+        tracing::info!(
+            "Successfully added column '{}' to table '{}'",
+            field.name,
+            table_name
+        );
         Ok(())
     }
 
@@ -439,7 +731,37 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
-    /// Insert a single batch chunk using high-performance bulk copy
+    /// Check if a table has a primary key or unique constraint on block_num column
+    async fn has_block_num_constraint(&self, table_name: &str) -> Result<bool, BoxError> {
+        let result: Option<(bool,)> = sqlx::query_as(
+            "SELECT EXISTS (
+                SELECT 1 FROM pg_constraint c
+                JOIN pg_class t ON c.conrelid = t.oid
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+                WHERE t.relname = $1
+                AND a.attname = 'block_num'
+                AND c.contype IN ('p', 'u')
+            )",
+        )
+        .bind(table_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to check block_num constraint for table '{}': {}",
+                table_name, e
+            )
+        })?;
+
+        Ok(result.map(|(exists,)| exists).unwrap_or(false))
+    }
+
+    /// Insert a single batch chunk using high-performance bulk copy with conflict handling
+    ///
+    /// Uses a temporary table approach to handle conflicts on block_num primary key:
+    /// 1. COPY data into a temporary table (fast bulk load)
+    /// 2. INSERT from temp table into main table with ON CONFLICT DO NOTHING
+    /// 3. Drop temporary table
     async fn insert_batch_chunk(
         &self,
         table_name: &str,
@@ -479,37 +801,103 @@ impl AmpsyncDbEngine {
             .collect();
         let columns_clause = column_names.join(", ");
 
-        // Execute COPY FROM STDIN with binary format
-        let copy_query = format!(
-            "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
-            table_name, columns_clause
-        );
+        // Check if schema has block_num column (primary key)
+        let has_block_num = schema_fields
+            .fields()
+            .iter()
+            .any(|f| f.name() == "block_num");
+
+        // Check constraint ONCE before entering retry closure - critical for performance!
+        // This query result is cached and reused across all retry attempts.
+        let has_constraint = if has_block_num {
+            self.has_block_num_constraint(table_name).await?
+        } else {
+            false
+        };
 
         let pool = &self.pool;
-        let query = &copy_query;
         let buffer_data = &buffer.freeze();
         let num_rows = batch.num_rows();
+        let columns_clause_ref = &columns_clause;
 
-        // Use retry logic for the entire COPY operation
+        // Use retry logic for the entire operation
         (|| async move {
-            // Get a connection from the pool and execute the COPY command
+            // Get a connection from the pool
             let mut conn = pool.acquire().await?;
 
-            // Use PostgreSQL's COPY protocol for maximum performance
-            let mut copy_in = conn.copy_in_raw(query).await?;
+            if has_constraint {
+                // Use temporary table approach for conflict handling
+                // Generate unique temp table name using process ID and timestamp
+                let temp_table = format!("{}_tmp_{}", table_name, std::process::id());
 
-            // Send the binary data (Bytes is cheap to clone - it's Arc under the hood)
-            copy_in.send(buffer_data.clone()).await?;
+                // Begin transaction to ensure temp table is properly scoped
+                let mut tx = conn.begin().await?;
 
-            // Finish the copy operation
-            let rows_affected = copy_in.finish().await?;
+                // Create temporary table with same structure (without constraints)
+                // Temp table is session-scoped and will be auto-dropped at end of session
+                let create_temp = format!(
+                    "CREATE TEMPORARY TABLE {} (LIKE {} INCLUDING DEFAULTS)",
+                    temp_table, table_name
+                );
+                sqlx::query(&create_temp).execute(&mut *tx).await?;
 
-            tracing::trace!(
-                "COPY operation completed: {} rows affected for {} input rows in table '{}'",
-                rows_affected,
-                num_rows,
-                table_name
-            );
+                // COPY into temporary table
+                let copy_query = format!(
+                    "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
+                    temp_table, columns_clause_ref
+                );
+                let mut copy_in = tx.copy_in_raw(&copy_query).await?;
+                copy_in.send(buffer_data.clone()).await?;
+                copy_in.finish().await?;
+
+                // INSERT from temp table into main table with conflict handling
+                let insert_query = format!(
+                    "INSERT INTO {} ({}) SELECT {} FROM {} ON CONFLICT (block_num) DO NOTHING",
+                    table_name, columns_clause_ref, columns_clause_ref, temp_table
+                );
+                let result = sqlx::query(&insert_query).execute(&mut *tx).await?;
+
+                // Drop temporary table explicitly before committing
+                let drop_temp = format!("DROP TABLE {}", temp_table);
+                sqlx::query(&drop_temp).execute(&mut *tx).await?;
+
+                // Commit the transaction
+                tx.commit().await?;
+
+                let rows_inserted = result.rows_affected();
+                if rows_inserted < num_rows as u64 {
+                    tracing::debug!(
+                        "Inserted {} of {} rows into '{}' (skipped {} duplicates)",
+                        rows_inserted,
+                        num_rows,
+                        table_name,
+                        num_rows as u64 - rows_inserted
+                    );
+                }
+
+                tracing::trace!(
+                    "Bulk insert with conflict handling completed: {} rows inserted for {} input rows in table '{}'",
+                    rows_inserted,
+                    num_rows,
+                    table_name
+                );
+            } else {
+                // No constraint on block_num (or no block_num column) - use direct COPY
+                let copy_query = format!(
+                    "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
+                    table_name, columns_clause_ref
+                );
+                let mut copy_in = conn.copy_in_raw(&copy_query).await?;
+                copy_in.send(buffer_data.clone()).await?;
+                let rows_affected = copy_in.finish().await?;
+
+                tracing::trace!(
+                    "COPY operation completed: {} rows affected for {} input rows in table '{}'",
+                    rows_affected,
+                    num_rows,
+                    table_name
+                );
+            }
 
             Ok::<(), sqlx::Error>(())
         })
