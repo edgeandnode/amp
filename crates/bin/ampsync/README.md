@@ -252,12 +252,29 @@ Ampsync handles errors at multiple levels:
 
 When the nozzle config file changes:
 
-1. File watcher detects the change (debounced to 500ms)
+1. File watcher detects the change (polling every 2 seconds + 500ms debounce)
 2. All active streams are gracefully stopped via cancellation token
 3. New config is loaded and validated
 4. Schemas are fetched from Admin API
 5. Tables are migrated if needed (adds new columns)
 6. Streams are restarted with new configuration
+
+**File Watching Implementation**:
+
+The file watcher uses **polling-based detection** rather than native OS events (inotify/kqueue) for maximum compatibility with Docker volume mounts. This approach:
+
+- **Polls every 2 seconds**: Checks the file system for changes on a fixed interval
+- **Compares file contents**: Uses content comparison (not just modification time) for reliable change detection
+- **Works with Docker volumes**: Docker volume mounts on macOS and some Linux configurations don't always propagate native file system events, making polling more reliable
+- **2-4 second detection latency**: Changes are typically detected within 2-4 seconds (2s poll + 500ms debounce)
+- **Debounces rapid changes**: 500ms debounce prevents reload storms from editors that write files in chunks
+
+**Limitations**:
+
+- Hot-reload **does not support** dropping columns (rejected with error to prevent data loss)
+- Hot-reload **does not support** changing column types (rejected with error)
+- Changes detected within 2-4 seconds (not instant like native file watchers)
+- To remove columns or change types, manually alter the database and restart ampsync
 
 ## Development
 
@@ -346,6 +363,22 @@ crates/bin/ampsync/
 - Check for tables with very large batches
 - Monitor adaptive batch manager adjustments in debug logs
 - Consider database connection pool size
+
+**"Hot-reload not detecting file changes"**
+
+- File watcher uses polling (2-second intervals) - wait 2-4 seconds after saving
+- Enable debug logging: `RUST_LOG=debug,ampsync::file_watcher=trace`
+- Look for `"File watcher received event"` log messages
+- Verify the file is mounted correctly in Docker (check with `docker exec`)
+- Ensure the file path matches `DATASET_MANIFEST` environment variable
+
+**"Hot-reload failed: Columns dropped from schema (unsupported)"**
+
+- Hot-reload does not support removing columns (data safety feature)
+- To remove a column:
+  1. Manually drop the column from PostgreSQL: `ALTER TABLE blocks DROP COLUMN column_name;`
+  2. Update your nozzle config to remove the column from the SELECT
+  3. Restart ampsync (hot-reload won't work for this case)
 
 ### Debug Logging
 

@@ -24,7 +24,7 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - **Database**: PostgreSQL (target sync destination)
 - **Data Encoding**: pgpq library for Arrow → PostgreSQL COPY binary format
 - **Config Parsing**: oxc_parser for JS/TS AST parsing, serde_json for JSON
-- **File Watching**: notify crate for hot-reload (kqueue on macOS, inotify on Linux)
+- **File Watching**: notify crate with PollWatcher for hot-reload (polling-based for Docker compatibility)
 - **HTTP Client**: reqwest for Admin API queries
 - **Concurrency**: tokio async runtime with per-table tasks and semaphore-based backpressure
 
@@ -68,9 +68,13 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 
 ### 5. File Watcher (`src/file_watcher.rs`)
 - **Purpose**: Hot-reload support via file system monitoring
+- **Implementation**: Uses `PollWatcher` (polling-based) instead of native OS events
+- **Polling Interval**: 2 seconds (configurable via `Config::with_poll_interval`)
+- **Content Comparison**: Uses `with_compare_contents(true)` to detect actual content changes (not just mtime)
 - **Debouncing**: 500ms delay to handle editors that write files in chunks
-- **Platform-Native**: Uses kqueue on macOS, inotify on Linux
-- **Event Filtering**: Only triggers on actual content changes, ignores metadata
+- **Docker Compatibility**: Polling mode works reliably with Docker volume mounts where native events (inotify/kqueue) often fail
+- **Event Detection**: Accepts `Modify(Metadata(_))` events which PollWatcher emits when content changes
+- **Detection Latency**: 2-4 seconds (2s poll interval + 500ms debounce)
 
 ### 6. SQL Validator (`src/sql_validator.rs`)
 - **Purpose**: Validate and sanitize SQL queries for incremental streaming
@@ -95,8 +99,15 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 
 ### 🔄 Hot-Reload Flow
 
+**File Watcher Detection** (Polling-Based):
+- PollWatcher checks file system every 2 seconds
+- Compares file contents (not just modification time)
+- Debounces for 500ms to handle rapid saves
+- Detection latency: 2-4 seconds total
+- Works reliably in Docker (native events often fail with volume mounts)
+
 **Critical State Management**:
-1. File change detected → Send event to main loop
+1. File change detected (via polling) → Send event to main loop
 2. Main loop cancels all stream tasks via `CancellationToken`
 3. Await all tasks with timeout (graceful shutdown)
 4. Load new config, fetch new schemas from Admin API
@@ -110,9 +121,14 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - Dataset version (will re-fetch schemas)
 
 **What Cannot Change**:
-- Column type changes (rejected with error)
-- Dropping columns (rejected with error)
+- Column type changes (rejected with error to prevent data corruption)
+- Dropping columns (rejected with error to prevent data loss)
 - Database connection (requires restart)
+
+**Debugging Hot-Reload**:
+- Enable debug logs: `RUST_LOG=debug,ampsync::file_watcher=trace`
+- Look for: `"File watcher received event"` → `"File change detected"` → `"Manifest file changed, initiating hot-reload"`
+- If not detecting changes: wait 2-4 seconds, verify file mount in Docker, check DATASET_MANIFEST path
 
 ### 🎯 Concurrency Model
 

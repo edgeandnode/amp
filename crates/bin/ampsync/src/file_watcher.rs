@@ -7,11 +7,11 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use notify::{
-    Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    Config, Event, EventKind, PollWatcher, RecursiveMode, Watcher,
     event::{ModifyKind, RenameMode},
 };
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Debounce duration to prevent reload storms from rapid file saves.
 /// Editors often write files in multiple chunks, so we wait for the dust to settle.
@@ -31,7 +31,8 @@ pub enum FileWatchEvent {
 /// modifications, ignoring metadata changes.
 ///
 /// # Architecture
-/// - Uses platform-native file watching (kqueue on macOS, inotify on Linux)
+/// - Uses polling-based file watching (compatible with Docker volumes)
+/// - Polls every 2 seconds for changes (configurable via Config)
 /// - Debounces rapid successive writes to prevent reload storms
 /// - Watches parent directory (some editors use atomic rename patterns)
 /// - Non-blocking: runs in background task with channel communication
@@ -90,7 +91,17 @@ async fn run_file_watcher(
     // Spawn notify watcher in blocking thread (notify is sync-only)
     let watch_dir_clone = watch_dir.clone();
     std::thread::spawn(move || {
-        let mut watcher = match RecommendedWatcher::new(
+        // Use PollWatcher instead of RecommendedWatcher for Docker volume mount compatibility.
+        // Docker volumes (especially on macOS) don't always propagate file system events properly,
+        // so we use polling mode which checks the file system periodically (default: 30 seconds).
+        // This is more reliable for containerized environments at the cost of some latency.
+        //
+        // with_compare_contents(true) ensures we detect changes even if mtime doesn't update
+        // (which can happen with Docker volume mounts on macOS)
+        let config = Config::default()
+            .with_poll_interval(Duration::from_secs(2))
+            .with_compare_contents(true);
+        let mut watcher = match PollWatcher::new(
             move |res: Result<Event, notify::Error>| match res {
                 Ok(event) => {
                     // Send event to async task (non-blocking send)
@@ -99,7 +110,7 @@ async fn run_file_watcher(
                 }
                 Err(e) => error!("File watcher error: {}", e),
             },
-            Config::default(),
+            config,
         ) {
             Ok(w) => w,
             Err(e) => {
@@ -131,7 +142,6 @@ async fn run_file_watcher(
                 match event_result {
                     Ok(event) => {
                         if is_relevant_event(&event, &file_name) {
-                            debug!("File change detected: {:?}", event.kind);
                             pending_event = true;
                             debounce_timer = Some(tokio::time::Instant::now() + DEBOUNCE_DURATION);
                         }
@@ -171,11 +181,14 @@ async fn run_file_watcher(
 /// Filters events to only care about:
 /// - Data modifications (content changes)
 /// - Atomic renames (editor save patterns)
+/// - Metadata changes (when using PollWatcher, these indicate file updates)
 ///
 /// Ignores:
-/// - Metadata changes (permissions, timestamps)
 /// - Access events
 /// - Events for other files in the directory
+///
+/// Note: PollWatcher emits Modify(Metadata(WriteTime)) events when file contents change
+/// (when using with_compare_contents(true)), so we accept metadata events for polling mode.
 fn is_relevant_event(event: &Event, target_file_name: &str) -> bool {
     // Check if this event is for our target file
     let is_target_file = event.paths.iter().any(|p| {
@@ -189,9 +202,12 @@ fn is_relevant_event(event: &Event, target_file_name: &str) -> bool {
     }
 
     // Filter for relevant event types
+    // Note: We accept Modify(Metadata(WriteTime)) because PollWatcher uses this
+    // to signal content changes when with_compare_contents(true) is set
     matches!(
         event.kind,
-        EventKind::Modify(ModifyKind::Data(_))  // Content modified
+        EventKind::Modify(ModifyKind::Data(_))  // Content modified (native watchers)
+        | EventKind::Modify(ModifyKind::Metadata(_))  // Metadata modified (polling watcher)
         | EventKind::Modify(ModifyKind::Name(RenameMode::To))  // Atomic rename (editor pattern)
         | EventKind::Create(_) // File created (handles some editor patterns)
     )
@@ -243,15 +259,15 @@ mod tests {
     }
 
     #[test]
-    fn test_is_relevant_event_metadata_only() {
+    fn test_is_relevant_event_metadata_accepted() {
         use notify::event::MetadataKind;
 
-        // Metadata changes should be ignored
+        // Metadata changes are now accepted (for PollWatcher compatibility)
         let event = Event {
             kind: EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any)),
             paths: vec![std::path::PathBuf::from("/tmp/test.ts")],
             attrs: Default::default(),
         };
-        assert!(!is_relevant_event(&event, "test.ts"));
+        assert!(is_relevant_event(&event, "test.ts"));
     }
 }
