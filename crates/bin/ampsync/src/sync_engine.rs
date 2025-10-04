@@ -487,6 +487,116 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
+    /// Initialize the checkpoint tracking table
+    ///
+    /// Creates a table to track the last successfully processed block_num for each table.
+    /// This enables resuming from the last checkpoint on restart.
+    pub async fn init_checkpoint_table(&self) -> Result<(), BoxError> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _ampsync_checkpoints (
+                table_name TEXT PRIMARY KEY,
+                max_block_num BIGINT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to create checkpoint table: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Get the checkpoint (last processed block_num) for a table
+    ///
+    /// Returns None if no checkpoint exists (first run)
+    pub async fn get_checkpoint(&self, table_name: &str) -> Result<Option<i64>, BoxError> {
+        let result: Option<(i64,)> =
+            sqlx::query_as("SELECT max_block_num FROM _ampsync_checkpoints WHERE table_name = $1")
+                .bind(table_name)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    format!("Failed to get checkpoint for table '{}': {}", table_name, e)
+                })?;
+
+        Ok(result.map(|(block_num,)| block_num))
+    }
+
+    /// Update the checkpoint for a table
+    ///
+    /// This should be called after successfully inserting a batch.
+    /// Uses UPSERT (INSERT ... ON CONFLICT) for atomic updates.
+    pub async fn update_checkpoint(
+        &self,
+        table_name: &str,
+        max_block_num: i64,
+    ) -> Result<(), BoxError> {
+        sqlx::query(
+            "INSERT INTO _ampsync_checkpoints (table_name, max_block_num, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (table_name)
+             DO UPDATE SET max_block_num = EXCLUDED.max_block_num, updated_at = NOW()",
+        )
+        .bind(table_name)
+        .bind(max_block_num)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to update checkpoint for table '{}' to {}: {}",
+                table_name, max_block_num, e
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Extract the maximum block_num from a RecordBatch
+    ///
+    /// Returns None if:
+    /// - The batch has no block_num column
+    /// - The batch is empty
+    /// - All block_num values are NULL
+    pub fn extract_max_block_num(batch: &RecordBatch) -> Option<i64> {
+        use arrow_array::Array;
+
+        // Find the block_num column
+        let schema = batch.schema();
+        let block_num_idx = schema
+            .fields()
+            .iter()
+            .position(|f| f.name() == "block_num")?;
+
+        // Get the column data
+        let column = batch.column(block_num_idx);
+
+        // Handle UInt64 type (most common for block_num)
+        if let Some(uint64_array) = column.as_any().downcast_ref::<arrow_array::UInt64Array>() {
+            let mut max_val: Option<u64> = None;
+            for i in 0..uint64_array.len() {
+                if !uint64_array.is_null(i) {
+                    let val = uint64_array.value(i);
+                    max_val = Some(max_val.map_or(val, |m| m.max(val)));
+                }
+            }
+            return max_val.map(|v| v as i64);
+        }
+
+        // Handle Int64 type
+        if let Some(int64_array) = column.as_any().downcast_ref::<arrow_array::Int64Array>() {
+            let mut max_val: Option<i64> = None;
+            for i in 0..int64_array.len() {
+                if !int64_array.is_null(i) {
+                    let val = int64_array.value(i);
+                    max_val = Some(max_val.map_or(val, |m| m.max(val)));
+                }
+            }
+            return max_val;
+        }
+
+        None
+    }
+
     /// Check if a table exists in the database
     async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(

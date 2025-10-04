@@ -76,6 +76,10 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     let ampsync_db_engine = AmpsyncDbEngine::new(&db_pool);
 
+    // Initialize checkpoint tracking table
+    ampsync_db_engine.init_checkpoint_table().await?;
+    info!("Checkpoint tracking initialized");
+
     // Create a shutdown token to coordinate graceful shutdown across all tasks
     let shutdown_token = tokio_util::sync::CancellationToken::new();
 
@@ -202,8 +206,26 @@ async fn ampsync_runner() -> Result<(), BoxError> {
             .create_table_from_schema(table_name, &arrow_schema)
             .await?;
 
+        // Get checkpoint for this table to resume from last processed block
+        let checkpoint = ampsync_db_engine.get_checkpoint(table_name).await?;
+        let sql_query_with_checkpoint = if let Some(max_block) = checkpoint {
+            info!(
+                "Resuming table '{}' from checkpoint: block_num > {}",
+                table_name, max_block
+            );
+            // Add WHERE clause to resume from checkpoint
+            // Note: This assumes the query has a block_num column accessible
+            format!("{} WHERE block_num > {}", sql_query, max_block)
+        } else {
+            info!(
+                "No checkpoint found for table '{}', starting from beginning",
+                table_name
+            );
+            sql_query.to_string()
+        };
+
         // Add streaming settings to the query
-        let streaming_query = format!("{} SETTINGS stream = true", sql_query);
+        let streaming_query = format!("{} SETTINGS stream = true", sql_query_with_checkpoint);
         debug!(
             "Executing streaming query for '{}': {}",
             table_name, streaming_query
@@ -332,6 +354,29 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                                     converted_batch.num_rows(),
                                     table_name_owned
                                 );
+
+                                // Update checkpoint with the max block_num from this batch
+                                if let Some(max_block) =
+                                    AmpsyncDbEngine::extract_max_block_num(&converted_batch)
+                                {
+                                    if let Err(e) = ampsync_db_engine_clone
+                                        .update_checkpoint(&table_name_owned, max_block)
+                                        .await
+                                    {
+                                        error!(
+                                            "Failed to update checkpoint for table '{}' to block {}: {}. \
+                                             Continuing with data processing, but restart may reprocess recent data.",
+                                            table_name_owned, max_block, e
+                                        );
+                                        // Don't break - checkpoint failure is not critical enough to halt stream
+                                        // Worst case: we'll reprocess some data on restart
+                                    } else {
+                                        debug!(
+                                            "Updated checkpoint for table '{}' to block {}",
+                                            table_name_owned, max_block
+                                        );
+                                    }
+                                }
                             }
                             // Permit is automatically released when _permit is dropped
                         }
