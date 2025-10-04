@@ -102,8 +102,14 @@ async fn ampsync_runner() -> Result<(), BoxError> {
             TableInput::View(view) => &view.sql,
         };
 
+        // Validate that the query only uses incremental operations
+        use crate::sql_validator::{
+            SelectColumns, extract_select_columns, validate_incremental_query,
+        };
+        validate_incremental_query(sql_query)
+            .map_err(|e| format!("Table '{}' has invalid query:\n{}", table_name, e))?;
+
         // Extract which columns are selected in the SQL query
-        use crate::sql_validator::{SelectColumns, extract_select_columns};
         let selected_columns = extract_select_columns(sql_query)
             .map_err(|e| format!("Failed to parse SQL for table '{}': {}", table_name, e))?;
 
