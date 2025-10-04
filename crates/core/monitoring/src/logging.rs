@@ -77,6 +77,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "server",
     "substreams_datasets",
     "tests",
+    "worker",
 ];
 
 fn env_filter_and_log_level() -> (EnvFilter, String) {

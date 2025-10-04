@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use sqlx::{Executor, Postgres};
 
-use super::WorkerNodeId;
+use super::{NodeId, NodeIdOwned};
 
 /// Registers a worker.
 ///
 /// If the worker already exists, its `last_heartbeat` column is updated.
 #[tracing::instrument(skip(exe), err)]
-pub async fn register_worker<'c, E>(exe: E, id: &WorkerNodeId) -> Result<(), sqlx::Error>
+pub async fn register_worker<'c, E>(exe: E, id: NodeId<'_>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -25,12 +25,12 @@ where
 
 /// Updates the `last_heartbeat` column for a given worker
 #[tracing::instrument(skip(exe), err)]
-pub async fn update_heartbeat<'c, E>(exe: E, id: &WorkerNodeId) -> Result<(), sqlx::Error>
+pub async fn update_heartbeat<'c, E>(exe: E, id: NodeId<'_>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        UPDATE workers 
+        UPDATE workers
         SET last_heartbeat = timezone('UTC', now())
         WHERE node_id = $1
     "#};
@@ -45,7 +45,7 @@ where
 pub async fn get_active_workers<'c, E>(
     exe: E,
     interval: Duration,
-) -> Result<Vec<WorkerNodeId>, sqlx::Error>
+) -> Result<Vec<NodeIdOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {

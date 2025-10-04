@@ -47,6 +47,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "utoipa",
+ "worker",
 ]
 
 [[package]]
@@ -5473,6 +5474,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "vergen-gitcl",
+ "worker",
 ]
 
 [[package]]
@@ -8112,6 +8114,7 @@ dependencies = [
  "toml 0.8.23",
  "tonic 0.12.3",
  "tracing",
+ "worker",
 ]
 
 [[package]]
@@ -9523,6 +9526,25 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "worker"
+version = "0.1.0"
+dependencies = [
+ "backon",
+ "common",
+ "dataset-store",
+ "dump",
+ "futures",
+ "metadata-db",
+ "monitoring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "writeable"

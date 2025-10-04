@@ -35,7 +35,7 @@
 use std::{collections::BTreeSet, path::Path, str::FromStr as _, sync::Arc};
 
 use common::{BoxError, config::Config};
-use metadata_db::WorkerNodeId;
+use worker::NodeId;
 
 use super::fixtures::{
     Anvil, DaemonConfig, DaemonConfigBuilder, DaemonServer, DaemonStateDir, DaemonWorker,
@@ -393,8 +393,7 @@ impl TestCtxBuilder {
 
         // Start worker using the fixture
         let worker = DaemonWorker::new(
-            WorkerNodeId::from_str(&self.test_name)
-                .expect("test name should be a valid WorkerNodeId"),
+            NodeId::from_str(&self.test_name).expect("test name should be a valid WorkerNodeId"),
             config,
             temp_db.metadata_db().clone(),
             None,

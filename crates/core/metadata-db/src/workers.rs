@@ -1,9 +1,10 @@
 use sqlx::types::chrono::{DateTime, Utc};
 
+pub mod events;
 pub mod heartbeat;
 mod node_id;
 
-pub use self::node_id::WorkerNodeId;
+pub use self::node_id::{NodeId, NodeIdOwned};
 
 /// Represents a worker node in the metadata database.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -12,7 +13,7 @@ pub struct Worker {
     pub id: i64,
 
     /// ID of the worker node
-    pub node_id: WorkerNodeId,
+    pub node_id: NodeIdOwned,
 
     /// Last heartbeat timestamp
     pub last_heartbeat: DateTime<Utc>,
@@ -21,5 +22,6 @@ pub struct Worker {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
+    mod it_events;
     mod it_heartbeat;
 }
