@@ -735,7 +735,20 @@ impl AmpsyncDbEngine {
 
     /// Add a new column to an existing table
     async fn add_column(&self, table_name: &str, field: &Field) -> Result<(), BoxError> {
-        let column_def = arrow_field_to_postgres_column(field)?;
+        // When adding columns to existing tables, always make them nullable
+        // even if the schema says NOT NULL. This is because:
+        // 1. Existing rows will have NULL for the new column
+        // 2. PostgreSQL doesn't allow adding NOT NULL columns to non-empty tables
+        // 3. New data from the stream will populate these columns properly
+        let pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
+        let column_name = if RESERVED_KEYWORDS.contains(field.name.as_str()) {
+            format!("\"{}\"", field.name)
+        } else {
+            field.name.clone()
+        };
+
+        // Always add as nullable - existing rows will be NULL, new rows will have values
+        let column_def = format!("{} {}", column_name, pg_type);
         let alter_stmt = format!("ALTER TABLE {} ADD COLUMN {}", table_name, column_def);
 
         tracing::info!("Executing schema migration: {}", alter_stmt);

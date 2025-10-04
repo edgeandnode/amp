@@ -30,9 +30,11 @@ datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 enum_dispatch = "0.3.13"
+flume = "0.11.1"
 futures.workspace = true
 lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
+notify = { version = "7.0.0", default-features = false, features = ["macos_kqueue"] }
 nozzle-client = { path = "../../client" }
 oxc_allocator = "0.93"
 oxc_ast = "0.93"

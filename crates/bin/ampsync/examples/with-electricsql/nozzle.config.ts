@@ -3,7 +3,7 @@ import { defineDataset } from "nozzl";
 export default defineDataset(() => ({
   name: "ampsync_example",
   network: "mainnet",
-  version: "0.2.2",
+  version: "0.2.6",
   dependencies: {
     anvil: {
       owner: "graphprotocol",
@@ -13,7 +13,7 @@ export default defineDataset(() => ({
   },
   tables: {
     blocks: {
-      sql: `SELECT block_num, timestamp, hash, nonce FROM anvil.blocks`,
+      sql: `SELECT block_num, timestamp, hash, nonce, miner FROM anvil.blocks`,
     },
     logs: {
       sql: `SELECT * FROM anvil.logs`,

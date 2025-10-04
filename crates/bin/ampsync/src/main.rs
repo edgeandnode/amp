@@ -1,6 +1,7 @@
 mod batch_utils;
 mod conn;
 mod dataset_definition;
+mod file_watcher;
 mod manifest;
 mod pgpq;
 mod sql_validator;
@@ -51,28 +52,29 @@ async fn main() {
 /// Grab the configuration object of the db to connect to, as well as the amp dataset.
 /// Listen to changes on the dataset and sync those changes to the db instance.
 ///
-/// This will run in tandem with both amp (nozzle) and with a sync engine such as with-electricsql-sql
+/// This will run in tandem with both amp (nozzle) and with a sync engine such as electricsql-sql
 /// to provide subsets of the nozzle dataset to build a reactive query layer for application development.
+///
+/// Supports hot-reloading: when the manifest file changes, streams are gracefully stopped,
+/// schema migrations are applied, and streams are restarted with the new configuration.
 async fn ampsync_runner() -> Result<(), BoxError> {
     // Initialize logging
     monitoring::logging::init();
 
-    info!("Starting ampsync...");
+    info!("Starting ampsync with hot-reload support...");
 
-    let config = AmpsyncConfig::from_env().await?;
+    let mut config = AmpsyncConfig::from_env().await?;
     info!(
         "Loaded manifest: {} v{}",
         config.manifest.name, config.manifest.version
     );
 
-    // Connect to target database
+    // Connect to target database (reused across reloads)
     let db_pool = DbConnPool::connect(&config.database_url, DEFAULT_POOL_SIZE).await?;
 
-    // Connect to Nozzle server
+    // Connect to Nozzle server (reused across reloads)
     let sql_client = SqlClient::new(&config.amp_flight_addr).await?;
     info!("Connected to Nozzle server at {}", config.amp_flight_addr);
-
-    info!("Preparing to sync dataset: {}", config.manifest.name);
 
     let ampsync_db_engine = AmpsyncDbEngine::new(&db_pool);
 
@@ -80,9 +82,95 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     ampsync_db_engine.init_checkpoint_table().await?;
     info!("Checkpoint tracking initialized");
 
-    // Create a shutdown token to coordinate graceful shutdown across all tasks
-    let shutdown_token = tokio_util::sync::CancellationToken::new();
+    // Set up file watcher for hot-reload
+    let (file_change_tx, mut file_change_rx) = tokio::sync::mpsc::channel(1);
+    let manifest_path = config.manifest_path.clone();
+    let _file_watcher_handle = file_watcher::spawn_file_watcher(manifest_path, file_change_tx);
+    info!(
+        "File watcher initialized for '{}'",
+        config.manifest_path.display()
+    );
 
+    // Setup signal handlers for graceful shutdown
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    // Main reload loop
+    loop {
+        info!("Preparing to sync dataset: {}", config.manifest.name);
+
+        // Spawn stream processing tasks for current configuration
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
+        let task_handles = spawn_stream_tasks(
+            &config,
+            &sql_client,
+            &ampsync_db_engine,
+            shutdown_token.clone(),
+        )
+        .await?;
+
+        // Wait for reload trigger or shutdown signal
+        tokio::select! {
+            // File changed - reload configuration
+            Some(file_watcher::FileWatchEvent::Changed) = file_change_rx.recv() => {
+                info!("Manifest file changed, initiating hot-reload...");
+
+                // Gracefully stop all streams
+                shutdown_token.cancel();
+                shutdown_streams_gracefully(task_handles).await;
+
+                // Reload manifest
+                match config.reload_manifest().await {
+                    Ok(new_config) => {
+                        info!(
+                            "Successfully loaded new manifest: {} v{}",
+                            new_config.manifest.name, new_config.manifest.version
+                        );
+                        config = new_config;
+                        // Loop continues with new config
+                    }
+                    Err(e) => {
+                        error!("Failed to reload manifest: {}", e);
+                        error!("Keeping previous configuration active");
+                        // Loop continues with old config (safe fallback)
+                    }
+                }
+            }
+
+            // SIGTERM received - graceful shutdown
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM, shutting down gracefully...");
+                shutdown_token.cancel();
+                shutdown_streams_gracefully(task_handles).await;
+                break;
+            }
+
+            // SIGINT received - graceful shutdown
+            _ = sigint.recv() => {
+                info!("Received SIGINT, shutting down gracefully...");
+                shutdown_token.cancel();
+                shutdown_streams_gracefully(task_handles).await;
+                break;
+            }
+        }
+    }
+
+    info!("Shutdown complete");
+    Ok(())
+}
+
+/// Spawns stream processing tasks for all tables in the manifest.
+///
+/// Creates tables (with schema evolution if needed), retrieves checkpoints,
+/// and spawns background tasks to process streaming data from Nozzle.
+///
+/// Returns task handles that can be used to await completion during shutdown.
+async fn spawn_stream_tasks(
+    config: &AmpsyncConfig,
+    sql_client: &SqlClient,
+    ampsync_db_engine: &AmpsyncDbEngine,
+    shutdown_token: tokio_util::sync::CancellationToken,
+) -> Result<Vec<tokio::task::JoinHandle<()>>, BoxError> {
     // Create a semaphore to limit concurrent batch processing across all tables
     // This provides backpressure to prevent OOM when many tables receive large batches simultaneously.
     // When all permits are taken, the stream processing will wait at semaphore.acquire(),
@@ -440,25 +528,19 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         task_handles.push(task_handle);
     }
 
-    // Keep the main task alive and wait for shutdown signals
-    // Handle both SIGTERM (Docker stop) and SIGINT (Ctrl+C)
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    Ok(task_handles)
+}
 
-    tokio::select! {
-        _ = sigterm.recv() => {
-            info!("Received SIGTERM, shutting down gracefully...");
-        }
-        _ = sigint.recv() => {
-            info!("Received SIGINT, shutting down gracefully...");
-        }
-    }
+/// Gracefully shuts down all stream processing tasks.
+///
+/// Waits for tasks to complete with a timeout, logging any failures.
+/// This ensures in-flight batches are processed before shutdown.
+async fn shutdown_streams_gracefully(task_handles: Vec<tokio::task::JoinHandle<()>>) {
+    info!(
+        "Shutting down {} stream processing tasks...",
+        task_handles.len()
+    );
 
-    // Signal all tasks to shut down
-    shutdown_token.cancel();
-    info!("Shutdown signal sent to all stream processing tasks");
-
-    // Wait for all tasks to complete with timeout
     let shutdown_future = async {
         for (i, handle) in task_handles.into_iter().enumerate() {
             match handle.await {
@@ -474,15 +556,12 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     )
     .await
     {
-        Ok(_) => info!("All tasks shut down gracefully"),
+        Ok(_) => info!("All stream tasks shut down gracefully"),
         Err(_) => warn!(
             "Graceful shutdown timeout reached after {}s, some tasks may still be running",
             GRACEFUL_SHUTDOWN_TIMEOUT_SECS
         ),
     }
-
-    info!("Shutdown complete");
-    Ok(())
 }
 
 /// Sanitize a database URL for safe logging by redacting the password
@@ -526,6 +605,10 @@ pub struct AmpsyncConfig {
     pub database_url: String,
     /// Amp ArrowFlight server endpoint to connect to.
     pub amp_flight_addr: String,
+    /// Amp Admin API endpoint for schema resolution.
+    pub amp_admin_api_addr: String,
+    /// Path to the dataset manifest file (for hot-reloading).
+    pub manifest_path: PathBuf,
     /// Parsed dataset manifest.
     pub manifest: Arc<Manifest>,
 }
@@ -595,6 +678,8 @@ impl AmpsyncConfig {
             return Ok(Self {
                 database_url,
                 amp_flight_addr,
+                amp_admin_api_addr,
+                manifest_path: dataset_manifest,
                 manifest,
             });
         }
@@ -641,6 +726,28 @@ impl AmpsyncConfig {
         Ok(Self {
             database_url,
             amp_flight_addr,
+            amp_admin_api_addr,
+            manifest_path: dataset_manifest,
+            manifest,
+        })
+    }
+
+    /// Reload the manifest from disk (used for hot-reloading).
+    ///
+    /// This creates a new config with the updated manifest while preserving
+    /// database connection details.
+    pub async fn reload_manifest(&self) -> Result<Self, BoxError> {
+        info!("Reloading manifest from '{}'", self.manifest_path.display());
+
+        let manifest = Arc::new(
+            manifest::fetch_manifest(&self.amp_admin_api_addr, &self.manifest_path).await?,
+        );
+
+        Ok(Self {
+            database_url: self.database_url.clone(),
+            amp_flight_addr: self.amp_flight_addr.clone(),
+            amp_admin_api_addr: self.amp_admin_api_addr.clone(),
+            manifest_path: self.manifest_path.clone(),
             manifest,
         })
     }

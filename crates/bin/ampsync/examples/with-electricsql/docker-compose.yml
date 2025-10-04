@@ -80,8 +80,8 @@ services:
         condition: service_started
 
     volumes:
-      # Mount the nozzle config file (updated path for non-root user home)
-      - ./nozzle.config.ts:/home/ampsync/nozzle.config.ts:ro
+      # Mount the nozzle config file for hot-reload (writeable for file events)
+      - ./nozzle.config.ts:/home/ampsync/nozzle.config.ts
       # Mount the dataset manifests directory (shared with amp service)
       - ./infra/amp/datasets:/var/lib/amp/datasets:ro
 
