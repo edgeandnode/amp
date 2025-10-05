@@ -1,4 +1,4 @@
-name: Nozzle
+name: Build
 on:
   workflow_dispatch:
   push:
@@ -37,20 +37,43 @@ jobs:
           target: ${{ matrix.target }}
           cache: true
 
-      - name: Build binary
-        run: cargo build --target ${{ matrix.target }} --release -p nozzle
+      - name: Build binaries
+        run: cargo build --target ${{ matrix.target }} --release -p nozzle -p nozzleup
 
-      - name: Sign macOS binary
+      - name: Sign binaries
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
-        uses: lando/code-sign-action@a5703d3b5486ada6e8efd08912110f8756e873e8 # v3
-        with:
-          file: target/${{ matrix.target }}/release/nozzle
-          certificate-data: ${{ secrets.APPLE_CERT_DATA }}
-          certificate-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          certificate-id: ${{ secrets.APPLE_TEAM_ID }}
-          options: --options runtime --entitlements entitlements.plist
+        run: |
+          # Decode certificate (macOS uses -D, not --decode)
+          echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -D > certificate.p12
 
-      - name: Notarize macOS binary
+          # Create temporary keychain
+          security create-keychain -p actions macos-build.keychain
+          security default-keychain -s macos-build.keychain
+          security unlock-keychain -p actions macos-build.keychain
+
+          # Import certificate
+          security import certificate.p12 -k macos-build.keychain -P "${{ secrets.APPLE_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions macos-build.keychain
+
+          # Sign both binaries
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
+            target/${{ matrix.target }}/release/nozzle
+
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
+            target/${{ matrix.target }}/release/nozzleup
+
+          # Reset to login keychain before deleting
+          security default-keychain -s login.keychain-db
+          security delete-keychain macos-build.keychain
+          rm certificate.p12
+
+      - name: Notarize nozzle
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
@@ -59,11 +82,27 @@ jobs:
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Upload artifact
+      - name: Notarize nozzleup
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
+        with:
+          product-path: target/${{ matrix.target }}/release/nozzleup
+          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
+          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
+          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload nozzle artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ matrix.target }}
+          name: ${{ matrix.target }}-nozzle
           path: target/${{ matrix.target }}/release/nozzle
+          retention-days: 30
+
+      - name: Upload nozzleup artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}-nozzleup
+          path: target/${{ matrix.target }}/release/nozzleup
           retention-days: 30
 
   release:
@@ -86,22 +125,27 @@ jobs:
         run: |
           # Organize binaries for release
           mkdir -p release
-          
-          # Copy and rename binaries to match expected artifact names
-          cp artifacts/x86_64-unknown-linux-gnu/nozzle release/nozzle-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu/nozzle release/nozzle-linux-aarch64
-          cp artifacts/aarch64-apple-darwin/nozzle release/nozzle-darwin-aarch64
-          
+
+          # Copy and rename nozzle binaries
+          cp artifacts/x86_64-unknown-linux-gnu-nozzle/nozzle release/nozzle-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-nozzle/nozzle release/nozzle-linux-aarch64
+          cp artifacts/aarch64-apple-darwin-nozzle/nozzle release/nozzle-darwin-aarch64
+
+          # Copy and rename nozzleup binaries
+          cp artifacts/x86_64-unknown-linux-gnu-nozzleup/nozzleup release/nozzleup-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-nozzleup/nozzleup release/nozzleup-linux-aarch64
+          cp artifacts/aarch64-apple-darwin-nozzleup/nozzleup release/nozzleup-darwin-aarch64
+
           # Make all binaries executable
           chmod +x release/*
-          
+
           # Verify binaries exist
           ls -la release/
 
       - name: Create draft release
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
         with:
-          files: release/nozzle-*
+          files: release/*
           fail_on_unmatched_files: true
           draft: true
 
@@ -126,13 +170,13 @@ jobs:
       - name: Download Linux AMD64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: nozzle-linux-x86_64
+          name: x86_64-unknown-linux-gnu-nozzle
           path: ./amd64/
 
-      - name: Download Linux ARM64 binary  
+      - name: Download Linux ARM64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: nozzle-linux-aarch64
+          name: aarch64-unknown-linux-gnu-nozzle
           path: ./arm64/
           
       - name: Login to GitHub Container Registry
