@@ -11,7 +11,6 @@ pub async fn run(
     version: Option<String>,
     arch_override: Option<String>,
     platform_override: Option<String>,
-    skip_verification: bool,
 ) -> Result<()> {
     let config = Config::new()?;
     let github = GitHubClient::new(&config)?;
@@ -51,7 +50,7 @@ pub async fn run(
     // Install the binary
     let installer = Installer::new(config, github);
     installer
-        .install_from_release(&version, platform, arch, skip_verification)
+        .install_from_release(&version, platform, arch)
         .await?;
 
     println!("nozzleup: Successfully installed nozzle ({})", version);

@@ -20,6 +20,5 @@ tokio.workspace = true
 url.workspace = true
 
 # Additional dependencies for nozzleup
-sha2 = "0.10"
 indicatif = "0.17"
 console = "0.15"

@@ -31,10 +31,6 @@ enum Commands {
         /// Override platform detection (linux, darwin)
         #[arg(long)]
         platform: Option<String>,
-
-        /// Skip SHA256 verification (not recommended)
-        #[arg(short, long)]
-        force: bool,
     },
 
     /// List installed versions
@@ -96,9 +92,8 @@ async fn main() -> Result<()> {
             version,
             arch,
             platform,
-            force,
         }) => {
-            commands::install::run(version, arch, platform, force).await?;
+            commands::install::run(version, arch, platform).await?;
         }
         Some(Commands::List) => {
             commands::list::run()?;
@@ -125,7 +120,7 @@ async fn main() -> Result<()> {
         }
         None => {
             // Default: install latest version
-            commands::install::run(None, None, None, false).await?;
+            commands::install::run(None, None, None).await?;
         }
     }
 
