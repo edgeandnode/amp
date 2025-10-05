@@ -117,30 +117,18 @@ download_asset() {
     return 0
 }
 
-# Get the latest nozzleup release version
-get_latest_nozzleup_version() {
+# Get the latest version
+get_latest_version() {
     local args=(-sSf)
 
     if [ -n "$GITHUB_TOKEN" ]; then
         args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
     fi
 
-    local latest
-    # Get all releases and find the latest one matching "nozzleup-v*"
-    latest=$(curl "${args[@]}" \
-        "https://api.github.com/repos/$REPO/releases" 2>/dev/null \
+    local latest=$(curl "${args[@]}" \
+        "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
         | grep '"tag_name"' \
-        | grep 'nozzleup-v' \
-        | head -1 \
         | sed -E 's/.*"([^"]+)".*/\1/')
-
-    # If no nozzleup-specific release found, fall back to latest release
-    if [ -z "$latest" ]; then
-        latest=$(curl "${args[@]}" \
-            "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-            | grep '"tag_name"' \
-            | sed -E 's/.*"([^"]+)".*/\1/')
-    fi
 
     if [ -z "$latest" ]; then
         error "Failed to get latest version"
@@ -228,7 +216,7 @@ main() {
         info "Using GitHub token for private repository access"
     fi
 
-    version=$(get_latest_nozzleup_version)
+    version=$(get_latest_version)
     info "Latest nozzleup version: $version"
 
     # Download nozzleup binary
