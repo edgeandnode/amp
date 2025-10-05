@@ -42,8 +42,8 @@ enum Commands {
 
     /// Switch to a specific installed version
     Use {
-        /// Version to switch to
-        version: String,
+        /// Version to switch to (if not provided, shows interactive selection)
+        version: Option<String>,
     },
 
     /// Uninstall a specific version
@@ -104,7 +104,7 @@ async fn main() -> Result<()> {
             commands::list::run()?;
         }
         Some(Commands::Use { version }) => {
-            commands::use_version::run(&version)?;
+            commands::use_version::run(version)?;
         }
         Some(Commands::Uninstall { version }) => {
             commands::uninstall::run(&version)?;
