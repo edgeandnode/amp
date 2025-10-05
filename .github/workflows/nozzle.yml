@@ -88,9 +88,9 @@ jobs:
           mkdir -p release
           
           # Copy and rename binaries to match expected artifact names
-          cp artifacts/nozzle-linux-x86_64/nozzle release/nozzle-linux-x86_64
-          cp artifacts/nozzle-linux-aarch64/nozzle release/nozzle-linux-aarch64
-          cp artifacts/nozzle-darwin-aarch64/nozzle release/nozzle-darwin-aarch64
+          cp artifacts/x86_64-unknown-linux-gnu/nozzle release/nozzle-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/nozzle release/nozzle-linux-aarch64
+          cp artifacts/aarch64-apple-darwin/nozzle release/nozzle-darwin-aarch64
           
           # Make all binaries executable
           chmod +x release/*

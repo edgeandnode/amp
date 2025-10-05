@@ -86,15 +86,15 @@ jobs:
         run: |
           # Organize binaries for release
           mkdir -p release
-          
+
           # Copy and rename binaries to match expected artifact names
-          cp artifacts/nozzleup-linux-x86_64/nozzleup release/nozzleup-linux-x86_64
-          cp artifacts/nozzleup-linux-aarch64/nozzleup release/nozzleup-linux-aarch64
-          cp artifacts/nozzleup-darwin-aarch64/nozzleup release/nozzleup-darwin-aarch64
-          
+          cp artifacts/x86_64-unknown-linux-gnu/nozzleup release/nozzleup-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/nozzleup release/nozzleup-linux-aarch64
+          cp artifacts/aarch64-apple-darwin/nozzleup release/nozzleup-darwin-aarch64
+
           # Make all binaries executable
           chmod +x release/*
-          
+
           # Verify binaries exist
           ls -la release/
 
