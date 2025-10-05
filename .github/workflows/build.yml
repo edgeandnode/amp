@@ -79,7 +79,8 @@ jobs:
             --timestamp \
             target/${{ matrix.target }}/release/nozzleup
 
-          # Cleanup
+          # Cleanup - reset to login keychain before deleting
+          security default-keychain -s login.keychain-db
           security delete-keychain macos-build.keychain
           rm certificate.p12
 
