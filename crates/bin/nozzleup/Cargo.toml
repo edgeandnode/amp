@@ -22,3 +22,4 @@ url.workspace = true
 # Additional dependencies for nozzleup
 indicatif = "0.17"
 console = "0.15"
+dialoguer = "0.11"
