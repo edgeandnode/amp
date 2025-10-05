@@ -2,7 +2,6 @@ name: Nozzle
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "nozzleup-crate"]
     tags: ["v*"]
 
 permissions:
