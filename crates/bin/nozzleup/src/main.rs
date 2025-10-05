@@ -52,50 +52,31 @@ enum Commands {
         version: String,
     },
 
-    /// Build and install from a specific branch
-    Branch {
-        /// Branch name to build from
-        branch: String,
+    /// Build and install from source
+    Build {
+        /// Build from local repository path
+        #[arg(short, long, conflicts_with_all = ["repo", "branch", "commit", "pr"])]
+        path: Option<std::path::PathBuf>,
 
-        /// Number of CPU cores to use when building
+        /// GitHub repository in format "owner/repo" (default: configured repo)
+        #[arg(short, long, conflicts_with = "path")]
+        repo: Option<String>,
+
+        /// Build from specific branch
+        #[arg(short, long, conflicts_with_all = ["path", "commit", "pr"])]
+        branch: Option<String>,
+
+        /// Build from specific commit hash
+        #[arg(short = 'C', long, conflicts_with_all = ["path", "branch", "pr"])]
+        commit: Option<String>,
+
+        /// Build from pull request number
+        #[arg(short = 'P', long, conflicts_with_all = ["path", "branch", "commit"])]
+        pr: Option<u32>,
+
+        /// Custom version name (required for non-git local paths, optional otherwise)
         #[arg(short, long)]
-        jobs: Option<usize>,
-    },
-
-    /// Build and install from a specific commit
-    Commit {
-        /// Commit hash to build from
-        commit: String,
-
-        /// Number of CPU cores to use when building
-        #[arg(short, long)]
-        jobs: Option<usize>,
-    },
-
-    /// Build and install from a pull request
-    Pr {
-        /// Pull request number
-        number: u32,
-
-        /// Number of CPU cores to use when building
-        #[arg(short, long)]
-        jobs: Option<usize>,
-    },
-
-    /// Build and install from a local repository
-    Path {
-        /// Path to local repository
-        path: std::path::PathBuf,
-
-        /// Number of CPU cores to use when building
-        #[arg(short, long)]
-        jobs: Option<usize>,
-    },
-
-    /// Build and install from a remote repository
-    Repo {
-        /// Repository in format "owner/repo"
-        repo: String,
+        name: Option<String>,
 
         /// Number of CPU cores to use when building
         #[arg(short, long)]
@@ -128,20 +109,16 @@ async fn main() -> Result<()> {
         Some(Commands::Uninstall { version }) => {
             commands::uninstall::run(&version)?;
         }
-        Some(Commands::Branch { branch, jobs }) => {
-            commands::build::run_branch(&branch, jobs).await?;
-        }
-        Some(Commands::Commit { commit, jobs }) => {
-            commands::build::run_commit(&commit, jobs).await?;
-        }
-        Some(Commands::Pr { number, jobs }) => {
-            commands::build::run_pr(number, jobs).await?;
-        }
-        Some(Commands::Path { path, jobs }) => {
-            commands::build::run_path(&path, jobs)?;
-        }
-        Some(Commands::Repo { repo, jobs }) => {
-            commands::build::run_repo(&repo, jobs).await?;
+        Some(Commands::Build {
+            path,
+            repo,
+            branch,
+            commit,
+            pr,
+            name,
+            jobs,
+        }) => {
+            commands::build::run(path, repo, branch, commit, pr, name, jobs).await?;
         }
         Some(Commands::Update) => {
             commands::update::run().await?;
