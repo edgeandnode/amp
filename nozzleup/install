@@ -2,10 +2,10 @@
 set -eo pipefail
 
 # Configuration
-REPO="edgeandnode/project-nozzle"
-REF="main"
+REPO="${NOZZLE_REPO:-edgeandnode/project-nozzle}"
+REF="${NOZZLE_REF:-main}"
 BASE=${XDG_CONFIG_HOME:-$HOME}
-DIR=${DIR-"$BASE/.nozzle"}
+DIR=${NOZZLE_DIR-"$BASE/.nozzle"}
 BIN="$DIR/bin"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
