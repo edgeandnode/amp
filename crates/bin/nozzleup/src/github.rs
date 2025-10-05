@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 
 use crate::config::Config;
@@ -156,12 +158,43 @@ impl GitHubClient {
             anyhow::bail!("Failed to download asset: HTTP {}", status);
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .context("Failed to read asset data")?;
+        // Get content length for progress bar
+        let total_size = response.content_length();
 
-        Ok(bytes.to_vec())
+        // Setup progress bar
+        let pb = if let Some(size) = total_size {
+            let pb = ProgressBar::new(size);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template(
+                        "{msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                    )
+                    .context("Invalid progress bar template")?
+                    .progress_chars("#>-"),
+            );
+            pb.set_message("Downloading");
+            pb
+        } else {
+            let pb = ProgressBar::new_spinner();
+            pb.set_message("Downloading (size unknown)");
+            pb
+        };
+
+        // Stream and collect chunks
+        let mut downloaded: u64 = 0;
+        let mut buffer = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Error while downloading file")?;
+            buffer.extend_from_slice(&chunk);
+            downloaded += chunk.len() as u64;
+            pb.set_position(downloaded);
+        }
+
+        pb.finish_with_message("Downloaded");
+
+        Ok(buffer)
     }
 
     /// Download asset directly (for public repos)
@@ -178,12 +211,43 @@ impl GitHubClient {
             anyhow::bail!("Failed to download asset: HTTP {}", status);
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .context("Failed to read asset data")?;
+        // Get content length for progress bar
+        let total_size = response.content_length();
 
-        Ok(bytes.to_vec())
+        // Setup progress bar
+        let pb = if let Some(size) = total_size {
+            let pb = ProgressBar::new(size);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template(
+                        "{msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                    )
+                    .context("Invalid progress bar template")?
+                    .progress_chars("#>-"),
+            );
+            pb.set_message("Downloading");
+            pb
+        } else {
+            let pb = ProgressBar::new_spinner();
+            pb.set_message("Downloading (size unknown)");
+            pb
+        };
+
+        // Stream and collect chunks
+        let mut downloaded: u64 = 0;
+        let mut buffer = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Error while downloading file")?;
+            buffer.extend_from_slice(&chunk);
+            downloaded += chunk.len() as u64;
+            pb.set_position(downloaded);
+        }
+
+        pb.finish_with_message("Downloaded");
+
+        Ok(buffer)
     }
 
     /// Download SHA256 checksum for an asset
