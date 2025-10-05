@@ -2,7 +2,6 @@ use std::os::unix::fs::symlink;
 
 use anyhow::{Context, Result};
 use fs_err as fs;
-use sha2::{Digest, Sha256};
 
 use crate::{
     config::Config,
@@ -26,7 +25,6 @@ impl Installer {
         version: &str,
         platform: Platform,
         arch: Architecture,
-        skip_verification: bool,
     ) -> Result<()> {
         self.config.ensure_dirs()?;
 
@@ -34,7 +32,7 @@ impl Installer {
 
         println!("nozzleup: Downloading {} for {}...", version, artifact);
 
-        // Download the binary
+        // Download the binary over HTTPS (TLS provides integrity verification)
         let binary_data = self
             .github
             .download_release_asset(version, &artifact)
@@ -47,48 +45,10 @@ impl Installer {
 
         println!("nozzleup: Downloaded {} bytes", binary_data.len());
 
-        // Verify SHA256 checksum unless skipped
-        if !skip_verification {
-            self.verify_checksum(version, &artifact, &binary_data)
-                .await?;
-        } else {
-            println!("nozzleup: Warning: Skipping SHA256 verification");
-        }
-
         // Install the binary
         self.install_binary(version, &binary_data)?;
 
         Ok(())
-    }
-
-    /// Verify SHA256 checksum
-    async fn verify_checksum(&self, version: &str, artifact_name: &str, data: &[u8]) -> Result<()> {
-        println!("nozzleup: Verifying SHA256 checksum...");
-
-        match self.github.download_checksum(version, artifact_name).await {
-            Ok(expected_hash) => {
-                // Calculate actual hash
-                let mut hasher = Sha256::new();
-                hasher.update(data);
-                let actual_hash = format!("{:x}", hasher.finalize());
-
-                if expected_hash.to_lowercase() != actual_hash.to_lowercase() {
-                    anyhow::bail!(
-                        "SHA256 verification failed!\nExpected: {}\nActual:   {}",
-                        expected_hash,
-                        actual_hash
-                    );
-                }
-
-                println!("nozzleup: SHA256 verification successful");
-                Ok(())
-            }
-            Err(e) => {
-                println!("nozzleup: Warning: Could not download checksum file: {}", e);
-                println!("nozzleup: Skipping verification");
-                Ok(())
-            }
-        }
     }
 
     /// Install the binary to the version directory

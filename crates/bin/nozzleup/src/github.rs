@@ -249,26 +249,4 @@ impl GitHubClient {
 
         Ok(buffer)
     }
-
-    /// Download SHA256 checksum for an asset
-    pub async fn download_checksum(&self, version: &str, asset_name: &str) -> Result<String> {
-        let checksum_name = format!("{}.sha256", asset_name);
-
-        match self.download_release_asset(version, &checksum_name).await {
-            Ok(data) => {
-                let checksum =
-                    String::from_utf8(data).context("Checksum file is not valid UTF-8")?;
-                // Extract just the hash (first part before any whitespace)
-                let hash = checksum
-                    .split_whitespace()
-                    .next()
-                    .context("Invalid checksum format")?;
-                Ok(hash.to_string())
-            }
-            Err(e) => {
-                // Checksum file might not exist
-                Err(e)
-            }
-        }
-    }
 }

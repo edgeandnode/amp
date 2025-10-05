@@ -161,7 +161,6 @@ nozzleup update
 
 ## Security
 
-- All downloads are verified using SHA256 checksums
 - macOS binaries are code-signed and notarized
 - Private repository access uses GitHub's OAuth token mechanism
 
@@ -180,12 +179,6 @@ source ~/.bashrc  # or ~/.zshenv for zsh, or ~/.config/fish/config.fish for fish
 - Check your internet connection
 - Verify the release exists on GitHub
 - For private repos, ensure `GITHUB_TOKEN` is set correctly
-
-### SHA256 verification failed
-
-- Wait for the release to be fully published
-- Check if the checksum file exists in the release assets
-- As a last resort, use `--force` to skip verification (not recommended)
 
 ### Building from source requires Rust
 
