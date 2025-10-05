@@ -1,0 +1,196 @@
+name: Nozzle
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "nozzleup-crate"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: namespace-profile-linux-amd64-build
+            target: x86_64-unknown-linux-gnu
+          - runner: namespace-profile-linux-arm64-build
+            target: aarch64-unknown-linux-gnu
+          - runner: namespace-profile-macos-arm64-build
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Setup rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+        with:
+          target: ${{ matrix.target }}
+          cache: true
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }} --release -p nozzle
+
+      - name: Sign macOS binary
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/code-sign-action@a5703d3b5486ada6e8efd08912110f8756e873e8 # v3
+        with:
+          file: target/${{ matrix.target }}/release/nozzle
+          certificate-data: ${{ secrets.APPLE_CERT_DATA }}
+          certificate-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          certificate-id: ${{ secrets.APPLE_TEAM_ID }}
+          options: --options runtime --entitlements entitlements.plist
+
+      - name: Notarize macOS binary
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
+        with:
+          product-path: target/${{ matrix.target }}/release/nozzle
+          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
+          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
+          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/nozzle
+          retention-days: 30
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          path: artifacts
+
+      - name: Prepare release binaries
+        run: |
+          # Organize binaries for release
+          mkdir -p release
+          
+          # Copy and rename binaries to match expected artifact names
+          cp artifacts/nozzle-linux-x86_64/nozzle release/nozzle-linux-x86_64
+          cp artifacts/nozzle-linux-aarch64/nozzle release/nozzle-linux-aarch64
+          cp artifacts/nozzle-darwin-aarch64/nozzle release/nozzle-darwin-aarch64
+          
+          # Make all binaries executable
+          chmod +x release/*
+          
+          # Verify binaries exist
+          ls -la release/
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          files: release/nozzle-*
+          fail_on_unmatched_files: true
+          draft: true
+
+      - name: Finalize release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          draft: false
+
+  containerize:
+    name: Containerize
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Download Linux AMD64 binary
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: nozzle-linux-x86_64
+          path: ./amd64/
+
+      - name: Download Linux ARM64 binary  
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: nozzle-linux-aarch64
+          path: ./arm64/
+          
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+
+      - name: Docker meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        id: metadata
+        with:
+          images: ghcr.io/edgeandnode/nozzle
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha
+
+      - name: Create multi-arch Dockerfile
+        run: |
+          cat > Dockerfile.native << 'EOF'
+          FROM debian:trixie-slim
+          ARG TARGETARCH
+
+          # Install runtime dependencies
+          RUN apt-get update && \
+              apt-get install -y ca-certificates && \
+              apt-get clean && \
+              rm -rf /var/lib/apt/lists/*
+
+          # Copy the appropriate binary based on target architecture
+          COPY nozzle-linux-$TARGETARCH /nozzle
+          RUN chmod +x /nozzle
+          ENTRYPOINT ["/nozzle"]
+          EOF
+
+      - name: Rename binaries for Docker context
+        run: |
+          # Copy and rename the binaries from their download directories
+          cp ./amd64/nozzle ./nozzle-linux-amd64
+          chmod +x ./nozzle-linux-amd64
+          cp ./arm64/nozzle ./nozzle-linux-arm64
+          chmod +x ./nozzle-linux-arm64
+
+          # Verify binaries exist
+          ls -la nozzle-linux-*
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: Dockerfile.native
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}

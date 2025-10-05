@@ -1,0 +1,112 @@
+name: Nozzleup
+on:
+  workflow_dispatch:
+  push:
+    branches: ["nozzleup-crate"]
+    tags: ["nozzleup-v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: namespace-profile-linux-amd64-build
+            target: x86_64-unknown-linux-gnu
+          - runner: namespace-profile-linux-arm64-build
+            target: aarch64-unknown-linux-gnu
+          - runner: namespace-profile-macos-arm64-build
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Setup rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+        with:
+          target: ${{ matrix.target }}
+          cache: true
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }} --release -p nozzleup
+
+      - name: Sign macOS binary
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/code-sign-action@a5703d3b5486ada6e8efd08912110f8756e873e8 # v3
+        with:
+          file: target/${{ matrix.target }}/release/nozzleup
+          certificate-data: ${{ secrets.APPLE_CERT_DATA }}
+          certificate-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          certificate-id: ${{ secrets.APPLE_TEAM_ID }}
+          options: --options runtime --entitlements entitlements.plist
+
+      - name: Notarize macOS binary
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
+        with:
+          product-path: target/${{ matrix.target }}/release/nozzleup
+          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
+          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
+          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/nozzleup
+          retention-days: 30
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/nozzleup-v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          path: artifacts
+
+      - name: Prepare release binaries
+        run: |
+          # Organize binaries for release
+          mkdir -p release
+          
+          # Copy and rename binaries to match expected artifact names
+          cp artifacts/nozzleup-linux-x86_64/nozzleup release/nozzleup-linux-x86_64
+          cp artifacts/nozzleup-linux-aarch64/nozzleup release/nozzleup-linux-aarch64
+          cp artifacts/nozzleup-darwin-aarch64/nozzleup release/nozzleup-darwin-aarch64
+          
+          # Make all binaries executable
+          chmod +x release/*
+          
+          # Verify binaries exist
+          ls -la release/
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          files: release/nozzleup-*
+          fail_on_unmatched_files: true
+          draft: true
+
+      - name: Finalize release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          draft: false
