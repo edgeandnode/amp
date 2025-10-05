@@ -51,43 +51,58 @@ jobs:
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -p nozzle -p nozzleup
 
-      - name: Sign macOS nozzle binary
+      - name: Sign macOS binaries
         if: startsWith(matrix.os, 'namespace-profile-macos')
-        uses: lando/code-sign-action@a5703d3b5486ada6e8efd08912110f8756e873e8 # v3
-        with:
-          file: target/${{ matrix.target }}/release/nozzle
-          certificate-data: ${{ secrets.APPLE_CERT_DATA }}
-          certificate-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          certificate-id: ${{ secrets.APPLE_TEAM_ID }}
-          options: --options runtime --entitlements entitlements.plist
+        run: |
+          # Decode certificate (macOS uses -D, not --decode)
+          echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -D > certificate.p12
 
-      - name: Sign macOS nozzleup binary
-        if: startsWith(matrix.os, 'namespace-profile-macos')
-        uses: lando/code-sign-action@a5703d3b5486ada6e8efd08912110f8756e873e8 # v3
-        with:
-          file: target/${{ matrix.target }}/release/nozzleup
-          certificate-data: ${{ secrets.APPLE_CERT_DATA }}
-          certificate-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          certificate-id: ${{ secrets.APPLE_TEAM_ID }}
-          options: --options runtime --entitlements entitlements.plist
+          # Create temporary keychain
+          security create-keychain -p actions macos-build.keychain
+          security default-keychain -s macos-build.keychain
+          security unlock-keychain -p actions macos-build.keychain
 
-      - name: Notarize macOS nozzle binary
-        if: startsWith(matrix.os, 'namespace-profile-macos')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/nozzle
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          # Import certificate
+          security import certificate.p12 -k macos-build.keychain -P "${{ secrets.APPLE_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions macos-build.keychain
 
-      - name: Notarize macOS nozzleup binary
+          # Sign both binaries
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
+            target/${{ matrix.target }}/release/nozzle
+
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
+            target/${{ matrix.target }}/release/nozzleup
+
+          # Cleanup
+          security delete-keychain macos-build.keychain
+          rm certificate.p12
+
+      - name: Notarize macOS binaries
         if: startsWith(matrix.os, 'namespace-profile-macos')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/nozzleup
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Store notarization credentials
+          xcrun notarytool store-credentials "notarytool-profile" \
+            --apple-id "${{ secrets.NOTARIZATION_USERNAME }}" \
+            --password "${{ secrets.NOTARIZATION_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}"
+
+          # Notarize nozzle
+          xcrun notarytool submit target/${{ matrix.target }}/release/nozzle \
+            --keychain-profile "notarytool-profile" \
+            --wait
+          xcrun stapler staple target/${{ matrix.target }}/release/nozzle
+
+          # Notarize nozzleup
+          xcrun notarytool submit target/${{ matrix.target }}/release/nozzleup \
+            --keychain-profile "notarytool-profile" \
+            --wait
+          xcrun stapler staple target/${{ matrix.target }}/release/nozzleup
 
       - name: Upload nozzle artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
