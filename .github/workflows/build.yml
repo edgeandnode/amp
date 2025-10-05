@@ -48,11 +48,8 @@ jobs:
           target: ${{ matrix.target }}
           cache: true
 
-      - name: Build nozzle binary
-        run: cargo build --target ${{ matrix.target }} --release -p nozzle
-
-      - name: Build nozzleup binary
-        run: cargo build --target ${{ matrix.target }} --release -p nozzleup
+      - name: Build binaries
+        run: cargo build --target ${{ matrix.target }} --release -p nozzle -p nozzleup
 
       - name: Sign macOS nozzle binary
         if: startsWith(matrix.os, 'namespace-profile-macos')
@@ -72,6 +69,12 @@ jobs:
           appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Cleanup keychain
+        if: startsWith(matrix.os, 'namespace-profile-macos')
+        run: |
+          # Delete the keychain created by lando/code-sign-action to avoid collision
+          security delete-keychain macos-build.keychain || true
 
       - name: Sign macOS nozzleup binary
         if: startsWith(matrix.os, 'namespace-profile-macos')
