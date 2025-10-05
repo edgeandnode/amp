@@ -3,6 +3,7 @@ members = [
     "crates/bin/dump-check",
     "crates/bin/generate-manifest",
     "crates/bin/nozzle",
+    "crates/bin/nozzleup",
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
@@ -73,7 +74,7 @@ opentelemetry_sdk = { version = "0.30" }
 pretty_assertions = "1.4.1"
 rand = "0.9.0"
 regex = "1.10.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 schemars = "1.0.4"
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }

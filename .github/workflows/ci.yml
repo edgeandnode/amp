@@ -172,6 +172,7 @@ jobs:
 
   # Check generated code is up to date
   gen-check:
+    name: Check codegen
     runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
@@ -195,15 +196,13 @@ jobs:
       - name: Check for uncommitted changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            printf "❌ Generated code is out of date. Please run 'just gen' and commit the changes.\n"
-            
-            printf "\n📄 Files with changes:\n"
+            printf "Generated code is out of date. Please run 'just gen' and commit the changes.\n"
+
+            printf "\nFiles with changes:\n"
             git status --porcelain
-            
-            printf "\n🔍 Detailed diff:\n"
+
+            printf "\nDetailed diff:\n"
             git diff --color=always
 
             exit 1
-          else
-            printf "✅ Generated code is up to date.\n"
           fi
