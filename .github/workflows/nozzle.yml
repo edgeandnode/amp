@@ -126,13 +126,13 @@ jobs:
       - name: Download Linux AMD64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: nozzle-linux-x86_64
+          name: x86_64-unknown-linux-gnu
           path: ./amd64/
 
       - name: Download Linux ARM64 binary  
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: nozzle-linux-aarch64
+          name: aarch64-unknown-linux-gnu
           path: ./arm64/
           
       - name: Login to GitHub Container Registry
