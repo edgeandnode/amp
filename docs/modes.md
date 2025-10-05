@@ -19,14 +19,14 @@ Nozzle provides several commands that can be combined into different deployment 
 Nozzle supports three primary operational modes:
 
 1. **Serverless Mode**: Ephemeral, on-demand extraction using `nozzle dump` for cloud functions, scheduled jobs, or CI/CD pipelines
-2. **Single-Node Mode**: Combined server + embedded worker using `nozzle server --dev` for local development and testing
+2. **Single-Node Mode**: Combined server + embedded worker using `nozzle dev` for local development and testing
 3. **Distributed Mode**: Separate `nozzle server` and `nozzle worker` processes coordinating via metadata DB for production deployments
 
 ### Common Deployment Patterns
 
 1. **Serverless Mode**: Direct extraction using `nozzle dump`
 2. **Server-Only Mode**: Query serving without extraction workers (distributed, read-only)
-3. **Development Mode**: Combined server + embedded worker `nozzle server --dev` (single-node)
+3. **Development Mode**: Combined server + embedded worker `nozzle dev` (single-node)
 4. **Server + Workers**: Separate server and worker processes coordinating via metadata DB (distributed)
 
 ## Serverless Mode
@@ -319,7 +319,7 @@ Multiple workers coordinate through the metadata DB:
 
 ### Purpose
 
-Development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated with the `--dev` flag on the server command.
+Development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated using the `nozzle dev` command.
 
 ### When to Use
 
@@ -331,7 +331,7 @@ Development mode runs a combined server and worker in a single process for simpl
 
 ### How It Works
 
-When running `nozzle server --dev`:
+When running `nozzle dev`:
 1. Server starts all three query/management interfaces (Arrow Flight, JSON Lines, Admin API)
 2. Worker automatically spawns in the same process with node ID "worker"
 3. Worker registers with metadata DB and begins listening for jobs
@@ -342,7 +342,7 @@ When running `nozzle server --dev`:
 
 ```bash
 # Start development mode
-nozzle server --dev
+nozzle dev
 
 # Schedule a job via Admin API (executed by embedded worker)
 curl -X POST http://localhost:1610/datasets/eth_mainnet/dump \
@@ -379,7 +379,7 @@ This section describes common deployment topologies and when to use each.
 
 ```
 ┌────────────────────────────────────┐
-│ nozzle server --dev                │
+│ nozzle dev                         │
 │ ┌──────────────┐ ┌──────────────┐  │
 │ │Server        │ │ Worker       │  │
 │ │- Flight      │ │ (embedded)   │  │
@@ -402,7 +402,7 @@ This section describes common deployment topologies and when to use each.
 
 **Commands:**
 ```bash
-nozzle server --dev
+nozzle dev
 ```
 
 ### Pattern 2: Query-Only Server _(Distributed, Read-Only)_
@@ -567,7 +567,7 @@ nozzle worker --node-id eu-west-1-worker
 ### Stage 1: Development & Testing
 - **Mode:** Serverless + Single-Node
 - Use `nozzle dump` for initial testing (serverless mode)
-- Use `nozzle server --dev` for local query testing (single-node mode)
+- Use `nozzle dev` for local query testing (single-node mode)
 - Single machine, minimal setup
 - **Not for production use**
 

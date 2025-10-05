@@ -17,7 +17,6 @@ use metadata_db::MetadataDb;
 use server::service::Service;
 use tonic::transport::{Server, server::TcpIncoming};
 use tracing::instrument;
-use worker::Worker;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
@@ -29,12 +28,9 @@ pub struct BoundAddrs {
 pub async fn run(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    dev: bool,
     enable_flight: bool,
     enable_jsonl: bool,
     enable_admin: bool,
-    metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
-    meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -46,21 +42,6 @@ pub async fn run(
         "Spill to disk allowed: {}",
         !config.spill_location.is_empty()
     );
-
-    if dev {
-        let worker = Worker::new(
-            config.clone(),
-            metadata_db.clone(),
-            "worker".parse().expect("Invalid worker ID"),
-            metrics,
-            meter,
-        );
-        tokio::spawn(async move {
-            if let Err(err) = worker.run().await {
-                tracing::error!("{err}");
-            }
-        });
-    }
 
     let service = Service::new(config.clone(), metadata_db.clone()).await?;
 

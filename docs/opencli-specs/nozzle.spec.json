@@ -3,7 +3,7 @@
   "info": {
     "title": "Nozzle CLI",
     "description": "High-performance ETL (Extract, Transform, Load) architecture for blockchain data services. Extracts blockchain data from various sources, transforms it via SQL queries, and serves it through multiple query interfaces.",
-    "version": "0.1.0-20251001",
+    "version": "0.1.0-20251005",
     "contact": {
       "name": "Edge & Node",
       "url": "https://github.com/edgeandnode/project-nozzle"
@@ -160,21 +160,71 @@
         }
       ]
     },
-    "server": {
-      "summary": "Start query servers",
-      "description": "Starts one or more query servers for serving blockchain data through different protocols. By default, all three servers (Arrow Flight, JSON Lines, and Admin API) are started. Servers can be selectively enabled using flags. Dev mode starts a worker in the same process for simplified local development. If no server flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). The server runs continuously until terminated (Ctrl+C or kill signal).",
+    "dev": {
+      "summary": "Start development server with embedded worker",
+      "description": "Starts query servers with an embedded worker in the same process for simplified local development. This is the recommended mode for local testing and development, eliminating the need to run a separate worker process. By default, all three servers (Arrow Flight, JSON Lines, and Admin API) are started. Servers can be selectively enabled using flags. If no server flags are specified, ALL THREE servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). The server and embedded worker run continuously until terminated (Ctrl+C or kill signal).",
       "parameters": [
         {
-          "name": "dev",
+          "name": "flight-server",
           "in": "flag",
-          "description": "Run in dev mode, which starts a worker in the same process. This simplifies local development by eliminating the need to run a separate worker process. Dev mode is independent of server selection and can be combined with any server configuration.",
+          "description": "Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.",
           "required": false,
           "schema": {
             "type": "boolean",
             "default": false
           },
-          "x-environment": "SERVER_DEV"
+          "x-environment": "FLIGHT_SERVER"
         },
+        {
+          "name": "jsonl-server",
+          "in": "flag",
+          "description": "Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "x-environment": "JSONL_SERVER"
+        },
+        {
+          "name": "admin-server",
+          "in": "flag",
+          "description": "Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the nozzle system.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "x-environment": "ADMIN_SERVER"
+        }
+      ],
+      "responses": {
+        "0": {
+          "description": "Server and embedded worker shut down gracefully"
+        },
+        "1": {
+          "description": "Error occurred during operation or configuration is invalid"
+        }
+      },
+      "x-examples": [
+        {
+          "command": "nozzle --config config.toml dev",
+          "description": "Start all three servers with an embedded worker for local development"
+        },
+        {
+          "command": "nozzle --config config.toml dev --flight-server",
+          "description": "Start only the Arrow Flight RPC Server with an embedded worker"
+        },
+        {
+          "command": "nozzle --config config.toml dev --flight-server --admin-server",
+          "description": "Start Flight and Admin servers with an embedded worker"
+        }
+      ]
+    },
+    "server": {
+      "summary": "Start query servers",
+      "description": "Starts one or more query servers for serving blockchain data through different protocols. This command starts ONLY the query servers without any embedded worker - extraction jobs must be handled by separate worker processes or serverless dump commands. By default, all three servers (Arrow Flight, JSON Lines, and Admin API) are started. Servers can be selectively enabled using flags. If no server flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). The server runs continuously until terminated (Ctrl+C or kill signal).",
+      "parameters": [
         {
           "name": "flight-server",
           "in": "flag",
@@ -223,12 +273,12 @@
           "description": "Start all three servers (Arrow Flight, JSON Lines, and Admin API)"
         },
         {
-          "command": "nozzle --config config.toml server --dev",
-          "description": "Start all servers in dev mode with an embedded worker"
-        },
-        {
           "command": "nozzle --config config.toml server --flight-server",
           "description": "Start only the Arrow Flight RPC Server"
+        },
+        {
+          "command": "nozzle --config config.toml server --flight-server --jsonl-server",
+          "description": "Start only Flight and JSON Lines servers"
         }
       ]
     },

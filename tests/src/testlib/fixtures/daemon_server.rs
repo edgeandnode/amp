@@ -55,12 +55,9 @@ impl DaemonServer {
         let (server_addrs, server) = nozzle::server::run(
             config.clone(),
             metadb,
-            false, // dev
             enable_flight,
             enable_jsonl,
             enable_admin_api,
-            None, // metrics
-            None, // meter
         )
         .await?;
 
