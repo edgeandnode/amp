@@ -1,37 +1,42 @@
 # nozzleup
 
-Update or install nozzle with ease.
+The official version manager and installer for nozzle.
 
-## Installing
+## Features
 
-### Public Repository (once open-sourced)
+- Install nozzle from GitHub releases or build from source
+- Manage multiple versions and switch between them
+- Support for private repositories (via `GITHUB_TOKEN`)
+- SHA256 verification for all downloads
+- Cross-platform support (Linux, macOS)
+- Multi-architecture support (x86_64, aarch64)
+
+## Installation
+
+### Quick Install
+
+For public repositories (once open-sourced):
 
 ```sh
-curl -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/nozzleup/install | bash
+curl -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | bash
 ```
 
-### Private Repository (current)
+### Private Repository
 
-While the repository is private you need to set `GITHUB_TOKEN`:
+While the repository is private, you need to set `GITHUB_TOKEN`:
 
 ```sh
 export GITHUB_TOKEN=$(gh auth token)
-curl -H "Authorization: Bearer $GITHUB_TOKEN" -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/nozzleup/install | bash
+curl -L https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | GITHUB_TOKEN=$GITHUB_TOKEN bash
 ```
 
-This will install `nozzleup`. Then, run:
+This installs `nozzleup`. Then run:
 
 ```sh
 nozzleup
 ```
 
 This will install the latest version of nozzle.
-
-To install a specific version:
-
-```sh
-nozzleup --install v0.1.0
-```
 
 ## Usage
 
@@ -41,10 +46,34 @@ nozzleup --install v0.1.0
 nozzleup
 ```
 
+or
+
+```sh
+nozzleup install
+```
+
 ### Install Specific Version
 
 ```sh
-nozzleup --install v0.1.0
+nozzleup install v0.1.0
+```
+
+### List Installed Versions
+
+```sh
+nozzleup list
+```
+
+### Switch Between Versions
+
+```sh
+nozzleup use v0.1.0
+```
+
+### Uninstall a Version
+
+```sh
+nozzleup uninstall v0.1.0
 ```
 
 ### Build from Source
@@ -52,100 +81,88 @@ nozzleup --install v0.1.0
 Build from a specific branch:
 
 ```sh
-nozzleup --branch main
+nozzleup branch main
 ```
 
 Build from a specific commit:
 
 ```sh
-nozzleup --commit abc123
+nozzleup commit abc123
 ```
 
 Build from a Pull Request:
 
 ```sh
-nozzleup --pr 123
+nozzleup pr 123
 ```
 
 Build from a local repository:
 
 ```sh
-nozzleup --path /path/to/nozzle
+nozzleup path /path/to/nozzle
 ```
 
 Build from a remote fork:
 
 ```sh
-nozzleup --repo username/fork
+nozzleup repo username/fork
 ```
 
-### Version Management
-
-List installed versions:
+### Update nozzleup Itself
 
 ```sh
-nozzleup --list
-```
-
-Switch between versions:
-
-```sh
-nozzleup --use v0.1.0
-```
-
-Update nozzleup itself:
-
-```sh
-nozzleup --update
+nozzleup update
 ```
 
 ## How It Works
 
-`nozzleup` can install nozzle in two ways:
+`nozzleup` is a Rust-based version manager with a minimal bash bootstrap script for installation.
 
-1. **Precompiled Binaries**: Downloads from [GitHub releases](https://github.com/edgeandnode/project-nozzle/releases)
+### Installation Methods
+
+1. **Precompiled Binaries** (default): Downloads signed binaries from [GitHub releases](https://github.com/edgeandnode/project-nozzle/releases)
 2. **Build from Source**: Clones and compiles the repository using Cargo
 
-Binaries are stored in `~/.nozzle/versions/<version>/` and the active version is symlinked to `~/.nozzle/bin/nozzle`.
-
-### Supported Platforms
-
-- Linux (x86_64, aarch64)
-- macOS (aarch64)
-
-### Private Repositories
-
-While the repository is private, set the `GITHUB_TOKEN` environment variable:
-
-```sh
-export GITHUB_TOKEN=$(gh auth token)$
-nozzleup
-```
-
-## Uninstalling
-
-To uninstall nozzle and nozzleup:
-
-```sh
-rm -rf ~/.nozzle
-```
-
-Then remove the PATH entry from your shell configuration file (`~/.bashrc`, `~/.zshenv`, or `~/.config/fish/config.fish`).
-
-## Directory Structure
+### Directory Structure
 
 ```
 ~/.nozzle/
 ├── bin/
-│   ├── nozzleup           # Version manager script
-│   └── nozzle          # Symlink to active version binary
+│   ├── nozzleup           # Version manager binary
+│   └── nozzle             # Symlink to active version
 ├── versions/
 │   ├── v0.1.0/
-│   │   └── nozzle      # Binary for v0.1.0
+│   │   └── nozzle         # Binary for v0.1.0
 │   └── v0.2.0/
-│       └── nozzle      # Binary for v0.2.0
-└── .current_version    # Tracks active version
+│       └── nozzle         # Binary for v0.2.0
+└── .version               # Tracks active version
 ```
+
+## Versioning
+
+nozzleup uses **independent versioning** from nozzle:
+
+- **nozzle releases:** `v0.1.0`, `v0.2.0`, `v1.0.0`, etc.
+- **nozzleup releases:** `nozzleup-v1.0.0`, `nozzleup-v1.1.0`, `nozzleup-v2.0.0`, etc.
+
+This allows nozzleup to be updated independently (bug fixes, new features) without requiring a nozzle release. nozzleup is version-agnostic and works with all versions of nozzle.
+
+## Supported Platforms
+
+- Linux (x86_64, aarch64)
+- macOS (aarch64/Apple Silicon)
+
+## Environment Variables
+
+- `GITHUB_TOKEN`: GitHub personal access token for private repository access
+- `NOZZLE_REPO`: Override repository (default: `edgeandnode/project-nozzle`)
+- `NOZZLE_DIR`: Override installation directory (default: `~/.nozzle`)
+
+## Security
+
+- All downloads are verified using SHA256 checksums
+- macOS binaries are code-signed and notarized
+- Private repository access uses GitHub's OAuth token mechanism
 
 ## Troubleshooting
 
@@ -159,33 +176,53 @@ source ~/.bashrc  # or ~/.zshenv for zsh, or ~/.config/fish/config.fish for fish
 
 ### Download failed
 
-Check your internet connection and verify the release exists on GitHub:
-https://github.com/edgeandnode/project-nozzle/releases
-
-### Unsupported platform
-
-Currently, precompiled binaries are only available for:
-- Linux (x86_64, aarch64)
-- macOS (aarch64/Apple Silicon)
-
-For other platforms, build from source using `nozzleup --branch main`.
-
-### Building from source requires Rust
-
-If you're building from source (using `--branch`, `--commit`, `--pr`, `--path`, or `--repo`), you need:
-- Rust toolchain (install from https://rustup.rs)
-- Git
+- Check your internet connection
+- Verify the release exists on GitHub
+- For private repos, ensure `GITHUB_TOKEN` is set correctly
 
 ### SHA256 verification failed
 
-If you see a SHA256 verification error, either:
 - Wait for the release to be fully published
-- Use `nozzleup --force` to skip verification (not recommended)
+- Check if the checksum file exists in the release assets
+- As a last resort, use `--force` to skip verification (not recommended)
 
-### Private repository access
+### Building from source requires Rust
 
-For private repositories, create a GitHub Personal Access Token with `repo` scope and set:
+If you're building from source (using `branch`, `commit`, `pr`, `path`, or `repo` commands), you need:
+
+- Rust toolchain (install from https://rustup.rs)
+- Git
+- Build dependencies (see main project documentation)
+
+## Uninstalling
+
+To uninstall nozzle and nozzleup:
 
 ```sh
-export GITHUB_TOKEN=ghp_yourtoken
+rm -rf ~/.nozzle
 ```
+
+Then remove the PATH entry from your shell configuration file.
+
+## Development
+
+nozzleup is implemented in Rust and lives in the main nozzle repository:
+
+- Source: `crates/bin/nozzleup/`
+- Install script: `nozzleup/install`
+
+### Building nozzleup
+
+```sh
+cargo build --release -p nozzleup
+```
+
+### Running tests
+
+```sh
+cargo test -p nozzleup
+```
+
+## License
+
+Same as the main nozzle project.

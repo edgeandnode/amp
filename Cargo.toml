@@ -3,6 +3,7 @@ members = [
     "crates/bin/dump-check",
     "crates/bin/generate-manifest",
     "crates/bin/nozzle",
+    "crates/bin/nozzleup",
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",

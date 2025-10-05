@@ -5254,6 +5254,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nozzleup"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "console",
+ "fs-err",
+ "futures",
+ "indicatif",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

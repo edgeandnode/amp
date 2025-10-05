@@ -304,7 +304,7 @@ install_binary() {
   ensure ln -sf "$binary_path" "$BIN/nozzle"
 
   # Record installed version
-  echo "$version" > "$DIR/.current_version"
+  echo "$version" > "$DIR/.version"
 
   say "Successfully installed nozzle ($version)"
   say "Run 'nozzle --version' to verify installation"
@@ -466,7 +466,7 @@ build_and_install() {
   ensure ln -sf "$binary_path" "$BIN/nozzle"
 
   # Record installed version
-  echo "$version_label" > "$DIR/.current_version"
+  echo "$version_label" > "$DIR/.version"
 
   say "Successfully built and installed nozzle ($version_label)"
   say "Run 'nozzle --version' to verify installation"
@@ -481,8 +481,8 @@ list_versions() {
   fi
 
   local current_version
-  if [ -f "$DIR/.current_version" ]; then
-    current_version=$(cat "$DIR/.current_version")
+  if [ -f "$DIR/.version" ]; then
+    current_version=$(cat "$DIR/.version")
   fi
 
   say "Installed versions:"
@@ -508,7 +508,7 @@ use_version() {
 
   local binary_path="$version_dir/nozzle"
   ensure ln -sf "$binary_path" "$BIN/nozzle"
-  echo "$version" > "$DIR/.current_version"
+  echo "$version" > "$DIR/.version"
 
   say "Switched to nozzle $version"
 }
