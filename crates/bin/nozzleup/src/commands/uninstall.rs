@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 use crate::config::Config;
 
@@ -18,7 +19,7 @@ pub fn run(version: &str) -> Result<()> {
     }
 
     // Remove the version directory
-    fs_err::remove_dir_all(&version_dir).context("Failed to remove version directory")?;
+    fs::remove_dir_all(&version_dir).context("Failed to remove version directory")?;
 
     println!("nozzleup: Uninstalled nozzle {}", version);
 
@@ -26,13 +27,13 @@ pub fn run(version: &str) -> Result<()> {
     if current.as_deref() == Some(version) {
         let current_file = config.current_version_file();
         if current_file.exists() {
-            fs_err::remove_file(&current_file).context("Failed to remove current version file")?;
+            fs::remove_file(&current_file).context("Failed to remove current version file")?;
         }
 
         // Remove the symlink
         let active_path = config.active_binary_path();
         if active_path.exists() || active_path.is_symlink() {
-            fs_err::remove_file(&active_path).context("Failed to remove symlink")?;
+            fs::remove_file(&active_path).context("Failed to remove symlink")?;
         }
 
         println!("nozzleup: No version is currently active");

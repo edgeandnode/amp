@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 use crate::config::Config;
 
@@ -15,9 +16,7 @@ pub fn run() -> Result<()> {
     println!("nozzleup: Installed versions:");
 
     let mut versions = Vec::new();
-    for entry in
-        fs_err::read_dir(&config.versions_dir).context("Failed to read versions directory")?
-    {
+    for entry in fs::read_dir(&config.versions_dir).context("Failed to read versions directory")? {
         let entry = entry.context("Failed to read directory entry")?;
         if entry
             .file_type()

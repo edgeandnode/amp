@@ -1,6 +1,7 @@
 use std::os::unix::fs::symlink;
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -94,22 +95,22 @@ impl Installer {
     fn install_binary(&self, version: &str, data: &[u8]) -> Result<()> {
         // Create version directory
         let version_dir = self.config.versions_dir.join(version);
-        fs_err::create_dir_all(&version_dir).context("Failed to create version directory")?;
+        fs::create_dir_all(&version_dir).context("Failed to create version directory")?;
 
         let binary_path = version_dir.join("nozzle");
 
         // Write binary
-        fs_err::write(&binary_path, data).context("Failed to write binary")?;
+        fs::write(&binary_path, data).context("Failed to write binary")?;
 
         // Make executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs_err::metadata(&binary_path)
+            let mut perms = fs::metadata(&binary_path)
                 .context("Failed to get binary metadata")?
                 .permissions();
             perms.set_mode(0o755);
-            fs_err::set_permissions(&binary_path, perms)
+            fs::set_permissions(&binary_path, perms)
                 .context("Failed to set executable permissions")?;
         }
 
@@ -118,7 +119,7 @@ impl Installer {
 
         // Remove existing symlink if it exists
         if active_path.exists() || active_path.is_symlink() {
-            fs_err::remove_file(&active_path).context("Failed to remove existing symlink")?;
+            fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
         }
 
         // Create new symlink

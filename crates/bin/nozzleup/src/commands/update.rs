@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 use crate::{
     config::Config,
@@ -35,22 +36,21 @@ pub async fn run() -> Result<()> {
 
     // Write to a temporary file first
     let temp_path = current_exe.with_extension("tmp");
-    fs_err::write(&temp_path, &binary_data).context("Failed to write temporary file")?;
+    fs::write(&temp_path, &binary_data).context("Failed to write temporary file")?;
 
     // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs_err::metadata(&temp_path)
+        let mut perms = fs::metadata(&temp_path)
             .context("Failed to get temp file metadata")?
             .permissions();
         perms.set_mode(0o755);
-        fs_err::set_permissions(&temp_path, perms)
-            .context("Failed to set executable permissions")?;
+        fs::set_permissions(&temp_path, perms).context("Failed to set executable permissions")?;
     }
 
     // Replace the current executable
-    fs_err::rename(&temp_path, &current_exe).context("Failed to replace executable")?;
+    fs::rename(&temp_path, &current_exe).context("Failed to replace executable")?;
 
     println!("nozzleup: Updated successfully to {}", latest_version);
 

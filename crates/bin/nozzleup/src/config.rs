@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 /// Configuration for nozzleup
 pub struct Config {
@@ -60,7 +61,7 @@ impl Config {
             return Ok(None);
         }
 
-        let version = fs_err::read_to_string(&version_file)
+        let version = fs::read_to_string(&version_file)
             .context("Failed to read current version file")?
             .trim()
             .to_string();
@@ -70,8 +71,8 @@ impl Config {
 
     /// Set the current version
     pub fn set_current_version(&self, version: &str) -> Result<()> {
-        fs_err::create_dir_all(&self.nozzle_dir).context("Failed to create nozzle directory")?;
-        fs_err::write(self.current_version_file(), version)
+        fs::create_dir_all(&self.nozzle_dir).context("Failed to create nozzle directory")?;
+        fs::write(self.current_version_file(), version)
             .context("Failed to write current version file")?;
         Ok(())
     }
@@ -88,10 +89,9 @@ impl Config {
 
     /// Ensure all required directories exist
     pub fn ensure_dirs(&self) -> Result<()> {
-        fs_err::create_dir_all(&self.nozzle_dir).context("Failed to create nozzle directory")?;
-        fs_err::create_dir_all(&self.bin_dir).context("Failed to create bin directory")?;
-        fs_err::create_dir_all(&self.versions_dir)
-            .context("Failed to create versions directory")?;
+        fs::create_dir_all(&self.nozzle_dir).context("Failed to create nozzle directory")?;
+        fs::create_dir_all(&self.bin_dir).context("Failed to create bin directory")?;
+        fs::create_dir_all(&self.versions_dir).context("Failed to create versions directory")?;
         Ok(())
     }
 }

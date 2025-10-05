@@ -1,6 +1,7 @@
 use std::os::unix::fs::symlink;
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 use crate::config::Config;
 
@@ -25,7 +26,7 @@ pub fn run(version: &str) -> Result<()> {
 
     // Remove existing symlink if it exists
     if active_path.exists() || active_path.is_symlink() {
-        fs_err::remove_file(&active_path).context("Failed to remove existing symlink")?;
+        fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
     }
 
     // Create new symlink

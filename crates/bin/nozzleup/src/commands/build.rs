@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 
 use crate::config::Config;
 
@@ -420,23 +421,22 @@ fn build_and_install(
 
     // Create version directory
     let version_dir = config.versions_dir.join(version_label);
-    fs_err::create_dir_all(&version_dir).context("Failed to create version directory")?;
+    fs::create_dir_all(&version_dir).context("Failed to create version directory")?;
 
     let binary_dest = version_dir.join("nozzle");
 
     // Copy the binary
-    fs_err::copy(&binary_source, &binary_dest).context("Failed to copy binary")?;
+    fs::copy(&binary_source, &binary_dest).context("Failed to copy binary")?;
 
     // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs_err::metadata(&binary_dest)
+        let mut perms = fs::metadata(&binary_dest)
             .context("Failed to get binary metadata")?
             .permissions();
         perms.set_mode(0o755);
-        fs_err::set_permissions(&binary_dest, perms)
-            .context("Failed to set executable permissions")?;
+        fs::set_permissions(&binary_dest, perms).context("Failed to set executable permissions")?;
     }
 
     // Create symlink to active binary
@@ -444,7 +444,7 @@ fn build_and_install(
 
     // Remove existing symlink if it exists
     if active_path.exists() || active_path.is_symlink() {
-        fs_err::remove_file(&active_path).context("Failed to remove existing symlink")?;
+        fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
     }
 
     // Create new symlink
