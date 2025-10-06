@@ -10,9 +10,9 @@ The limit to the size of data permitted in a single partition file. Any number o
   - blocks †
   - rows †
 
-- **_Base Cooldown Duration_** †:
+- **_Cooldown_** †:
 
-  A duration to be multiplied with a Segment candidate's generation value to determine a scaled cooldown period ($c$) for that segment. This period is considered expired for a segment if the interval between its `created_on` timestamp and now is greater than or equal to $c$.
+  A duration to determine a cooldown period ($c$) for a segment. This period is considered expired for a segment if the interval between its `created_on` timestamp and now is greater than or equal to $c$.
 
 - **_Eager Compaction Limit_** †:
 
@@ -25,7 +25,7 @@ The limit to the size of data permitted in a single partition file. Any number o
 
 \* Required
 † Optional
-‡ Corresponds with and may be overridden by the `NOZZLE_PARTITION_SIZE_MB` environment variable or the optional `partition_size_mb` dump command argument. 
+‡ Corresponds with and may be overridden by the `NOZZLE_PARTITION_SIZE_MB` environment variable or the optional `partition_size_mb` dump command argument.
 
 ## Compaction Schemes
 

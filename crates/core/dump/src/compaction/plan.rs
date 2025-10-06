@@ -7,8 +7,11 @@ use std::{
 };
 
 use common::{
-    BlockNum, ParquetFooterCache,
-    catalog::{physical::PhysicalTable, reader::NozzleReaderFactory},
+    BlockNum,
+    catalog::{
+        physical::{PhysicalTable, TableSnapshot},
+        reader::NozzleReaderFactory,
+    },
     metadata::{
         SegmentSize,
         segments::{BlockRange, Segment},
@@ -47,13 +50,13 @@ impl CompactionFile {
     pub async fn try_new(
         reader_factory: Arc<NozzleReaderFactory>,
         partition_index: usize,
-        segment: Segment,
+        segment: &Segment,
         is_tail: bool,
     ) -> CompactionResult<Self> {
         let file_id = segment.id;
-        let range = segment.range;
+        let range = segment.range.clone();
 
-        let mut file_meta = FileMeta::from(segment.object);
+        let mut file_meta = FileMeta::from(segment.object.clone());
 
         file_meta.extensions = Some(Arc::new(file_id));
 
@@ -122,28 +125,22 @@ pub struct CompactionPlan<'a> {
 
 impl<'a> CompactionPlan<'a> {
     #[tracing::instrument(skip_all)]
-    pub async fn from_table(
-        table: Arc<PhysicalTable>,
+    pub async fn from_snapshot(
+        table: &'a TableSnapshot,
         opts: Arc<WriterProperties>,
     ) -> CompactionResult<Self> {
-        let chain = table
-            .canonical_chain()
-            .map_err(CompactorError::chain_error)
-            .await?
-            .ok_or(CompactorError::empty_chain())?;
+        let chain = table.canonical_segments();
 
-        let size = chain.0.len();
+        let size = chain.len();
+        if size == 0 {
+            return Err(CompactorError::EmptyChain);
+        }
 
         tracing::info!("Scanning {size} segments for compaction");
 
-        let reader_factory: Arc<NozzleReaderFactory> = Arc::new(NozzleReaderFactory {
-            location_id: table.location_id(),
-            metadata_db: table.metadata_db().clone(),
-            object_store: Arc::clone(&table.object_store()),
-            parquet_footer_cache: ParquetFooterCache::builder(size).build(),
-        });
+        let reader_factory = Arc::clone(table.reader_factory());
 
-        let files = stream::iter(chain.0)
+        let files = stream::iter(chain)
             .enumerate()
             .map(move |(partition_index, segment)| {
                 let reader_factory = Arc::clone(&reader_factory);
@@ -153,12 +150,12 @@ impl<'a> CompactionPlan<'a> {
             })
             .buffered(10)
             .boxed();
-        let current_group = CompactionGroup::new_empty(&opts, &table);
+        let current_group = CompactionGroup::new_empty(&opts, table.physical_table());
 
         Ok(Self {
             files,
             opts,
-            table,
+            table: Arc::clone(table.physical_table()),
             current_group,
             current_file: None,
             current_candidate: None,

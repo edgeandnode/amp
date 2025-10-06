@@ -3,7 +3,9 @@ use std::{
     time::Duration,
 };
 
-use common::{BoxError, catalog::physical::PhysicalTable, metadata::Generation};
+use common::{
+    BoxError, ParquetFooterCache, catalog::physical::PhysicalTable, metadata::Generation,
+};
 use dataset_store::DatasetStore;
 use dump::{
     compaction::{
@@ -86,6 +88,7 @@ async fn sql_dataset_input_batch_size() {
 /// and collection workflows with specific batch size configurations.
 struct TestCtx {
     ctx: testlib::ctx::TestCtx,
+    cache: ParquetFooterCache,
 }
 
 impl TestCtx {
@@ -100,6 +103,11 @@ impl TestCtx {
             .await
             .expect("Failed to create test context");
 
+        let cache = ParquetFooterCache::builder(
+            (ctx.daemon_server().config().parquet.cache_size_mb * 1024 * 1024) as usize,
+        )
+        .build();
+
         // Deploy the TypeScript dataset
         let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("nozzle.config.ts"));
         let cli = ctx.new_nozzl_cli();
@@ -108,7 +116,7 @@ impl TestCtx {
             .await
             .expect("Failed to register sql_stream_ds dataset");
 
-        Self { ctx }
+        Self { ctx, cache }
     }
 
     /// Get reference to the dataset store.
@@ -166,7 +174,7 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
-        let mut task = Compactor::start(table, &opts, &None);
+        let mut task = Compactor::start(table, &self.cache, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -185,7 +193,7 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
-        let mut task = Collector::start(table, &opts, &None);
+        let mut task = Collector::start(table, &self.cache, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(100)).await;

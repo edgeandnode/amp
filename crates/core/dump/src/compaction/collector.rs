@@ -121,6 +121,7 @@ impl NozzleCompactorTaskType for Collector {
 
     fn new(
         table: &Arc<PhysicalTable>,
+        _cache: &common::ParquetFooterCache,
         opts: &Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> Self {

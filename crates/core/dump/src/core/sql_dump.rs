@@ -265,8 +265,12 @@ async fn dump_sql_query(
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
-    let mut compactor =
-        NozzleCompactor::start(physical_table.clone(), opts.clone(), metrics.clone());
+    let mut compactor = NozzleCompactor::start(
+        physical_table.clone(),
+        env.parquet_footer_cache.clone(),
+        opts.clone(),
+        metrics.clone(),
+    );
 
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.

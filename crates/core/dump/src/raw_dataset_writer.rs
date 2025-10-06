@@ -1,9 +1,10 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, RawTableRows,
+    BlockNum, BoxError, ParquetFooterCache, RawTableRows,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::BlockRange},
+    parquet::file::metadata::ParquetMetaData,
 };
 use metadata_db::MetadataDb;
 
@@ -38,7 +39,11 @@ impl RawDatasetWriter {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = RawTableWriter::new(table.clone(), opts.clone(), ranges, metrics.clone())?;
+            let cache = ParquetFooterCache::builder(opts.cache_size_mb)
+                .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+                .build();
+            let writer =
+                RawTableWriter::new(table.clone(), cache, opts.clone(), ranges, metrics.clone())?;
             writers.insert(table_name.to_string(), writer);
         }
         Ok(RawDatasetWriter {
@@ -116,6 +121,7 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
         opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -131,7 +137,8 @@ impl RawTableWriter {
             None => None,
         };
 
-        let nozzle_compactor = NozzleCompactor::start(table.clone(), opts.clone(), metrics.clone());
+        let nozzle_compactor =
+            NozzleCompactor::start(table.clone(), cache, opts.clone(), metrics.clone());
 
         Ok(Self {
             table,

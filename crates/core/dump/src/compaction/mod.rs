@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use common::{Timestamp, catalog::physical::PhysicalTable};
+use common::{ParquetFooterCache, Timestamp, catalog::physical::PhysicalTable};
 use futures::{
     FutureExt, TryFutureExt,
     future::{BoxFuture, ok as ready_ok},
@@ -38,12 +38,13 @@ pub struct NozzleCompactor {
 impl NozzleCompactor {
     pub fn start(
         table: Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
         opts: Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         NozzleCompactor {
-            compaction_task: Compactor::start(&table, &opts, &metrics),
-            deletion_task: Collector::start(&table, &opts, &metrics),
+            compaction_task: Compactor::start(&table, &cache, &opts, &metrics),
+            deletion_task: Collector::start(&table, &cache, &opts, &metrics),
         }
     }
 
@@ -80,6 +81,7 @@ pub type DeletionTask = NozzleCompactorTask<Collector>;
 pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
+    cache: ParquetFooterCache,
     opts: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
     previous: Option<Timestamp>,
@@ -115,7 +117,13 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
 
         let inner = match task
             .map_err(|join_err| {
-                T::handle_error(&self.table, &mut self.opts, &self.metrics, join_err)
+                T::handle_error(
+                    &self.table,
+                    &self.cache,
+                    &mut self.opts,
+                    &self.metrics,
+                    join_err,
+                )
             })
             .await
         {
@@ -123,7 +131,9 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
                 self.previous = Some(Timestamp::now());
                 inner
             }
-            Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, &self.metrics, err),
+            Ok(Err(err)) => {
+                T::handle_error(&self.table, &self.cache, &mut self.opts, &self.metrics, err)
+            }
         };
         self.task = tokio::spawn(inner.run());
     }
@@ -142,6 +152,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
 
     fn new(
         table: &Arc<PhysicalTable>,
+        cache: &ParquetFooterCache,
         opts: &Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> Self;
@@ -161,11 +172,12 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn handle_error(
         table: &Arc<PhysicalTable>,
+        cache: &ParquetFooterCache,
         opts: &mut Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
         err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
     ) -> Self {
-        let this = Self::new(table, opts, metrics);
+        let this = Self::new(table, cache, opts, metrics);
         let err = err.into();
         if err.is_cancellation() {
             Self::deactivate(opts);
@@ -188,14 +200,16 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn start(
         table: &Arc<PhysicalTable>,
+        cache: &ParquetFooterCache,
         opts: &Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> NozzleCompactorTask<Self> {
-        let task = tokio::spawn(ready_ok(Self::new(table, opts, metrics)));
+        let task = tokio::spawn(ready_ok(Self::new(table, cache, opts, metrics)));
 
         let mut this = NozzleCompactorTask {
             task,
             table: Arc::clone(table),
+            cache: cache.clone(),
             opts: Arc::clone(opts),
             previous: None,
             metrics: metrics.clone(),

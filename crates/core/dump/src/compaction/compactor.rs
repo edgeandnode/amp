@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    BlockNum,
+    BlockNum, ParquetFooterCache,
     catalog::physical::PhysicalTable,
     config::ParquetConfig,
     metadata::{SegmentSize, segments::BlockRange},
@@ -51,6 +51,7 @@ impl<'a> From<&'a ParquetConfig> for CompactorProperties {
 #[derive(Clone)]
 pub struct Compactor {
     pub(super) table: Arc<PhysicalTable>,
+    pub(super) cache: ParquetFooterCache,
     pub(super) opts: Arc<WriterProperties>,
     pub(super) metrics: Option<Arc<MetricsRegistry>>,
 }
@@ -80,11 +81,15 @@ impl Display for Compactor {
 impl Compactor {
     #[tracing::instrument(skip_all, fields(table = self.table.table_name()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
-        let table = Arc::clone(&self.table);
+        let snapshot = self
+            .table
+            .snapshot(false, self.cache.clone())
+            .await
+            .map_err(CompactorError::chain_error)?;
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = CompactionPlan::from_table(table, opts)
+        let mut join_set = CompactionPlan::from_snapshot(&snapshot, opts)
             .await?
             .try_compact_all();
 
@@ -118,11 +123,13 @@ impl NozzleCompactorTaskType for Compactor {
 
     fn new(
         table: &Arc<PhysicalTable>,
+        cache: &ParquetFooterCache,
         opts: &Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> Self {
         Compactor {
             table: Arc::clone(table),
+            cache: cache.clone(),
             opts: Arc::clone(opts),
             metrics: metrics.clone(),
         }

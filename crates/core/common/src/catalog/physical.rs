@@ -151,6 +151,10 @@ impl TableSnapshot {
     pub fn canonical_segments(&self) -> &[Segment] {
         &self.canonical_segments
     }
+
+    pub fn reader_factory(&self) -> &Arc<NozzleReaderFactory> {
+        &self.reader_factory
+    }
 }
 
 #[derive(Debug, Clone)]

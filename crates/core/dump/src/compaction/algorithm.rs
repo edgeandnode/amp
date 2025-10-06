@@ -17,74 +17,47 @@ use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
 /// based on their size and age.
 ///
 /// ## Fields
-/// - `base_duration`: The base duration used to calculate
+/// - `cooldown_duration`: The base duration used to calculate
 ///   the cooldown period for files based on their generation.
-/// - `upper_bound`: The upper bound for segment size limits.
+/// - `target_partition_size`: The upper bound for segment size limits.
 ///   Files exceeding this limit will not be compacted together. This
 ///   value must be non-unbounded.
-/// - `lower_bound`: The lower bound for segment size limits. This
+/// - `eager_compaction_limit`: The lower bound for segment size limits. This
 ///   value can be unbounded, indicating no lower limit for compaction.
-///
-/// ## Logic
-///
-/// ### Eager Compaction
-/// > If the lower bound is set to >= the upper bound, all files are considered `Live`,
-/// > and will be compacted together as long as they do not exceed the upper bound
-/// > size limits, regardless of their generation or age.
-///
-/// ### Exponential Compaction
-/// > If the lower bound is unbounded, and the base duration for cooldown
-/// > is set to zero, all files are considered `Hot`, and will be compacted
-/// > together as long as they do not exceed the upper bound size limits and
-/// > share the same generation.
-///
-/// ### Relaxed Exponential Compaction
-/// > If the lower bound is unbounded, and the base duration for cooldown
-/// > is set to a non-zero value, files are considered `Hot` or `Cold`
-/// > based on their age and the cooldown period. As long as the total size
-/// > of the candidate group does not exceed the upper bound, `Hot` files
-/// > will only be compacted with other files of the same generation, while
-/// > `Cold` files can be compacted regardless of generation.
-///
-/// ### Hybrid Compaction
-/// > If the lower bound is set to a non-unbounded value that is less than
-/// > the upper bound, and the base duration for cooldown is set to a non-zero
-/// > value, files are considered `Live`, `Hot`, or `Cold` based on their
-/// > size and age. As long as the total size of the candidate group does not
-/// > exceed the upper bound, `Live` files will be compacted together if
-/// > they do not exceed the lower bound limits, `Hot` files will only be
-/// > compacted with other files of the same generation, and `Cold` files
-/// > can be compacted regardless of generation.
 #[derive(Clone, Copy)]
 pub struct CompactionAlgorithm {
-    pub base_cooldown: Duration,
-    pub upper_bound: SegmentSizeLimit,
-    pub lower_bound: SegmentSizeLimit,
+    /// The amount of time a file must wait before it can be
+    /// compacted with files of different generations.
+    pub cooldown_duration: Duration,
+    /// The upper bound for segment size limits. Files exceeding this limit
+    /// will not be compacted together. This value must be non-unbounded.
+    pub target_partition_size: SegmentSizeLimit,
+    pub eager_compaction_limit: SegmentSizeLimit,
 }
 
 impl CompactionAlgorithm {
     pub fn kind(&self) -> &'static str {
-        if self.lower_bound.0 >= self.upper_bound.0 {
-            return "Eager Compaction";
+        if self.eager_compaction_limit.0 >= self.target_partition_size.0 {
+            return "Strict Eager Compaction";
         }
 
-        let unbounded_lower = self.lower_bound.is_unbounded();
+        let unbounded_lower = self.eager_compaction_limit.is_unbounded();
 
-        if unbounded_lower && self.base_cooldown.is_zero() {
-            "Exponential Compaction"
+        if unbounded_lower && self.cooldown_duration.is_zero() {
+            "Strict Generationally-Tiered Compaction"
         } else if unbounded_lower {
-            "Relaxed Exponential Compaction"
+            "Relaxed Generationally-Tiered Compaction"
         } else {
             "Hybrid Compaction"
         }
     }
 
     fn is_live(&self, segment: &SegmentSize) -> TestResult {
-        self.lower_bound.is_live(segment)
+        self.eager_compaction_limit.is_live(segment)
     }
 
     fn is_hot(&self, segment: &SegmentSize) -> TestResult {
-        Cooldown::new(self.base_cooldown, segment.generation).is_hot(segment.created_at)
+        Cooldown::new(self.cooldown_duration).is_hot(segment.created_at)
     }
 
     /// Determines the state of a file based on its size and age.
@@ -120,8 +93,9 @@ impl CompactionAlgorithm {
             .max(self.file_state(&candidate.size));
 
         // Check if combining sizes exceeds upper bound.
-        let (size_exceeded, length_exceeded, _) =
-            self.upper_bound.is_exceeded(&(candidate.size + group.size));
+        let (size_exceeded, length_exceeded, _) = self
+            .target_partition_size
+            .is_exceeded(&(candidate.size + group.size));
 
         if state == FileState::Live {
             // For live files, only compact if size limit is not exceeded.
@@ -143,9 +117,9 @@ impl CompactionAlgorithm {
 impl Debug for CompactionAlgorithm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(self.kind())
-            .field("base_duration", &self.base_cooldown)
-            .field("upper_bound", &self.upper_bound)
-            .field("lower_bound", &self.lower_bound)
+            .field("base_duration", &self.cooldown_duration)
+            .field("upper_bound", &self.target_partition_size)
+            .field("lower_bound", &self.eager_compaction_limit)
             .finish()
     }
 }
@@ -154,17 +128,28 @@ impl Display for CompactionAlgorithm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let kind = self.kind().trim_end_matches(" Compaction");
         match kind {
-            "Eager" => write!(f, "{{ kind: {}, upper_bound: {} }}", kind, self.upper_bound),
-            "Exponential" => write!(f, "{{ kind: {}, upper_bound: {} }}", kind, self.upper_bound),
+            "Eager" => write!(
+                f,
+                "{{ kind: {}, upper_bound: {} }}",
+                kind, self.target_partition_size
+            ),
+            "Exponential" => write!(
+                f,
+                "{{ kind: {}, upper_bound: {} }}",
+                kind, self.target_partition_size
+            ),
             "Relaxed Exponential" => write!(
                 f,
                 "{{ kind: {}, base_duration: {:?}, upper_bound: {} }}",
-                kind, self.base_cooldown, self.upper_bound
+                kind, self.cooldown_duration, self.target_partition_size
             ),
             "Hybrid" => write!(
                 f,
                 "{{ kind: {}, base_duration: {:?}, upper_bound: {}, lower_bound: {} }}",
-                kind, self.base_cooldown, self.upper_bound, self.lower_bound
+                kind,
+                self.cooldown_duration,
+                self.target_partition_size,
+                self.eager_compaction_limit
             ),
             _ => unreachable!("Unexpected compaction algorithm kind"),
         }
@@ -174,53 +159,33 @@ impl Display for CompactionAlgorithm {
 impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
     fn from(config: &'a ParquetConfig) -> Self {
         CompactionAlgorithm {
-            base_cooldown: config
+            cooldown_duration: config
                 .compactor
                 .algorithm
                 .base_cooldown_duration
                 .unwrap_or(Duration::from_secs(2)),
-            upper_bound: SegmentSizeLimit::from(&config.target_size),
-            lower_bound: SegmentSizeLimit::from(&config.compactor.algorithm.eager_compaction_limit),
+            target_partition_size: SegmentSizeLimit::from(&config.target_size),
+            eager_compaction_limit: SegmentSizeLimit::from(
+                &config.compactor.algorithm.eager_compaction_limit,
+            ),
         }
     }
 }
 
-/// Cooldown period for file compaction, as a function of the
-/// generation of the file. Before the period elapses, the file
-/// will only be compacted if the candidate group shares the
+/// Cooldown period for file compaction. Before the period elapses,
+/// the file will only be compacted if the candidate group shares the
 /// same generation.
-///
-/// The cooldown period is calculated as:
-/// `base_duration * generation`
-/// # Examples
-/// ```rust
-/// use std::time::Duration;
-/// use dump::compaction::algorithm::Cooldown;
-/// use dump::compaction::Generation;
-/// let cooldown = Cooldown::new(Duration::from_secs(5), 3);
-/// assert_eq!(cooldown.as_duration(), Duration::from_secs(15));
-/// let cooldown_raw = Cooldown::new(Duration::from_secs(500), Generation::default());
-/// assert_eq!(cooldown_raw.as_duration(), Duration::from_secs(0));
 #[derive(Clone, Copy)]
-pub struct Cooldown(Duration, Generation);
+pub struct Cooldown(Duration);
 
 impl Cooldown {
-    pub fn new(base: Duration, generation: impl Into<Generation>) -> Self {
-        Self(base, generation.into())
+    pub fn new(duration: Duration) -> Self {
+        Self(duration)
     }
 
-    /// Returns the cooldown period as a `Duration` by
-    /// multiplying the base duration by the dereferenced generation.
-    ///
-    /// See the [`Cooldown`] documentation for details and examples.
-    pub fn as_duration(&self) -> Duration {
-        Duration::from_micros(
-            self.0
-                .as_micros()
-                .try_into()
-                .unwrap_or(u64::MAX)
-                .saturating_mul(*self.1),
-        )
+    /// Returns the cooldown period as a `Duration`
+    pub fn as_micros(&self) -> u128 {
+        self.0.as_micros()
     }
 
     pub(super) fn is_hot(&self, created_at: u128) -> TestResult {
@@ -228,22 +193,20 @@ impl Cooldown {
             TestResult::Skipped
         } else {
             let now = Timestamp::now();
-            TestResult::Activated(
-                created_at.saturating_add(self.as_duration().as_micros()) > now.0.as_micros(),
-            )
+            TestResult::Activated(created_at.saturating_add(self.as_micros()) > now.0.as_micros())
         }
     }
 }
 
 impl Debug for Cooldown {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cooldown({:?} @ {})", self.as_duration(), self.1)
+        write!(f, "Cooldown({:?})", self.0)
     }
 }
 
 impl Display for Cooldown {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.as_duration())
+        write!(f, "{:?}", self.0)
     }
 }
 
