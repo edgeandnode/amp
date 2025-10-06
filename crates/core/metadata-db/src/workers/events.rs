@@ -139,6 +139,26 @@ pub enum NotifRecvError {
 /// A notification envelope containing the target worker node ID and the payload.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Notification<T> {
+    #[serde(
+        serialize_with = "serialize_node_id",
+        deserialize_with = "deserialize_node_id"
+    )]
     node_id: NodeIdOwned,
     payload: T,
+}
+
+fn serialize_node_id<S>(node_id: &NodeIdOwned, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serde::Serialize::serialize(node_id.as_str(), serializer)
+}
+
+fn deserialize_node_id<'de, D>(deserializer: D) -> Result<NodeIdOwned, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = serde::Deserialize::deserialize(deserializer)?;
+    // SAFETY: Deserialized values are trusted to uphold invariants; typically from database or internal communication.
+    Ok(NodeIdOwned::from_owned_unchecked(s))
 }

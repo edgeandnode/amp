@@ -159,13 +159,15 @@ impl From<metadata_db::WorkerNodeIdOwned> for NodeId {
 
 impl From<NodeId> for metadata_db::WorkerNodeIdOwned {
     fn from(value: NodeId) -> Self {
-        metadata_db::WorkerNodeId::from_owned(value.0)
+        // SAFETY: NodeId is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
+        metadata_db::WorkerNodeId::from_owned_unchecked(value.0)
     }
 }
 
 impl<'a> From<&'a NodeId> for metadata_db::WorkerNodeId<'a> {
     fn from(value: &'a NodeId) -> Self {
-        metadata_db::WorkerNodeId::from_ref(&value.0)
+        // SAFETY: NodeId is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
+        metadata_db::WorkerNodeId::from_ref_unchecked(&value.0)
     }
 }
 
