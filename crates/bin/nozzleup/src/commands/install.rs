@@ -24,6 +24,26 @@ pub async fn run(
         }
     };
 
+    // Check if this version is already installed
+    let version_binary = config.version_binary_path(&version);
+    if version_binary.exists() {
+        println!("nozzleup: Version {} is already installed", version);
+
+        // Check if it's the current version
+        let current_version = config.current_version()?;
+        if current_version.as_deref() == Some(&version) {
+            println!("nozzleup: Already using version {}", version);
+            return Ok(());
+        }
+
+        // Switch to this version
+        println!("nozzleup: Switching to version {}", version);
+        crate::commands::use_version::switch_to_version(&config, &version)?;
+        println!("nozzleup: Successfully switched to nozzle ({})", version);
+        println!("nozzleup: Run 'nozzle --version' to verify installation");
+        return Ok(());
+    }
+
     println!("nozzleup: Installing version {}", version);
 
     // Detect or override platform and architecture

@@ -13,9 +13,30 @@ pub async fn run() -> Result<()> {
     let config = Config::new()?;
     let github = GitHubClient::new(&config)?;
 
+    // Get the current version
+    let current_version = env!("CARGO_PKG_VERSION");
+
     // Get the latest version
     let latest_version = github.get_latest_version().await?;
     println!("nozzleup: Latest version: {}", latest_version);
+
+    // Normalize versions for comparison (strip 'v' prefix if present)
+    let current_normalized = current_version.strip_prefix('v').unwrap_or(current_version);
+    let latest_normalized = latest_version.strip_prefix('v').unwrap_or(&latest_version);
+
+    // Check if already on latest version
+    if current_normalized == latest_normalized {
+        println!(
+            "nozzleup: Already on the latest version ({})",
+            current_version
+        );
+        return Ok(());
+    }
+
+    println!(
+        "nozzleup: Updating from {} to {}",
+        current_version, latest_version
+    );
 
     // Detect platform and architecture
     let platform = Platform::detect()?;

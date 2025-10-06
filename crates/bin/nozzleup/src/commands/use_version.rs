@@ -18,7 +18,16 @@ pub fn run(version: Option<String>) -> Result<()> {
         }
     };
 
-    let version_dir = config.versions_dir.join(&version);
+    switch_to_version(&config, &version)?;
+
+    println!("nozzleup: Switched to nozzle {}", version);
+
+    Ok(())
+}
+
+/// Switch to a specific installed version
+pub fn switch_to_version(config: &Config, version: &str) -> Result<()> {
+    let version_dir = config.versions_dir.join(version);
     if !version_dir.exists() {
         anyhow::bail!(
             "Version {} is not installed. Run 'nozzleup install {}' to install it",
@@ -27,7 +36,7 @@ pub fn run(version: Option<String>) -> Result<()> {
         );
     }
 
-    let binary_path = config.version_binary_path(&version);
+    let binary_path = config.version_binary_path(version);
     if !binary_path.exists() {
         anyhow::bail!("Binary not found for version {}", version);
     }
@@ -43,9 +52,7 @@ pub fn run(version: Option<String>) -> Result<()> {
     symlink(&binary_path, &active_path).context("Failed to create symlink")?;
 
     // Update current version file
-    config.set_current_version(&version)?;
-
-    println!("nozzleup: Switched to nozzle {}", version);
+    config.set_current_version(version)?;
 
     Ok(())
 }
