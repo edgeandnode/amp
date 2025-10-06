@@ -6,6 +6,7 @@ mod config;
 mod github;
 mod install;
 mod platform;
+mod shell;
 
 /// The nozzle installer and version manager
 #[derive(Parser, Debug)]
@@ -19,6 +20,22 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Initialize nozzleup (called by install script)
+    #[command(hide = true)]
+    Init {
+        /// Installation directory (default: $XDG_CONFIG_HOME/.nozzle or $HOME/.nozzle)
+        #[arg(long)]
+        install_dir: Option<std::path::PathBuf>,
+
+        /// Don't modify PATH environment variable
+        #[arg(long)]
+        no_modify_path: bool,
+
+        /// Don't install latest nozzle version after setup
+        #[arg(long)]
+        no_install_latest: bool,
+    },
+
     /// Install a specific version from binaries (default: latest)
     Install {
         /// Version to install (e.g., v0.1.0). If not specified, installs latest
@@ -88,6 +105,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Some(Commands::Init {
+            install_dir,
+            no_modify_path,
+            no_install_latest,
+        }) => {
+            commands::init::run(install_dir, no_modify_path, no_install_latest).await?;
+        }
         Some(Commands::Install {
             version,
             arch,
