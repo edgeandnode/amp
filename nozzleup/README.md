@@ -20,6 +20,30 @@ curl --proto '=https' --tlsv1.2 -sSf \
 
 Once installed, you can conveniently manage your `nozzle` versions through `nozzleup`.
 
+### Customizing Installation
+
+The installer script accepts options to customize the installation process:
+
+```sh
+# Skip automatic PATH modification
+curl ... | sh -s -- --no-modify-path
+
+# Skip installing the latest nozzle version
+curl ... | sh -s -- --no-install-latest
+
+# Use a custom installation directory
+curl ... | sh -s -- --install-dir /custom/path
+
+# Combine multiple options
+curl ... | sh -s -- --no-modify-path --no-install-latest --install-dir ~/.custom/nozzle
+```
+
+**Available Options:**
+
+- `--install-dir <DIR>`: Install to a custom directory (default: `$XDG_CONFIG_HOME/.nozzle` or `$HOME/.nozzle`)
+- `--no-modify-path`: Don't automatically add `nozzleup` to your PATH
+- `--no-install-latest`: Don't automatically install the latest `nozzle` version
+
 ## Usage
 
 ### Install Latest Version
