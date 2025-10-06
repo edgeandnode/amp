@@ -1,9 +1,0 @@
-kind = "substreams"
-
-name = "example_substreams"
-
-# Substreams output module name
-module = "map_events"
-
-# Substreams package manifest URL
-manifest = "https://spkg.io/<package>"
