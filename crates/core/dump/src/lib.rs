@@ -8,7 +8,6 @@ pub mod metrics;
 mod parquet_writer;
 mod raw_dataset_writer;
 pub mod streaming_query;
-pub mod worker;
 
 pub use core::*;
 use std::sync::Arc;

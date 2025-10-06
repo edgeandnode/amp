@@ -6,7 +6,7 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    workers::{WorkerNodeId, heartbeat},
+    workers::{NodeId, heartbeat},
 };
 
 /// The interval used for testing the active workers list
@@ -23,10 +23,10 @@ async fn new_worker_is_active_on_registration() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id: WorkerNodeId = "test-worker-new".parse().expect("Invalid worker ID");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-new");
 
     //* When
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -51,10 +51,10 @@ async fn reregistration_updates_heartbeat() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id: WorkerNodeId = "test-worker-reregister".parse().expect("Invalid worker ID");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-reregister");
 
     // Initial registration
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to initially register worker");
 
@@ -63,7 +63,7 @@ async fn reregistration_updates_heartbeat() {
 
     //* When
     // Re-register the worker (this should update the heartbeat)
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to re-register worker");
 
@@ -91,9 +91,9 @@ async fn heartbeat_update_maintains_activity() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id: WorkerNodeId = "test-worker-heartbeat".parse().expect("Invalid worker ID");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-heartbeat");
 
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -101,7 +101,7 @@ async fn heartbeat_update_maintains_activity() {
     tokio::time::sleep(TEST_ACTIVE_INTERVAL / 2).await;
 
     //* When
-    heartbeat::update_heartbeat(&mut *conn, &worker_id)
+    heartbeat::update_heartbeat(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to update heartbeat");
 
@@ -129,9 +129,9 @@ async fn worker_is_inactive_after_interval() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id: WorkerNodeId = "test-worker-inactive".parse().expect("Invalid worker ID");
+    let worker_id = NodeId::from_ref_unchecked("test-worker-inactive");
 
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -172,11 +172,10 @@ async fn heartbeat_on_unknown_worker_is_noop() {
         .await
         .expect("Failed to run migrations");
 
-    let non_existent_worker_id: WorkerNodeId =
-        "worker-does-not-exist".parse().expect("Invalid worker ID");
+    let non_existent_worker_id = NodeId::from_ref_unchecked("worker-does-not-exist");
 
     //* When
-    let res = heartbeat::update_heartbeat(&mut *conn, &non_existent_worker_id).await;
+    let res = heartbeat::update_heartbeat(&mut *conn, non_existent_worker_id.clone()).await;
 
     //* Then
     assert!(
@@ -228,10 +227,10 @@ async fn registration_conflict_updates_timestamp() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id: WorkerNodeId = "conflict-worker".parse().expect("Invalid worker ID");
+    let worker_id = NodeId::from_ref_unchecked("conflict-worker");
 
     // First registration
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker initially");
 
@@ -241,7 +240,7 @@ async fn registration_conflict_updates_timestamp() {
 
     //* When
     // Second registration of the same worker ID (triggers ON CONFLICT DO UPDATE)
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker on conflict");
 

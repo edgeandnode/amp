@@ -1,6 +1,6 @@
 //! DB integration tests for the workers queue
 
-use metadata_db::{JobStatus, MetadataDb};
+use metadata_db::{JobStatus, MetadataDb, WorkerNodeId};
 use pgtemp::PgTempDB;
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn schedule_and_retrieve_job() {
             .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
-    let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     metadata_db
         .register_worker(&worker_id)
         .await
@@ -38,7 +38,7 @@ async fn schedule_and_retrieve_job() {
 
     // Get the job
     let job = metadata_db
-        .get_job(&job_id)
+        .get_job(job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -60,7 +60,7 @@ async fn pagination_traverses_all_jobs_ordered() {
             .expect("Failed to connect to metadata db");
 
     let total_jobs = 7;
-    let worker_id = "test-worker-traverse".parse().expect("Invalid worker ID");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");
     metadata_db
         .register_worker(&worker_id)
         .await

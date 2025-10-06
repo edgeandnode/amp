@@ -6,9 +6,9 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
-use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
+use worker::Worker;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -77,10 +77,18 @@ enum Command {
         #[arg(long, env = "DUMP_ONLY_FINALIZED_BLOCKS")]
         only_finalized_blocks: bool,
     },
+    Dev {
+        /// Enable Arrow Flight RPC Server.
+        #[arg(long, env = "FLIGHT_SERVER")]
+        flight_server: bool,
+        /// Enable JSON Lines Server.
+        #[arg(long, env = "JSONL_SERVER")]
+        jsonl_server: bool,
+        /// Enable Admin API Server.
+        #[arg(long, env = "ADMIN_SERVER")]
+        admin_server: bool,
+    },
     Server {
-        /// Run in dev mode, which starts a worker in the same process.
-        #[arg(long, env = "SERVER_DEV")]
-        dev: bool,
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
@@ -132,9 +140,9 @@ enum Command {
 async fn main() {
     match main_inner().await {
         Ok(()) => {}
-        Err(e) => {
+        Err(err) => {
             // Manually print the error so we can control the format.
-            eprintln!("Exiting with error: {e}");
+            eprintln!("Exiting with error: {err}");
             std::process::exit(1);
         }
     }
@@ -144,7 +152,7 @@ async fn main_inner() -> Result<(), BoxError> {
     let Args { config, command } = Args::parse();
     let config_path = config;
 
-    let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
+    let allow_temp_db = matches!(command, Command::Dev { .. });
     let (mut config, metadata_db) =
         load_config_and_metadata_db(config_path.as_ref(), allow_temp_db).await?;
 
@@ -163,6 +171,41 @@ async fn main_inner() -> Result<(), BoxError> {
     );
 
     let cmd_result = match command {
+        Command::Dev {
+            mut flight_server,
+            mut jsonl_server,
+            mut admin_server,
+        } => {
+            if !flight_server && !jsonl_server && !admin_server {
+                flight_server = true;
+                jsonl_server = true;
+                admin_server = true;
+            }
+            let config = Arc::new(config);
+
+            let worker = Worker::new(
+                config.clone(),
+                metadata_db.clone(),
+                "worker".parse().expect("Invalid worker ID"),
+                metrics_registry.clone(),
+                telemetry_metrics_meter.clone(),
+            );
+            tokio::spawn(async move {
+                if let Err(err) = worker.run().await {
+                    tracing::error!("{err}");
+                }
+            });
+
+            let (_, server) = nozzle::server::run(
+                config,
+                metadata_db,
+                flight_server,
+                jsonl_server,
+                admin_server,
+            )
+            .await?;
+            server.await
+        }
         Command::Dump {
             end_block,
             n_jobs,
@@ -239,7 +282,6 @@ async fn main_inner() -> Result<(), BoxError> {
             Ok(())
         }
         Command::Server {
-            dev,
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
@@ -253,12 +295,9 @@ async fn main_inner() -> Result<(), BoxError> {
             let (_, server) = nozzle::server::run(
                 config.into(),
                 metadata_db,
-                dev,
                 flight_server,
                 jsonl_server,
                 admin_server,
-                metrics_registry,
-                telemetry_metrics_meter,
             )
             .await?;
             server.await

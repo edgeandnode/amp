@@ -1,8 +1,14 @@
 //! DB integration tests for the workers events notifications
 
 use futures::StreamExt;
-use metadata_db::{JobNotifAction, JobStatus, MetadataDb};
+use metadata_db::{JobId, JobStatus, MetadataDb, WorkerNodeId};
 use pgtemp::PgTempDB;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct JobNotification {
+    job_id: JobId,
+    action: String,
+}
 
 #[tokio::test]
 async fn schedule_job_and_receive_notification() {
@@ -15,7 +21,7 @@ async fn schedule_job_and_receive_notification() {
             .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
-    let worker_id = "test-worker-events".parse().expect("Invalid worker ID");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
     metadata_db
         .register_worker(&worker_id)
         .await
@@ -32,18 +38,30 @@ async fn schedule_job_and_receive_notification() {
 
     // Start listening for notifications before scheduling the job
     let listener = metadata_db
-        .listen_for_job_notifications()
+        .listen_for_job_notifications(&worker_id)
         .await
         .expect("Failed to create job notification listener");
 
-    let mut notification_stream = std::pin::pin!(listener.into_stream());
+    let mut notification_stream = std::pin::pin!(listener.into_stream::<JobNotification>());
 
     //* When
-    // Schedule the job (this will automatically send a START notification)
+    // Schedule the job
     let job_id = metadata_db
         .schedule_job(&worker_id, &job_desc_str, &[])
         .await
         .expect("Failed to schedule job");
+
+    // Send notification to the worker
+    metadata_db
+        .send_job_notification(
+            worker_id.to_owned(),
+            &JobNotification {
+                job_id,
+                action: "START".to_string(),
+            },
+        )
+        .await
+        .expect("Failed to send job notification");
 
     // Receive the notification
     let received_notification = tokio::time::timeout(
@@ -56,17 +74,13 @@ async fn schedule_job_and_receive_notification() {
     .expect("Failed to receive notification");
 
     //* Then
-    // Verify the notification
-    assert_eq!(received_notification.node_id, worker_id);
+    // Verify the notification payload
     assert_eq!(received_notification.job_id, job_id);
-    assert!(matches!(
-        received_notification.action,
-        JobNotifAction::Start
-    ));
+    assert_eq!(received_notification.action, "START");
 
     // Verify the job was actually registered
     let job = metadata_db
-        .get_job(&job_id)
+        .get_job(job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");

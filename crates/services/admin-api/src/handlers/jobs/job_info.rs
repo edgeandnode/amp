@@ -1,6 +1,6 @@
 //! Job information types for API responses
 
-use metadata_db::JobId;
+use worker::JobId;
 
 /// Represents job information for the API response
 ///
@@ -33,7 +33,7 @@ pub struct JobInfo {
 impl From<metadata_db::JobWithDetails> for JobInfo {
     fn from(value: metadata_db::JobWithDetails) -> Self {
         Self {
-            id: value.id,
+            id: value.id.into(),
             created_at: value.created_at.to_rfc3339(),
             updated_at: value.updated_at.to_rfc3339(),
             node_id: value.node_id.to_string(),

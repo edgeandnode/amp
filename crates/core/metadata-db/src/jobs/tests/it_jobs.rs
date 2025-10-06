@@ -3,6 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
+    WorkerNodeId,
     conn::DbConn,
     jobs::{self, JobStatus},
     workers::heartbeat,
@@ -19,8 +20,8 @@ async fn register_job_creates_with_scheduled_status() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to pre-register the worker");
 
@@ -33,12 +34,12 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
         .await
         .expect("Failed to schedule job");
 
     //* Then
-    let job = jobs::get_by_id(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -59,12 +60,12 @@ async fn get_jobs_for_node_filters_by_node_id() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id_main = "test-worker-main".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id_main)
+    let worker_id_main = WorkerNodeId::from_ref_unchecked("test-worker-main");
+    heartbeat::register_worker(&mut *conn, worker_id_main.clone())
         .await
         .expect("Failed to pre-register the worker 1");
-    let worker_id_other = "test-worker-other".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id_other)
+    let worker_id_other = WorkerNodeId::from_ref_unchecked("test-worker-other");
+    heartbeat::register_worker(&mut *conn, worker_id_other.clone())
         .await
         .expect("Failed to pre-register the worker 2");
 
@@ -73,7 +74,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
     let job_id1 = jobs::insert(
         &mut *conn,
-        &worker_id_main,
+        worker_id_main.clone(),
         &job_desc_str1,
         JobStatus::default(),
     )
@@ -84,7 +85,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
     let job_id2 = jobs::insert(
         &mut *conn,
-        &worker_id_main,
+        worker_id_main.clone(),
         &job_desc_str2,
         JobStatus::default(),
     )
@@ -96,7 +97,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
     let job_id_other = jobs::insert(
         &mut *conn,
-        &worker_id_other,
+        worker_id_other.clone(),
         &job_desc_str_other,
         JobStatus::default(),
     )
@@ -104,10 +105,13 @@ async fn get_jobs_for_node_filters_by_node_id() {
     .expect("Failed to register job for other worker");
 
     //* When
-    let jobs_list =
-        jobs::get_by_node_id_and_statuses(&mut *conn, &worker_id_main, [JobStatus::Scheduled])
-            .await
-            .expect("Failed to get jobs for node");
+    let jobs_list = jobs::get_by_node_id_and_statuses(
+        &mut *conn,
+        worker_id_main.clone(),
+        [JobStatus::Scheduled],
+    )
+    .await
+    .expect("Failed to get jobs for node");
 
     //* Then
     assert!(
@@ -138,8 +142,8 @@ async fn get_jobs_for_node_filters_by_status() {
         .expect("Failed to connect to metadata db");
     db.run_migrations().await.expect("Failed to run migrations");
 
-    let worker_id = "test-worker-active-ids".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *db, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-active-ids");
+    heartbeat::register_worker(&mut *db, worker_id.clone())
         .await
         .expect("Failed to pre-register the worker");
 
@@ -147,40 +151,65 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Active jobs
-    let job_id_scheduled = jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register job_id_scheduled");
+    let job_id_scheduled = jobs::insert(
+        &mut *db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Scheduled,
+    )
+    .await
+    .expect("Failed to register job_id_scheduled");
 
-    let job_id_running = jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Running)
-        .await
-        .expect("Failed to register job_id_running");
+    let job_id_running = jobs::insert(
+        &mut *db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Running,
+    )
+    .await
+    .expect("Failed to register job_id_running");
 
     // Terminal state jobs (should not be retrieved)
-    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Completed)
-        .await
-        .expect("Failed to register completed job");
+    jobs::insert(
+        &mut *db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Completed,
+    )
+    .await
+    .expect("Failed to register completed job");
 
-    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to register failed job");
+    jobs::insert(
+        &mut *db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to register failed job");
 
     let job_id_stop_requested = jobs::insert(
         &mut *db,
-        &worker_id,
+        worker_id.clone(),
         &job_desc_str,
         JobStatus::StopRequested,
     )
     .await
     .expect("Failed to register job_id_stop_requested");
 
-    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Stopped)
-        .await
-        .expect("Failed to register stopped job");
+    jobs::insert(
+        &mut *db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Stopped,
+    )
+    .await
+    .expect("Failed to register stopped job");
 
     //* When
     let active_jobs = jobs::get_by_node_id_and_statuses(
         &mut *db,
-        &worker_id,
+        worker_id.clone(),
         [
             JobStatus::Scheduled,
             JobStatus::Running,
@@ -221,8 +250,8 @@ async fn get_job_by_id_returns_job() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-get".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-get");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -233,12 +262,12 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
         .await
         .expect("Failed to register job");
 
     //* When
-    let job = jobs::get_by_id(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -261,8 +290,8 @@ async fn get_job_with_details_includes_timestamps() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-details".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-details");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -272,12 +301,12 @@ async fn get_job_with_details_includes_timestamps() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
         .await
         .expect("Failed to register job");
 
     //* When
-    let job_details = jobs::get_by_id_with_details(&mut *conn, &job_id)
+    let job_details = jobs::get_by_id_with_details(&mut *conn, job_id)
         .await
         .expect("Failed to get job with details")
         .expect("Job not found");
@@ -324,10 +353,8 @@ async fn list_jobs_first_page_respects_limit() {
     // Create workers and jobs
     let mut job_ids = Vec::new();
     for i in 0..5 {
-        let worker_id = format!("test-worker-{}", i)
-            .parse()
-            .expect("Invalid worker ID");
-        heartbeat::register_worker(&mut *conn, &worker_id)
+        let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-{}", i));
+        heartbeat::register_worker(&mut *conn, worker_id.clone())
             .await
             .expect("Failed to register worker");
 
@@ -337,7 +364,7 @@ async fn list_jobs_first_page_respects_limit() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
             .await
             .expect("Failed to register job");
         job_ids.push(job_id);
@@ -375,10 +402,8 @@ async fn list_jobs_next_page_uses_cursor() {
     // Create 10 jobs
     let mut all_job_ids = Vec::new();
     for i in 0..10 {
-        let worker_id = format!("test-worker-page-{}", i)
-            .parse()
-            .expect("Invalid worker ID");
-        heartbeat::register_worker(&mut *conn, &worker_id)
+        let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-page-{}", i));
+        heartbeat::register_worker(&mut *conn, worker_id.clone())
             .await
             .expect("Failed to register worker");
 
@@ -388,7 +413,7 @@ async fn list_jobs_next_page_uses_cursor() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
             .await
             .expect("Failed to register job");
         all_job_ids.push(job_id);
@@ -436,27 +461,27 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-delete".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-delete");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
         .await
         .expect("Failed to insert job");
 
     //* When
-    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, &job_id, [JobStatus::Scheduled])
+    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
         .await
         .expect("Failed to delete job");
 
     //* Then
     assert!(deleted);
 
-    let job = jobs::get_by_id(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to query job");
     assert!(job.is_none());
@@ -473,27 +498,32 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-no-delete".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-no-delete");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
-        .await
-        .expect("Failed to insert job");
+    let job_id = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Running,
+    )
+    .await
+    .expect("Failed to insert job");
 
     //* When
-    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, &job_id, [JobStatus::Scheduled])
+    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
         .await
         .expect("Failed to delete job");
 
     //* Then
     assert!(!deleted);
 
-    let job = jobs::get_by_id(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to query job")
         .expect("Job should still exist");
@@ -511,10 +541,8 @@ async fn delete_by_status_deletes_all_matching_jobs() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-bulk-delete"
-        .parse()
-        .expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-bulk-delete");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -522,15 +550,30 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create 3 jobs, 2 will be Completed, 1 will be Running
-    let job_id1 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
-        .await
-        .expect("Failed to insert job 1");
-    let job_id2 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
-        .await
-        .expect("Failed to insert job 2");
-    let job_id3 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
-        .await
-        .expect("Failed to insert job 3");
+    let job_id1 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Completed,
+    )
+    .await
+    .expect("Failed to insert job 1");
+    let job_id2 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Completed,
+    )
+    .await
+    .expect("Failed to insert job 2");
+    let job_id3 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Running,
+    )
+    .await
+    .expect("Failed to insert job 3");
 
     //* When
     let deleted_count = jobs::delete_by_status(&mut *conn, JobStatus::Completed)
@@ -542,20 +585,20 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 
     // Verify the Completed jobs are gone
     assert!(
-        jobs::get_by_id(&mut *conn, &job_id1)
+        jobs::get_by_id(&mut *conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, &job_id2)
+        jobs::get_by_id(&mut *conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::get_by_id(&mut *conn, &job_id3)
+    let running_job = jobs::get_by_id(&mut *conn, job_id3)
         .await
         .expect("Failed to query job 3")
         .expect("Running job should still exist");
@@ -573,10 +616,8 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = "test-worker-multi-delete"
-        .parse()
-        .expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi-delete");
+    heartbeat::register_worker(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -584,18 +625,38 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create 4 jobs with different statuses
-    let job_id1 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
-        .await
-        .expect("Failed to insert job 1");
-    let job_id2 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job 2");
-    let job_id3 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Stopped)
-        .await
-        .expect("Failed to insert job 3");
-    let job_id4 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
-        .await
-        .expect("Failed to insert job 4");
+    let job_id1 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Completed,
+    )
+    .await
+    .expect("Failed to insert job 1");
+    let job_id2 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job 2");
+    let job_id3 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Stopped,
+    )
+    .await
+    .expect("Failed to insert job 3");
+    let job_id4 = jobs::insert(
+        &mut *conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Running,
+    )
+    .await
+    .expect("Failed to insert job 4");
 
     //* When
     let deleted_count = jobs::delete_by_statuses(
@@ -610,26 +671,26 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 
     // Verify terminal jobs are gone
     assert!(
-        jobs::get_by_id(&mut *conn, &job_id1)
+        jobs::get_by_id(&mut *conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, &job_id2)
+        jobs::get_by_id(&mut *conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, &job_id3)
+        jobs::get_by_id(&mut *conn, job_id3)
             .await
             .expect("Failed to query job 3")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::get_by_id(&mut *conn, &job_id4)
+    let running_job = jobs::get_by_id(&mut *conn, job_id4)
         .await
         .expect("Failed to query job 4")
         .expect("Running job should still exist");

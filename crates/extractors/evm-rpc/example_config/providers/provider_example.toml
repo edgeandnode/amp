@@ -1,8 +1,0 @@
-kind = "evm-rpc"
-
-# The network for this endpoint. Follow the 'CLI name' in this table:
-# https://thegraph.com/docs/en/developing/supported-networks/
-network = "mainnet"
-
-# The EVM RPC endpoint
-url = "https://<ENDPOINT>"

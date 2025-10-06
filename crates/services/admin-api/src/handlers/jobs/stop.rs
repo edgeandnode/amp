@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::JobId;
+use worker::JobId;
 
 use crate::{
     ctx::Ctx,
@@ -106,7 +106,7 @@ pub async fn handler(
     // Delegate to scheduler for atomic stop operation
     // The database layer handles validation
     ctx.scheduler
-        .stop_job(&id, &job.node_id)
+        .stop_job(&id, &job.node_id.into())
         .await
         .map_err(|err| {
             match err {

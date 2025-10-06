@@ -8,8 +8,9 @@ pub use self::{
     pagination::{list_first_page, list_next_page},
 };
 use crate::{
-    JobStatus, TableId, WorkerNodeId,
+    JobStatus, TableId,
     jobs::{Job, JobId},
+    workers::NodeIdOwned,
 };
 
 pub mod events;
@@ -84,7 +85,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT 
+        SELECT
             -- Location fields
             l.id,
             l.dataset,
@@ -92,7 +93,7 @@ where
             l.tbl,
             l.url,
             l.active,
-            
+
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
             j.node_id     AS writer_job_node_id,
@@ -115,7 +116,7 @@ where
         url: Url,
         active: bool,
         writer_job_id: Option<JobId>,
-        writer_job_node_id: Option<WorkerNodeId>,
+        writer_job_node_id: Option<NodeIdOwned>,
         writer_job_status: Option<JobStatus>,
         writer_job_descriptor: Option<JsonValue>,
     }
@@ -258,8 +259,8 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        UPDATE locations 
-        SET writer = $1 
+        UPDATE locations
+        SET writer = $1
         WHERE id = ANY($2)
     "};
 

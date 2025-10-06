@@ -26,7 +26,7 @@ where
     let query = format!(r#"SELECT pg_notify('{}', $1)"#, LOCATION_CHANGE_CHANNEL);
 
     sqlx::query(&query)
-        .bind(&location_id.to_string())
+        .bind(location_id.to_string())
         .execute(exe)
         .await
         .map_err(LocationNotifSendError)?;

@@ -75,8 +75,7 @@ impl std::str::FromStr for LocationId {
         let id = s
             .parse::<i64>()
             .map_err(LocationIdFromStrError::ParseError)?;
-        id.try_into()
-            .map_err(|err| LocationIdFromStrError::NonPositive(err))
+        id.try_into().map_err(LocationIdFromStrError::NonPositive)
     }
 }
 

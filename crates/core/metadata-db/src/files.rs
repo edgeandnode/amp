@@ -19,6 +19,7 @@ pub type FooterBytes = Vec<u8>;
 ///
 /// Creates a new file metadata entry. Uses ON CONFLICT DO NOTHING for idempotency.
 #[instrument(skip(executor, footer))]
+#[allow(clippy::too_many_arguments)]
 pub async fn insert<'e, E>(
     executor: E,
     location_id: LocationId,
