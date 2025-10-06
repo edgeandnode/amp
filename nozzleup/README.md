@@ -9,24 +9,22 @@ The official version manager and installer for nozzle.
 While the repository is private, you need to authenticate with GitHub:
 
 ```sh
+# Obtain a personal access token.
 export GITHUB_TOKEN=$(gh auth token)
-curl -L \
+
+# Set up `nozzleup` from the private repository.
+curl --proto '=https' --tlsv1.2 -sSf \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install \
-  | bash
+  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | sh
 ```
 
-This installs `nozzleup`. Then run:
-
-```sh
-nozzleup
-```
-
-This will install the latest version of nozzle.
+Once installed, you can conveniently manage your `nozzle` versions through `nozzleup`.
 
 ## Usage
 
 ### Install Latest Version
+
+> NOTE: By default, the `nozzleup` installer will also install the latest version of `nozzle`.
 
 ```sh
 nozzleup
@@ -126,7 +124,7 @@ nozzleup update
 
 ## How It Works
 
-`nozzleup` is a Rust-based version manager with a minimal bash bootstrap script for installation.
+`nozzleup` is a Rust-based version manager with a minimal bootstrap script for installation.
 
 ### Installation Methods
 
@@ -157,7 +155,7 @@ nozzleup update
 
 - `GITHUB_TOKEN`: GitHub personal access token for private repository access
 - `NOZZLE_REPO`: Override repository (default: `edgeandnode/project-nozzle`)
-- `NOZZLE_DIR`: Override installation directory (default: `~/.nozzle`)
+- `NOZZLE_DIR`: Override installation directory (default: `$XDG_CONFIG_HOME/.nozzle` or `$HOME/.nozzle`)
 
 ## Security
 
@@ -168,7 +166,7 @@ nozzleup update
 
 ### Command not found: nozzleup
 
-Make sure `~/.nozzle/bin` is in your PATH. You may need to restart your terminal or run:
+Make sure the `nozzleup` binary is in your PATH. You may need to restart your terminal or run:
 
 ```sh
 source ~/.bashrc  # or ~/.zshenv for zsh, or ~/.config/fish/config.fish for fish
@@ -190,10 +188,10 @@ If you're building from source (using the `build` command), you need:
 
 ## Uninstalling
 
-To uninstall nozzle and nozzleup:
+To uninstall nozzle and nozzleup, simply delete you `.nozzle` directory (default: `$XDG_CONFIG_HOME/.nozzle` or `$HOME/.nozzle`):
 
 ```sh
-rm -rf ~/.nozzle
+rm -rf ~/.nozzle # or $XDG_CONFIG_HOME/.nozzle
 ```
 
 Then remove the PATH entry from your shell configuration file.
