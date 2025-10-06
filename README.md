@@ -43,6 +43,52 @@ nozzleup build --branch develop
 
 For more details and advanced options, see the [nozzleup README](nozzleup/README.md).
 
+### Installation via Nix
+
+For Nix users, `nozzle` is available as a flake:
+
+```sh
+# Run directly without installing
+nix run github:edgeandnode/project-nozzle
+
+# Install to your profile
+nix profile install github:edgeandnode/project-nozzle
+
+# Try it out temporarily
+nix shell github:edgeandnode/project-nozzle -c nozzle --version
+```
+
+You can also add it to your NixOS or home-manager configuration:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nozzle = {
+      url = "github:edgeandnode/project-nozzle";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, nozzle, ... }: {
+    # NixOS configuration
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      # ...
+      environment.systemPackages = [
+        nozzle.packages.${system}.nozzle
+      ];
+    };
+
+    # Or home-manager configuration
+    home.packages = [
+      nozzle.packages.${system}.nozzle
+    ];
+  };
+}
+```
+
+Note: Nix handles version management, so `nozzleup` is not needed for Nix users.
+
 ### Building from Source (Manual)
 
 If you prefer to build manually without using `nozzleup`:
