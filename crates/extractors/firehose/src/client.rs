@@ -42,7 +42,7 @@ impl Client {
         final_blocks_only: bool,
         meter: Option<&telemetry::metrics::Meter>,
     ) -> Result<Self, Error> {
-        let metrics = meter.map(|m| crate::metrics::MetricsRegistry::new(m));
+        let metrics = meter.map(crate::metrics::MetricsRegistry::new);
 
         let client = {
             let uri = Uri::from_str(&config.url)?;
