@@ -247,10 +247,6 @@ pub async fn dump_table(
     // Record dump duration on successful completion
     if let Some(ref metrics) = metrics_for_after {
         let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-        let dataset_version = table_for_metrics
-            .dataset()
-            .dataset_version()
-            .unwrap_or_default();
         let job_id = format!("{}_{}", dataset_name_for_metrics, table_name_for_metrics);
         metrics.record_dump_duration(
             duration_millis,
