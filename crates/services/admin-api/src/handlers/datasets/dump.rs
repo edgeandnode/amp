@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
+use dump::EndBlock;
 use worker::JobId;
 
 use super::tracing::display_selector_version;
@@ -195,12 +196,17 @@ async fn handler_inner(
 #[derive(serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DumpOptions {
-    /// The last block number to extract (optional)
+    /// The end block configuration for the dump
     ///
-    /// If not specified, the extraction will continue indefinitely
-    /// (until manually stopped or the blockchain tip).
+    /// Supports multiple modes:
+    /// - `null` or omitted: Continuous dumping (never stops)
+    /// - `"latest"`: Stop at the latest available block
+    /// - `<number>`: Stop at specific block number (e.g., `1000000`)
+    /// - `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)
+    ///
+    /// If not specified, defaults to continuous mode.
     #[serde(default)]
-    end_block: Option<i64>,
+    end_block: EndBlock,
 }
 
 /// Response returned by the dataset dump endpoint

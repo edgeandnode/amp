@@ -15,7 +15,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::consistency_check;
+use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd::dump;
 
@@ -43,7 +43,7 @@ pub async fn dump_dataset(
         metadata_db.clone(),
         vec![dataset_name.to_string()],
         true,
-        Some(end as i64),
+        EndBlock::Absolute(end),
         n_jobs,
         partition_size_mb,
         None,

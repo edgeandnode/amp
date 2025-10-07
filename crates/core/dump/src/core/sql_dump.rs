@@ -108,7 +108,7 @@ use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use tracing::instrument;
 
-use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
     compaction::{CompactionProperties, NozzleCompactor},
     metrics,
@@ -128,7 +128,7 @@ pub async fn dump_table(
     parquet_opts: &ParquetWriterProperties,
     compaction_opts: &Arc<CompactionProperties>,
     microbatch_max_interval: u64,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
@@ -179,20 +179,28 @@ pub async fn dump_table(
             tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
             return Ok::<(), BoxError>(());
         };
-        let end = match end {
-            Some(end) if end >= 0 => end as BlockNum,
-            _ => {
+
+        let resolved = end
+            .resolve(start, async {
                 let query_ctx =
                     QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                let Some(max_end_block) = query_ctx
+                query_ctx
                     .max_end_block(&plan.clone().attach_to(&query_ctx)?)
-                    .await?
-                else {
-                    tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
-                    return Ok::<(), BoxError>(());
-                };
-                block_ranges::resolve_relative(start, end, max_end_block)?
+                    .await
+                    .map_err(Into::into)
+            })
+            .await?;
+
+        let end_block = match resolved {
+            ResolvedEndBlock::Continuous => {
+                tracing::warn!("continuous mode not yet implemented for derived datasets");
+                return Ok::<(), BoxError>(());
             }
+            ResolvedEndBlock::NoDataAvailable => {
+                tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+                return Ok::<(), BoxError>(());
+            }
+            ResolvedEndBlock::Block(block) => block,
         };
 
         if let IncrementalCheck::NonIncremental(op) = incremental_check {
@@ -210,7 +218,7 @@ pub async fn dump_table(
             &env,
             &catalog,
             plan.clone(),
-            start..=end,
+            start..=end_block,
             resume_watermark,
             table.clone(),
             &parquet_opts,

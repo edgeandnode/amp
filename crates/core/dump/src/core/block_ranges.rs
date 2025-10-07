@@ -10,9 +10,10 @@ use tracing::instrument;
 /// - `Latest`: Stop at the latest available block
 /// - `Absolute(N)`: Stop at specific block number N
 /// - `LatestMinus(N)`: Stop at latest block - N (e.g., 100 means latest - 100)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum EndBlock {
     /// Continuous dumping - never stops
+    #[default]
     None,
     /// Stop at the latest available block
     Latest,
@@ -22,53 +23,77 @@ pub enum EndBlock {
     LatestMinus(u64),
 }
 
+/// Result of resolving an EndBlock configuration.
+///
+/// After resolution, the end block specification becomes one of:
+/// - `Continuous`: Never stop dumping (from `EndBlock::None`)
+/// - `Block(N)`: Stop at concrete block number N
+/// - `NoDataAvailable`: Dependencies have no data available
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedEndBlock {
+    /// Continuous dumping - never stops
+    Continuous,
+    /// Stop at this specific block number
+    Block(BlockNum),
+    /// No data available from dependencies
+    NoDataAvailable,
+}
+
 impl EndBlock {
-    /// Resolves the end block to a concrete block number, if applicable.
+    /// Resolves the end block configuration to a concrete result.
     ///
-    /// Returns `None` for continuous dumping mode (`EndBlock::None`).
-    /// For other variants, resolves to a concrete block number using the provided
-    /// `get_latest` function when needed.
+    /// Returns one of:
+    /// - `Continuous`: For `EndBlock::None` (never stops)
+    /// - `Block(N)`: Concrete block number to stop at
+    /// - `NoDataAvailable`: When dependencies have no data
     ///
     /// # Arguments
     /// * `start` - The start block number, used for validation
-    /// * `get_latest` - Async function to fetch the latest block number
+    /// * `get_latest` - Async function to fetch the latest block number (returns None if no data)
     ///
     /// # Returns
-    /// * `Ok(None)` - For continuous mode
-    /// * `Ok(Some(block))` - Resolved concrete block number
+    /// * `Ok(ResolvedEndBlock)` - Successfully resolved end block
     /// * `Err(_)` - If resolution fails or validation fails
     #[instrument(skip(get_latest), err)]
-    pub async fn resolve<F, Fut>(
+    pub async fn resolve<F>(
         &self,
         start: BlockNum,
         get_latest: F,
-    ) -> Result<Option<BlockNum>, ResolutionError>
+    ) -> Result<ResolvedEndBlock, ResolutionError>
     where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<BlockNum, BoxError>>,
+        F: Future<Output = Result<Option<BlockNum>, BoxError>>,
     {
         match self {
-            EndBlock::None => Ok(None),
+            EndBlock::None => Ok(ResolvedEndBlock::Continuous),
             EndBlock::Latest => {
-                let latest = get_latest()
+                let latest = get_latest
                     .await
                     .map_err(|e| ResolutionError::FetchLatestFailed(e.to_string()))?;
-                Ok(Some(latest))
+                match latest {
+                    Some(block) => Ok(ResolvedEndBlock::Block(block)),
+                    None => Ok(ResolvedEndBlock::NoDataAvailable),
+                }
             }
             EndBlock::Absolute(n) => {
                 let block = *n;
                 if block < start {
                     return Err(ResolutionError::invalid_end_block(start, block));
                 }
-                Ok(Some(block))
+                Ok(ResolvedEndBlock::Block(block))
             }
             EndBlock::LatestMinus(offset) => {
-                let latest = get_latest()
+                let latest = get_latest
                     .await
                     .map_err(|e| ResolutionError::FetchLatestFailed(e.to_string()))?;
-                // Subtract offset from latest (offset is always positive)
-                let resolved = resolve_relative(start, Some(-(*offset as i64)), latest)?;
-                Ok(Some(resolved))
+                match latest {
+                    Some(latest_block) => {
+                        // Subtract offset from latest (offset is always positive)
+                        let resolved =
+                            resolve_relative(start, Some(-(*offset as i64)), latest_block)?;
+                        Ok(ResolvedEndBlock::Block(resolved))
+                    }
+                    None => Ok(ResolvedEndBlock::NoDataAvailable),
+                }
             }
         }
     }
@@ -179,7 +204,7 @@ impl ResolutionError {
 
 #[cfg(test)]
 mod tests {
-    use super::{EndBlock, ResolutionError, resolve_relative};
+    use super::{EndBlock, ResolutionError, ResolvedEndBlock, resolve_relative};
 
     #[test]
     fn resolve_block_range_variants() {
@@ -229,49 +254,69 @@ mod tests {
     async fn end_block_resolve_none() {
         let end_block = EndBlock::None;
         let result = end_block
-            .resolve(0, || async { Ok::<u64, common::BoxError>(100) })
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
-        assert_eq!(result, None);
+        assert_eq!(result, ResolvedEndBlock::Continuous);
     }
 
     #[tokio::test]
     async fn end_block_resolve_latest() {
         let end_block = EndBlock::Latest;
         let result = end_block
-            .resolve(0, || async { Ok::<u64, common::BoxError>(100) })
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
-        assert_eq!(result, Some(100));
+        assert_eq!(result, ResolvedEndBlock::Block(100));
     }
 
     #[tokio::test]
     async fn end_block_resolve_absolute() {
         let end_block = EndBlock::Absolute(100);
         let result = end_block
-            .resolve(0, || async { Ok::<u64, common::BoxError>(200) })
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(200)) })
             .await
             .unwrap();
-        assert_eq!(result, Some(100));
+        assert_eq!(result, ResolvedEndBlock::Block(100));
     }
 
     #[tokio::test]
     async fn end_block_resolve_latest_minus() {
         let end_block = EndBlock::LatestMinus(50);
         let result = end_block
-            .resolve(0, || async { Ok::<u64, common::BoxError>(100) })
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
-        assert_eq!(result, Some(50));
+        assert_eq!(result, ResolvedEndBlock::Block(50));
     }
 
     #[tokio::test]
     async fn end_block_resolve_absolute_validation() {
         let end_block = EndBlock::Absolute(10);
         let result = end_block
-            .resolve(50, || async { Ok::<u64, common::BoxError>(100) })
+            .resolve(50, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn end_block_resolve_latest_no_data() {
+        let end_block = EndBlock::Latest;
+        let result = end_block
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .await
+            .unwrap();
+        assert_eq!(result, ResolvedEndBlock::NoDataAvailable);
+    }
+
+    #[tokio::test]
+    async fn end_block_resolve_latest_minus_no_data() {
+        let end_block = EndBlock::LatestMinus(50);
+        let result = end_block
+            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .await
+            .unwrap();
+        assert_eq!(result, ResolvedEndBlock::NoDataAvailable);
     }
 
     #[test]

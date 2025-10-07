@@ -94,11 +94,11 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
-use futures::TryStreamExt as _;
+use futures::{TryFutureExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
-use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
     compaction::CompactionProperties, metrics, parquet_writer::ParquetWriterProperties,
     raw_dataset_writer::RawDatasetWriter,
@@ -118,7 +118,7 @@ pub async fn dump(
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     compaction_opts: Arc<CompactionProperties>,
-    end: Option<i64>,
+    end: EndBlock,
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
@@ -135,13 +135,17 @@ pub async fn dump(
     tracing::info!("connected to provider: {}", client.provider_name());
 
     let mut start = tables[0].dataset().start_block.unwrap_or(0);
-    let end = match end {
-        None => None,
-        Some(end) => Some(block_ranges::resolve_relative(
-            start,
-            Some(end),
-            client.latest_block().await?,
-        )?),
+    let resolved = end
+        .resolve(start, client.latest_block().map_ok(Some))
+        .await?;
+
+    let end = match resolved {
+        ResolvedEndBlock::NoDataAvailable => {
+            tracing::warn!("no blocks available from provider for {}", dataset_name);
+            return Ok(());
+        }
+        ResolvedEndBlock::Continuous => None,
+        ResolvedEndBlock::Block(block) => Some(block),
     };
 
     let mut timer = tokio::time::interval(Duration::from_secs(1));

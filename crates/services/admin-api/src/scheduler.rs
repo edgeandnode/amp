@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
+use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
 use worker::{JobDescriptor, JobId, JobNotification, NodeId};
@@ -23,7 +24,7 @@ impl Scheduler {
     pub async fn schedule_dataset_dump(
         &self,
         dataset: Dataset,
-        end_block: Option<i64>,
+        end_block: EndBlock,
     ) -> Result<JobId, ScheduleJobError> {
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
