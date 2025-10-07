@@ -30,7 +30,7 @@ pub struct MetricsRegistry {
     pub streaming_query_lifetime: telemetry::metrics::Histogram<f64>,
 
     /// Number of rows per streaming microbatch
-    pub streaming_microbatch_size: telemetry::metrics::Histogram<u64>,
+    pub streaming_microbatch_rows: telemetry::metrics::Histogram<u64>,
 
     /// Total rows sent incrementally via streaming queries
     pub streaming_rows_sent: telemetry::metrics::Counter,
