@@ -174,9 +174,7 @@ impl CompactionGroup {
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
-        use std::time::Instant;
-
-        let start_time = Instant::now();
+        let start_time = std::time::Instant::now();
         let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.file_lock_duration;
 
