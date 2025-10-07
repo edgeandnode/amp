@@ -25,7 +25,7 @@ For each parquet file and streaming query microbatch, Nozzle tracks metadata for
 
 Arrow Flight clients receive metadata about the block range associated with each data batch via the `app_metadata` field in `FlightData` messages. This metadata is crucial for handling reorgs at the client level.
 
-For streaming queries, Nozzle sends an empty `RecordBatch` (with 0 rows) at the end of each microbatch to signal completion. This empty batch includes the `app_metadata` for the completed microbatch, allowing clients to track the fully processed block ranges.
+For streaming queries, all `RecordBatch` messages include `app_metadata` with block range information and a `ranges_complete` flag. When `ranges_complete` is `true`, it signals that the associated block ranges have been fully processed in the current microbatch, allowing clients to safely use this as a resumption watermark.
 
 #### Metadata Format
 
@@ -39,13 +39,15 @@ The `app_metadata` field contains JSON-serialized metadata with the following st
       "hash": "0x0deee2eaa7adb2b28c7fa731f79ea86e77e375f8ee0a0f2619ba6ec3eb2f68e6",
       "prev_hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
     }
-  ]
+  ],
+  "ranges_complete": false
 }
 ```
 where:
 - `numbers` is an inclusive range of block numbers.
 - `hash` is the hash associated with the end block.
 - `prev_hash` is the hash associated with the parent of the start block.
+- `ranges_complete` indicates whether this is the final record batch associated to the ranges.
 
 #### Usage
 
@@ -56,7 +58,7 @@ Clients should track block ranges from consecutive batches to handle reorgs. The
 
 For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit three types of events:
 - `ResponseBatchWithReorg::Batch` - Normal data batches with metadata
-- `ResponseBatchWithReorg::Watermark` - Emitted when an empty batch is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
+- `ResponseBatchWithReorg::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
 - `ResponseBatchWithReorg::Reorg` - Reorg detection events with invalidation ranges
 
 #### Resuming Streams

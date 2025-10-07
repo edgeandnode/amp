@@ -44,9 +44,10 @@ pub struct ResponseBatch {
     pub metadata: Metadata,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Metadata {
     pub ranges: Vec<BlockRange>,
+    pub ranges_complete: bool,
 }
 
 impl Stream for ResultStream {
@@ -205,7 +206,7 @@ pub fn with_reorg(
                 yield Ok(ResponseBatchWithReorg::Reorg { invalidation });
             }
             prev_ranges = ranges;
-            if batch.data.num_rows() == 0 {
+            if batch.metadata.ranges_complete {
                 let watermark = ResumeWatermark::from_ranges(batch.metadata.ranges);
                 yield Ok(ResponseBatchWithReorg::Watermark(watermark));
             } else {

@@ -25,7 +25,7 @@ use common::{
     },
     catalog::physical::Catalog,
     config::Config,
-    metadata::segments::ResumeWatermark,
+    metadata::segments::{BlockRange, ResumeWatermark},
     notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::IncrementalCheck,
     query_context::{Error as CoreError, QueryEnv, parse_sql},
@@ -599,7 +599,7 @@ fn flight_data_stream(
     };
     stream! {
         let mut dictionary_tracker = DictionaryTracker::new(true);
-        let mut app_metadata: Option<String> = None;
+        let mut ranges: Vec<BlockRange> = Default::default();
         let mut first_message = true;
         while let Some(result) = incremental_stream.next().await {
             match result {
@@ -609,9 +609,8 @@ fn flight_data_stream(
                 }
                 Ok(message) => match message {
                     QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
-                        assert_eq!(app_metadata, None);
-                        let metadata_value = json!({"ranges": [range]});
-                        app_metadata = Some(serde_json::to_string(&metadata_value).unwrap());
+                        assert!(ranges.is_empty());
+                        ranges.push(range);
                     }
                     QueryMessage::Data(batch) => {
                         if first_message {
@@ -620,12 +619,13 @@ fn flight_data_stream(
                                 FlightData::from(SchemaAsIpc::new(&schema, &IpcWriteOptions::default()));
                             yield Ok(schema_message);
                         }
+                        let app_metadata = json!({
+                            "ranges": &ranges,
+                            "ranges_complete": false,
+                        });
                         match encode_record_batch(batch, &app_metadata, &mut dictionary_tracker) {
                             Ok(encoded) => {
                                 for message in encoded {
-                                    if message.data_body.is_empty() {
-                                        continue;
-                                    }
                                     yield Ok(message);
                                 }
                             }
@@ -637,8 +637,12 @@ fn flight_data_stream(
                     }
                     QueryMessage::BlockComplete(_) => (),
                     QueryMessage::MicrobatchEnd(_) => {
-                        assert!(app_metadata.is_some());
+                        assert!(ranges.len() > 0);
                         let empty_batch = RecordBatch::new_empty(schema.clone());
+                        let app_metadata = json!({
+                            "ranges": &ranges,
+                            "ranges_complete": true,
+                        });
                         match encode_record_batch(empty_batch, &app_metadata, &mut dictionary_tracker) {
                             Ok(encoded) => {
                                 for message in encoded {
@@ -650,7 +654,7 @@ fn flight_data_stream(
                                 return;
                             }
                         };
-                        app_metadata = None;
+                        ranges.clear();
                     }
                 }
             }
@@ -661,12 +665,13 @@ fn flight_data_stream(
 
 pub fn encode_record_batch(
     batch: RecordBatch,
-    app_metadata: &Option<String>,
+    app_metadata: &serde_json::Value,
     dictionary_tracker: &mut DictionaryTracker,
 ) -> Result<Vec<FlightData>, Status> {
     let ipc = IpcDataGenerator::default();
     let options = IpcWriteOptions::default();
     let mut encoded: Vec<FlightData> = Default::default();
+    let app_metadata = serde_json::to_string(app_metadata).unwrap();
     for batch in split_batch_for_grpc_response(batch, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES) {
         let (encoded_dictionaries, encoded_batch) = ipc
             .encoded_batch(&batch, dictionary_tracker, &options)
@@ -674,10 +679,7 @@ pub fn encode_record_batch(
         for encoded_dictionary in encoded_dictionaries {
             encoded.push(encoded_dictionary.into());
         }
-        encoded.push(
-            FlightData::from(encoded_batch)
-                .with_app_metadata(app_metadata.clone().unwrap_or_default()),
-        );
+        encoded.push(FlightData::from(encoded_batch).with_app_metadata(app_metadata.clone()));
     }
     Ok(encoded)
 }
