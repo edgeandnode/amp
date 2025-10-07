@@ -90,9 +90,9 @@ impl MetricsRegistry {
                 "Duration that streaming queries remain active before completion",
                 "milliseconds",
             ),
-            streaming_microbatch_size: telemetry::metrics::Histogram::new_u64(
+            streaming_microbatch_rows: telemetry::metrics::Histogram::new_u64(
                 meter,
-                "streaming_microbatch_size_rows",
+                "streaming_microbatch_rows",
                 "Number of rows per streaming microbatch",
                 "rows",
             ),
@@ -134,7 +134,7 @@ impl MetricsRegistry {
 
     /// Record streaming microbatch size and throughput
     pub fn record_streaming_batch(&self, batch_rows: u64, batch_bytes: u64) {
-        self.streaming_microbatch_size.record(batch_rows);
+        self.streaming_microbatch_rows.record(batch_rows);
         self.streaming_rows_sent.inc_by(batch_rows);
         self.streaming_bytes_sent.inc_by(batch_bytes);
     }
