@@ -26,7 +26,7 @@ pub use crate::compaction::{
 /// Duration collector must wait prior to deleting files
 pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CompactionProperties {
     pub compactor_active: bool,
     pub collector_active: bool,
@@ -37,6 +37,7 @@ pub struct CompactionProperties {
     pub write_concurrency: usize,
     pub parquet_writer_props: ParquetWriterProperties,
     pub size_limit: SegmentSizeLimit,
+    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl Display for CompactionProperties {

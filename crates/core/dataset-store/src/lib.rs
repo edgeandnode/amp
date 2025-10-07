@@ -533,7 +533,7 @@ impl DatasetStore {
                         name: dataset_name.to_string(),
                         source: err,
                     })?;
-                firehose_datasets::Client::new(config, only_finalized_blocks)
+                firehose_datasets::Client::new(config, only_finalized_blocks, meter)
                     .await
                     .map(BlockStreamClient::Firehose)
                     .map_err(|err| GetClientError::FirehoseClientError {
@@ -555,7 +555,7 @@ impl DatasetStore {
                         version: dataset_version.map(|v| v.to_string()),
                         source: err,
                     })?;
-                substreams_datasets::Client::new(config, manifest, only_finalized_blocks)
+                substreams_datasets::Client::new(config, manifest, only_finalized_blocks, meter)
                     .await
                     .map(BlockStreamClient::Substreams)
                     .map_err(|err| GetClientError::SubstreamsClientError {

@@ -1,9 +1,13 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Table};
 use firehose_datasets::{Error, client::AuthInterceptor};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
+use monitoring::telemetry;
 use pbsubstreams::{Request as StreamRequest, response::Message, stream_client::StreamClient};
 use prost::Message as _;
 use tonic::{
@@ -31,7 +35,9 @@ pub struct Client {
     package: Package,
     output_module: String,
     provider_name: String,
+    network: String,
     final_blocks_only: bool,
+    metrics: Option<crate::metrics::MetricsRegistry>,
 }
 
 impl Package {
@@ -61,7 +67,10 @@ impl Client {
         config: ProviderConfig,
         manifest: Manifest,
         final_blocks_only: bool,
+        meter: Option<&telemetry::metrics::Meter>,
     ) -> Result<Self, Error> {
+        let metrics = meter.map(|m| crate::metrics::MetricsRegistry::new(m));
+
         let stream_client = {
             let uri = Uri::from_str(&config.url)?;
             let mut endpoint = Endpoint::from(uri);
@@ -91,9 +100,11 @@ impl Client {
             stream_client,
             package,
             tables,
-            output_module: manifest.module,
+            output_module: manifest.module.clone(),
             provider_name: config.name,
+            network: config.network,
             final_blocks_only,
+            metrics,
         })
     }
 
@@ -159,6 +170,12 @@ impl BlockStreamer for Client {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         stream! {
+            let stream_start = Instant::now();
+            let metrics = self.metrics.clone();
+            let provider = self.provider_name.clone();
+            let network = self.network.clone();
+            let module = self.output_module.clone();
+
             // Explicitly track the next block in case we need to restart the stream.
             let mut next_block = start_block;
 
@@ -168,6 +185,9 @@ impl BlockStreamer for Client {
                     // If there is an error at the initial connection, we don't retry here as that's
                     // unexpected.
                     Err(err) => {
+                        if let Some(ref metrics) = metrics {
+                            metrics.record_stream_error(&provider, &network, &module, "connection");
+                        }
                         yield Err(err.into());
                         return;
                     }
@@ -185,10 +205,16 @@ impl BlockStreamer for Client {
 
                             match transform(block, &self.tables) {
                                 Ok(table_rows) => {
+                                    if let Some(ref metrics) = metrics {
+                                        metrics.record_block_processed(&provider, &network, &module);
+                                    }
                                     yield Ok(table_rows);
                                     next_block = block_num + 1;
                                 }
                                 Err(err) => {
+                                    if let Some(ref metrics) = metrics {
+                                        metrics.record_stream_error(&provider, &network, &module, "transformation");
+                                    }
                                     yield Err(format!(
                                         "error converting Blockscope to rows on block {}: {}",
                                         block_num, err
@@ -198,6 +224,9 @@ impl BlockStreamer for Client {
                             }
                         }
                         Err(err) => {
+                            if let Some(ref metrics) = metrics {
+                                metrics.record_stream_error(&provider, &network, &module, "stream");
+                            }
                             // Log the error and retry after `RETRY_BACKOFF` seconds
                             tracing::debug!(error=%err, "error reading substreams stream, retrying in {} seconds", RETRY_BACKOFF.as_secs());
                             tokio::time::sleep(RETRY_BACKOFF).await;
@@ -209,6 +238,12 @@ impl BlockStreamer for Client {
                 // The stream has ended, or the receiver has gone away,
                 // either way we hit a natural termination condition
                 break;
+            }
+
+            // Record stream duration
+            if let Some(ref metrics) = metrics {
+                let duration = stream_start.elapsed().as_millis() as f64;
+                metrics.record_stream_duration(duration, &provider, &network, &module);
             }
         }
     }

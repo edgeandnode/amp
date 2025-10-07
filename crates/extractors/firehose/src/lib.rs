@@ -9,6 +9,7 @@ pub mod client;
 pub mod dataset;
 mod dataset_kind;
 pub mod evm;
+pub mod metrics;
 mod proto;
 
 pub use client::Client;

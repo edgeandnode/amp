@@ -1,8 +1,12 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
+use monitoring::telemetry;
 use pbfirehose::{Response as StreamResponse, stream_client::StreamClient};
 use prost::Message as _;
 use tonic::{
@@ -28,11 +32,18 @@ pub struct Client {
     network: String,
     provider_name: String,
     final_blocks_only: bool,
+    metrics: Option<crate::metrics::MetricsRegistry>,
 }
 
 impl Client {
     /// Configure the client from a Firehose dataset definition.
-    pub async fn new(config: ProviderConfig, final_blocks_only: bool) -> Result<Self, Error> {
+    pub async fn new(
+        config: ProviderConfig,
+        final_blocks_only: bool,
+        meter: Option<&telemetry::metrics::Meter>,
+    ) -> Result<Self, Error> {
+        let metrics = meter.map(crate::metrics::MetricsRegistry::new);
+
         let client = {
             let uri = Uri::from_str(&config.url)?;
             let mut endpoint = Endpoint::from(uri);
@@ -44,6 +55,7 @@ impl Client {
                 network: config.network,
                 provider_name: config.name,
                 final_blocks_only,
+                metrics,
             }
         };
 
@@ -160,6 +172,11 @@ impl BlockStreamer for Client {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         stream! {
+            let stream_start = Instant::now();
+            let metrics = self.metrics.clone();
+            let provider = self.provider_name.clone();
+            let network = self.network.clone();
+
             // Explicitly track the next block in case we need to restart the Firehose stream.
             let mut next_block = start_block;
 
@@ -169,6 +186,9 @@ impl BlockStreamer for Client {
                     // If there is an error at the initial connection, we don't retry here as that's
                     // unexpected.
                     Err(err) => {
+                        if let Some(ref metrics) = metrics {
+                            metrics.record_stream_error(&provider, &network, "connection");
+                        }
                         yield Err(err.into());
                         return;
                     }
@@ -181,10 +201,16 @@ impl BlockStreamer for Client {
 
                             match protobufs_to_rows(block, &self.network) {
                                 Ok(table_rows) => {
+                                    if let Some(ref metrics) = metrics {
+                                        metrics.record_block_received(&provider, &network);
+                                    }
                                     yield Ok(table_rows);
                                     next_block = block_num + 1;
                                 }
                                 Err(err) => {
+                                    if let Some(ref metrics) = metrics {
+                                        metrics.record_stream_error(&provider, &network, "conversion");
+                                    }
                                     yield Err(format!(
                                         "error converting Protobufs to rows on block {}: {}",
                                         block_num,
@@ -195,6 +221,9 @@ impl BlockStreamer for Client {
                             }
                         }
                         Err(err) => {
+                            if let Some(ref metrics) = metrics {
+                                metrics.record_stream_error(&provider, &network, "stream");
+                            }
                             // Log the error and retry after `RETRY_BACKOFF` seconds
                             tracing::debug!(error=%err, "error reading firehose stream, retrying in {} seconds", RETRY_BACKOFF.as_secs());
                             tokio::time::sleep(RETRY_BACKOFF).await;
@@ -206,6 +235,12 @@ impl BlockStreamer for Client {
                 // The stream has ended, or the receiver has gone away,
                 // either way we hit a natural termination condition
                 break;
+            }
+
+            // Record stream duration
+            if let Some(ref metrics) = metrics {
+                let duration = stream_start.elapsed().as_millis() as f64;
+                metrics.record_stream_duration(duration, &provider, &network);
             }
         }
     }

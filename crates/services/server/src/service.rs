@@ -230,10 +230,15 @@ pub struct Service {
     env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl Service {
-    pub async fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Result<Self, Error> {
+    pub async fn new(
+        config: Arc<Config>,
+        metadata_db: MetadataDb,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
+    ) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = {
             let provider_configs_store =
@@ -250,11 +255,14 @@ impl Service {
         };
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
+        let metrics = meter.map(|m| Arc::new(crate::metrics::MetricsRegistry::new(m)));
+
         Ok(Self {
             config,
             env,
             dataset_store,
             notification_multiplexer,
+            metrics,
         })
     }
 
@@ -267,9 +275,25 @@ impl Service {
 
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
+
         let is_streaming = common::stream_helpers::is_streaming(&query);
-        self.execute_plan(catalog, dataset_store, plan, is_streaming, None)
-            .await
+        let result = self
+            .execute_plan(catalog, dataset_store, plan, is_streaming, None)
+            .await;
+
+        // Record execution error
+        if result.is_err()
+            && let Some(metrics) = &self.metrics
+        {
+            let error_code = result
+                .as_ref()
+                .err()
+                .map(|e| e.error_code())
+                .unwrap_or("UNKNOWN_ERROR");
+            metrics.record_query_error(error_code);
+        }
+
+        result
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -281,6 +305,8 @@ impl Service {
         is_streaming: bool,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
+        let query_start_time = std::time::Instant::now();
+
         // is_incremental returns an error if query contains DDL, DML, etc.
         let incremental_check = plan
             .is_incremental()
@@ -315,7 +341,13 @@ impl Service {
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
             let record_baches = ctx.execute_plan(plan, true).await?;
-            Ok(QueryResultStream::NonIncremental(record_baches))
+            let stream = QueryResultStream::NonIncremental(record_baches);
+
+            if let Some(metrics) = &self.metrics {
+                Ok(track_query_metrics(stream, metrics, query_start_time))
+            } else {
+                Ok(stream)
+            }
         } else {
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
@@ -346,12 +378,18 @@ impl Service {
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
-            Ok(QueryResultStream::Incremental(
+            let stream = QueryResultStream::Incremental(
                 query
                     .as_stream()
                     .map_err(|err| Error::StreamingExecutionError(err.to_string()))
                     .boxed(),
-            ))
+            );
+
+            if let Some(metrics) = &self.metrics {
+                Ok(track_query_metrics(stream, metrics, query_start_time))
+            } else {
+                Ok(stream)
+            }
         }
     }
 }
@@ -576,6 +614,114 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     let mut bytes = BytesMut::new().writer();
     arrow::ipc::writer::write_message(&mut bytes, encoded, ipc_opts).unwrap();
     bytes.into_inner().into()
+}
+
+/// Wrap a query result stream with metrics tracking
+fn track_query_metrics(
+    stream: QueryResultStream,
+    metrics: &Arc<crate::metrics::MetricsRegistry>,
+    start_time: std::time::Instant,
+) -> QueryResultStream {
+    let metrics = metrics.clone();
+
+    match stream {
+        QueryResultStream::NonIncremental(record_batch_stream) => {
+            let schema = record_batch_stream.schema();
+            let wrapped_stream = stream! {
+                let mut total_rows = 0u64;
+                let mut total_bytes = 0u64;
+
+                for await result in record_batch_stream {
+                    match result {
+                        Ok(batch) => {
+                            let batch_rows = batch.num_rows() as u64;
+                            let batch_bytes = batch.get_array_memory_size() as u64;
+
+                            // Track cumulative totals
+                            total_rows += batch_rows;
+                            total_bytes += batch_bytes;
+
+                            yield Ok(batch);
+                        }
+                        Err(e) => {
+                            // Record metrics on error
+                            let duration = start_time.elapsed().as_millis() as f64;
+                            let err_msg = e.to_string();
+                            metrics.record_query_error(&err_msg);
+                            metrics.record_query_execution(duration, total_rows, total_bytes);
+
+                            yield Err(e);
+                            return;
+                        }
+                    }
+                }
+
+                // Stream completed successfully, record metrics
+                let duration = start_time.elapsed().as_millis() as f64;
+                metrics.record_query_execution(duration, total_rows, total_bytes);
+            };
+
+            let wrapped: SendableRecordBatchStream =
+                Box::pin(RecordBatchStreamAdapter::new(schema, wrapped_stream));
+
+            QueryResultStream::NonIncremental(wrapped)
+        }
+        QueryResultStream::Incremental(message_stream) => {
+            // Increment active streaming query counter
+            metrics.streaming_queries_active.inc();
+            metrics.streaming_queries_started.inc();
+
+            let wrapped = stream! {
+                let mut microbatch_start: Option<std::time::Instant> = None;
+
+                for await result in message_stream {
+                    match result {
+                        Ok(message) => {
+                            match message {
+                                QueryMessage::MicrobatchStart { .. } => {
+                                    microbatch_start = Some(std::time::Instant::now());
+                                }
+                                QueryMessage::Data(ref batch) => {
+                                    let batch_rows = batch.num_rows() as u64;
+                                    let batch_bytes = batch.get_array_memory_size() as u64;
+                                    // Record incremental throughput per batch (counters track cumulative totals)
+                                    metrics.record_streaming_batch(batch_rows, batch_bytes);
+                                }
+                                QueryMessage::MicrobatchEnd(_) => {
+                                    if let Some(start) = microbatch_start.take() {
+                                        let duration = start.elapsed().as_millis() as f64;
+                                        metrics.record_streaming_microbatch_duration(duration);
+                                    }
+                                }
+                                QueryMessage::BlockComplete(_) => {}
+                            }
+
+                            yield Ok(message);
+                        }
+                        Err(e) => {
+                            // Record metrics on error
+                            let duration = start_time.elapsed().as_millis() as f64;
+                            metrics.streaming_queries_completed.inc();
+                            metrics.streaming_queries_active.dec();
+                            metrics.record_streaming_lifetime(duration);
+
+                            yield Err(e);
+                            return;
+                        }
+                    }
+                }
+
+                // Record metrics on success
+                let duration = start_time.elapsed().as_millis() as f64;
+                metrics.streaming_queries_completed.inc();
+                metrics.streaming_queries_active.dec();
+                metrics.record_streaming_lifetime(duration);
+            }
+            .boxed();
+
+            QueryResultStream::Incremental(wrapped)
+        }
+    }
 }
 
 fn flight_data_stream(

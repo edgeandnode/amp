@@ -124,7 +124,8 @@ impl JsonRpcClient {
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
         let client = evm::provider::new(url, rate_limit);
-        let client = RootProviderWithMetrics::new(client, meter);
+        let client =
+            RootProviderWithMetrics::new(client, meter, provider_name.clone(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -149,9 +150,9 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ipc(path, rate_limit)
-            .await
-            .map(|c| RootProviderWithMetrics::new(c, meter))?;
+        let client = evm::provider::new_ipc(path, rate_limit).await.map(|c| {
+            RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
+        })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -176,9 +177,9 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ws(url, rate_limit)
-            .await
-            .map(|c| RootProviderWithMetrics::new(c, meter))?;
+        let client = evm::provider::new_ws(url, rate_limit).await.map(|c| {
+            RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
+        })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -235,7 +236,7 @@ impl JsonRpcClient {
                 let _permit = self.limiter.acquire().await.unwrap();
 
                 let block_num = BlockNumberOrTag::Number(block_num);
-                let block = self.client.with_metrics(async |c| {
+                let block = self.client.with_metrics("eth_getBlockByNumber", async |c| {
                     c.get_block_by_number(block_num).full().await
                 }).await;
                 let block = match block {
@@ -263,7 +264,7 @@ impl JsonRpcClient {
                         .map(|hash| {
                             let client = &self.client;
                             async move {
-                                client.with_metrics(|c| async move {
+                                client.with_metrics("eth_getTransactionReceipt", |c| async move {
                                     c.get_transaction_receipt(hash).await.map(|r| (hash, r))
                                 }).await
                             }
@@ -285,7 +286,7 @@ impl JsonRpcClient {
                     received_receipts
                 } else {
                     let receipts = self.client
-                        .with_metrics(async |c| {
+                        .with_metrics("eth_getBlockReceipts", async |c| {
                             c.get_block_receipts(BlockId::Number(block_num)).await
                         })
                         .await
@@ -463,7 +464,9 @@ impl BlockStreamer for JsonRpcClient {
         let _permit = self.limiter.acquire();
         let block = self
             .client
-            .with_metrics(async |c| c.get_block_by_number(number).await)
+            .with_metrics("eth_getBlockByNumber", async |c| {
+                c.get_block_by_number(number).await
+            })
             .await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
@@ -476,42 +479,29 @@ impl BlockStreamer for JsonRpcClient {
 #[derive(Debug, Clone)]
 struct RootProviderWithMetrics {
     inner: alloy::providers::RootProvider<AnyNetwork>,
-    metrics: Option<JsonRpcMetrics>,
+    metrics: Option<crate::metrics::MetricsRegistry>,
+    provider: String,
+    network: String,
 }
 
 impl RootProviderWithMetrics {
     fn new(
         inner: alloy::providers::RootProvider<AnyNetwork>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
+        provider: String,
+        network: String,
     ) -> Self {
-        let metrics = meter.map(|meter| JsonRpcMetrics {
-            num_rpc_calls_single: monitoring::telemetry::metrics::Counter::new(
-                meter,
-                "evm_rpc_num_calls_single",
-                "Number of single RPC calls made",
-            ),
-            num_rpc_calls_batch: monitoring::telemetry::metrics::Counter::new(
-                meter,
-                "evm_rpc_num_calls_batch",
-                "Number of batch RPC calls made",
-            ),
-            num_failed_rpc_calls: monitoring::telemetry::metrics::Counter::new(
-                meter,
-                "evm_rpc_num_failed_calls",
-                "Number of failed RPC calls",
-            ),
-            rpc_call_latency: monitoring::telemetry::metrics::Histogram::new_f64(
-                meter,
-                "evm_rpc_call_latency_ms",
-                "Latency of RPC calls in milliseconds",
-                "ms",
-            ),
-        });
-        Self { inner, metrics }
+        let metrics = meter.map(|meter| crate::metrics::MetricsRegistry::new(meter));
+        Self {
+            inner,
+            metrics,
+            provider,
+            network,
+        }
     }
 
     /// Use the provider to execute a function, recording metrics if enabled.
-    async fn with_metrics<T, E, F, Fut>(&self, func: F) -> Fut::Output
+    async fn with_metrics<T, E, F, Fut>(&self, method: &str, func: F) -> Fut::Output
     where
         F: FnOnce(alloy::providers::RootProvider<AnyNetwork>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
@@ -526,10 +516,9 @@ impl RootProviderWithMetrics {
         let resp = func(self.inner.clone()).await;
 
         let duration = start.elapsed().as_millis() as f64;
-        metrics.rpc_call_latency.record(duration);
-        metrics.num_rpc_calls_single.inc();
+        metrics.record_single_request(duration, &self.provider, &self.network, method);
         if resp.is_err() {
-            metrics.num_failed_rpc_calls.inc();
+            metrics.record_error(&self.provider, &self.network);
         }
 
         resp
@@ -563,30 +552,34 @@ impl RootProviderWithMetrics {
 
         batch.send().await.inspect_err(|_| {
             let duration = start.elapsed().as_millis() as f64;
-            metrics.rpc_call_latency.record(duration);
-            metrics.num_rpc_calls_batch.inc();
+            metrics.record_batch_request(
+                duration,
+                requests.len() as u64,
+                &self.provider,
+                &self.network,
+            );
+            metrics.record_error(&self.provider, &self.network);
         })?;
 
         let resp = try_join_all(waiters).await;
 
         let duration = start.elapsed().as_millis() as f64;
-        metrics.rpc_call_latency.record(duration);
-        metrics.num_rpc_calls_batch.inc();
+
+        // Record batch-level metrics
+        metrics.record_batch_request(
+            duration,
+            requests.len() as u64,
+            &self.provider,
+            &self.network,
+        );
+
         if resp.is_err() {
-            metrics.num_failed_rpc_calls.inc();
+            metrics.record_error(&self.provider, &self.network);
         }
 
         let resp = resp?;
         Ok(resp)
     }
-}
-
-#[derive(Debug, Clone)]
-struct JsonRpcMetrics {
-    num_rpc_calls_single: monitoring::telemetry::metrics::Counter,
-    num_rpc_calls_batch: monitoring::telemetry::metrics::Counter,
-    num_failed_rpc_calls: monitoring::telemetry::metrics::Counter,
-    rpc_call_latency: monitoring::telemetry::metrics::Histogram<f64>,
 }
 
 fn rpc_to_rows(

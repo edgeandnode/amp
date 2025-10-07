@@ -7,6 +7,7 @@ use url::Url;
 
 mod client;
 mod dataset_kind;
+pub mod metrics;
 pub mod tables;
 
 pub use self::{

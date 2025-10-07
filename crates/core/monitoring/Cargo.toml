@@ -4,13 +4,14 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-tracing-subscriber.workspace = true
-tracing.workspace = true
+common = { path = "../common" }
+metadata-db = { path = "../metadata-db" }
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
+tracing.workspace = true
 tracing-opentelemetry.workspace = true
-common = { path = "../common" }
+tracing-subscriber.workspace = true
 
 
 [dev-dependencies]

@@ -56,6 +56,7 @@ pub struct TestCtxBuilder {
     dataset_manifests_to_preload: BTreeSet<String>,
     provider_configs_to_preload: BTreeSet<String>,
     dataset_snapshots_to_preload: BTreeSet<String>,
+    meter: Option<monitoring::telemetry::metrics::Meter>,
 }
 
 impl TestCtxBuilder {
@@ -68,6 +69,7 @@ impl TestCtxBuilder {
             dataset_manifests_to_preload: Default::default(),
             provider_configs_to_preload: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
+            meter: None,
         }
     }
 
@@ -77,6 +79,15 @@ impl TestCtxBuilder {
     /// written to the generated config.toml file in the test environment.
     pub fn with_config(mut self, config: DaemonConfig) -> Self {
         self.daemon_config = config;
+        self
+    }
+
+    /// Enable metrics collection for this test environment.
+    ///
+    /// Provides a meter that will be passed to the daemon server and worker for metrics collection.
+    /// Use with `monitoring::test_utils::TestMetricsContext` to collect and validate metrics.
+    pub fn with_meter(mut self, meter: monitoring::telemetry::metrics::Meter) -> Self {
+        self.meter = Some(meter);
         self
     }
 
@@ -381,6 +392,9 @@ impl TestCtxBuilder {
             None => None,
         };
 
+        // Clone meter for worker before server consumes it
+        let worker_meter = self.meter.clone();
+
         // Start nozzle server using the fixture
         let server = DaemonServer::new(
             config.clone(),
@@ -388,6 +402,7 @@ impl TestCtxBuilder {
             true, // enable_flight
             true, // enable_jsonl
             true, // enable_admin_api
+            self.meter,
         )
         .await?;
 
@@ -396,8 +411,7 @@ impl TestCtxBuilder {
             NodeId::from_str(&self.test_name).expect("test name should be a valid WorkerNodeId"),
             config,
             temp_db.metadata_db().clone(),
-            None,
-            None,
+            worker_meter,
         )
         .await?;
 

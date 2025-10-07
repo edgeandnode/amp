@@ -59,7 +59,6 @@ async fn evm_rpc_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // metrics
             None,               // meter
             false,              // track_progress
         )
@@ -140,7 +139,6 @@ async fn eth_beacon_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // metrics
             None,               // meter
             false,              // track_progress
         )
@@ -222,7 +220,6 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
             None,               // metrics
-            None,               // meter
             false,              // track_progress
         )
         .await
@@ -302,7 +299,6 @@ async fn evm_rpc_base_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // metrics
             None,               // meter
             false,              // track_progress
         )
@@ -383,7 +379,6 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // metrics
             None,               // meter
             false,              // track_progress
         )
@@ -464,7 +459,6 @@ async fn eth_firehose_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // metrics
             None,               // meter
             false,              // track_progress
         )
@@ -546,7 +540,6 @@ async fn base_firehose_single_dump() {
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
             None,               // metrics
-            None,               // meter
             false,              // track_progress
         )
         .await
