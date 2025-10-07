@@ -274,10 +274,7 @@ impl Service {
             .await?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = ctx
-            .plan_sql(query.clone())
-            .await
-            .map_err(Error::from)?;
+        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
 
         let is_streaming = common::stream_helpers::is_streaming(&query);
         let result = self
@@ -285,7 +282,9 @@ impl Service {
             .await;
 
         // Record execution error
-        if result.is_err() && let Some(metrics) = &self.metrics {
+        if result.is_err()
+            && let Some(metrics) = &self.metrics
+        {
             let error_code = result
                 .as_ref()
                 .err()
