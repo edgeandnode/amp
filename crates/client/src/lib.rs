@@ -44,9 +44,10 @@ pub struct ResponseBatch {
     pub metadata: Metadata,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Metadata {
     pub ranges: Vec<BlockRange>,
+    pub ranges_complete: bool,
 }
 
 impl Stream for ResultStream {
@@ -115,6 +116,8 @@ pub enum ResponseBatchWithReorg {
         data: RecordBatch,
         metadata: Metadata,
     },
+    /// Watermark used to indicate the fully processed ranges when resuming a dropped stream.
+    Watermark(ResumeWatermark),
     /// Reorg marker, invalidating prior batches overlapping with the given ranges.
     Reorg {
         invalidation: Vec<InvalidationRange>,
@@ -162,11 +165,12 @@ impl From<BlockRange> for InvalidationRange {
 /// while let Some(result) = reorg_stream.next().await {
 ///     match result? {
 ///         ResponseBatchWithReorg::Batch { data, metadata } => {
-///             // Process normal data batch
 ///             println!("Received batch for block ranges: {:#?}", metadata.ranges);
 ///         }
+///         ResponseBatchWithReorg::Watermark(watermark) => {
+///             println!("Completed stream up to {:#?}", watermark);
+///         }
 ///         ResponseBatchWithReorg::Reorg { invalidation } => {
-///             // Handle reorg - invalidate data for these ranges
 ///             println!("Reorg detected, invalidating ranges: {:#?}", invalidation);
 ///         }
 ///     }
@@ -202,10 +206,15 @@ pub fn with_reorg(
                 yield Ok(ResponseBatchWithReorg::Reorg { invalidation });
             }
             prev_ranges = ranges;
-            yield Ok(ResponseBatchWithReorg::Batch{
-                data: batch.data,
-                metadata: batch.metadata,
-            });
+            if batch.metadata.ranges_complete {
+                let watermark = ResumeWatermark::from_ranges(batch.metadata.ranges);
+                yield Ok(ResponseBatchWithReorg::Watermark(watermark));
+            } else {
+                yield Ok(ResponseBatchWithReorg::Batch{
+                    data: batch.data,
+                    metadata: batch.metadata,
+                });
+            }
         }
     }
     .boxed()

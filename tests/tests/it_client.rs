@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use alloy::primitives::BlockHash;
 use common::{
     BlockNum,
@@ -6,7 +8,7 @@ use common::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use nozzle_client::{InvalidationRange, SqlClient};
+use nozzle_client::SqlClient;
 use tests::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
 use tokio::task::JoinHandle;
 
@@ -22,21 +24,31 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
         .await
         .expect("Failed to create query stream");
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum ControlMessage {
+        Batch(RangeInclusive<BlockNum>),
+        Reorg(RangeInclusive<BlockNum>),
+    }
+
     let handle: JoinHandle<Vec<ControlMessage>> = tokio::spawn(async move {
         let mut control_messages: Vec<ControlMessage> = Default::default();
         let mut stream = nozzle_client::with_reorg(stream);
+        let mut latest_range = None;
         while let Some(result) = stream.next().await {
             let response_batch = result.expect("Failed to get response batch from stream");
-            control_messages.push(match response_batch {
+            match response_batch {
                 nozzle_client::ResponseBatchWithReorg::Batch { metadata, .. } => {
-                    ControlMessage::Batch(metadata.ranges.into_iter().map(Into::into).collect())
+                    latest_range = Some(metadata.ranges[0].numbers.clone());
+                }
+                nozzle_client::ResponseBatchWithReorg::Watermark(_) => {
+                    control_messages.push(ControlMessage::Batch(latest_range.take().unwrap()));
                 }
                 nozzle_client::ResponseBatchWithReorg::Reorg { invalidation } => {
-                    ControlMessage::Reorg(invalidation)
+                    control_messages.push(ControlMessage::Reorg(invalidation[0].numbers.clone()));
                 }
-            });
-            if let Some(ControlMessage::Batch(ranges)) = control_messages.last()
-                && *ranges[0].numbers.end() == last_block
+            };
+            if let Some(ControlMessage::Batch(numbers)) = control_messages.last()
+                && *numbers.end() == last_block
             {
                 break;
             }
@@ -56,26 +68,11 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
     assert_eq!(
         handle.await.expect("Failed to await control messages task"),
         vec![
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 0..=0,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 1..=1,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=2,
-            }]),
-            ControlMessage::Reorg(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=3,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=3,
-            }]),
+            ControlMessage::Batch(0..=0),
+            ControlMessage::Batch(1..=1),
+            ControlMessage::Batch(2..=2),
+            ControlMessage::Reorg(2..=3),
+            ControlMessage::Batch(2..=3),
         ],
     );
 }
@@ -216,13 +213,6 @@ impl From<BlockInfo> for BlockRow {
 }
 
 // Helper types and functions
-
-/// Control message types from nozzle client streaming.
-#[derive(Debug, PartialEq, Eq)]
-enum ControlMessage {
-    Batch(Vec<InvalidationRange>),
-    Reorg(Vec<InvalidationRange>),
-}
 
 /// Stream records with resumption watermark.
 #[derive(Debug)]
