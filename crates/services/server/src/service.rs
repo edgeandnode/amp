@@ -285,15 +285,13 @@ impl Service {
             .await;
 
         // Record execution error
-        if result.is_err() {
-            if let Some(metrics) = &self.metrics {
-                let error_code = result
-                    .as_ref()
-                    .err()
-                    .map(|e| e.error_code())
-                    .unwrap_or("UNKNOWN_ERROR");
-                metrics.record_query_error(error_code);
-            }
+        if result.is_err() && let Some(metrics) = &self.metrics {
+            let error_code = result
+                .as_ref()
+                .err()
+                .map(|e| e.error_code())
+                .unwrap_or("UNKNOWN_ERROR");
+            metrics.record_query_error(error_code);
         }
 
         result
