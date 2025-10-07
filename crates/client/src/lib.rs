@@ -167,7 +167,7 @@ impl From<BlockRange> for InvalidationRange {
 ///             println!("Received batch for block ranges: {:#?}", metadata.ranges);
 ///         }
 ///         ResponseBatchWithReorg::Watermark(watermark) => {
-///            println!("Completed stream up to {:#?}", watermark);
+///             println!("Completed stream up to {:#?}", watermark);
 ///         }
 ///         ResponseBatchWithReorg::Reorg { invalidation } => {
 ///             println!("Reorg detected, invalidating ranges: {:#?}", invalidation);
