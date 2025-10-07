@@ -2,6 +2,8 @@
 default:
     @just --list
 
+# Support both docker and podman
+docker := if `command -v podman >/dev/null 2>&1; echo $?` == "0" { "podman" } else { "docker" }
 
 ## Workspace management
 
@@ -232,6 +234,60 @@ gen-substreams-datasets-proto:
 # Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
 gen-firehose-datasets-proto:
     RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
+
+
+## Build and Containerize
+
+# Build nozzle for current platform and create a Docker image
+containerize TAG="nozzle:local":
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    # Build nozzle for release
+    echo "Building nozzle binary..."
+    cargo build --release -p nozzle
+
+    # Create temporary directory
+    TMPDIR=$(mktemp --directory)
+    trap "rm -rf $TMPDIR" EXIT
+
+    # Detect current architecture
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        DOCKER_ARCH="amd64"
+    elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+        DOCKER_ARCH="arm64"
+    else
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+    fi
+
+    # Copy binary to tmpdir
+    cp target/release/nozzle $TMPDIR/nozzle-linux-$DOCKER_ARCH
+    chmod +x $TMPDIR/nozzle-linux-$DOCKER_ARCH
+
+    # Create Dockerfile in tmpdir
+    printf '%s\n' \
+        'FROM debian:trixie-slim' \
+        'ARG TARGETARCH' \
+        '' \
+        '# Install runtime dependencies' \
+        'RUN apt-get update && \' \
+        '    apt-get install -y ca-certificates && \' \
+        '    apt-get clean && \' \
+        '    rm -rf /var/lib/apt/lists/*' \
+        '' \
+        '# Copy the binary' \
+        'COPY nozzle-linux-$TARGETARCH /nozzle' \
+        'RUN chmod +x /nozzle' \
+        'ENTRYPOINT ["/nozzle"]' \
+        > $TMPDIR/Dockerfile
+
+    # Build Docker image
+    echo "Building Docker image..."
+    cd $TMPDIR && {{docker}} build --build-arg TARGETARCH=$DOCKER_ARCH -t {{TAG}} .
+
+    echo "Docker image built successfully: {{TAG}}"
 
 
 ## Misc
