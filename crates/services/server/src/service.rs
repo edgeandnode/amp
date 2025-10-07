@@ -623,6 +623,9 @@ fn flight_data_stream(
                         match encode_record_batch(batch, &app_metadata, &mut dictionary_tracker) {
                             Ok(encoded) => {
                                 for message in encoded {
+                                    if message.data_body.is_empty() {
+                                        continue;
+                                    }
                                     yield Ok(message);
                                 }
                             }
@@ -635,6 +638,18 @@ fn flight_data_stream(
                     QueryMessage::BlockComplete(_) => (),
                     QueryMessage::MicrobatchEnd(_) => {
                         assert!(app_metadata.is_some());
+                        let empty_batch = RecordBatch::new_empty(schema.clone());
+                        match encode_record_batch(empty_batch, &app_metadata, &mut dictionary_tracker) {
+                            Ok(encoded) => {
+                                for message in encoded {
+                                    yield Ok(message);
+                                }
+                            }
+                            Err(err) => {
+                                yield Err(err);
+                                return;
+                            }
+                        };
                         app_metadata = None;
                     }
                 }

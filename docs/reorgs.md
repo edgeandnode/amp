@@ -23,7 +23,9 @@ For each parquet file and streaming query microbatch, Nozzle tracks metadata for
 
 ### Arrow Flight Metadata
 
-Arrow Flight clients receive metadata about the block range associated with each data batch via the `app_metadata` field in `FlightData` messages. This metadata is crucial for handling reors at the client level.
+Arrow Flight clients receive metadata about the block range associated with each data batch via the `app_metadata` field in `FlightData` messages. This metadata is crucial for handling reorgs at the client level.
+
+For streaming queries, Nozzle sends an empty `RecordBatch` (with 0 rows) at the end of each microbatch to signal completion. This empty batch includes the `app_metadata` for the completed microbatch, allowing clients to track the fully processed block ranges.
 
 #### Metadata Format
 
@@ -52,7 +54,10 @@ Clients should track block ranges from consecutive batches to handle reorgs. The
 2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch is not equal to the prior range and starts at or before a previous batch's end block, a reorg has occurred.
 3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed.
 
-For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit reorg events alongside data batches.
+For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit three types of events:
+- `ResponseBatchWithReorg::Batch` - Normal data batches with metadata
+- `ResponseBatchWithReorg::Watermark` - Emitted when an empty batch is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
+- `ResponseBatchWithReorg::Reorg` - Reorg detection events with invalidation ranges
 
 #### Resuming Streams
 

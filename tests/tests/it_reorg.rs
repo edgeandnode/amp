@@ -543,11 +543,12 @@ impl ReorgTestCtx {
             .expect("Failed to start metadata stream")
     }
 
-    /// Extract BlockRange metadata from FlightData app_metadata field.
+    /// Extract BlockRange metadata from FlightData app_metadata field on microbatch end.
     ///
-    /// Returns None if the FlightData contains no metadata or if parsing fails.
+    /// Returns None if the FlightData contains no metadata, parsing fails, or the microbatch is
+    /// incomplete.
     fn extract_block_range(data: &FlightData) -> Option<BlockRange> {
-        if data.app_metadata.is_empty() {
+        if data.app_metadata.is_empty() || data.data_body.is_empty() {
             return None;
         }
 
