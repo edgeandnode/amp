@@ -15,7 +15,7 @@ use common::arrow::{
 };
 use futures::{Stream, ready};
 
-use crate::{Error, Metadata, ResponseBatch};
+use crate::{Error, ResponseBatch};
 
 pub struct FlightDataDecoder<S> {
     flight_data: S,
@@ -46,7 +46,7 @@ where
                 Some(Ok(flight_data)) => match self.state.decode_flight_data(flight_data) {
                     Ok(Some(decoded)) => {
                         let metadata = if decoded.metadata.is_empty() {
-                            Metadata { ranges: vec![] }
+                            Default::default()
                         } else {
                             match serde_json::from_slice(&decoded.metadata) {
                                 Ok(metadata) => metadata,

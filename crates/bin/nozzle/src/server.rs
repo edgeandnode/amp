@@ -150,9 +150,9 @@ async fn handle_jsonl_request(
         Err(err) => return err.into_response(),
     };
     let stream = stream
+        .record_batches()
         .map(|result| -> Result<Vec<u8>, BoxError> {
-            let (batch, _range) = result.map_err(error_payload)?;
-            // TODO: propagate range to client
+            let batch = result.map_err(error_payload)?;
             let mut buf: Vec<u8> = Default::default();
             let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
             writer.write(&batch)?;
