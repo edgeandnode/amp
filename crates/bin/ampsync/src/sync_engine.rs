@@ -847,26 +847,6 @@ impl AmpsyncDbEngine {
             .max_by_key(|r| r.end())
             .map(|r| (r.network.clone(), r.end() as i64))
     }
-
-    /// Get the checkpoint (last processed block_num) for a table
-    ///
-    /// DEPRECATED: Use load_resume_point() for smart resumption.
-    /// This method returns the highest block number across all networks for backward compatibility.
-    ///
-    /// Returns None if no checkpoint exists (first run)
-    pub async fn get_checkpoint(&self, table_name: &str) -> Result<Option<i64>, BoxError> {
-        let result: Option<(Option<i64>,)> =
-            sqlx::query_as("SELECT MAX(block_num) FROM _ampsync_checkpoints WHERE table_name = $1")
-                .bind(table_name)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| {
-                    format!("Failed to get checkpoint for table '{}': {}", table_name, e)
-                })?;
-
-        Ok(result.and_then(|(block_num,)| block_num))
-    }
-
     /// Save a watermark checkpoint for a table
     ///
     /// This should be called when receiving a ResponseBatchWithReorg::Watermark.
@@ -926,76 +906,6 @@ impl AmpsyncDbEngine {
         })?;
 
         Ok(())
-    }
-
-    /// Update the checkpoint for a table
-    ///
-    /// DEPRECATED: Use save_watermark() for hash-verified checkpoints.
-    /// This method is kept for backward compatibility with old code paths.
-    ///
-    /// This should be called after successfully inserting a batch.
-    /// Uses UPSERT (INSERT ... ON CONFLICT) for atomic updates.
-    pub async fn update_checkpoint(
-        &self,
-        table_name: &str,
-        _max_block_num: i64,
-    ) -> Result<(), BoxError> {
-        // Note: This method is deprecated and won't work with the new schema
-        // that requires (table_name, network) as primary key.
-        // It's kept only for compilation compatibility and will error at runtime
-        // if called with the new schema.
-        tracing::warn!(
-            table = table_name,
-            "update_checkpoint is deprecated, use save_watermark instead"
-        );
-
-        Err("update_checkpoint is deprecated, use save_watermark with ResponseBatchWithReorg::Watermark instead".into())
-    }
-
-    /// Extract the maximum block_num from a RecordBatch
-    ///
-    /// Returns None if:
-    /// - The batch has no block_num column
-    /// - The batch is empty
-    /// - All block_num values are NULL
-    pub fn extract_max_block_num(batch: &RecordBatch) -> Option<i64> {
-        use arrow_array::Array;
-
-        // Find the block_num column
-        let schema = batch.schema();
-        let block_num_idx = schema
-            .fields()
-            .iter()
-            .position(|f| f.name() == "block_num")?;
-
-        // Get the column data
-        let column = batch.column(block_num_idx);
-
-        // Handle UInt64 type (most common for block_num)
-        if let Some(uint64_array) = column.as_any().downcast_ref::<arrow_array::UInt64Array>() {
-            let mut max_val: Option<u64> = None;
-            for i in 0..uint64_array.len() {
-                if !uint64_array.is_null(i) {
-                    let val = uint64_array.value(i);
-                    max_val = Some(max_val.map_or(val, |m| m.max(val)));
-                }
-            }
-            return max_val.map(|v| v as i64);
-        }
-
-        // Handle Int64 type
-        if let Some(int64_array) = column.as_any().downcast_ref::<arrow_array::Int64Array>() {
-            let mut max_val: Option<i64> = None;
-            for i in 0..int64_array.len() {
-                if !int64_array.is_null(i) {
-                    let val = int64_array.value(i);
-                    max_val = Some(max_val.map_or(val, |m| m.max(val)));
-                }
-            }
-            return max_val;
-        }
-
-        None
     }
 
     /// Returns true if the table exists.

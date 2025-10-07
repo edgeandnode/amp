@@ -1,8 +1,6 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
-use arrow_array::{ArrayRef, RecordBatch, UInt64Array};
-use arrow_schema::{DataType, Field, Schema};
 use common::metadata::segments::ResumeWatermark;
 use pgtemp::PgTempDB;
 
@@ -29,21 +27,6 @@ async fn create_test_pool() -> (DbConnPool, sqlx::PgPool, PgTempDB) {
         .expect("Failed to connect to test database");
 
     (db_pool, raw_pool, pg_temp)
-}
-
-/// Helper to create a test RecordBatch with block_num column
-fn create_test_batch(block_nums: Vec<u64>) -> RecordBatch {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::UInt64, false),
-        Field::new("block_num", DataType::UInt64, false),
-    ]));
-
-    let ids: Vec<u64> = (0..block_nums.len() as u64).collect();
-    let id_array: ArrayRef = Arc::new(UInt64Array::from(ids));
-    let block_num_array: ArrayRef = Arc::new(UInt64Array::from(block_nums));
-
-    RecordBatch::try_new(schema, vec![id_array, block_num_array])
-        .expect("Failed to create test batch")
 }
 
 /// Helper to create a test watermark for a single network
@@ -198,43 +181,6 @@ async fn test_save_watermark_upsert() {
         .expect("Failed to load watermark");
 
     assert_eq!(loaded, Some(watermark2));
-}
-
-#[tokio::test]
-async fn test_extract_max_block_num() {
-    // Test with UInt64 blocks
-    let batch = create_test_batch(vec![100, 200, 150, 300, 250]);
-    let max_block = AmpsyncDbEngine::extract_max_block_num(&batch);
-    assert_eq!(max_block, Some(300));
-
-    // Test with single block
-    let batch = create_test_batch(vec![42]);
-    let max_block = AmpsyncDbEngine::extract_max_block_num(&batch);
-    assert_eq!(max_block, Some(42));
-
-    // Test with empty batch
-    let batch = create_test_batch(vec![]);
-    let max_block = AmpsyncDbEngine::extract_max_block_num(&batch);
-    assert_eq!(max_block, None);
-}
-
-#[tokio::test]
-async fn test_extract_max_block_num_no_block_column() {
-    // Create batch without block_num column
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::UInt64, false),
-        Field::new("name", DataType::Utf8, true),
-    ]));
-
-    let ids: Vec<u64> = vec![1, 2, 3];
-    let id_array: ArrayRef = Arc::new(UInt64Array::from(ids));
-    let names: ArrayRef = Arc::new(arrow_array::StringArray::from(vec!["a", "b", "c"]));
-
-    let batch =
-        RecordBatch::try_new(schema, vec![id_array, names]).expect("Failed to create test batch");
-
-    let max_block = AmpsyncDbEngine::extract_max_block_num(&batch);
-    assert_eq!(max_block, None);
 }
 
 #[tokio::test]
