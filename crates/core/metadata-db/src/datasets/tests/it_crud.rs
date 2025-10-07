@@ -19,7 +19,7 @@ async fn insert_with_valid_data_succeeds() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("test_dataset");
+    let name = Name::from_ref_unchecked("test_dataset");
     let version = "1.0.0"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -47,7 +47,7 @@ async fn insert_with_prerelease_version_succeeds() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("prerelease_dataset");
+    let name = Name::from_ref_unchecked("prerelease_dataset");
     let version = "1.0.0-alpha.1"
         .parse::<Version>()
         .expect("should parse prerelease version");
@@ -88,7 +88,7 @@ async fn insert_with_duplicate_name_and_version_fails() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("duplicate_dataset");
+    let name = Name::from_ref_unchecked("duplicate_dataset");
     let version = "1.0.0"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -131,7 +131,7 @@ async fn get_by_name_and_version_with_details_returns_existing_dataset() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("existing_dataset");
+    let name = Name::from_ref_unchecked("existing_dataset");
     let version = "2.1.0"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -180,7 +180,7 @@ async fn get_by_name_and_version_with_details_returns_none_for_nonexistent_datas
         .await
         .expect("Failed to run migrations");
 
-    let name = Name::from_ref("nonexistent_dataset");
+    let name = Name::from_ref_unchecked("nonexistent_dataset");
     let version = "1.0.0"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -209,7 +209,7 @@ async fn exists_by_name_and_version_returns_true_for_existing_dataset() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("exists_dataset");
+    let name = Name::from_ref_unchecked("exists_dataset");
     let version = "1.5.2"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -246,7 +246,7 @@ async fn exists_by_name_and_version_returns_false_for_nonexistent_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let name = Name::from_ref("nonexistent_dataset");
+    let name = Name::from_ref_unchecked("nonexistent_dataset");
     let version = "99.99.99"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -272,7 +272,7 @@ async fn get_manifest_by_name_and_version_returns_manifest_for_existing_dataset(
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("manifest_dataset");
+    let name = Name::from_ref_unchecked("manifest_dataset");
     let version = "3.0.1"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -312,7 +312,7 @@ async fn get_manifest_by_name_and_version_returns_none_for_nonexistent_dataset()
         .await
         .expect("Failed to run migrations");
 
-    let name = Name::from_ref("no_manifest_dataset");
+    let name = Name::from_ref_unchecked("no_manifest_dataset");
     let version = "1.0.0"
         .parse::<Version>()
         .expect("should parse valid version");
@@ -343,7 +343,7 @@ async fn get_latest_version_by_name_returns_none_for_nonexistent_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let name = Name::from_ref("no_versions_dataset");
+    let name = Name::from_ref_unchecked("no_versions_dataset");
 
     //* When
     let result = datasets::get_latest_version_by_name_with_details(&mut *conn, name).await;
@@ -372,7 +372,7 @@ async fn get_latest_version_by_name_returns_highest_version() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let name = Name::from_ref("versioned_dataset");
+    let name = Name::from_ref_unchecked("versioned_dataset");
 
     // Insert multiple versions
     let version_1_0_0 = "1.0.0"

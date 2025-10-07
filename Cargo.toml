@@ -4,6 +4,7 @@ members = [
     "crates/bin/dump-check",
     "crates/bin/generate-manifest",
     "crates/bin/nozzle",
+    "crates/bin/nozzleup",
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
@@ -85,6 +86,7 @@ regex = "1.10.2"
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
+    "stream",
 ] }
 schemars = "1.0.4"
 semver = { version = "1.0.18", features = ["serde"] }

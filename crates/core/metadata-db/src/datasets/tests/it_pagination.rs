@@ -62,7 +62,7 @@ async fn list_first_page_respects_limit_and_ordering() {
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
         let owner = "test_owner";
-        let name = Name::from_ref(*name);
+        let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
@@ -161,7 +161,10 @@ async fn list_next_page_uses_cursor() {
         ("test_dataset_4", "5.0.0"), // #5
         ("test_dataset_4", "4.0.0"),
     ];
-    let cursor = (Name::from_ref("test_dataset_1"), test_version("3.0.0"));
+    let cursor = (
+        Name::from_ref_unchecked("test_dataset_1"),
+        test_version("3.0.0"),
+    );
 
     // Shuffle to ensure insertion order does not affect retrieval order
     datasets.shuffle(&mut rand::rng());
@@ -169,7 +172,7 @@ async fn list_next_page_uses_cursor() {
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
         let owner = "test_owner";
-        let name = Name::from_ref(*name);
+        let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
@@ -258,7 +261,7 @@ async fn list_versions_by_name_first_page_when_empty_returns_empty_list() {
     //* When
     let result = datasets::list_versions_by_name_first_page(
         &mut *conn,
-        Name::from_ref("nonexistent_dataset"),
+        Name::from_ref_unchecked("nonexistent_dataset"),
         10,
     )
     .await
@@ -283,7 +286,7 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let dataset_name = Name::from_ref("versioned_dataset");
+    let dataset_name = Name::from_ref_unchecked("versioned_dataset");
 
     // Create 7 versions with semver edge cases to test both limit and ordering
     // Using versions that test proper semver ordering vs lexicographic
@@ -377,7 +380,7 @@ async fn list_versions_by_name_next_page_uses_cursor() {
         .expect("Failed to run migrations");
 
     let owner = "test_owner";
-    let dataset_name = Name::from_ref("paginated_dataset");
+    let dataset_name = Name::from_ref_unchecked("paginated_dataset");
 
     // Create 7 versions with specific structure:
     // - Test cursor pagination with semver edge cases

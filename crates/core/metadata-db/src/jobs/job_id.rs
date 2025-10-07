@@ -1,18 +1,30 @@
-//! Job ID new-type with validation for job record identifiers.
+//! Job ID new-type wrapper for database values
 //!
-//! This module provides a type-safe wrapper around database job IDs with built-in
-//! validation to ensure IDs are always positive and within valid ranges.
+//! This module provides a [`JobId`] new-type wrapper around `i64` that maintains job ID
+//! invariants for database operations.
+//!
+//! ## Validation Strategy
+//!
+//! This type **maintains invariants but does not validate** input data. Validation occurs
+//! at system boundaries through types like [`worker::JobId`], which enforce the required
+//! constraints before converting into this database-layer type. Database values are trusted
+//! as already valid, following the principle of "validate at boundaries, trust database data."
+//!
+//! Types that convert into [`JobId`] are responsible for ensuring invariants are met:
+//! - Job IDs must be positive (> 0)
+//! - Job IDs must fit within the range of `i64`
 
 use sqlx::{Database, Postgres, encode::IsNull, error::BoxDynError};
 
 /// A type-safe identifier for job records.
 ///
-/// [`JobId`] is a new-type wrapper around `i64` that enforces the following invariants:
+/// [`JobId`] is a new-type wrapper around `i64` that maintains the following invariants:
 /// - Values must be positive (> 0)
 /// - Values must fit within the range of `i64`
 ///
-/// This type provides validation when converting from raw integers and integrates
-/// seamlessly with PostgreSQL through sqlx trait implementations.
+/// The type trusts that values are already validated. Validation must occur at system
+/// boundaries before conversion into this type. The type integrates seamlessly with
+/// PostgreSQL through sqlx trait implementations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct JobId(i64);
@@ -21,10 +33,13 @@ impl JobId {
     /// Creates a JobId from an i64 without validation
     ///
     /// # Safety
-    /// The caller must ensure the provided value holds the invariants:
+    /// The caller must ensure the provided value upholds the job ID invariants:
     /// - Value must be positive (> 0)
     /// - Value must fit within the range of i64
-    pub fn from_i64(value: impl Into<i64>) -> Self {
+    ///
+    /// This method does not perform validation. Failure to uphold the invariants may
+    /// cause undefined behavior.
+    pub fn from_i64_unchecked(value: impl Into<i64>) -> Self {
         Self(value.into())
     }
 
@@ -64,7 +79,8 @@ impl sqlx::postgres::PgHasArrayType for JobId {
 impl<'r> sqlx::Decode<'r, Postgres> for JobId {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
         let id = <i64 as sqlx::Decode<Postgres>>::decode(value)?;
-        Ok(Self::from_i64(id))
+        // SAFETY: Database values are trusted to uphold invariants; validation occurs at boundaries before insertion.
+        Ok(Self::from_i64_unchecked(id))
     }
 }
 
@@ -92,6 +108,7 @@ impl<'de> serde::Deserialize<'de> for JobId {
         D: serde::Deserializer<'de>,
     {
         let id = i64::deserialize(deserializer)?;
-        Ok(Self::from_i64(id))
+        // SAFETY: Deserialized values are trusted to uphold invariants; typically from database or internal communication.
+        Ok(Self::from_i64_unchecked(id))
     }
 }

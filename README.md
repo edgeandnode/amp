@@ -8,6 +8,97 @@ _The data goes in the bucket_
 
 An experiment in ETL architecture for data services on The Graph. 'Project Nozzle' is a codename.
 
+## Installation
+
+The easiest way to install Nozzle is using `nozzleup`, the official version manager and installer:
+
+```sh
+# Obtain a GitHub personal access token (required while repo is private)
+export GITHUB_TOKEN=$(gh auth token)
+
+# Install nozzleup
+curl --proto '=https' --tlsv1.2 -sSf \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | sh
+```
+
+This will install `nozzleup` and the latest version of `nozzle`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.
+
+Once installed, you can manage `nozzle` versions:
+
+```sh
+# Install or update to the latest version
+nozzleup install
+
+# Switch between installed versions
+nozzleup use v0.1.0
+
+# Build from source (main branch)
+nozzleup build
+
+# Build from a specific PR or branch
+nozzleup build --pr 123
+nozzleup build --branch develop
+```
+
+For more details and advanced options, see the [nozzleup README](nozzleup/README.md).
+
+### Installation via Nix
+
+For Nix users, `nozzle` is available as a flake:
+
+```sh
+# Run directly without installing
+nix run github:edgeandnode/project-nozzle
+
+# Install to your profile
+nix profile install github:edgeandnode/project-nozzle
+
+# Try it out temporarily
+nix shell github:edgeandnode/project-nozzle -c nozzle --version
+```
+
+You can also add it to your NixOS or home-manager configuration:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nozzle = {
+      url = "github:edgeandnode/project-nozzle";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, nozzle, ... }: {
+    # NixOS configuration
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      # ...
+      environment.systemPackages = [
+        nozzle.packages.${system}.nozzle
+      ];
+    };
+
+    # Or home-manager configuration
+    home.packages = [
+      nozzle.packages.${system}.nozzle
+    ];
+  };
+}
+```
+
+Note: Nix handles version management, so `nozzleup` is not needed for Nix users.
+
+### Building from Source (Manual)
+
+If you prefer to build manually without using `nozzleup`:
+
+```sh
+cargo build --release -p nozzle
+```
+
+The binary will be available at `target/release/nozzle`.
+
 ### Python Quickstart
 
 To quickly dive into the power of Nozzle with Python, best is to run the [`marimo_example_nb.ipynb](python/notebooks/marimo_example_nb.pyy). Follow the instructions in thy [Python README](python/README.md).

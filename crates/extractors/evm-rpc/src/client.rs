@@ -54,7 +54,6 @@ pub enum ToRowError {
 struct BatchingRpcWrapper {
     client: RootProviderWithMetrics,
     batch_size: usize,
-    retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
 }
 
@@ -62,14 +61,12 @@ impl BatchingRpcWrapper {
     fn new(
         client: RootProviderWithMetrics,
         batch_size: usize,
-        retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
     ) -> Self {
         assert!(batch_size > 0, "batch_size must be > 0");
         Self {
             client,
             batch_size,
-            retries,
             limiter,
         }
     }
@@ -86,7 +83,6 @@ impl BatchingRpcWrapper {
         }
         let mut results = Vec::new();
         let mut remaining_calls = calls;
-        let mut remaining_attempts = self.retries;
 
         while !remaining_calls.is_empty() {
             let chunk: Vec<_> = remaining_calls
@@ -96,63 +92,10 @@ impl BatchingRpcWrapper {
             // Acquire semaphore permit for the batch, which will be one request
             let _permit = self.limiter.acquire().await?;
 
-            let batch_result = self.client.batch_request(&chunk).await;
-
-            match batch_result {
-                Ok(responses) => {
-                    results.extend(responses);
-                }
-                Err(e) if remaining_attempts > 0 && self.batch_size > 1 => {
-                    self.request_batch_individually(&mut results, remaining_attempts, &chunk, e)
-                        .await?;
-                    remaining_calls.splice(0..0, chunk);
-                    remaining_attempts -= 1;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
+            let batch_responses = self.client.batch_request(&chunk).await?;
+            results.extend(batch_responses);
         }
         Ok(results)
-    }
-
-    /// If a batch fails, try each call individually to isolate the failure for debugging.
-    async fn request_batch_individually<T: RpcRecv, Params: RpcSend>(
-        &self,
-        results: &mut Vec<T>,
-        remaining_attempts: usize,
-        chunk: &[(&'static str, Params)],
-        e: BoxError,
-    ) -> Result<(), BoxError> {
-        let delay_ms = 500 * (self.retries - remaining_attempts) as u64;
-        warn!(
-            "Batch failed. Error({:?}) Batch size {}. Retries left: {}, will wait for {}ms before retrying",
-            e, self.batch_size, remaining_attempts, delay_ms
-        );
-        for (method, params) in chunk {
-            tracing::info!(
-                "Retrying {} with params {:?} after error: {}",
-                method,
-                params,
-                e
-            );
-            let _permit = self.limiter.acquire().await?;
-            let result = self.client.request(method, params).await;
-            match result {
-                Ok(response) => {
-                    results.push(response);
-                }
-                Err(err) => {
-                    error!(
-                        "Error executing {} with params {:?}: {}",
-                        method, params, err
-                    );
-                    return Err(err.into());
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        Ok(())
     }
 }
 
@@ -371,12 +314,8 @@ impl JsonRpcClient {
         end_block: u64,
     ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
         tracing::info!("Fetching blocks (batched) {} to {}", start_block, end_block);
-        let batching_client = BatchingRpcWrapper::new(
-            self.client.clone(),
-            self.batch_size,
-            10,
-            self.limiter.clone(),
-        );
+        let batching_client =
+            BatchingRpcWrapper::new(self.client.clone(), self.batch_size, self.limiter.clone());
 
         let mut blocks_completed = 0;
         let mut txns_completed = 0;
@@ -594,35 +533,6 @@ impl RootProviderWithMetrics {
         }
 
         resp
-    }
-
-    /// Send a single RPC request, recording metrics if enabled.
-    async fn request<Params, Resp>(&self, method: &'static str, params: Params) -> BoxResult<Resp>
-    where
-        Params: RpcSend,
-        Resp: RpcRecv,
-    {
-        let client = self.inner.client();
-
-        let Some(metrics) = self.metrics.as_ref() else {
-            // Send request without recording metrics.
-            let resp = client.request(method, params).await?;
-            return Ok(resp);
-        };
-
-        let start = Instant::now();
-
-        let resp = client.request(method, params).await;
-
-        let duration = start.elapsed().as_millis() as f64;
-        metrics.rpc_call_latency.record(duration);
-        metrics.num_rpc_calls_single.inc();
-        if resp.is_err() {
-            metrics.num_failed_rpc_calls.inc();
-        }
-
-        let resp = resp?;
-        Ok(resp)
     }
 
     /// Send a batch of RPC requests, recording metrics if enabled.

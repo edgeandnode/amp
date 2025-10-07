@@ -74,6 +74,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "monitoring",
     "nozzle",
     "nozzle_client",
+    "nozzleup",
     "server",
     "substreams_datasets",
     "tests",

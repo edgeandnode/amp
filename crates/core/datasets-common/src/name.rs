@@ -140,13 +140,15 @@ impl From<metadata_db::DatasetNameOwned> for Name {
 
 impl From<Name> for metadata_db::DatasetNameOwned {
     fn from(value: Name) -> Self {
-        metadata_db::DatasetName::from_owned(value.0)
+        // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
+        metadata_db::DatasetName::from_owned_unchecked(value.0)
     }
 }
 
 impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
     fn from(value: &'a Name) -> Self {
-        metadata_db::DatasetName::from_ref(&value.0)
+        // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
+        metadata_db::DatasetName::from_ref_unchecked(&value.0)
     }
 }
 

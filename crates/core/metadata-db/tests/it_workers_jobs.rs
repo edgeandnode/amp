@@ -14,7 +14,7 @@ async fn schedule_and_retrieve_job() {
             .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
-    let worker_id = WorkerNodeId::from_ref("test-worker-id");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     metadata_db
         .register_worker(&worker_id)
         .await
@@ -60,7 +60,7 @@ async fn pagination_traverses_all_jobs_ordered() {
             .expect("Failed to connect to metadata db");
 
     let total_jobs = 7;
-    let worker_id = WorkerNodeId::from_ref("test-worker-traverse");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");
     metadata_db
         .register_worker(&worker_id)
         .await
