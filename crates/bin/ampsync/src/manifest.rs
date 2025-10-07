@@ -3,7 +3,6 @@ use std::{path::Path, time::Duration};
 use admin_api::handlers::datasets::{
     get_version_schema::DatasetSchemaResponse, get_versions::DatasetVersionsResponse,
 };
-use common::BoxError;
 use datasets_common::{name::Name, version::Version};
 use datasets_derived::{DerivedDatasetKind, Manifest, manifest::Table};
 use lazy_static::lazy_static;
@@ -13,8 +12,66 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::SourceType;
 use serde_json::Value;
+use thiserror::Error;
 
 use crate::{dataset_definition::DatasetDefinition, sql_validator};
+
+/// Errors that can occur when fetching or parsing dataset manifests.
+#[derive(Error, Debug, Clone)]
+pub enum ManifestError {
+    #[error("Dataset '{dataset}' version '{version}' not found in admin-api")]
+    DatasetNotFound { dataset: String, version: String },
+
+    #[error("No versions available for dataset '{dataset}' in admin-api")]
+    NoVersionsAvailable { dataset: String },
+
+    #[error("Failed to connect to admin-api at {url}: {message}")]
+    NetworkError { url: String, message: String },
+
+    #[error("HTTP {status} from admin-api {url}: {message}")]
+    HttpError {
+        status: u16,
+        url: String,
+        message: String,
+    },
+
+    #[error("Invalid dataset name '{name}': {reason}")]
+    InvalidDatasetName { name: String, reason: String },
+
+    #[error("Invalid dataset version '{version}': {reason}")]
+    InvalidVersion { version: String, reason: String },
+
+    #[error("Schema mismatch: {0}")]
+    SchemaMismatch(String),
+
+    #[error("Failed to read config file at '{path}': {message}")]
+    ConfigFileReadError { path: String, message: String },
+
+    #[error("Failed to parse config file at '{path}': {reason}")]
+    ConfigParseError { path: String, reason: String },
+
+    #[error("SQL validation failed for table '{table}': {reason}")]
+    SqlValidationError { table: String, reason: String },
+}
+
+impl ManifestError {
+    /// Returns true if this error is retryable (transient/recoverable).
+    ///
+    /// Retryable errors include:
+    /// - Dataset not found (may be published soon)
+    /// - No versions available (may be published soon)
+    /// - Network errors (may be transient)
+    /// - 5xx HTTP errors (server-side issues, may recover)
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            ManifestError::DatasetNotFound { .. }
+            | ManifestError::NoVersionsAvailable { .. }
+            | ManifestError::NetworkError { .. } => true,
+            ManifestError::HttpError { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+}
 
 /// Maximum number of dataset versions to fetch from admin-api when resolving version
 const ADMIN_API_VERSION_LIMIT: usize = 1000;
@@ -48,36 +105,53 @@ lazy_static! {
 /// * `config_path` - Path to the nozzle configuration file
 ///
 /// # Returns
-/// * `Result<DatasetDefinition, BoxError>` - Parsed dataset definition with sanitized SQL
-pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefinition, BoxError> {
+/// * `Result<DatasetDefinition, ManifestError>` - Parsed dataset definition with sanitized SQL
+pub async fn load_dataset_definition(
+    config_path: &Path,
+) -> Result<DatasetDefinition, ManifestError> {
     // Read the file contents asynchronously to avoid blocking the executor
-    let contents = tokio::fs::read_to_string(config_path)
-        .await
-        .map_err(|e| format!("Failed to read manifest file: {}", e))?;
+    let contents = tokio::fs::read_to_string(config_path).await.map_err(|e| {
+        ManifestError::ConfigFileReadError {
+            path: config_path.display().to_string(),
+            message: e.to_string(),
+        }
+    })?;
 
     // Determine how to parse based on file extension
     let extension = config_path
         .extension()
         .and_then(|ext| ext.to_str())
-        .ok_or("Unable to determine file extension")?;
+        .ok_or_else(|| ManifestError::ConfigParseError {
+            path: config_path.display().to_string(),
+            reason: "Unable to determine file extension".to_string(),
+        })?;
 
     let mut dataset_def = match extension {
         "json" => {
             // Parse JSON directly using serde_json
-            serde_json::from_str(&contents)
-                .map_err(|e| format!("Failed to parse manifest as JSON: {}", e).into())
+            serde_json::from_str(&contents).map_err(|e| ManifestError::ConfigParseError {
+                path: config_path.display().to_string(),
+                reason: format!("Failed to parse JSON: {}", e),
+            })
         }
         "js" | "mjs" | "ts" | "mts" => {
             // Parse JS/TS files using oxc_parser
-            parse_js_ts_manifest(&contents, extension)
+            parse_js_ts_manifest(&contents, extension, config_path)
         }
-        _ => Err(format!("Unsupported file extension: {}", extension).into()),
+        _ => Err(ManifestError::ConfigParseError {
+            path: config_path.display().to_string(),
+            reason: format!("Unsupported file extension: {}", extension),
+        }),
     }?;
 
     // Sanitize all SQL queries in tables (remove ORDER BY clauses)
     for (table_name, table_def) in &mut dataset_def.tables {
-        let sanitized_sql = sql_validator::sanitize_sql(&table_def.sql)
-            .map_err(|e| format!("Failed to sanitize SQL in table '{}': {}", table_name, e))?;
+        let sanitized_sql = sql_validator::sanitize_sql(&table_def.sql).map_err(|e| {
+            ManifestError::SqlValidationError {
+                table: table_name.clone(),
+                reason: format!("Failed to sanitize SQL: {}", e),
+            }
+        })?;
         table_def.sql = sanitized_sql;
     }
 
@@ -85,7 +159,11 @@ pub async fn load_dataset_definition(config_path: &Path) -> Result<DatasetDefini
 }
 
 /// Parse a JavaScript/TypeScript file to extract the dataset definition using AST parsing
-fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefinition, BoxError> {
+fn parse_js_ts_manifest(
+    contents: &str,
+    extension: &str,
+    config_path: &Path,
+) -> Result<DatasetDefinition, ManifestError> {
     let allocator = Allocator::default();
 
     // Determine source type based on extension
@@ -109,14 +187,17 @@ fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefini
             .iter()
             .map(|e| format!("{:?}", e))
             .collect();
-        return Err(format!("Parse errors: {}", error_messages.join(", ")).into());
+        return Err(ManifestError::ConfigParseError {
+            path: config_path.display().to_string(),
+            reason: format!("Parse errors: {}", error_messages.join(", ")),
+        });
     }
 
     // Extract the manifest from the AST
     let mut extractor = ManifestExtractor::new();
     extractor.visit_program(&parse_result.program);
 
-    extractor.extract_manifest()
+    extractor.extract_manifest(config_path)
 }
 
 /// Resolve a simple version (e.g., "0.2.0") to a fully qualified version (e.g., "0.2.0-LTcyNjgzMjc1NA").
@@ -131,35 +212,57 @@ fn parse_js_ts_manifest(contents: &str, extension: &str) -> Result<DatasetDefini
 ///
 /// # Returns
 /// * `Ok(Version)` - The fully qualified version
-/// * `Err(BoxError)` - If the version cannot be found or HTTP request fails
+/// * `Err(ManifestError)` - If the version cannot be found or HTTP request fails
 async fn resolve_qualified_version(
     admin_api_addr: &str,
     name: &Name,
     version: &Version,
-) -> Result<Version, BoxError> {
-    let versions_resp = ADMIN_API_CLIENT
-        .get(format!(
-            "{}/datasets/{}/versions?limit={}",
-            admin_api_addr, name, ADMIN_API_VERSION_LIMIT
-        ))
-        .send()
-        .await?;
+) -> Result<Version, ManifestError> {
+    let url = format!(
+        "{}/datasets/{}/versions?limit={}",
+        admin_api_addr, name, ADMIN_API_VERSION_LIMIT
+    );
+
+    let versions_resp =
+        ADMIN_API_CLIENT
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ManifestError::NetworkError {
+                url: url.clone(),
+                message: e.to_string(),
+            })?;
 
     // Check for HTTP errors
     let status = versions_resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err(ManifestError::NoVersionsAvailable {
+            dataset: name.to_string(),
+        });
+    }
     if !status.is_success() {
-        return Err(format!(
-            "Failed to fetch versions from admin-api: HTTP {} for dataset '{}'",
-            status, name
-        )
-        .into());
+        let body = versions_resp.text().await.unwrap_or_default();
+        return Err(ManifestError::HttpError {
+            status: status.as_u16(),
+            url: url.clone(),
+            message: body,
+        });
     }
 
-    let versions_data: DatasetVersionsResponse = versions_resp.json().await?;
+    let versions_data: DatasetVersionsResponse =
+        versions_resp
+            .json()
+            .await
+            .map_err(|e| ManifestError::NetworkError {
+                url: url.clone(),
+                message: e.to_string(),
+            })?;
 
     // Check if any versions exist
     if versions_data.versions.is_empty() {
-        return Err(format!("No versions found for dataset '{}' in admin-api", name).into());
+        return Err(ManifestError::NoVersionsAvailable {
+            dataset: name.to_string(),
+        });
     }
 
     // Find the first version that matches our config version prefix
@@ -170,17 +273,9 @@ async fn resolve_qualified_version(
         .versions
         .iter()
         .find(|v| v.to_string().starts_with(&version_prefix))
-        .ok_or_else(|| {
-            format!(
-                "No version found matching prefix '{}' for dataset '{}'. Available versions: {:?}",
-                version_prefix,
-                name,
-                versions_data
-                    .versions
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-            )
+        .ok_or_else(|| ManifestError::DatasetNotFound {
+            dataset: name.to_string(),
+            version: version_prefix.clone(),
         })?
         .clone();
 
@@ -192,6 +287,154 @@ async fn resolve_qualified_version(
     );
 
     Ok(qualified_version)
+}
+
+/// Fetch manifest with indefinite polling for initial startup.
+///
+/// This function polls the admin-api until the dataset becomes available.
+/// Used during initial startup when the dataset might not be published yet.
+///
+/// # Arguments
+/// * `admin_api_addr` - Base URL of the admin-api service
+/// * `config_path` - Path to the local nozzle configuration file
+///
+/// # Returns
+/// * `Ok(Manifest)` - Successfully fetched manifest
+/// * `Err(ManifestError)` - Non-recoverable errors (invalid config, permanent failures)
+///
+/// # Behavior
+/// - On retryable errors: Retry with exponential backoff (indefinitely)
+/// - On non-retryable errors: Fail immediately
+/// - Logs helpful messages to guide users to run `nozzle dump`
+pub async fn fetch_manifest_with_startup_poll(
+    admin_api_addr: &str,
+    config_path: &Path,
+) -> Result<Manifest, ManifestError> {
+    let mut first_error_logged = false;
+    let mut attempt = 0u32;
+    let max_backoff_secs = 30u64;
+
+    loop {
+        match fetch_manifest(admin_api_addr, config_path).await {
+            Ok(manifest) => {
+                if attempt > 0 {
+                    tracing::info!(
+                        "Successfully fetched manifest after {} attempts",
+                        attempt + 1
+                    );
+                }
+                return Ok(manifest);
+            }
+            Err(e) if e.is_retryable() => {
+                if !first_error_logged {
+                    tracing::warn!(
+                        "Dataset not found in admin-api. This is expected on first run."
+                    );
+                    tracing::warn!(
+                        "Have you run 'nozzle dump --dataset <name>' to publish the dataset?"
+                    );
+                    tracing::info!("Waiting for dataset to become available...");
+                    first_error_logged = true;
+                }
+
+                // Calculate backoff with saturation to avoid overflow
+                let backoff_secs = if attempt < 5 {
+                    2u64.pow(attempt)
+                } else {
+                    max_backoff_secs
+                }
+                .min(max_backoff_secs);
+
+                if attempt > 0 && attempt % 5 == 0 {
+                    tracing::info!(
+                        "Still waiting for dataset... (attempt {}, retrying in {}s)",
+                        attempt + 1,
+                        backoff_secs
+                    );
+                }
+
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                attempt += 1;
+            }
+            Err(e) => {
+                // Non-retryable error
+                return Err(e);
+            }
+        }
+    }
+}
+
+/// Fetch manifest with limited retries for hot-reload.
+///
+/// This function retries a limited number of times to give the dump command
+/// time to complete after a config file change.
+///
+/// # Arguments
+/// * `admin_api_addr` - Base URL of the admin-api service
+/// * `config_path` - Path to the local nozzle configuration file
+/// * `max_retries` - Maximum number of retry attempts
+///
+/// # Returns
+/// * `Ok(Manifest)` - Successfully fetched manifest
+/// * `Err(ManifestError)` - Failed after max retries or non-recoverable error
+///
+/// # Behavior
+/// - On retryable errors: Retry up to max_retries times with exponential backoff
+/// - On non-retryable errors: Fail immediately
+/// - After max retries: Return error suggesting to check dump command
+pub async fn fetch_manifest_with_retry(
+    admin_api_addr: &str,
+    config_path: &Path,
+    max_retries: u32,
+) -> Result<Manifest, ManifestError> {
+    let mut attempt = 0u32;
+
+    loop {
+        match fetch_manifest(admin_api_addr, config_path).await {
+            Ok(manifest) => {
+                if attempt > 0 {
+                    tracing::info!(
+                        "Successfully fetched manifest after {} retry attempts",
+                        attempt
+                    );
+                }
+                return Ok(manifest);
+            }
+            Err(e) if e.is_retryable() && attempt < max_retries => {
+                // Calculate backoff with saturation to avoid overflow
+                let backoff_secs = if attempt < 5 {
+                    2u64.pow(attempt)
+                } else {
+                    30u64
+                }
+                .min(30);
+
+                tracing::warn!(
+                    "Dataset not found (attempt {}/{}). Retrying in {}s to allow dump command to complete...",
+                    attempt + 1,
+                    max_retries,
+                    backoff_secs
+                );
+
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                attempt += 1;
+            }
+            Err(e) => {
+                // Max retries exceeded or non-recoverable error
+                if attempt >= max_retries && e.is_retryable() {
+                    return Err(ManifestError::ConfigParseError {
+                        path: config_path.display().to_string(),
+                        reason: format!(
+                            "Failed to fetch manifest after {} retries: {}. \
+                             Dataset version not found - did the 'nozzle dump' command complete successfully?",
+                            max_retries, e
+                        ),
+                    });
+                }
+                return Err(e);
+            }
+        }
+    }
 }
 
 /// Fetch and construct a dataset Manifest by combining schema from admin-api with local config.
@@ -208,7 +451,7 @@ async fn resolve_qualified_version(
 ///
 /// # Returns
 /// * `Ok(Manifest)` - A complete manifest with schema and SQL combined
-/// * `Err(BoxError)` - Various errors:
+/// * `Err(ManifestError)` - Various errors:
 ///   - Failed to load or parse local config file
 ///   - Invalid dataset name or version
 ///   - HTTP request failure to admin-api
@@ -224,35 +467,28 @@ async fn resolve_qualified_version(
 pub async fn fetch_manifest(
     admin_api_addr: &str,
     config_path: &Path,
-) -> Result<Manifest, BoxError> {
+) -> Result<Manifest, ManifestError> {
     // Load the dataset definition to extract name, version, and SQL queries
-    let dataset_def = load_dataset_definition(config_path).await.map_err(|e| {
-        format!(
-            "Failed to load dataset definition from '{}': {}",
-            config_path.display(),
-            e
-        )
-    })?;
+    let dataset_def = load_dataset_definition(config_path).await?;
 
     // Parse and validate dataset name
-    let name: Name = dataset_def.name.parse().map_err(|e| {
-        format!(
-            "Invalid dataset name '{}' in config '{}': {}",
-            dataset_def.name,
-            config_path.display(),
-            e
-        )
-    })?;
+    let name: Name = dataset_def
+        .name
+        .parse()
+        .map_err(|e| ManifestError::InvalidDatasetName {
+            name: dataset_def.name.clone(),
+            reason: format!("{}", e),
+        })?;
 
     // Parse and validate dataset version
-    let version: Version = dataset_def.version.parse().map_err(|e| {
-        format!(
-            "Invalid dataset version '{}' in config '{}': {}",
-            dataset_def.version,
-            config_path.display(),
-            e
-        )
-    })?;
+    let version: Version =
+        dataset_def
+            .version
+            .parse()
+            .map_err(|e| ManifestError::InvalidVersion {
+                version: dataset_def.version.clone(),
+                reason: format!("{}", e),
+            })?;
 
     // Resolve the simple version from config to a fully qualified version
     let qualified_version = resolve_qualified_version(admin_api_addr, &name, &version).await?;
@@ -265,25 +501,39 @@ pub async fn fetch_manifest(
     );
 
     // Fetch schema from admin-api using the qualified version
+    let schema_url = format!(
+        "{}/datasets/{}/versions/{}/schema",
+        admin_api_addr, name, qualified_version
+    );
+
     let schema_resp = ADMIN_API_CLIENT
-        .get(format!(
-            "{}/datasets/{}/versions/{}/schema",
-            admin_api_addr, name, qualified_version
-        ))
+        .get(&schema_url)
         .send()
-        .await?;
+        .await
+        .map_err(|e| ManifestError::NetworkError {
+            url: schema_url.clone(),
+            message: e.to_string(),
+        })?;
 
     // Check for HTTP errors
     let status = schema_resp.status();
     if !status.is_success() {
-        return Err(format!(
-            "Failed to fetch schema from admin-api: HTTP {} for dataset '{}' version '{}'",
-            status, name, qualified_version
-        )
-        .into());
+        let body = schema_resp.text().await.unwrap_or_default();
+        return Err(ManifestError::HttpError {
+            status: status.as_u16(),
+            url: schema_url.clone(),
+            message: body,
+        });
     }
 
-    let schema_response: DatasetSchemaResponse = schema_resp.json().await?;
+    let schema_response: DatasetSchemaResponse =
+        schema_resp
+            .json()
+            .await
+            .map_err(|e| ManifestError::NetworkError {
+                url: schema_url,
+                message: e.to_string(),
+            })?;
 
     // Combine schema from admin-api with SQL from local config
     let mut tables = std::collections::BTreeMap::<String, Table>::new();
@@ -295,11 +545,11 @@ pub async fn fetch_manifest(
             .get(&table_info.name)
             .map(|t| &t.sql)
             .ok_or_else(|| {
-                format!(
-                    "Schema mismatch: table '{}' exists in admin-api schema but not in local config '{}'",
+                ManifestError::SchemaMismatch(format!(
+                    "Table '{}' exists in admin-api schema but not in local config '{}'",
                     table_info.name,
                     config_path.display()
-                )
+                ))
             })?;
 
         tables.insert(
@@ -337,12 +587,17 @@ impl ManifestExtractor {
         }
     }
 
-    fn extract_manifest(self) -> Result<DatasetDefinition, BoxError> {
+    fn extract_manifest(self, config_path: &Path) -> Result<DatasetDefinition, ManifestError> {
         let json = self
             .manifest_json
-            .ok_or("No manifest configuration found in the file")?;
-        serde_json::from_value(json)
-            .map_err(|e| format!("Failed to parse manifest JSON: {}", e).into())
+            .ok_or_else(|| ManifestError::ConfigParseError {
+                path: config_path.display().to_string(),
+                reason: "No manifest configuration found in the file".to_string(),
+            })?;
+        serde_json::from_value(json).map_err(|e| ManifestError::ConfigParseError {
+            path: config_path.display().to_string(),
+            reason: format!("Failed to parse manifest JSON: {}", e),
+        })
     }
 
     /// Convert an AST object expression to a JSON Value
@@ -736,7 +991,7 @@ mod tests {
         // Verify the error
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("404"));
+        assert!(err_msg.contains("No versions available"));
         assert!(err_msg.contains("test_dataset"));
     }
 
@@ -918,7 +1173,7 @@ mod tests {
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("No versions found"));
+        assert!(err_msg.contains("No versions available"));
         assert!(err_msg.contains("test_dataset"));
     }
 
@@ -952,9 +1207,9 @@ mod tests {
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("No version found matching prefix"));
+        assert!(err_msg.contains("not found"));
+        assert!(err_msg.contains("test_dataset"));
         assert!(err_msg.contains("1.0.0"));
-        assert!(err_msg.contains("2.0.0-ABC123"));
     }
 
     #[tokio::test]
@@ -1038,7 +1293,7 @@ mod tests {
             }
         "#;
 
-        let result = parse_js_ts_manifest(js_content, "js");
+        let result = parse_js_ts_manifest(js_content, "js", Path::new("test.js"));
         match result {
             Ok(def) => {
                 assert_eq!(def.name, "test");
@@ -1067,7 +1322,7 @@ mod tests {
             }))
         "#;
 
-        let result = parse_js_ts_manifest(ts_content, "ts");
+        let result = parse_js_ts_manifest(ts_content, "ts", Path::new("test.ts"));
         // This should parse the defineDataset pattern
         match result {
             Ok(def) => {
@@ -1079,6 +1334,332 @@ mod tests {
                 panic!("Failed to parse defineDataset pattern: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn test_is_retryable_dataset_not_found() {
+        let error = ManifestError::DatasetNotFound {
+            dataset: "test".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn test_is_retryable_no_versions_available() {
+        let error = ManifestError::NoVersionsAvailable {
+            dataset: "test".to_string(),
+        };
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn test_is_retryable_network_error() {
+        let error = ManifestError::NetworkError {
+            url: "http://localhost:1610".to_string(),
+            message: "Connection refused".to_string(),
+        };
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn test_is_retryable_http_5xx_error() {
+        let error = ManifestError::HttpError {
+            status: 503,
+            url: "http://localhost:1610".to_string(),
+            message: "Service Unavailable".to_string(),
+        };
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn test_is_not_retryable_http_4xx_error() {
+        let error = ManifestError::HttpError {
+            status: 400,
+            url: "http://localhost:1610".to_string(),
+            message: "Bad Request".to_string(),
+        };
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn test_is_not_retryable_invalid_config() {
+        let error = ManifestError::InvalidDatasetName {
+            name: "invalid name".to_string(),
+            reason: "Contains spaces".to_string(),
+        };
+        assert!(!error.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_with_startup_poll_success_after_retries() {
+        use admin_api::handlers::datasets::get_version_schema::TableSchemaInfo;
+        use datasets_derived::manifest::{ArrowSchema, TableSchema};
+
+        // Create a temporary JSON config file
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{
+                    "blocks": {{
+                        "sql": "SELECT * FROM source.blocks"
+                    }}
+                }},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let mut server = mockito::Server::new_async().await;
+
+        // First two calls return 404, third succeeds
+        let versions_mock_fail1 = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(404)
+            .with_body("Not Found")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let versions_mock_fail2 = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(404)
+            .with_body("Not Found")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let versions_mock_success = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec!["1.0.0-ABC123".parse().unwrap()],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let schema_mock = server
+            .mock("GET", "/datasets/test_dataset/versions/1.0.0-ABC123/schema")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetSchemaResponse {
+                    name: "test_dataset".parse().unwrap(),
+                    version: "1.0.0-ABC123".parse().unwrap(),
+                    tables: vec![TableSchemaInfo {
+                        name: "blocks".to_string(),
+                        network: "mainnet".to_string(),
+                        schema: TableSchema {
+                            arrow: ArrowSchema { fields: vec![] },
+                        },
+                    }],
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Call with startup polling - should succeed after retries
+        let result = fetch_manifest_with_startup_poll(&server.url(), config_file.path()).await;
+
+        versions_mock_fail1.assert_async().await;
+        versions_mock_fail2.assert_async().await;
+        versions_mock_success.assert_async().await;
+        schema_mock.assert_async().await;
+
+        assert!(result.is_ok());
+        let manifest = result.unwrap();
+        assert_eq!(manifest.name.as_ref(), "test_dataset");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_with_startup_poll_immediate_failure_on_invalid_config() {
+        // Create a config with invalid name
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "invalid name with spaces",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let server = mockito::Server::new_async().await;
+
+        // Should fail immediately without retrying (invalid config)
+        let result = fetch_manifest_with_startup_poll(&server.url(), config_file.path()).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid dataset name"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_with_retry_success_after_retries() {
+        use admin_api::handlers::datasets::get_version_schema::TableSchemaInfo;
+        use datasets_derived::manifest::{ArrowSchema, TableSchema};
+
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{
+                    "blocks": {{
+                        "sql": "SELECT * FROM source.blocks"
+                    }}
+                }},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let mut server = mockito::Server::new_async().await;
+
+        // First call returns 404, second succeeds
+        let versions_mock_fail = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(404)
+            .with_body("Not Found")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let versions_mock_success = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetVersionsResponse {
+                    versions: vec!["1.0.0-ABC123".parse().unwrap()],
+                    next_cursor: None,
+                })
+                .unwrap(),
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let schema_mock = server
+            .mock("GET", "/datasets/test_dataset/versions/1.0.0-ABC123/schema")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::to_string(&DatasetSchemaResponse {
+                    name: "test_dataset".parse().unwrap(),
+                    version: "1.0.0-ABC123".parse().unwrap(),
+                    tables: vec![TableSchemaInfo {
+                        name: "blocks".to_string(),
+                        network: "mainnet".to_string(),
+                        schema: TableSchema {
+                            arrow: ArrowSchema { fields: vec![] },
+                        },
+                    }],
+                })
+                .unwrap(),
+            )
+            .create_async()
+            .await;
+
+        // Call with retry (max 3) - should succeed on second attempt
+        let result = fetch_manifest_with_retry(&server.url(), config_file.path(), 3).await;
+
+        versions_mock_fail.assert_async().await;
+        versions_mock_success.assert_async().await;
+        schema_mock.assert_async().await;
+
+        assert!(result.is_ok());
+        let manifest = result.unwrap();
+        assert_eq!(manifest.name.as_ref(), "test_dataset");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_with_retry_max_retries_exceeded() {
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "1.0.0",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let mut server = mockito::Server::new_async().await;
+
+        // All attempts return 404
+        let versions_mock = server
+            .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+            .with_status(404)
+            .with_body("Not Found")
+            .expect(4) // Initial attempt + 3 retries
+            .create_async()
+            .await;
+
+        // Call with retry (max 3) - should fail after exhausting retries
+        let result = fetch_manifest_with_retry(&server.url(), config_file.path(), 3).await;
+
+        versions_mock.assert_async().await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to fetch manifest after 3 retries"));
+        assert!(err_msg.contains("did the 'nozzle dump' command complete"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_manifest_with_retry_immediate_failure_on_invalid_config() {
+        // Create a config with invalid version
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        writeln!(
+            config_file,
+            r#"{{
+                "name": "test_dataset",
+                "network": "mainnet",
+                "version": "not-a-semver",
+                "dependencies": {{}},
+                "tables": {{}},
+                "functions": {{}}
+            }}"#
+        )
+        .unwrap();
+        config_file.flush().unwrap();
+
+        let server = mockito::Server::new_async().await;
+
+        // Should fail immediately without retrying (invalid version)
+        let result = fetch_manifest_with_retry(&server.url(), config_file.path(), 3).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("version") || err_msg.contains("Invalid"));
     }
 
     #[tokio::test]
@@ -1127,7 +1708,7 @@ mod tests {
             }))
         "#;
 
-        let result = parse_js_ts_manifest(nozzle_config, "ts");
+        let result = parse_js_ts_manifest(nozzle_config, "ts", Path::new("nozzle.config.ts"));
         match result {
             Ok(def) => {
                 assert_eq!(def.name, "example");

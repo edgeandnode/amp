@@ -24,6 +24,9 @@ use crate::{
 /// Default maximum number of concurrent batch operations across all tables
 const DEFAULT_MAX_CONCURRENT_BATCHES: usize = 10;
 
+/// Default number of retries when hot-reloading fails to fetch manifest
+const DEFAULT_HOT_RELOAD_MAX_RETRIES: u32 = 3;
+
 /// Maximum number of stream reconnection attempts before giving up
 const MAX_STREAM_RETRIES: u32 = 5;
 
@@ -611,6 +614,8 @@ pub struct AmpsyncConfig {
     pub manifest_path: PathBuf,
     /// Parsed dataset manifest.
     pub manifest: Arc<Manifest>,
+    /// Maximum number of retries for hot-reload manifest fetch (configurable via HOT_RELOAD_MAX_RETRIES env var)
+    pub hot_reload_max_retries: u32,
 }
 impl AmpsyncConfig {
     /// Get a sanitized version of the database URL safe for logging
@@ -669,9 +674,17 @@ impl AmpsyncConfig {
         let amp_admin_api_addr =
             env::var("AMP_ADMIN_API_ADDR").unwrap_or_else(|_| "http://localhost:1610".to_string());
 
-        // Load manifest from registry (no Nozzle server query needed - solves empty table problem)
-        let manifest =
-            Arc::new(manifest::fetch_manifest(&amp_admin_api_addr, &dataset_manifest).await?);
+        // Get hot-reload retry configuration
+        let hot_reload_max_retries = env::var("HOT_RELOAD_MAX_RETRIES")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(DEFAULT_HOT_RELOAD_MAX_RETRIES);
+
+        // Load manifest with startup polling (polls indefinitely until dataset is published)
+        let manifest = Arc::new(
+            manifest::fetch_manifest_with_startup_poll(&amp_admin_api_addr, &dataset_manifest)
+                .await?,
+        );
 
         // First, try to get DATABASE_URL directly
         if let Ok(database_url) = env::var("DATABASE_URL") {
@@ -681,6 +694,7 @@ impl AmpsyncConfig {
                 amp_admin_api_addr,
                 manifest_path: dataset_manifest,
                 manifest,
+                hot_reload_max_retries,
             });
         }
 
@@ -729,6 +743,7 @@ impl AmpsyncConfig {
             amp_admin_api_addr,
             manifest_path: dataset_manifest,
             manifest,
+            hot_reload_max_retries,
         })
     }
 
@@ -736,11 +751,19 @@ impl AmpsyncConfig {
     ///
     /// This creates a new config with the updated manifest while preserving
     /// database connection details.
+    ///
+    /// Uses limited retries (configurable via hot_reload_max_retries) to give
+    /// the dump command time to complete, then fails if dataset still not found.
     pub async fn reload_manifest(&self) -> Result<Self, BoxError> {
         info!("Reloading manifest from '{}'", self.manifest_path.display());
 
         let manifest = Arc::new(
-            manifest::fetch_manifest(&self.amp_admin_api_addr, &self.manifest_path).await?,
+            manifest::fetch_manifest_with_retry(
+                &self.amp_admin_api_addr,
+                &self.manifest_path,
+                self.hot_reload_max_retries,
+            )
+            .await?,
         );
 
         Ok(Self {
@@ -749,6 +772,7 @@ impl AmpsyncConfig {
             amp_admin_api_addr: self.amp_admin_api_addr.clone(),
             manifest_path: self.manifest_path.clone(),
             manifest,
+            hot_reload_max_retries: self.hot_reload_max_retries,
         })
     }
 }

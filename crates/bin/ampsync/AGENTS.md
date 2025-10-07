@@ -11,12 +11,18 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 ### Data Flow
 1. **Config Loading**: Parse nozzle config file (JSON/TS/JS) to extract table SQL queries
 2. **Schema Fetching**: Query Nozzle Admin API to get Arrow schemas for all tables
+   - **First-Run Behavior**: If dataset not published yet, polls indefinitely (2-30s backoff) until available
+   - Logs helpful message: "Have you run 'nozzle dump --dataset <name>'?"
+   - No restart needed - automatically detects when dataset becomes available
 3. **Schema Setup**: Create PostgreSQL tables from Arrow schemas (with evolution support)
 4. **Checkpoint Recovery**: Resume from last processed block using internal checkpoint table
 5. **Streaming**: Execute SQL queries with `SETTINGS stream = true` on Nozzle Arrow Flight server
 6. **Reorg Detection**: Wrap streams with `with_reorg()` to detect blockchain reorganizations
 7. **Batch Processing**: Convert Arrow RecordBatches to PostgreSQL binary format and bulk insert via COPY
 8. **Hot-Reload**: Watch config file for changes, gracefully restart streams with new configuration
+   - **Hot-Reload Retry**: Limited retries (default: 3) when fetching updated manifest
+   - Gives `nozzle dump` command time to complete (~2-30s depending on retries)
+   - Configurable via `HOT_RELOAD_MAX_RETRIES` environment variable
 
 ### Technology Stack
 - **Language**: Rust (async/await heavily used)
@@ -59,6 +65,8 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - **Schema Resolution**: Queries Admin API to resolve version (e.g., "0.2.0" → "0.2.0-LTcyNjgzMjc1NA")
 - **SQL Sanitization**: Automatically removes ORDER BY clauses (non-incremental queries not supported)
 - **Supported Formats**: JSON, JS, TS (uses oxc_parser for AST parsing)
+- **Startup Polling**: `fetch_manifest_with_startup_poll()` polls indefinitely if dataset not found
+- **Hot-Reload Retry**: `fetch_manifest_with_retry()` retries with configurable limit for hot-reload scenarios
 
 ### 4. PostgreSQL Binary Encoder (`src/pgpq/`)
 - **Purpose**: Convert Arrow RecordBatches to PostgreSQL COPY binary format
@@ -179,6 +187,7 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - `AMP_FLIGHT_ADDR`: Nozzle Arrow Flight server (default: http://localhost:1602)
 - `AMP_ADMIN_API_ADDR`: Nozzle Admin API server (default: http://localhost:1610)
 - `MAX_CONCURRENT_BATCHES`: Concurrent batch limit (default: 10)
+- `HOT_RELOAD_MAX_RETRIES`: Hot-reload retry attempts (default: 3)
 - `RUST_LOG`: Logging configuration (default: info)
 
 **Database Connection Options**:
@@ -463,6 +472,18 @@ RUST_LOG=trace,ampsync=trace cargo run -p ampsync
 - Modules: Snake_case (e.g., `sync_engine.rs`)
 
 ## Troubleshooting Guide for AI Agents
+
+### "Dataset not found in admin-api. This is expected on first run."
+- **Cause**: Normal startup behavior - dataset hasn't been published yet
+- **Fix**: Run `nozzle dump --dataset <name>` to publish. Ampsync will auto-detect when available.
+- **Behavior**: Polls indefinitely with exponential backoff (2-30s intervals)
+- **Code Location**: `src/manifest.rs::fetch_manifest_with_startup_poll()`
+
+### "Failed to fetch manifest after N retries"
+- **Cause**: Hot-reload detected config change but new dataset version not found after retries
+- **Fix**: Ensure `nozzle dump` completed successfully. Increase `HOT_RELOAD_MAX_RETRIES` if needed.
+- **Behavior**: Limited retries (default: 3) to allow dump command to complete
+- **Code Location**: `src/manifest.rs::fetch_manifest_with_retry()`
 
 ### "Failed to fetch schema from admin-api"
 - **Cause**: Dataset not published to Nozzle server, wrong endpoint, or version mismatch

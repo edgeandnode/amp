@@ -1,21 +1,8 @@
-# Rust build artifacts
+# Build artifacts
 target/
-**/target/
 
-# Cargo files
-Cargo.lock
-**/Cargo.lock
-
-# Source code (not needed in the image)
-src/
-**/src/
-tests/
-**/tests/
-
-# Documentation
-*.md
-docs/
-**/docs/
+# Dependencies
+node_modules/
 
 # Git
 .git/
@@ -45,14 +32,15 @@ docs/
 tmp/
 temp/
 
-# Build scripts (not needed in image)
+# Build scripts
 build.sh
-Makefile
-justfile
 
-# Examples and development files
-examples/
-**/examples/
+# Local data directories
+infra/
+data/
+*.db
+*.sqlite
 
-# Keep only the bin directory with pre-built binaries
-!bin/
+# Examples local data
+examples/*/infra/
+examples/*/data/

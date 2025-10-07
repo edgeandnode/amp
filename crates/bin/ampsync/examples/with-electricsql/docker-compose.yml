@@ -47,14 +47,14 @@ services:
       - "8545:8545"
 
   ampsync:
-    # Multi-stage build - compiles inside Docker for correct architecture
+    # Multi-stage build - compiles inside Docker
     build:
-      context: ../../../../..
+      context: ../../../../../
       dockerfile: crates/bin/ampsync/Dockerfile
     image: ampsync:latest
     environment:
       # Dataset manifest configuration
-      DATASET_MANIFEST: /home/ampsync/nozzle.config.ts
+      DATASET_MANIFEST: /nozzle.config.ts
 
       # Amp ArrowFlight URL. Used to perform queries on amp dataset
       AMP_FLIGHT_ADDR: http://amp:1602
@@ -81,9 +81,7 @@ services:
 
     volumes:
       # Mount the nozzle config file for hot-reload (writeable for file events)
-      - ./nozzle.config.ts:/home/ampsync/nozzle.config.ts
-      # Mount the dataset manifests directory (shared with amp service)
-      - ./infra/amp/datasets:/var/lib/amp/datasets:ro
+      - ./nozzle.config.ts:/nozzle.config.ts
 
     restart: unless-stopped
 

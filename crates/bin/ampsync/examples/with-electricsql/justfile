@@ -26,6 +26,10 @@ down:
     @rm -rf ./infra/postgres/data
     @rm -rf ./infra/amp/data
 
+# clean the docker images
+clean:
+    docker system prune --volumes
+
 # Lint typescript code
 lint-ts *args:
     pnpm lint {{args}}

@@ -90,6 +90,14 @@ Option 2: Individual components (all required except password)
     - **Range**: `1-100` (recommended)
     - **Notes**: Controls backpressure to prevent OOM. Lower values reduce memory usage but may decrease throughput.
 
+#### Hot-Reload Configuration
+
+- **`HOT_RELOAD_MAX_RETRIES`** - Maximum retry attempts when hot-reloading fails to fetch manifest
+    - **Type**: Integer
+    - **Default**: `3`
+    - **Range**: `1-10` (recommended)
+    - **Notes**: When config file changes, ampsync will retry fetching the manifest this many times before failing. This gives the `nozzle dump` command time to complete (~2-30s depending on retries). Uses exponential backoff.
+
 #### Logging
 
 - **`RUST_LOG`** - Logging level configuration
@@ -110,6 +118,12 @@ Option 2: Individual components (all required except password)
 5. Starts streaming data using your SQL queries
 
 This means you maintain SQL queries in your config, and schemas are always in sync with the Nozzle server.
+
+**First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `nozzle dump` run), ampsync will wait patiently:
+- Polls the Admin API every 2-30 seconds (exponential backoff)
+- Logs helpful messages: "Have you run 'nozzle dump --dataset <name>'?"
+- Continues polling indefinitely until the dataset becomes available
+- Once found, proceeds normally with streaming
 
 ## Usage
 
@@ -331,11 +345,19 @@ crates/bin/ampsync/
 
 ### Common Issues
 
+**"Dataset not found in admin-api. This is expected on first run."**
+
+- **This is normal on first startup!** Ampsync is waiting for the dataset to be published.
+- Run `nozzle dump --dataset <name>` to publish the dataset
+- Ampsync will automatically detect when the dataset becomes available and start streaming
+- No restart needed - it polls the Admin API automatically
+
 **"Failed to fetch schema from admin-api: HTTP 404"**
 
-- Ensure the dataset exists in Nozzle with the specified name and version
-- Verify `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
-- Check that the dataset has been published to the Nozzle server
+- If this error persists after running `nozzle dump`, check:
+  - Dataset name and version match between config and published dataset
+  - `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
+  - Dataset was successfully published (check Nozzle server logs)
 
 **"Schema mismatch: table 'X' exists in admin-api schema but not in local config"**
 
@@ -371,6 +393,14 @@ crates/bin/ampsync/
 - Look for `"File watcher received event"` log messages
 - Verify the file is mounted correctly in Docker (check with `docker exec`)
 - Ensure the file path matches `DATASET_MANIFEST` environment variable
+
+**"Failed to fetch manifest after N retries: Dataset version not found"**
+
+- This occurs during hot-reload when ampsync can't find the new dataset version
+- After changing the config file, run `nozzle dump --dataset <name>` to publish the updated dataset
+- Ampsync retries up to `HOT_RELOAD_MAX_RETRIES` times (default: 3) to give dump time to complete
+- If dump takes longer, increase `HOT_RELOAD_MAX_RETRIES` (e.g., `5` or `10`)
+- This is different from startup behavior (which waits indefinitely)
 
 **"Hot-reload failed: Columns dropped from schema (unsupported)"**
 
