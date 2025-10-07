@@ -51,7 +51,6 @@ pub async fn dump_dataset(
         None,
         false,
         None,
-        None,
         false,
     )
     .await
@@ -244,4 +243,29 @@ pub async fn catalog_for_dataset(
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
     Ok(Catalog::new(tables, logical))
+}
+
+/// Create a test metrics context for validating metrics collection.
+///
+/// This helper creates a `TestMetricsContext` that can be used to collect and validate
+/// metrics during test execution. The context uses an in-memory exporter that captures
+/// all recorded metrics without requiring external observability infrastructure.
+///
+/// # Example
+///
+/// ```ignore
+/// let metrics = test_helpers::create_test_metrics_context();
+/// let test_ctx = TestCtxBuilder::new("my_test")
+///     .with_meter(metrics.meter().clone())
+///     .build()
+///     .await?;
+///
+/// // ... perform operations that should record metrics ...
+///
+/// let metrics = metrics.collect().await;
+/// let counter = find_counter(&metrics, "my_metric_name").unwrap();
+/// assert_eq!(counter.value, 1);
+/// ```
+pub fn create_test_metrics_context() -> crate::testlib::metrics::TestMetricsContext {
+    crate::testlib::metrics::TestMetricsContext::new()
 }

@@ -38,6 +38,7 @@ pub mod ctx;
 pub mod debug;
 mod env_dir;
 pub mod helpers;
+pub mod metrics;
 
 /// Low-level test fixtures and directory utilities.
 ///

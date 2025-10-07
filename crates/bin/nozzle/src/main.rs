@@ -159,10 +159,6 @@ async fn main_inner() -> Result<(), BoxError> {
     let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
         monitoring::init(config.opentelemetry.as_ref())?;
 
-    let metrics_registry = telemetry_metrics_meter
-        .as_ref()
-        .map(|meter| Arc::new(dump::metrics::MetricsRegistry::new(meter)));
-
     // Log version info
     tracing::info!(
         "built on {}, git describe {}",
@@ -186,7 +182,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 config.clone(),
                 metadata_db.clone(),
                 "worker".parse().expect("Invalid worker ID"),
-                metrics_registry.clone(),
                 telemetry_metrics_meter.clone(),
             );
             tokio::spawn(async move {
@@ -201,6 +196,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 flight_server,
                 jsonl_server,
                 admin_server,
+                telemetry_metrics_meter.as_ref(),
             )
             .await?;
             server.await
@@ -268,7 +264,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 None,
                 location,
                 fresh,
-                metrics_registry,
                 telemetry_metrics_meter.as_ref(),
                 only_finalized_blocks,
             )
@@ -292,6 +287,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 flight_server,
                 jsonl_server,
                 admin_server,
+                telemetry_metrics_meter.as_ref(),
             )
             .await?;
             server.await
@@ -301,7 +297,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 config.clone(),
                 metadata_db,
                 node_id.parse()?,
-                metrics_registry,
                 telemetry_metrics_meter.clone(),
             );
             worker.run().await.map_err(Into::into)

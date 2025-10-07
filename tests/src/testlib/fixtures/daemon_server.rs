@@ -37,6 +37,7 @@ impl DaemonServer {
         enable_flight: bool,
         enable_jsonl: bool,
         enable_admin_api: bool,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         let dataset_store = {
             let provider_configs_store =
@@ -52,12 +53,18 @@ impl DaemonServer {
             )
         };
 
+        // For tests, leak the meter to get a 'static reference
+        // This is acceptable in tests since they're short-lived
+        let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
+            meter.map(|m| Box::leak(Box::new(m)) as &'static _);
+
         let (server_addrs, server) = nozzle::server::run(
             config.clone(),
             metadb,
             enable_flight,
             enable_jsonl,
             enable_admin_api,
+            meter_ref,
         )
         .await?;
 
@@ -78,8 +85,9 @@ impl DaemonServer {
     pub async fn new_with_all_services(
         config: Arc<Config>,
         metadata_db: MetadataDb,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
-        Self::new(config, metadata_db, true, true, true).await
+        Self::new(config, metadata_db, true, true, true, meter).await
     }
 
     /// Get the server configuration.

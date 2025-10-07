@@ -1,5 +1,7 @@
 //! # Dump
 
+use std::{sync::Arc, time::Duration};
+
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 pub mod compaction;
@@ -10,7 +12,6 @@ mod raw_dataset_writer;
 pub mod streaming_query;
 
 pub use core::*;
-use std::time::Duration;
 
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
@@ -43,6 +44,7 @@ pub fn parquet_opts(config: &common::config::ParquetConfig) -> ParquetWriterProp
 pub fn compaction_opts(
     config: &common::config::CompactionConfig,
     parquet_writer_props: &ParquetWriterProperties,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> CompactionProperties {
     let size_limit = SegmentSizeLimit::from(config);
     let metadata_concurrency = config.metadata_concurrency;
@@ -65,5 +67,6 @@ pub fn compaction_opts(
         write_concurrency: table_concurrency,
         parquet_writer_props,
         size_limit,
+        metrics,
     }
 }

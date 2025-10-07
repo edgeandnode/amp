@@ -1,13 +1,18 @@
 use monitoring::logging;
-use tests::{run_spec, testlib::ctx::TestCtxBuilder};
+use tests::{
+    run_spec,
+    testlib::{ctx::TestCtxBuilder, helpers as test_helpers},
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests_basic() {
     logging::init();
+    let metrics = test_helpers::create_test_metrics_context();
     let test_ctx = TestCtxBuilder::new("sql_streaming_tests_basic")
         .with_dataset_manifests(["eth_rpc"])
         .with_dataset_snapshots(["eth_rpc"])
         .with_provider_configs(["rpc_eth_mainnet"])
+        .with_meter(metrics.create_meter())
         .build()
         .await
         .expect("Failed to create test environment");
@@ -22,10 +27,12 @@ async fn streaming_tests_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests_with_sql_datasets() {
     logging::init();
+    let metrics = test_helpers::create_test_metrics_context();
     let test_ctx = TestCtxBuilder::new("sql_streaming_tests_with_sql_datasets")
         .with_provider_config("rpc_eth_mainnet")
         .with_dataset_manifests(["eth_rpc"])
         .with_dataset_snapshots(["eth_rpc"])
+        .with_meter(metrics.create_meter())
         .build()
         .await
         .expect("Failed to create test environment");

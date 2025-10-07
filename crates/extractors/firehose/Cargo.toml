@@ -12,6 +12,7 @@ common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
 futures.workspace = true
 hex.workspace = true
+monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true

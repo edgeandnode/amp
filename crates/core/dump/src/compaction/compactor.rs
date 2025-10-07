@@ -174,10 +174,40 @@ impl CompactionGroup {
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
+        use std::time::Instant;
+
+        let start_time = Instant::now();
         let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.file_lock_duration;
 
+        // Calculate input metrics before compaction
+        let input_file_count = self.streams.len() as u64;
+        let input_bytes: u64 = self.streams.iter().map(|s| s.size.bytes as u64).sum();
+
+        // Extract values before move
+        let metrics = self.opts.metrics.clone();
+        let dataset = self.table.dataset().name.to_string();
+        let table_name = self.table.table_name().to_string();
+        let location_id = *self.table.location_id();
+
         let output = self.write_and_finish().await?;
+
+        // Calculate output metrics
+        let output_bytes = output.object_meta.size as u64;
+        let duration_millis = start_time.elapsed().as_millis() as f64;
+
+        // Record metrics if available
+        if let Some(ref metrics) = metrics {
+            metrics.record_compaction(
+                dataset,
+                table_name,
+                location_id,
+                input_file_count,
+                input_bytes,
+                output_bytes,
+                duration_millis,
+            );
+        }
 
         output
             .commit_metadata(metadata_db.clone())

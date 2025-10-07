@@ -35,6 +35,8 @@ indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
 nozzle = { path = "../crates/bin/nozzle" }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 nozzle-client = { path = "../crates/client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
@@ -51,3 +53,4 @@ toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 worker = { path = "../crates/services/worker" }
+
