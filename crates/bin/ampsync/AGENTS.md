@@ -15,11 +15,21 @@ Ampsync is a high-performance synchronization service that streams dataset chang
    - Logs helpful message: "Have you run 'nozzle dump --dataset <name>'?"
    - No restart needed - automatically detects when dataset becomes available
 3. **Schema Setup**: Create PostgreSQL tables from Arrow schemas (with evolution support)
-4. **Checkpoint Recovery**: Resume from last processed block using internal checkpoint table
+4. **Checkpoint Recovery**: Smart resumption strategy using hybrid checkpoints
+   - **Watermark (preferred)**: Hash-verified resumption point passed to `query()` (server-side)
+   - **Incremental (fallback)**: Best-effort checkpoint, adds `WHERE block_num > X` to SQL (client-side)
+   - **None**: No checkpoint available, starts from the beginning
+   - **Benefits**: Minimizes reprocessing (typically < 1 batch) while providing fork detection
 5. **Streaming**: Execute SQL queries with `SETTINGS stream = true` on Nozzle Arrow Flight server
 6. **Reorg Detection**: Wrap streams with `with_reorg()` to detect blockchain reorganizations
 7. **Batch Processing**: Convert Arrow RecordBatches to PostgreSQL binary format and bulk insert via COPY
-8. **Hot-Reload**: Watch config file for changes, gracefully restart streams with new configuration
+   - **Incremental Checkpoint**: Update progress tracking after each successful batch insertion
+   - **Purpose**: Minimize reprocessing between watermark events (typically emitted when ranges complete)
+8. **Watermark Processing**: Save canonical checkpoints when server signals ranges are complete
+   - **Hash-Verified**: Includes block number + block hash for fork detection
+   - **Multi-Network**: Supports cross-chain datasets with per-network checkpoints
+   - **Atomic Updates**: Transaction ensures all networks updated together
+9. **Hot-Reload**: Watch config file for changes, gracefully restart streams with new configuration
    - **Hot-Reload Retry**: Limited retries (default: 3) when fetching updated manifest
    - Gives `nozzle dump` command time to complete (~2-30s depending on retries)
    - Configurable via `HOT_RELOAD_MAX_RETRIES` environment variable
@@ -96,14 +106,24 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 
 **Never Lose Data**:
 - If batch insert fails, stream is halted (not silently dropped)
-- Checkpoint only updated after successful insert
-- On restart, resumes from last good checkpoint
+- **Dual checkpoint system** minimizes data reprocessing:
+  - **Incremental checkpoints**: Updated after each batch (best-effort progress tracking)
+  - **Watermark checkpoints**: Updated on Watermark events (canonical, hash-verified)
+- On restart, smart resumption strategy:
+  - Prefers watermark (hash-verified, detects forks) → minimal reprocessing
+  - Falls back to incremental (best-effort) → typically < 1 batch reprocessed
+  - Starts from beginning if no checkpoints exist
 - Reorg handling is atomic (delete + wait for corrected data)
 
 **Idempotency**:
 - Tables have PRIMARY KEY on `block_num` (if column exists)
 - Duplicate inserts use `ON CONFLICT DO NOTHING` via temp table approach
 - Safe to restart at any point
+
+**Fork Detection**:
+- Watermark checkpoints include block hash for cryptographic verification
+- Detects blockchain forks that simple block number comparison cannot
+- Multi-network support enables cross-chain dataset synchronization
 
 ### 🔄 Hot-Reload Flow
 
@@ -192,6 +212,108 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - Supports columns like "to", "from", "select", "array", "sum", "table", "blob", etc.
 - Uses compile-time perfect hash set (phf) for O(1) lookups with zero runtime cost
 - No user intervention required - handled transparently in DDL and DML operations
+
+### 📊 Hybrid Checkpoint Strategy
+
+**Problem**: Watermarks are emitted infrequently (when ranges complete). Without incremental checkpoints, streams could reprocess thousands of batches on reconnection.
+
+**Solution**: Dual checkpoint system combining best-effort progress tracking with hash-verified canonical checkpoints.
+
+#### Checkpoint Types
+
+**1. Incremental Checkpoints** (sync_engine.rs:739-768)
+- **Updated**: After each successful Batch insertion
+- **Purpose**: Best-effort progress tracking between Watermark events
+- **Storage**: `incremental_block_num`, `incremental_updated_at` columns
+- **SQL**: Uses `GREATEST()` to prevent checkpoint regression
+- **Benefits**: Minimizes reprocessing on reconnection (typically < 1 batch)
+- **Failure Handling**: Non-critical - warns but doesn't halt stream
+
+**2. Watermark Checkpoints** (sync_engine.rs:758-811)
+- **Updated**: On `ResponseBatchWithReorg::Watermark` events
+- **Purpose**: Canonical, hash-verified resumption points
+- **Storage**: `watermark_block_num`, `watermark_block_hash`, `watermark_updated_at` columns
+- **Benefits**:
+  - Cryptographic verification via block hash (detects forks)
+  - Server-side resumption (passed to `query()`, not WHERE clause)
+  - Multi-network support (one checkpoint per network)
+- **Failure Handling**: Critical - halts stream to retry (prevents data loss)
+
+#### Resumption Strategy (sync_engine.rs:776-838)
+
+**`load_resume_point()` returns `ResumePoint` enum**:
+
+```rust
+pub enum ResumePoint {
+    Watermark(ResumeWatermark),           // Preferred
+    Incremental { network, max_block_num }, // Fallback
+    None,                                  // Start from beginning
+}
+```
+
+**Decision Logic**:
+1. **Try watermark first**: If available, use hash-verified resumption (server-side)
+2. **Fall back to incremental**: If no watermark, use best-effort checkpoint (client-side WHERE clause)
+3. **Start from beginning**: If no checkpoints exist
+
+**Stream Creation** (main.rs:323-359):
+- `Watermark` → Pass to `SqlClient::query(..., resume_watermark)` (server handles resumption)
+- `Incremental` → Add `WHERE block_num > X` to SQL query (client filters)
+- `None` → No modification
+
+#### Database Schema
+
+```sql
+CREATE TABLE _ampsync_checkpoints (
+    table_name TEXT NOT NULL,
+    network TEXT NOT NULL,
+    -- Incremental (best-effort, updated per batch)
+    incremental_block_num BIGINT,
+    incremental_updated_at TIMESTAMPTZ,
+    -- Watermark (canonical, hash-verified, updated on Watermark event)
+    watermark_block_num BIGINT,
+    watermark_block_hash BYTEA,
+    watermark_updated_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (table_name, network)
+)
+```
+
+#### Migration from Old Schema
+
+**Backward Compatible** (sync_engine.rs:571-670):
+- Detects old schema (single `max_block_num` column)
+- Migrates old checkpoints to `incremental_block_num` (preserves progress)
+- Backs up old table as `_ampsync_checkpoints_backup` (safe rollback)
+- Network defaults to "unknown" for migrated checkpoints
+- Watermarks established on first Watermark event after migration
+
+#### Performance Characteristics
+
+**Before Hybrid Strategy**:
+- Stream drops → Reprocess from last Watermark (could be 1000s of batches)
+- Risk of significant data reprocessing
+
+**After Hybrid Strategy**:
+- Stream drops → Resume from incremental checkpoint (< 1 batch reprocessed)
+- Watermark available → Hash-verified resumption (zero reprocessing)
+- Database overhead: 1 UPDATE per batch (non-blocking, acceptable)
+
+#### Example Flow
+
+```
+Batch 1 → Insert → Update incremental checkpoint (block 100)
+Batch 2 → Insert → Update incremental checkpoint (block 200)
+Batch 3 → Insert → Update incremental checkpoint (block 300)
+Watermark → Save watermark checkpoint (block 300 + hash 0xabc...)
+[Connection drops]
+Restart → Load watermark → Resume from block 300 (hash-verified, server-side)
+```
+
+Without watermark:
+```
+Restart → Load incremental → Resume from block 300 (best-effort, WHERE clause)
+```
 
 ## Configuration
 
@@ -293,10 +415,12 @@ export default defineDataset(() => ({
 
 **Data Consistency Rules**:
 - **NEVER** silently drop data on errors - halt stream and log clearly
-- **NEVER** skip checkpoint updates after successful inserts
+- **NEVER** skip checkpoint updates after successful inserts (both incremental and watermark)
 - **NEVER** ignore reorg signals - they indicate blockchain state changed
 - **ALWAYS** use transactions for multi-step database operations
 - **ALWAYS** use retry logic for transient database errors
+- **ALWAYS** update incremental checkpoints after batch insertion (progress tracking)
+- **ALWAYS** save watermark checkpoints when Watermark event received (canonical resumption)
 
 **Code Quality Rules**:
 - **NEVER** skip formatting (`just fmt-file <file>`)
@@ -323,9 +447,16 @@ export default defineDataset(() => ({
 
 **`src/sync_engine.rs`** - Database operations (most changes happen here)
 - `AmpsyncDbEngine`: Main database interface
+- `ResumePoint`: Enum for smart resumption strategy (Watermark/Incremental/None)
 - `arrow_schema_to_postgres_ddl()`: Schema conversion
 - `insert_record_batch()`: Batch insertion with adaptive sizing
 - `handle_reorg()`: Reorg handling
+- **Checkpoint Methods** (hybrid strategy):
+  - `load_resume_point()`: Smart resumption (watermark-first, fallback to incremental)
+  - `load_watermark()`: Load hash-verified checkpoint
+  - `save_watermark()`: Save canonical checkpoint with block hash
+  - `update_incremental_checkpoint()`: Update best-effort progress tracking
+  - `extract_max_block_from_ranges()`: Helper to extract checkpoint from metadata
 
 **`src/manifest.rs`** - Config parsing and Admin API integration
 - `fetch_manifest()`: Main entry point for schema fetching

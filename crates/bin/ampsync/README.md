@@ -230,16 +230,23 @@ docker compose up
 
 1. **Config Loading**: Ampsync reads your nozzle config file and fetches schemas from Admin API
 2. **Schema Setup**: Creates PostgreSQL tables based on fetched Arrow schemas
-3. **Checkpoint Recovery**: Resumes from last processed block (if any) using internal checkpoints
+3. **Checkpoint Recovery**: Determines resumption strategy:
+    - **Watermark available**: Hash-verified resumption (server-side, via `query()` parameter)
+    - **Incremental only**: Best-effort resumption (client-side, adds `WHERE block_num > X`)
+    - **None**: Starts from the beginning
 4. **Streaming**: Executes SQL queries with `SETTINGS stream = true` on Nozzle server
 5. **Reorg Detection**: Wraps streams with `with_reorg()` to detect blockchain reorganizations
 6. **Batch Processing**:
-    - Receives RecordBatches from streams
+    - Receives `Batch` events from streams
     - Converts Arrow data to PostgreSQL binary format using pgpq
     - Inserts data using PostgreSQL COPY protocol for high throughput
-    - Updates checkpoint after successful insertion
-7. **Reorg Handling**: Deletes affected rows and waits for corrected data
-8. **Hot-Reload**: Watches config file, gracefully restarts streams on changes
+    - Updates **incremental checkpoint** after successful insertion (progress tracking)
+7. **Watermark Processing**:
+    - Receives `Watermark` events when ranges are complete
+    - Saves **watermark checkpoint** with block hash (canonical, hash-verified)
+    - Preferred for resumption over incremental checkpoints
+8. **Reorg Handling**: Deletes affected rows and waits for corrected data
+9. **Hot-Reload**: Watches config file, gracefully restarts streams on changes
 
 ### Performance Architecture
 
@@ -265,9 +272,25 @@ Created automatically from your nozzle config with schemas fetched from Admin AP
 
 #### Internal Tables
 
-- **`_ampsync_checkpoints`**: Tracks last processed `block_num` per table
-    - Columns: `table_name`, `max_block_num`, `updated_at`
-    - Enables resuming from last checkpoint on restart
+- **`_ampsync_checkpoints`**: Hybrid checkpoint tracking for resumable streaming
+    - **Schema**:
+        - `table_name` (TEXT): Table identifier
+        - `network` (TEXT): Network name (mainnet, sepolia, etc.)
+        - `incremental_block_num` (BIGINT): Best-effort progress tracking (updated per batch)
+        - `incremental_updated_at` (TIMESTAMPTZ): Last incremental checkpoint time
+        - `watermark_block_num` (BIGINT): Canonical checkpoint with hash verification
+        - `watermark_block_hash` (BYTEA): Block hash for fork detection
+        - `watermark_updated_at` (TIMESTAMPTZ): Last watermark checkpoint time
+        - `updated_at` (TIMESTAMPTZ): Last modification time
+    - **Primary Key**: `(table_name, network)`
+    - **Checkpoint Strategy**:
+        - **Incremental checkpoints**: Updated after each batch insertion for progress tracking between watermarks
+        - **Watermark checkpoints**: Updated on `Watermark` events from server (hash-verified, canonical)
+        - **Resumption**: Prefers watermark (hash-verified), falls back to incremental, starts from beginning if neither exists
+    - **Benefits**:
+        - Minimizes reprocessing on reconnection (typically < 1 batch)
+        - Hash-verified resumption detects blockchain forks
+        - Multi-network support for cross-chain datasets
 
 ### Error Handling
 
@@ -468,11 +491,25 @@ RUST_LOG=warn,ampsync=warn cargo run -p ampsync
 
 Monitor these log messages for health:
 
-- `"Successfully bulk inserted N rows into table 'X'"` - Normal operation
-- `"Updated checkpoint for table 'X' to block N"` - Progress tracking
-- `"Batch performance: Nms for N rows, new batch size: N"` - Adaptive batching
-- `"Reorg detected for table 'X'"` - Blockchain reorganization handled
+**Normal Operation**:
+- `"Successfully bulk inserted N rows into table 'X'"` - Batch processed successfully
+- `"incremental_checkpoint_updated"` (debug) - Progress tracking between watermarks
+- `"watermark_saved"` (info) - Canonical checkpoint established
+- `"Batch performance: Nms for N rows, new batch size: N"` - Adaptive batching working
+
+**Resumption**:
+- `"resuming_from_watermark"` - Best case: hash-verified resumption (minimal reprocessing)
+- `"resuming_from_incremental_checkpoint"` - Fallback: best-effort resumption (some reprocessing)
+- `"starting_from_beginning"` - No checkpoint available (full sync)
+
+**Blockchain Events**:
+- `"Reorg detected for table 'X'"` - Blockchain reorganization detected
 - `"Successfully handled reorg for table 'X'"` - Reorg processing complete
+
+**Warnings to Monitor**:
+- `"incremental_checkpoint_update_failed"` - Non-critical, may reprocess data on restart
+- `"watermark_save_failed"` - Critical, stream will reconnect to retry
+- `"invalid_watermark_hash_size"` - Data corruption, watermark skipped
 
 ## Performance Tuning
 
