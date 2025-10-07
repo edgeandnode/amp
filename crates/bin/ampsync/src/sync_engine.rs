@@ -274,97 +274,132 @@ fn arrow_type_to_postgres_type(data_type: &ArrowDataType) -> Result<String, BoxE
     Ok(pg_type.to_string())
 }
 
-/// Adaptive batch manager that optimizes batch sizes based on performance metrics
-#[derive(Debug, Clone)]
+/// Optimizes batch sizes based on processing performance.
+///
+/// Uses atomics for lock-free reads in the hot path. Only locks when updating samples.
+#[derive(Debug)]
 pub struct AdaptiveBatchManager {
-    /// Current target batch size (in rows)
-    current_batch_size: usize,
+    /// Current target batch size (atomic for lock-free reads)
+    current_batch_size: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     /// Minimum allowed batch size
     min_batch_size: usize,
     /// Maximum allowed batch size
     max_batch_size: usize,
-    /// Target processing time per batch (in milliseconds)
+    /// Target processing time per batch (milliseconds)
     target_duration_ms: u64,
-    /// Recent performance samples (duration in ms, rows processed)
-    /// Using VecDeque for O(1) pop_front instead of Vec's O(n) remove(0)
-    recent_samples: VecDeque<(u64, usize)>,
-    /// Maximum number of samples to keep
+    /// Recent performance samples (duration_ms, rows)
+    recent_samples: std::sync::Arc<tokio::sync::Mutex<VecDeque<(u64, usize)>>>,
+    /// Maximum samples to keep for averaging
     max_samples: usize,
-    /// Number of consecutive errors (for reducing batch size)
-    error_count: usize,
-    /// Target memory usage per batch (in bytes)
+    /// Consecutive error count (atomic)
+    error_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Target memory per batch (bytes)
     target_memory_bytes: usize,
+}
+
+impl Clone for AdaptiveBatchManager {
+    fn clone(&self) -> Self {
+        use std::sync::Arc;
+
+        Self {
+            current_batch_size: Arc::clone(&self.current_batch_size),
+            min_batch_size: self.min_batch_size,
+            max_batch_size: self.max_batch_size,
+            target_duration_ms: self.target_duration_ms,
+            recent_samples: Arc::clone(&self.recent_samples),
+            max_samples: self.max_samples,
+            error_count: Arc::clone(&self.error_count),
+            target_memory_bytes: self.target_memory_bytes,
+        }
+    }
 }
 
 impl Default for AdaptiveBatchManager {
     fn default() -> Self {
+        use std::sync::{Arc, atomic::AtomicUsize};
+
         Self {
-            current_batch_size: 1000, // Start with 1K rows
-            min_batch_size: 100,      // Minimum 100 rows
-            max_batch_size: 50_000,   // Maximum 50K rows
-            target_duration_ms: 1000, // Target 1 second per batch
-            recent_samples: VecDeque::with_capacity(10),
+            current_batch_size: Arc::new(AtomicUsize::new(1000)), // Start with 1K rows
+            min_batch_size: 100,                                  // Minimum 100 rows
+            max_batch_size: 50_000,                               // Maximum 50K rows
+            target_duration_ms: 1000,                             // Target 1 second per batch
+            recent_samples: Arc::new(tokio::sync::Mutex::new(VecDeque::with_capacity(10))),
             max_samples: 10,
-            error_count: 0,
+            error_count: Arc::new(AtomicUsize::new(0)),
             target_memory_bytes: 50 * 1024 * 1024, // Target 50MB per batch
         }
     }
 }
 
 impl AdaptiveBatchManager {
-    /// Record a successful batch processing performance
-    pub fn record_success(&mut self, duration: Duration, rows_processed: usize) {
+    /// Records successful batch processing and adjusts batch size.
+    pub async fn record_success(&self, duration: Duration, rows_processed: usize) {
+        use std::sync::atomic::Ordering;
+
         let duration_ms = duration.as_millis() as u64;
 
-        // Reset error count on success
-        self.error_count = 0;
+        // Reset error count on success (lock-free atomic operation)
+        self.error_count.store(0, Ordering::Relaxed);
 
-        // Add to recent samples
-        self.recent_samples.push_back((duration_ms, rows_processed));
-        if self.recent_samples.len() > self.max_samples {
-            self.recent_samples.pop_front();
+        // Update recent samples (only lock for the queue)
+        let mut samples = self.recent_samples.lock().await;
+        samples.push_back((duration_ms, rows_processed));
+        if samples.len() > self.max_samples {
+            samples.pop_front();
         }
 
-        // Adjust batch size based on performance
-        self.adjust_batch_size();
+        // Adjust batch size based on performance (still holding the samples lock)
+        self.adjust_batch_size_with_samples(&samples);
 
+        // Release lock before logging
+        drop(samples);
+
+        let current_size = self.current_batch_size.load(Ordering::Relaxed);
         tracing::debug!(
             duration_ms = duration_ms,
             rows = rows_processed,
-            new_batch_size = self.current_batch_size,
+            new_batch_size = current_size,
             "batch_performance_recorded"
         );
     }
 
-    /// Record a batch processing error
-    pub fn record_error(&mut self) {
-        self.error_count += 1;
+    /// Records batch processing error and reduces batch size after 3 consecutive errors.
+    pub fn record_error(&self) {
+        use std::sync::atomic::Ordering;
+
+        let error_count = self.error_count.fetch_add(1, Ordering::Relaxed) + 1;
 
         // Reduce batch size on repeated errors
-        if self.error_count >= 3 {
-            let new_size = (self.current_batch_size as f64 * 0.7) as usize;
-            self.current_batch_size = new_size.max(self.min_batch_size);
-            self.error_count = 0; // Reset after adjustment
+        if error_count >= 3 {
+            let current = self.current_batch_size.load(Ordering::Relaxed);
+            let new_size = ((current as f64) * 0.7) as usize;
+            let new_size = new_size.max(self.min_batch_size);
+
+            self.current_batch_size.store(new_size, Ordering::Relaxed);
+            self.error_count.store(0, Ordering::Relaxed); // Reset after adjustment
 
             tracing::warn!(
-                new_batch_size = self.current_batch_size,
+                new_batch_size = new_size,
                 "batch_size_reduced_due_to_errors"
             );
         }
     }
 
-    /// Get the optimal batch size for a RecordBatch considering memory constraints
+    /// Returns optimal batch size considering both performance and memory constraints.
     pub fn get_optimal_batch_size(&self, record_batch: &RecordBatch) -> usize {
+        use std::sync::atomic::Ordering;
+
         let estimated_row_bytes = self.estimate_row_size(record_batch);
         let memory_constrained_size = self.target_memory_bytes / estimated_row_bytes.max(1);
 
         // Use the smaller of current batch size or memory-constrained size
-        self.current_batch_size
+        let current = self.current_batch_size.load(Ordering::Relaxed);
+        current
             .min(memory_constrained_size)
             .max(self.min_batch_size)
     }
 
-    /// Estimate the size of a single row in bytes
+    /// Estimates average row size in bytes.
     fn estimate_row_size(&self, record_batch: &RecordBatch) -> usize {
         if record_batch.num_rows() == 0 {
             return 100; // Default estimate
@@ -380,18 +415,16 @@ impl AdaptiveBatchManager {
         total_bytes / record_batch.num_rows()
     }
 
-    /// Adjust batch size based on recent performance samples
-    fn adjust_batch_size(&mut self) {
-        if self.recent_samples.len() < 3 {
+    /// Adjusts batch size based on recent performance samples.
+    fn adjust_batch_size_with_samples(&self, samples: &VecDeque<(u64, usize)>) {
+        use std::sync::atomic::Ordering;
+
+        if samples.len() < 3 {
             return; // Need more samples
         }
 
-        let avg_duration = self
-            .recent_samples
-            .iter()
-            .map(|(duration, _)| *duration)
-            .sum::<u64>()
-            / self.recent_samples.len() as u64;
+        let avg_duration =
+            samples.iter().map(|(duration, _)| *duration).sum::<u64>() / samples.len() as u64;
 
         let adjustment_factor = if avg_duration > self.target_duration_ms {
             // Too slow, reduce batch size
@@ -404,36 +437,48 @@ impl AdaptiveBatchManager {
             1.05
         };
 
-        let new_size = (self.current_batch_size as f64 * adjustment_factor) as usize;
-        self.current_batch_size = new_size.max(self.min_batch_size).min(self.max_batch_size);
+        let current = self.current_batch_size.load(Ordering::Relaxed);
+        let new_size = ((current as f64) * adjustment_factor) as usize;
+        let new_size = new_size.max(self.min_batch_size).min(self.max_batch_size);
+
+        self.current_batch_size.store(new_size, Ordering::Relaxed);
     }
 }
 
 #[derive(Clone)]
 pub struct AmpsyncDbEngine {
     pool: Pool<Postgres>,
-    batch_manager: std::sync::Arc<tokio::sync::Mutex<AdaptiveBatchManager>>,
+    batch_manager: AdaptiveBatchManager,
 }
 
 impl AmpsyncDbEngine {
     pub fn new(pool: &DbConnPool) -> Self {
         Self {
             pool: pool.deref().clone(),
-            batch_manager: std::sync::Arc::new(tokio::sync::Mutex::new(
-                AdaptiveBatchManager::default(),
-            )),
+            batch_manager: AdaptiveBatchManager::default(),
         }
     }
 
-    /// Create a retry policy for database operations
+    /// Returns retry policy for database operations.
     fn db_retry_policy() -> ExponentialBuilder {
         ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(50))
             .with_max_delay(Duration::from_secs(5))
-            .with_max_times(5)
+            .with_max_times(50) // High limit, circuit breaker will stop us first
     }
 
-    /// Check if a database error should be retried
+    /// Maximum duration for database operation retries (60 seconds by default).
+    ///
+    /// Can be configured via `DB_OPERATION_MAX_RETRY_DURATION_SECS` environment variable.
+    fn db_max_retry_duration() -> Duration {
+        let secs = std::env::var("DB_OPERATION_MAX_RETRY_DURATION_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        Duration::from_secs(secs)
+    }
+
+    /// Returns true if the database error is retryable.
     fn is_retryable_db_error(err: &sqlx::Error) -> bool {
         match err {
             sqlx::Error::Database(db_err) => {
@@ -457,7 +502,29 @@ impl AmpsyncDbEngine {
         }
     }
 
-    /// Notify function for database operation retries
+    /// Creates a circuit breaker-aware retryable condition.
+    ///
+    /// Wraps the normal retryable check with a time-based circuit breaker.
+    fn create_retryable_with_circuit_breaker(
+        max_duration: Duration,
+    ) -> impl Fn(&sqlx::Error) -> bool {
+        let start_time = Instant::now();
+        move |err: &sqlx::Error| -> bool {
+            let elapsed = start_time.elapsed();
+            if elapsed >= max_duration {
+                tracing::error!(
+                    error = %err,
+                    elapsed_secs = elapsed.as_secs(),
+                    max_duration_secs = max_duration.as_secs(),
+                    "db_operation_circuit_breaker_triggered"
+                );
+                return false; // Circuit breaker: stop retrying
+            }
+            Self::is_retryable_db_error(err)
+        }
+    }
+
+    /// Logs database retry attempts.
     fn notify_db_retry(err: &sqlx::Error, dur: Duration) {
         tracing::warn!(
             error = %err,
@@ -604,7 +671,7 @@ impl AmpsyncDbEngine {
         None
     }
 
-    /// Check if a table exists in the database
+    /// Returns true if the table exists.
     async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(
             "SELECT EXISTS (
@@ -620,7 +687,7 @@ impl AmpsyncDbEngine {
         Ok(result.map(|(exists,)| exists).unwrap_or(false))
     }
 
-    /// Create a new table with the given schema
+    /// Creates a new table with the given schema.
     async fn create_table(&self, table_name: &str, schema: &ArrowSchema) -> Result<(), BoxError> {
         let ddl = arrow_schema_to_postgres_ddl(table_name, schema)?;
 
@@ -636,7 +703,9 @@ impl AmpsyncDbEngine {
 
         (|| async move { sqlx::query(ddl_query).execute(pool).await })
             .retry(Self::db_retry_policy())
-            .when(Self::is_retryable_db_error)
+            .when(Self::create_retryable_with_circuit_breaker(
+                Self::db_max_retry_duration(),
+            ))
             .notify(Self::notify_db_retry)
             .await
             .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
@@ -778,7 +847,9 @@ impl AmpsyncDbEngine {
 
         (|| async move { sqlx::query(stmt).execute(pool).await })
             .retry(Self::db_retry_policy())
-            .when(Self::is_retryable_db_error)
+            .when(Self::create_retryable_with_circuit_breaker(
+                Self::db_max_retry_duration(),
+            ))
             .notify(Self::notify_db_retry)
             .await
             .map_err(|e| {
@@ -796,7 +867,7 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
-    /// Insert a RecordBatch into a PostgreSQL table using adaptive batch sizing
+    /// Inserts RecordBatch into PostgreSQL using adaptive batch sizing.
     pub async fn insert_record_batch(
         &self,
         table_name: &str,
@@ -807,10 +878,7 @@ impl AmpsyncDbEngine {
         }
 
         let total_rows = batch.num_rows();
-        let optimal_batch_size = {
-            let batch_manager = self.batch_manager.lock().await;
-            batch_manager.get_optimal_batch_size(batch)
-        };
+        let optimal_batch_size = self.batch_manager.get_optimal_batch_size(batch);
 
         tracing::debug!(
             table = %table_name,
@@ -838,8 +906,9 @@ impl AmpsyncDbEngine {
             match self.insert_batch_chunk(table_name, &chunk).await {
                 Ok(()) => {
                     let chunk_duration = chunk_start_time.elapsed();
-                    let mut batch_manager = self.batch_manager.lock().await;
-                    batch_manager.record_success(chunk_duration, chunk_size);
+                    self.batch_manager
+                        .record_success(chunk_duration, chunk_size)
+                        .await;
 
                     tracing::debug!(
                         table = %table_name,
@@ -851,8 +920,7 @@ impl AmpsyncDbEngine {
                     );
                 }
                 Err(e) => {
-                    let mut batch_manager = self.batch_manager.lock().await;
-                    batch_manager.record_error();
+                    self.batch_manager.record_error();
 
                     return Err(format!(
                         "Failed to insert chunk {}-{} for table '{}': {}",
@@ -874,7 +942,7 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
-    /// Check if a table has a primary key or unique constraint on block_num column
+    /// Returns true if table has a primary key or unique constraint on block_num.
     async fn has_block_num_constraint(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(
             "SELECT EXISTS (
@@ -1046,7 +1114,9 @@ impl AmpsyncDbEngine {
             Ok::<(), sqlx::Error>(())
         })
         .retry(Self::db_retry_policy())
-        .when(Self::is_retryable_db_error)
+        .when(Self::create_retryable_with_circuit_breaker(
+            Self::db_max_retry_duration(),
+        ))
         .notify(Self::notify_db_retry)
         .await
         .map_err(|e| format!("Failed to bulk insert into table '{}': {}", table_name, e))?;
@@ -1097,7 +1167,9 @@ impl AmpsyncDbEngine {
 
         let result = (|| async move { sqlx::query(query).execute(pool).await })
             .retry(Self::db_retry_policy())
-            .when(Self::is_retryable_db_error)
+            .when(Self::create_retryable_with_circuit_breaker(
+                Self::db_max_retry_duration(),
+            ))
             .notify(Self::notify_db_retry)
             .await
             .map_err(|e| {

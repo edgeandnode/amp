@@ -1,12 +1,14 @@
 //! Establishes the connection to the postgres db where amp datasets will be synced to
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use backon::{ExponentialBuilder, Retryable};
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-use tracing::{instrument, warn};
+use tracing::{error, instrument, warn};
 
 pub const DEFAULT_POOL_SIZE: u32 = 10;
+/// Default maximum duration for connection retries (5 minutes)
+pub const DEFAULT_MAX_RETRY_DURATION_SECS: u64 = 300;
 
 /// Errors that can occur when connecting to the syncing layer DB.
 #[derive(Debug, thiserror::Error)]
@@ -21,13 +23,33 @@ pub enum ConnError {
 pub struct DbConnPool(Pool<Postgres>);
 
 impl DbConnPool {
-    /// Set up a connection pool to the syncing layer DB with exponential backoff retry.
+    /// Connects to PostgreSQL with exponential backoff and circuit breaker.
+    ///
+    /// Respects `DB_MAX_RETRY_DURATION_SECS` environment variable (default: 300 seconds).
+    /// Stops retrying after this duration to prevent indefinite hangs.
     #[instrument(skip_all, err)]
     pub async fn connect(url: &str, pool_size: u32) -> Result<Self, ConnError> {
+        Self::connect_with_max_duration(url, pool_size, None).await
+    }
+
+    /// Connects with explicit max retry duration for testing.
+    pub async fn connect_with_max_duration(
+        url: &str,
+        pool_size: u32,
+        max_duration: Option<Duration>,
+    ) -> Result<Self, ConnError> {
+        let max_retry_duration = max_duration.unwrap_or_else(|| {
+            let secs = std::env::var("DB_MAX_RETRY_DURATION_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_MAX_RETRY_DURATION_SECS);
+            Duration::from_secs(secs)
+        });
+
         let retry_policy = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(100))
             .with_max_delay(Duration::from_secs(30))
-            .with_max_times(10);
+            .with_max_times(100); // High limit, circuit breaker will stop us first
 
         fn is_connection_error(err: &sqlx::Error) -> bool {
             match err {
@@ -52,19 +74,43 @@ impl DbConnPool {
             }
         }
 
-        fn notify_retry(err: &sqlx::Error, dur: Duration) {
-            warn!(
-                error = %err,
-                retry_delay_secs = dur.as_secs_f32(),
-                "db_connection_retry"
-            );
-        }
-
         let pool_options = PgPoolOptions::new()
             .max_connections(pool_size)
             .acquire_timeout(Duration::from_secs(5));
 
         let url = url.to_string();
+
+        // Circuit breaker: track when we started retrying
+        let start_time = Instant::now();
+
+        let notify_retry = move |err: &sqlx::Error, dur: Duration| {
+            let elapsed = start_time.elapsed();
+
+            if elapsed >= max_retry_duration {
+                error!(
+                    error = %err,
+                    elapsed_secs = elapsed.as_secs(),
+                    max_duration_secs = max_retry_duration.as_secs(),
+                    "db_connection_circuit_breaker_triggered"
+                );
+            } else {
+                warn!(
+                    error = %err,
+                    retry_delay_secs = dur.as_secs_f32(),
+                    elapsed_secs = elapsed.as_secs(),
+                    "db_connection_retry"
+                );
+            }
+        };
+
+        // Circuit breaker condition: stop if we've been retrying too long
+        let circuit_breaker_start = Instant::now();
+        let is_retryable = move |err: &sqlx::Error| -> bool {
+            if circuit_breaker_start.elapsed() >= max_retry_duration {
+                return false; // Circuit breaker: stop retrying
+            }
+            is_connection_error(err)
+        };
 
         (|| {
             let pool_options = pool_options.clone();
@@ -72,7 +118,7 @@ impl DbConnPool {
             async move { pool_options.connect(&url).await }
         })
         .retry(retry_policy)
-        .when(is_connection_error)
+        .when(is_retryable)
         .notify(notify_retry)
         .await
         .map(Self)
