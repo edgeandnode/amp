@@ -387,7 +387,7 @@ impl Service {
             );
 
             if let Some(metrics) = &self.metrics {
-                Ok(track_query_metrics(stream, &metrics, query_start_time))
+                Ok(track_query_metrics(stream, metrics, query_start_time))
             } else {
                 Ok(stream)
             }
