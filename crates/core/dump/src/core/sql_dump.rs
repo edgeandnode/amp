@@ -94,7 +94,7 @@
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
 
-use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use std::sync::Arc;
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
@@ -191,16 +191,13 @@ pub async fn dump_table(
             })
             .await?;
 
-        let end_block = match resolved {
-            ResolvedEndBlock::Continuous => {
-                tracing::warn!("continuous mode not yet implemented for derived datasets");
-                return Ok::<(), BoxError>(());
-            }
+        let end = match resolved {
+            ResolvedEndBlock::Continuous => None,
             ResolvedEndBlock::NoDataAvailable => {
                 tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
                 return Ok::<(), BoxError>(());
             }
-            ResolvedEndBlock::Block(block) => block,
+            ResolvedEndBlock::Block(block) => Some(block),
         };
 
         if let IncrementalCheck::NonIncremental(op) = incremental_check {
@@ -218,7 +215,8 @@ pub async fn dump_table(
             &env,
             &catalog,
             plan.clone(),
-            start..=end_block,
+            start,
+            end,
             resume_watermark,
             table.clone(),
             &parquet_opts,
@@ -270,7 +268,8 @@ async fn dump_sql_query(
     env: &QueryEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
-    range: RangeInclusive<BlockNum>,
+    start: BlockNum,
+    end: Option<BlockNum>,
     resume_watermark: Option<ResumeWatermark>,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
@@ -282,8 +281,8 @@ async fn dump_sql_query(
     tracing::info!(
         "dumping {} [{}-{}]",
         physical_table.table_ref(),
-        range.start(),
-        range.end(),
+        start,
+        end.map(|e| e.to_string()).unwrap_or_default(),
     );
     let mut stream = {
         StreamingQuery::spawn(
@@ -291,8 +290,8 @@ async fn dump_sql_query(
             catalog.clone(),
             ctx.dataset_store.clone(),
             query,
-            *range.start(),
-            Some(*range.end()),
+            start,
+            end,
             resume_watermark,
             notification_multiplexer,
             Some(physical_table.clone()),
@@ -302,7 +301,7 @@ async fn dump_sql_query(
         .as_stream()
     };
 
-    let mut microbatch_start = *range.start();
+    let mut microbatch_start = start;
     let mut writer = ParquetFileWriter::new(
         physical_table.clone(),
         parquet_opts.clone(),
@@ -397,7 +396,6 @@ async fn dump_sql_query(
             }
         }
     }
-    assert!(microbatch_start == range.end() + 1);
 
     Ok(())
 }
