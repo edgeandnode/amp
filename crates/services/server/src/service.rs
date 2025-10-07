@@ -672,15 +672,28 @@ fn track_query_metrics(
             metrics.streaming_queries_started.inc();
 
             let wrapped = stream! {
+                let mut microbatch_start: Option<std::time::Instant> = None;
+
                 for await result in message_stream {
                     match result {
                         Ok(message) => {
-                            // Track data messages for metrics
-                            if let QueryMessage::Data(ref batch) = message {
-                                let batch_rows = batch.num_rows() as u64;
-                                let batch_bytes = batch.get_array_memory_size() as u64;
-                                // Record incremental throughput per batch (counters track cumulative totals)
-                                metrics.record_streaming_batch(batch_rows, batch_bytes);
+                            match message {
+                                QueryMessage::MicrobatchStart { .. } => {
+                                    microbatch_start = Some(std::time::Instant::now());
+                                }
+                                QueryMessage::Data(ref batch) => {
+                                    let batch_rows = batch.num_rows() as u64;
+                                    let batch_bytes = batch.get_array_memory_size() as u64;
+                                    // Record incremental throughput per batch (counters track cumulative totals)
+                                    metrics.record_streaming_batch(batch_rows, batch_bytes);
+                                }
+                                QueryMessage::MicrobatchEnd(_) => {
+                                    if let Some(start) = microbatch_start.take() {
+                                        let duration = start.elapsed().as_millis() as f64;
+                                        metrics.record_streaming_microbatch_duration(duration);
+                                    }
+                                }
+                                QueryMessage::BlockComplete(_) => {}
                             }
 
                             yield Ok(message);

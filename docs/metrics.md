@@ -87,13 +87,21 @@ Current number of active streaming queries in this process. Increments when stre
 
 Duration that streaming queries remain active from start to completion. Use to understand typical stream lifetimes, identify long-running streams, detect abandoned connections, and plan connection timeout policies.
 
-### streaming_microbatch_size_rows
+### streaming_microbatch_rows
 
 **Type:** Histogram
 **Unit:** rows
 **Labels:** None
 
 Distribution of rows per microbatch in streaming queries. Use to understand streaming throughput patterns, tune microbatch configuration, and identify queries with inefficient batching.
+
+### streaming_microbatch_duration_milliseconds
+
+**Type:** Histogram
+**Unit:** milliseconds
+**Labels:** None
+
+Duration of each streaming microbatch from start to completion. Measures the time taken to process and deliver each batch of results to clients. Use to understand microbatch processing performance, identify slow batches that may indicate complex queries or large result sets, correlate with batch size metrics to optimize microbatch configuration, and detect performance regressions in streaming query execution.
 
 ### streaming_rows_sent_total
 
@@ -339,7 +347,10 @@ rate(streaming_bytes_sent_total[5m])
 histogram_quantile(0.95, rate(streaming_query_lifetime_milliseconds_bucket[5m])) / 1000
 
 # Average microbatch size
-rate(streaming_rows_sent_total[5m]) / rate(streaming_microbatch_size_rows_count[5m])
+rate(streaming_rows_sent_total[5m]) / rate(streaming_microbatch_rows_count[5m])
+
+# P95 microbatch duration (convert milliseconds to seconds for display)
+histogram_quantile(0.95, rate(streaming_microbatch_duration_milliseconds_bucket[5m])) / 1000
 
 # Streaming completion rate
 rate(streaming_queries_completed_total[5m])

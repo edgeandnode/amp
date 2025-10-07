@@ -32,6 +32,9 @@ pub struct MetricsRegistry {
     /// Number of rows per streaming microbatch
     pub streaming_microbatch_rows: telemetry::metrics::Histogram<u64>,
 
+    /// Duration of each streaming microbatch in milliseconds
+    pub streaming_microbatch_duration: telemetry::metrics::Histogram<f64>,
+
     /// Total rows sent incrementally via streaming queries
     pub streaming_rows_sent: telemetry::metrics::Counter,
 
@@ -96,6 +99,12 @@ impl MetricsRegistry {
                 "Number of rows per streaming microbatch",
                 "rows",
             ),
+            streaming_microbatch_duration: telemetry::metrics::Histogram::new_f64(
+                meter,
+                "streaming_microbatch_duration_milliseconds",
+                "Duration of each streaming microbatch",
+                "milliseconds",
+            ),
             streaming_rows_sent: telemetry::metrics::Counter::new(
                 meter,
                 "streaming_rows_sent_total",
@@ -137,6 +146,11 @@ impl MetricsRegistry {
         self.streaming_microbatch_rows.record(batch_rows);
         self.streaming_rows_sent.inc_by(batch_rows);
         self.streaming_bytes_sent.inc_by(batch_bytes);
+    }
+
+    /// Record streaming microbatch duration
+    pub fn record_streaming_microbatch_duration(&self, duration_millis: f64) {
+        self.streaming_microbatch_duration.record(duration_millis);
     }
 
     /// Record streaming query lifetime
