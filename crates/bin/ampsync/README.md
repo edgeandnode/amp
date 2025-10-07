@@ -21,6 +21,8 @@ and handling blockchain reorganizations automatically.
 - **High Performance**: PostgreSQL COPY protocol with binary format for maximum throughput
 - **Adaptive Batching**: Dynamic batch size optimization based on performance metrics
 - **Connection Pooling**: Efficient database connection management with exponential backoff retry
+- **Circuit Breakers**: Configurable retry timeouts prevent indefinite hangs on connection/operation failures
+- **SQL Reserved Word Handling**: Automatically quotes column names that are SQL reserved keywords
 - **Graceful Shutdown**: Docker-compatible signal handling (SIGTERM/SIGINT)
 - **Concurrent Processing**: Per-table async tasks for parallel data processing
 
@@ -97,6 +99,20 @@ Option 2: Individual components (all required except password)
     - **Default**: `3`
     - **Range**: `1-10` (recommended)
     - **Notes**: When config file changes, ampsync will retry fetching the manifest this many times before failing. This gives the `nozzle dump` command time to complete (~2-30s depending on retries). Uses exponential backoff.
+
+#### Reliability & Error Handling
+
+- **`DB_MAX_RETRY_DURATION_SECS`** - Maximum duration for database connection retries (circuit breaker)
+    - **Type**: Integer
+    - **Default**: `300` (5 minutes)
+    - **Range**: `30-3600` (recommended)
+    - **Notes**: Prevents indefinite retry loops when database is unavailable. Stops retrying after this duration to avoid resource exhaustion. Logs "db_connection_circuit_breaker_triggered" when activated.
+
+- **`DB_OPERATION_MAX_RETRY_DURATION_SECS`** - Maximum duration for database operation retries (circuit breaker)
+    - **Type**: Integer
+    - **Default**: `60` (1 minute)
+    - **Range**: `10-300` (recommended)
+    - **Notes**: Prevents indefinite retries for database operations (inserts, checkpoints, etc.). Protects against prolonged database performance issues. Uses exponential backoff.
 
 #### Logging
 
@@ -245,6 +261,7 @@ Created automatically from your nozzle config with schemas fetched from Admin AP
 - Column types mapped from Arrow to PostgreSQL
 - Primary key on `block_num` (if present)
 - Supports schema evolution (adding new columns)
+- Automatically quotes SQL reserved keyword column names ("to", "from", "select", etc.)
 
 #### Internal Tables
 
@@ -305,7 +322,7 @@ docker build -t ampsync:latest -f crates/bin/ampsync/Dockerfile .
 ### Testing
 
 ```bash
-# Run all tests
+# Run all tests (6 integration tests)
 cargo test -p ampsync
 
 # Run specific test
@@ -314,6 +331,14 @@ cargo test -p ampsync --test hot_reload_test
 # Run with logging
 RUST_LOG=debug cargo test -p ampsync -- --nocapture
 ```
+
+**Integration Tests**:
+- `checkpoint_test.rs`: Checkpoint tracking and recovery
+- `decimal_insert_test.rs`: Decimal type handling
+- `hot_reload_test.rs`: Config reload functionality
+- `schema_evolution_test.rs`: Schema migration scenarios
+- `reserved_words_test.rs`: SQL reserved keyword column handling
+- `circuit_breaker_test.rs`: Database retry circuit breaker functionality
 
 ### Project Structure
 
@@ -385,6 +410,20 @@ crates/bin/ampsync/
 - Check for tables with very large batches
 - Monitor adaptive batch manager adjustments in debug logs
 - Consider database connection pool size
+
+**"db_connection_circuit_breaker_triggered" error**
+
+- Database connection retries exceeded configured timeout (default: 300 seconds)
+- Check database availability and network connectivity
+- Increase `DB_MAX_RETRY_DURATION_SECS` if database startup is slow
+- Verify PostgreSQL is running and accessible
+
+**Database operations timing out after 60 seconds**
+
+- Database operation retry circuit breaker triggered
+- Check database performance and network latency
+- Increase `DB_OPERATION_MAX_RETRY_DURATION_SECS` if needed
+- Monitor PostgreSQL logs for slow queries or locks
 
 **"Hot-reload not detecting file changes"**
 

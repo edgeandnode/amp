@@ -175,6 +175,24 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - INSERT, DELETE, SELECT (for data operations)
 - Should use dedicated user, not superuser
 
+### 🛡️ Reliability Features
+
+**Circuit Breakers**:
+- **Connection Circuit Breaker**: Prevents indefinite connection retry loops (default: 300s)
+  - Configurable via `DB_MAX_RETRY_DURATION_SECS`
+  - Stops retrying after configured duration to avoid resource exhaustion
+  - Logs "db_connection_circuit_breaker_triggered" when activated
+- **Operation Circuit Breaker**: Prevents indefinite database operation retries (default: 60s)
+  - Configurable via `DB_OPERATION_MAX_RETRY_DURATION_SECS`
+  - Protects against prolonged database performance issues
+  - Uses exponential backoff with intelligent retry logic
+
+**SQL Reserved Word Handling**:
+- Automatically quotes column names that are SQL reserved keywords
+- Supports columns like "to", "from", "select", "array", "sum", "table", "blob", etc.
+- Uses compile-time perfect hash set (phf) for O(1) lookups with zero runtime cost
+- No user intervention required - handled transparently in DDL and DML operations
+
 ## Configuration
 
 ### Environment Variables
@@ -188,6 +206,8 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - `AMP_ADMIN_API_ADDR`: Nozzle Admin API server (default: http://localhost:1610)
 - `MAX_CONCURRENT_BATCHES`: Concurrent batch limit (default: 10)
 - `HOT_RELOAD_MAX_RETRIES`: Hot-reload retry attempts (default: 3)
+- `DB_MAX_RETRY_DURATION_SECS`: Connection retry circuit breaker duration (default: 300 seconds)
+- `DB_OPERATION_MAX_RETRY_DURATION_SECS`: Database operation retry circuit breaker duration (default: 60 seconds)
 - `RUST_LOG`: Logging configuration (default: info)
 
 **Database Connection Options**:
@@ -351,6 +371,8 @@ export default defineDataset(() => ({
 - `decimal_insert_test.rs`: Decimal type handling
 - `hot_reload_test.rs`: Config reload functionality
 - `schema_evolution_test.rs`: Schema migration scenarios
+- `reserved_words_test.rs`: SQL reserved keyword column handling
+- `circuit_breaker_test.rs`: Database retry circuit breaker functionality
 
 **Testing with PostgreSQL**:
 - Tests use `pgtemp` crate for temporary databases
@@ -509,6 +531,18 @@ RUST_LOG=trace,ampsync=trace cargo run -p ampsync
 - **Cause**: Too many concurrent batches, large batch sizes, or batch size not adapting
 - **Fix**: Lower `MAX_CONCURRENT_BATCHES`, check adaptive batch manager logs
 - **Code Location**: `src/sync_engine.rs::AdaptiveBatchManager`
+
+### "db_connection_circuit_breaker_triggered"
+- **Cause**: Database connection retries exceeded configured timeout duration
+- **Fix**: Check database availability, network connectivity. Increase `DB_MAX_RETRY_DURATION_SECS` if needed.
+- **Default**: Stops after 300 seconds (5 minutes)
+- **Code Location**: `src/conn.rs::DbConnPool::connect_with_max_duration()`
+
+### Database operations timing out after 60 seconds
+- **Cause**: Database operation retry circuit breaker triggered
+- **Fix**: Check database performance, network latency. Increase `DB_OPERATION_MAX_RETRY_DURATION_SECS` if needed.
+- **Default**: Stops after 60 seconds
+- **Code Location**: `src/sync_engine.rs::db_max_retry_duration()`
 
 ## Quick Reference Commands
 
