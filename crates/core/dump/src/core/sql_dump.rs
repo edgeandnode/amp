@@ -230,10 +230,6 @@ pub async fn dump_table(
 
         // Record error metrics
         if let Some(ref metrics) = metrics_for_after {
-            let dataset_version = table_for_metrics
-                .dataset()
-                .dataset_version()
-                .unwrap_or_default();
             metrics.record_dump_error(
                 dataset_name_for_metrics.to_string(),
                 dataset_version,
