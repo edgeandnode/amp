@@ -139,7 +139,7 @@ pub async fn dump_table(
     // Clone values needed for metrics after async block
     let dataset_name_for_metrics = dataset_name.clone();
     let table_name_for_metrics = table_name.clone();
-    let table_for_metrics = table.clone();
+    let dataset_version = table.dataset().dataset_version().unwrap_or_default();
     let metrics_for_after = metrics.clone();
 
     // Get the table definition from the manifest
