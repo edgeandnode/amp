@@ -277,7 +277,7 @@ impl Service {
         let plan = ctx
             .plan_sql(query.clone())
             .await
-            .map_err(|err| Error::from(err))?;
+            .map_err(Error::from)?;
 
         let is_streaming = common::stream_helpers::is_streaming(&query);
         let result = self
