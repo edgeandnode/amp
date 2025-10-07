@@ -10,7 +10,7 @@ use tracing::instrument;
 /// - `Latest`: Stop at the latest available block
 /// - `Absolute(N)`: Stop at specific block number N
 /// - `LatestMinus(N)`: Stop at latest block - N (e.g., 100 means latest - 100)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, utoipa::ToSchema)]
 pub enum EndBlock {
     /// Continuous dumping - never stops
     #[default]

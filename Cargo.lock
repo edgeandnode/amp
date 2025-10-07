@@ -3437,6 +3437,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "utoipa",
 ]
 
 [[package]]

@@ -1192,12 +1192,8 @@
         "description": "Request options for dataset dump operations\n\nControls the behavior and scope of the data extraction job.\nThese options determine the range of blocks to extract.",
         "properties": {
           "end_block": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "The last block number to extract (optional)\n\nIf not specified, the extraction will continue indefinitely\n(until manually stopped or the blockchain tip)."
+            "$ref": "#/components/schemas/EndBlock",
+            "description": "The end block configuration for the dump\n\nSupports multiple modes:\n- `null` or omitted: Continuous dumping (never stops)\n- `\"latest\"`: Stop at the latest available block\n- `<number>`: Stop at specific block number (e.g., `1000000`)\n- `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)\n\nIf not specified, defaults to continuous mode."
           }
         }
       },
@@ -1214,6 +1210,55 @@
             "description": "The ID of the scheduled dump job (64-bit integer)"
           }
         }
+      },
+      "EndBlock": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Continuous dumping - never stops",
+            "enum": [
+              "None"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "Stop at the latest available block",
+            "enum": [
+              "Latest"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "Stop at a specific block number",
+            "required": [
+              "Absolute"
+            ],
+            "properties": {
+              "Absolute": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Stop at a specific block number",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Stop N blocks before the latest block",
+            "required": [
+              "LatestMinus"
+            ],
+            "properties": {
+              "LatestMinus": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Stop N blocks before the latest block",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "End block configuration for dump operations.\n\nDefines when a dump should stop processing blocks:\n- `None`: Continuous dumping (never stops)\n- `Latest`: Stop at the latest available block\n- `Absolute(N)`: Stop at specific block number N\n- `LatestMinus(N)`: Stop at latest block - N (e.g., 100 means latest - 100)"
       },
       "ErrorResponse": {
         "type": "object",
