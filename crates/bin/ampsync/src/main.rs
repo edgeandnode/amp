@@ -317,27 +317,49 @@ async fn spawn_stream_tasks(
             .create_table_from_schema(table_name, &arrow_schema)
             .await?;
 
-        // Get checkpoint for this table to resume from last processed block
-        let checkpoint = ampsync_db_engine.get_checkpoint(table_name).await?;
-        let sql_query_with_checkpoint = if let Some(max_block) = checkpoint {
-            info!(
-                table = %table_name,
-                checkpoint_block = max_block,
-                "resuming_from_checkpoint"
-            );
-            // Add WHERE clause to resume from checkpoint
-            // Note: This assumes the query has a block_num column accessible
-            format!("{} WHERE block_num > {}", sql_query, max_block)
-        } else {
-            info!(
-                table = %table_name,
-                "starting_from_beginning"
-            );
-            sql_query.to_string()
-        };
+        // Load resume point for this table (watermark-first, fallback to incremental)
+        let resume_point = ampsync_db_engine.load_resume_point(table_name).await?;
 
-        // Add streaming settings to the query
-        let streaming_query = format!("{} SETTINGS stream = true", sql_query_with_checkpoint);
+        let (resume_watermark, streaming_query) = match &resume_point {
+            sync_engine::ResumePoint::Watermark(watermark) => {
+                info!(
+                    table = %table_name,
+                    watermark = ?watermark,
+                    "resuming_from_watermark"
+                );
+                // Watermark handles resumption at server level - no WHERE clause needed
+                (
+                    Some(watermark.clone()),
+                    format!("{} SETTINGS stream = true", sql_query),
+                )
+            }
+            sync_engine::ResumePoint::Incremental {
+                network,
+                max_block_num,
+            } => {
+                info!(
+                    table = %table_name,
+                    network = %network,
+                    max_block_num = max_block_num,
+                    "resuming_from_incremental_checkpoint"
+                );
+                // Incremental checkpoint uses WHERE clause for resumption
+                (
+                    None,
+                    format!(
+                        "{} WHERE block_num > {} SETTINGS stream = true",
+                        sql_query, max_block_num
+                    ),
+                )
+            }
+            sync_engine::ResumePoint::None => {
+                info!(
+                    table = %table_name,
+                    "starting_from_beginning"
+                );
+                (None, format!("{} SETTINGS stream = true", sql_query))
+            }
+        };
         debug!(
             table = %table_name,
             query = %streaming_query,
@@ -351,6 +373,7 @@ async fn spawn_stream_tasks(
         let mut sql_client_clone = sql_client.clone();
         let streaming_query_clone = streaming_query.clone();
         let shutdown_token_clone = shutdown_token.clone();
+        let resume_watermark_clone = resume_watermark.clone();
 
         let task_handle = tokio::spawn(async move {
             let mut retry_count = 0u32;
@@ -366,8 +389,13 @@ async fn spawn_stream_tasks(
                     return;
                 }
 
+                // Query with watermark for hash-verified resumption
                 let result_stream = match sql_client_clone
-                    .query(&streaming_query_clone, None, None)
+                    .query(
+                        &streaming_query_clone,
+                        None,
+                        resume_watermark_clone.as_ref(),
+                    )
                     .await
                 {
                     Ok(stream) => stream,
@@ -473,30 +501,39 @@ async fn spawn_stream_tasks(
                                     "batch_inserted"
                                 );
 
-                                // Update checkpoint with the max block_num from this batch
-                                if let Some(max_block) =
-                                    AmpsyncDbEngine::extract_max_block_num(&converted_batch)
+                                // Update incremental checkpoint for progress tracking between watermarks
+                                if let Some((network, max_block)) =
+                                    AmpsyncDbEngine::extract_max_block_from_ranges(&metadata.ranges)
                                 {
                                     if let Err(e) = ampsync_db_engine_clone
-                                        .update_checkpoint(&table_name_owned, max_block)
+                                        .update_incremental_checkpoint(
+                                            &table_name_owned,
+                                            &network,
+                                            max_block,
+                                        )
                                         .await
                                     {
-                                        error!(
+                                        warn!(
                                             table = %table_name_owned,
+                                            network = %network,
                                             block_num = max_block,
                                             error = %e,
-                                            "checkpoint_update_failed"
+                                            "incremental_checkpoint_update_failed"
                                         );
-                                        // Don't break - checkpoint failure is not critical enough to halt stream
+                                        // Don't break - incremental checkpoint failure is not critical
                                         // Worst case: we'll reprocess some data on restart
                                     } else {
                                         debug!(
                                             table = %table_name_owned,
+                                            network = %network,
                                             block_num = max_block,
-                                            "checkpoint_updated"
+                                            "incremental_checkpoint_updated"
                                         );
                                     }
                                 }
+
+                                // Note: Canonical watermark checkpoint is updated via ResponseBatchWithReorg::Watermark
+                                // Watermarks provide hash-verified resumption and are emitted when ranges are complete.
                             }
                             // Permit is automatically released when _permit is dropped
                         }
@@ -538,6 +575,47 @@ async fn spawn_stream_tasks(
                                 info!(
                                     table = %table_name_owned,
                                     "reorg_handled"
+                                );
+                            }
+                        }
+                        Ok(ResponseBatchWithReorg::Watermark(watermark)) => {
+                            info!(
+                                table = %table_name_owned,
+                                watermark = ?watermark,
+                                "watermark_received"
+                            );
+
+                            // Acquire semaphore permit for watermark save
+                            let _permit = match batch_semaphore_clone.acquire().await {
+                                Ok(permit) => permit,
+                                Err(_) => {
+                                    // Semaphore is closed - this means shutdown is in progress
+                                    warn!(
+                                        table = %table_name_owned,
+                                        context = "watermark",
+                                        "semaphore_closed"
+                                    );
+                                    return;
+                                }
+                            };
+
+                            // Save watermark for hash-verified stream resumption
+                            if let Err(e) = ampsync_db_engine_clone
+                                .save_watermark(&table_name_owned, &watermark)
+                                .await
+                            {
+                                error!(
+                                    table = %table_name_owned,
+                                    error = %e,
+                                    "watermark_save_failed"
+                                );
+                                // Break to trigger stream reconnection
+                                // Watermark persistence is critical for resumption
+                                break;
+                            } else {
+                                info!(
+                                    table = %table_name_owned,
+                                    "watermark_saved"
                                 );
                             }
                         }

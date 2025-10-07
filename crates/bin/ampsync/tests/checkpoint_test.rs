@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 use arrow_array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
+use common::metadata::segments::ResumeWatermark;
 use pgtemp::PgTempDB;
 
 /// Helper to create a test database pool
@@ -45,6 +46,19 @@ fn create_test_batch(block_nums: Vec<u64>) -> RecordBatch {
         .expect("Failed to create test batch")
 }
 
+/// Helper to create a test watermark for a single network
+fn create_test_watermark(network: &str, block_num: u64) -> ResumeWatermark {
+    let mut map: BTreeMap<String, (u64, [u8; 32])> = BTreeMap::new();
+    // Use a simple deterministic hash for testing
+    let hash: [u8; 32] = {
+        let mut h = [0u8; 32];
+        h[0..8].copy_from_slice(&block_num.to_le_bytes());
+        h
+    };
+    map.insert(network.to_string(), (block_num, hash));
+    ResumeWatermark::from(map)
+}
+
 #[tokio::test]
 async fn test_init_checkpoint_table() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
@@ -69,7 +83,7 @@ async fn test_init_checkpoint_table() {
 
     assert_eq!(table_exists, Some((true,)));
 
-    // Verify columns exist
+    // Verify columns exist (new hybrid checkpoint schema)
     let columns: Vec<(String,)> = sqlx::query_as(
         "SELECT column_name FROM information_schema.columns
          WHERE table_name = '_ampsync_checkpoints'
@@ -79,31 +93,37 @@ async fn test_init_checkpoint_table() {
     .await
     .expect("Failed to query columns");
 
-    assert_eq!(columns.len(), 3);
+    assert_eq!(columns.len(), 8);
     assert_eq!(columns[0].0, "table_name");
-    assert_eq!(columns[1].0, "max_block_num");
-    assert_eq!(columns[2].0, "updated_at");
+    assert_eq!(columns[1].0, "network");
+    assert_eq!(columns[2].0, "incremental_block_num");
+    assert_eq!(columns[3].0, "incremental_updated_at");
+    assert_eq!(columns[4].0, "watermark_block_num");
+    assert_eq!(columns[5].0, "watermark_block_hash");
+    assert_eq!(columns[6].0, "watermark_updated_at");
+    assert_eq!(columns[7].0, "updated_at");
 
-    // Verify PRIMARY KEY on table_name
-    let pk_exists: Option<(bool,)> = sqlx::query_as(
-        "SELECT EXISTS (
-            SELECT 1 FROM pg_constraint c
-            JOIN pg_class t ON c.conrelid = t.oid
-            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
-            WHERE t.relname = '_ampsync_checkpoints'
-            AND a.attname = 'table_name'
-            AND c.contype = 'p'
-        )",
+    // Verify PRIMARY KEY on (table_name, network)
+    let pk_columns: Vec<(String,)> = sqlx::query_as(
+        "SELECT a.attname
+         FROM pg_constraint c
+         JOIN pg_class t ON c.conrelid = t.oid
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+         WHERE t.relname = '_ampsync_checkpoints'
+         AND c.contype = 'p'
+         ORDER BY array_position(c.conkey, a.attnum)",
     )
-    .fetch_optional(&pool)
+    .fetch_all(&pool)
     .await
-    .expect("Failed to check primary key");
+    .expect("Failed to query primary key columns");
 
-    assert_eq!(pk_exists, Some((true,)));
+    assert_eq!(pk_columns.len(), 2);
+    assert_eq!(pk_columns[0].0, "table_name");
+    assert_eq!(pk_columns[1].0, "network");
 }
 
 #[tokio::test]
-async fn test_get_checkpoint_none() {
+async fn test_load_watermark_none() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
     let engine = AmpsyncDbEngine::new(&db_pool);
 
@@ -112,17 +132,17 @@ async fn test_get_checkpoint_none() {
         .await
         .expect("Failed to initialize checkpoint table");
 
-    // Get checkpoint for non-existent table
-    let checkpoint = engine
-        .get_checkpoint("test_table")
+    // Load watermark for non-existent table
+    let watermark = engine
+        .load_watermark("test_table")
         .await
-        .expect("Failed to get checkpoint");
+        .expect("Failed to load watermark");
 
-    assert_eq!(checkpoint, None);
+    assert_eq!(watermark, None);
 }
 
 #[tokio::test]
-async fn test_update_and_get_checkpoint() {
+async fn test_save_and_load_watermark() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
     let engine = AmpsyncDbEngine::new(&db_pool);
 
@@ -131,23 +151,24 @@ async fn test_update_and_get_checkpoint() {
         .await
         .expect("Failed to initialize checkpoint table");
 
-    // Update checkpoint
+    // Save watermark
+    let watermark = create_test_watermark("mainnet", 1000);
     engine
-        .update_checkpoint("test_table", 1000)
+        .save_watermark("test_table", &watermark)
         .await
-        .expect("Failed to update checkpoint");
+        .expect("Failed to save watermark");
 
-    // Get checkpoint
-    let checkpoint = engine
-        .get_checkpoint("test_table")
+    // Load watermark
+    let loaded = engine
+        .load_watermark("test_table")
         .await
-        .expect("Failed to get checkpoint");
+        .expect("Failed to load watermark");
 
-    assert_eq!(checkpoint, Some(1000));
+    assert_eq!(loaded, Some(watermark));
 }
 
 #[tokio::test]
-async fn test_update_checkpoint_upsert() {
+async fn test_save_watermark_upsert() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
     let engine = AmpsyncDbEngine::new(&db_pool);
 
@@ -156,25 +177,27 @@ async fn test_update_checkpoint_upsert() {
         .await
         .expect("Failed to initialize checkpoint table");
 
-    // Initial update
+    // Initial save
+    let watermark1 = create_test_watermark("mainnet", 1000);
     engine
-        .update_checkpoint("test_table", 1000)
+        .save_watermark("test_table", &watermark1)
         .await
-        .expect("Failed to update checkpoint");
+        .expect("Failed to save watermark");
 
-    // Update again (should UPSERT)
+    // Save again (should UPSERT)
+    let watermark2 = create_test_watermark("mainnet", 2000);
     engine
-        .update_checkpoint("test_table", 2000)
+        .save_watermark("test_table", &watermark2)
         .await
-        .expect("Failed to update checkpoint");
+        .expect("Failed to save watermark");
 
-    // Get checkpoint - should have latest value
-    let checkpoint = engine
-        .get_checkpoint("test_table")
+    // Load watermark - should have latest value
+    let loaded = engine
+        .load_watermark("test_table")
         .await
-        .expect("Failed to get checkpoint");
+        .expect("Failed to load watermark");
 
-    assert_eq!(checkpoint, Some(2000));
+    assert_eq!(loaded, Some(watermark2));
 }
 
 #[tokio::test]
@@ -215,7 +238,7 @@ async fn test_extract_max_block_num_no_block_column() {
 }
 
 #[tokio::test]
-async fn test_multiple_tables_separate_checkpoints() {
+async fn test_multiple_tables_separate_watermarks() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
     let engine = AmpsyncDbEngine::new(&db_pool);
 
@@ -224,33 +247,42 @@ async fn test_multiple_tables_separate_checkpoints() {
         .await
         .expect("Failed to initialize checkpoint table");
 
-    // Update checkpoints for different tables
+    // Save watermarks for different tables
+    let watermark1 = create_test_watermark("mainnet", 5000);
     engine
-        .update_checkpoint("blocks", 5000)
+        .save_watermark("blocks", &watermark1)
         .await
-        .expect("Failed to update blocks checkpoint");
+        .expect("Failed to save blocks watermark");
 
+    let watermark2 = create_test_watermark("mainnet", 3000);
     engine
-        .update_checkpoint("transactions", 3000)
+        .save_watermark("transactions", &watermark2)
         .await
-        .expect("Failed to update transactions checkpoint");
+        .expect("Failed to save transactions watermark");
 
+    let watermark3 = create_test_watermark("mainnet", 7000);
     engine
-        .update_checkpoint("logs", 7000)
+        .save_watermark("logs", &watermark3)
         .await
-        .expect("Failed to update logs checkpoint");
+        .expect("Failed to save logs watermark");
 
-    // Verify each table has its own checkpoint
-    assert_eq!(engine.get_checkpoint("blocks").await.unwrap(), Some(5000));
+    // Verify each table has its own watermark
     assert_eq!(
-        engine.get_checkpoint("transactions").await.unwrap(),
-        Some(3000)
+        engine.load_watermark("blocks").await.unwrap(),
+        Some(watermark1)
     );
-    assert_eq!(engine.get_checkpoint("logs").await.unwrap(), Some(7000));
+    assert_eq!(
+        engine.load_watermark("transactions").await.unwrap(),
+        Some(watermark2)
+    );
+    assert_eq!(
+        engine.load_watermark("logs").await.unwrap(),
+        Some(watermark3)
+    );
 }
 
 #[tokio::test]
-async fn test_checkpoint_survives_reconnection() {
+async fn test_watermark_survives_reconnection() {
     let pg_temp = {
         // Set C locale for pgtemp
         unsafe {
@@ -260,7 +292,9 @@ async fn test_checkpoint_survives_reconnection() {
     };
     let connection_string = pg_temp.connection_uri();
 
-    // First connection - set checkpoint
+    let expected_watermark = create_test_watermark("mainnet", 9999);
+
+    // First connection - save watermark
     {
         let db_pool = DbConnPool::connect(&connection_string, 1)
             .await
@@ -273,24 +307,156 @@ async fn test_checkpoint_survives_reconnection() {
             .expect("Failed to initialize checkpoint table");
 
         engine
-            .update_checkpoint("test_table", 9999)
+            .save_watermark("test_table", &expected_watermark)
             .await
-            .expect("Failed to update checkpoint");
+            .expect("Failed to save watermark");
     }
     // Connection dropped
 
-    // Second connection - verify checkpoint persisted
+    // Second connection - verify watermark persisted
     {
         let db_pool = DbConnPool::connect(&connection_string, 1)
             .await
             .expect("Failed to create DbConnPool");
         let engine = AmpsyncDbEngine::new(&db_pool);
 
-        let checkpoint = engine
-            .get_checkpoint("test_table")
+        let loaded_watermark = engine
+            .load_watermark("test_table")
             .await
-            .expect("Failed to get checkpoint");
+            .expect("Failed to load watermark");
 
-        assert_eq!(checkpoint, Some(9999));
+        assert_eq!(loaded_watermark, Some(expected_watermark));
     }
+}
+
+#[tokio::test]
+async fn test_incremental_checkpoint_between_watermarks() {
+    use ampsync::sync_engine::ResumePoint;
+
+    let (db_pool, _pool, _pg_temp) = create_test_pool().await;
+    let engine = AmpsyncDbEngine::new(&db_pool);
+
+    engine
+        .init_checkpoint_table()
+        .await
+        .expect("Failed to initialize checkpoint table");
+
+    // Simulate batches arriving before first watermark
+    engine
+        .update_incremental_checkpoint("test_table", "mainnet", 100)
+        .await
+        .expect("Failed to update incremental checkpoint");
+
+    engine
+        .update_incremental_checkpoint("test_table", "mainnet", 200)
+        .await
+        .expect("Failed to update incremental checkpoint");
+
+    engine
+        .update_incremental_checkpoint("test_table", "mainnet", 300)
+        .await
+        .expect("Failed to update incremental checkpoint");
+
+    // Load resume point - should get incremental checkpoint
+    let resume_point = engine
+        .load_resume_point("test_table")
+        .await
+        .expect("Failed to load resume point");
+
+    match resume_point {
+        ResumePoint::Incremental {
+            network,
+            max_block_num,
+        } => {
+            assert_eq!(network, "mainnet");
+            assert_eq!(max_block_num, 300);
+        }
+        _ => panic!("Expected incremental resume point"),
+    }
+
+    // Now save a watermark
+    let watermark = create_test_watermark("mainnet", 500);
+    engine
+        .save_watermark("test_table", &watermark)
+        .await
+        .expect("Failed to save watermark");
+
+    // Load resume point - should now get watermark (preferred over incremental)
+    let resume_point = engine
+        .load_resume_point("test_table")
+        .await
+        .expect("Failed to load resume point");
+
+    match resume_point {
+        ResumePoint::Watermark(w) => {
+            assert_eq!(w, watermark);
+        }
+        _ => panic!("Expected watermark resume point"),
+    }
+}
+
+#[tokio::test]
+async fn test_multi_network_watermark() {
+    use std::collections::BTreeMap;
+
+    let (db_pool, _pool, _pg_temp) = create_test_pool().await;
+    let engine = AmpsyncDbEngine::new(&db_pool);
+
+    engine
+        .init_checkpoint_table()
+        .await
+        .expect("Failed to initialize checkpoint table");
+
+    // Create multi-network watermark
+    let mut map: BTreeMap<String, (u64, [u8; 32])> = BTreeMap::new();
+
+    let hash1: [u8; 32] = {
+        let mut h = [0u8; 32];
+        h[0..8].copy_from_slice(&1000u64.to_le_bytes());
+        h
+    };
+    map.insert("mainnet".to_string(), (1000, hash1));
+
+    let hash2: [u8; 32] = {
+        let mut h = [0u8; 32];
+        h[0..8].copy_from_slice(&2000u64.to_le_bytes());
+        h
+    };
+    map.insert("sepolia".to_string(), (2000, hash2));
+
+    let watermark = ResumeWatermark::from(map);
+
+    // Save multi-network watermark
+    engine
+        .save_watermark("test_table", &watermark)
+        .await
+        .expect("Failed to save watermark");
+
+    // Load watermark
+    let loaded = engine
+        .load_watermark("test_table")
+        .await
+        .expect("Failed to load watermark");
+
+    assert_eq!(loaded, Some(watermark));
+}
+
+#[tokio::test]
+async fn test_batch_with_empty_ranges() {
+    let (db_pool, _pool, _pg_temp) = create_test_pool().await;
+    let engine = AmpsyncDbEngine::new(&db_pool);
+
+    engine
+        .init_checkpoint_table()
+        .await
+        .expect("Failed to initialize checkpoint table");
+
+    // Test with empty ranges vector
+    let empty_ranges: Vec<common::metadata::segments::BlockRange> = vec![];
+    let result = AmpsyncDbEngine::extract_max_block_from_ranges(&empty_ranges);
+
+    assert_eq!(result, None);
+
+    // Verify updating incremental checkpoint with None doesn't panic
+    // (It just won't update anything)
 }

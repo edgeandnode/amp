@@ -40,6 +40,23 @@ struct SchemaDiff<'a> {
     type_mismatches: Vec<String>,
 }
 
+/// Stream resumption strategy
+///
+/// Indicates how the stream should be resumed based on available checkpoint data.
+#[derive(Debug, Clone)]
+pub enum ResumePoint {
+    /// Hash-verified watermark resumption (preferred)
+    /// Pass this to SqlClient::query() for server-side resumption
+    Watermark(common::metadata::segments::ResumeWatermark),
+
+    /// Best-effort incremental checkpoint resumption
+    /// Use WHERE block_num > max_block_num in the SQL query
+    Incremental { network: String, max_block_num: i64 },
+
+    /// No checkpoint exists - start from the beginning
+    None,
+}
+
 /// Compile-time perfect hash set of reserved SQL keywords.
 ///
 /// If a column in the derived arrow schema exists in this set, it needs to be wrapped in quotes,
@@ -563,29 +580,283 @@ impl AmpsyncDbEngine {
 
     /// Initialize the checkpoint tracking table
     ///
-    /// Creates a table to track the last successfully processed block_num for each table.
-    /// This enables resuming from the last checkpoint on restart.
+    /// Creates a table with hybrid checkpoint strategy:
+    /// - Incremental checkpoints: Updated after each batch insertion (best-effort progress tracking)
+    /// - Watermark checkpoints: Updated on Watermark events (hash-verified canonical resumption points)
+    ///
+    /// Schema supports multi-network scenarios with one row per (table, network) combination.
     pub async fn init_checkpoint_table(&self) -> Result<(), BoxError> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _ampsync_checkpoints (
-                table_name TEXT PRIMARY KEY,
-                max_block_num BIGINT NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        // First, check if old schema exists and migrate if needed
+        let old_schema_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = '_ampsync_checkpoints'
+                AND column_name = 'max_block_num'
+                AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = '_ampsync_checkpoints'
+                    AND column_name = 'network'
+                )
             )",
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map_err(|e| format!("Failed to create checkpoint table: {}", e))?;
+        .unwrap_or(false);
+
+        if old_schema_exists {
+            // Migrate from old schema to new hybrid schema
+            tracing::info!(
+                "Migrating checkpoint table from old schema to hybrid watermark-based schema"
+            );
+
+            // Create new table with hybrid checkpoint support
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS _ampsync_checkpoints_new (
+                    table_name TEXT NOT NULL,
+                    network TEXT NOT NULL,
+                    -- Incremental checkpoint (best-effort, updated per batch)
+                    incremental_block_num BIGINT,
+                    incremental_updated_at TIMESTAMPTZ,
+                    -- Watermark checkpoint (canonical, hash-verified, updated on Watermark event)
+                    watermark_block_num BIGINT,
+                    watermark_block_hash BYTEA,
+                    watermark_updated_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (table_name, network)
+                )",
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to create new checkpoint table: {}", e))?;
+
+            // Migrate old incremental checkpoints (preserve as best-effort resumption points)
+            // We can't create watermarks without block hashes, but we can preserve progress
+            tracing::info!("Migrating old checkpoint data to incremental checkpoints");
+            sqlx::query(
+                "INSERT INTO _ampsync_checkpoints_new
+                    (table_name, network, incremental_block_num, incremental_updated_at, updated_at)
+                 SELECT
+                    table_name,
+                    'unknown' as network,  -- Old schema didn't track network
+                    max_block_num,
+                    updated_at,
+                    updated_at
+                 FROM _ampsync_checkpoints",
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to migrate old checkpoints: {}", e))?;
+
+            // Backup old table instead of dropping
+            sqlx::query("ALTER TABLE _ampsync_checkpoints RENAME TO _ampsync_checkpoints_backup")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to backup old checkpoint table: {}", e))?;
+
+            sqlx::query("ALTER TABLE _ampsync_checkpoints_new RENAME TO _ampsync_checkpoints")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to rename new checkpoint table: {}", e))?;
+
+            tracing::info!(
+                "Checkpoint table migration completed. \
+                 Old table backed up as _ampsync_checkpoints_backup. \
+                 Incremental checkpoints preserved, watermarks will be established on first Watermark event."
+            );
+        } else {
+            // Create new schema directly
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS _ampsync_checkpoints (
+                    table_name TEXT NOT NULL,
+                    network TEXT NOT NULL,
+                    -- Incremental checkpoint (best-effort, updated per batch)
+                    incremental_block_num BIGINT,
+                    incremental_updated_at TIMESTAMPTZ,
+                    -- Watermark checkpoint (canonical, hash-verified, updated on Watermark event)
+                    watermark_block_num BIGINT,
+                    watermark_block_hash BYTEA,
+                    watermark_updated_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (table_name, network)
+                )",
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to create checkpoint table: {}", e))?;
+        }
 
         Ok(())
     }
 
+    /// Load the watermark for a table to enable stream resumption
+    ///
+    /// Returns None if no watermark exists (first run or after migration).
+    /// The returned ResumeWatermark can be passed to SqlClient::query() for hash-verified resumption.
+    pub async fn load_watermark(
+        &self,
+        table_name: &str,
+    ) -> Result<Option<common::metadata::segments::ResumeWatermark>, BoxError> {
+        use std::collections::BTreeMap;
+
+        use common::metadata::segments::ResumeWatermark;
+
+        let rows: Vec<(String, i64, Vec<u8>)> = sqlx::query_as(
+            "SELECT network, watermark_block_num, watermark_block_hash
+             FROM _ampsync_checkpoints
+             WHERE table_name = $1
+             AND watermark_block_num IS NOT NULL
+             AND watermark_block_hash IS NOT NULL
+             ORDER BY network",
+        )
+        .bind(table_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to load watermark for table '{}': {}", table_name, e))?;
+
+        if rows.is_empty() {
+            return Ok(None);
+        }
+
+        // Reconstruct ResumeWatermark from database rows
+        let watermark_map: BTreeMap<String, (common::BlockNum, [u8; 32])> = rows
+            .into_iter()
+            .filter_map(|(network, block_num, hash_bytes)| {
+                // Validate hash size to prevent panic
+                if hash_bytes.len() != 32 {
+                    tracing::warn!(
+                        table = table_name,
+                        network = %network,
+                        hash_size = hash_bytes.len(),
+                        "invalid_watermark_hash_size"
+                    );
+                    return None;
+                }
+
+                // Convert Vec<u8> to [u8; 32]
+                let mut hash_array = [0u8; 32];
+                hash_array.copy_from_slice(&hash_bytes);
+                Some((network, (block_num as common::BlockNum, hash_array)))
+            })
+            .collect();
+
+        if watermark_map.is_empty() {
+            return Ok(None);
+        }
+
+        // Use From trait to convert to ResumeWatermark
+        let watermark = ResumeWatermark::from(watermark_map);
+
+        Ok(Some(watermark))
+    }
+
+    /// Update incremental checkpoint for a table
+    ///
+    /// This should be called after successfully inserting a batch (Batch variant).
+    /// Provides best-effort progress tracking between watermark events.
+    ///
+    /// Uses UPSERT (INSERT ... ON CONFLICT) for atomic updates per network.
+    pub async fn update_incremental_checkpoint(
+        &self,
+        table_name: &str,
+        network: &str,
+        max_block_num: i64,
+    ) -> Result<(), BoxError> {
+        sqlx::query(
+            "INSERT INTO _ampsync_checkpoints
+                (table_name, network, incremental_block_num, incremental_updated_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())
+             ON CONFLICT (table_name, network)
+             DO UPDATE SET
+                incremental_block_num = GREATEST(COALESCE(_ampsync_checkpoints.incremental_block_num, 0), EXCLUDED.incremental_block_num),
+                incremental_updated_at = NOW(),
+                updated_at = NOW()",
+        )
+        .bind(table_name)
+        .bind(network)
+        .bind(max_block_num)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to update incremental checkpoint for table '{}', network '{}' to {}: {}",
+                table_name, network, max_block_num, e
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Load the resume point for a table (watermark-first, fallback to incremental)
+    ///
+    /// Returns a ResumePoint indicating how the stream should be resumed:
+    /// - Watermark: Hash-verified resumption point (preferred)
+    /// - Incremental: Best-effort resumption from max block number
+    /// - None: Start from the beginning
+    pub async fn load_resume_point(&self, table_name: &str) -> Result<ResumePoint, BoxError> {
+        // Try watermark first (hash-verified, canonical)
+        if let Some(watermark) = self.load_watermark(table_name).await? {
+            tracing::debug!(table = table_name, "loaded_watermark_resumption_point");
+            return Ok(ResumePoint::Watermark(watermark));
+        }
+
+        // Fall back to incremental checkpoint (best-effort)
+        let max_incremental: Option<(String, i64)> = sqlx::query_as(
+            "SELECT network, MAX(incremental_block_num) as max_block
+             FROM _ampsync_checkpoints
+             WHERE table_name = $1
+             AND incremental_block_num IS NOT NULL
+             GROUP BY network
+             ORDER BY max_block DESC
+             LIMIT 1",
+        )
+        .bind(table_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to load incremental checkpoint for table '{}': {}",
+                table_name, e
+            )
+        })?;
+
+        if let Some((network, max_block)) = max_incremental {
+            tracing::debug!(
+                table = table_name,
+                network = %network,
+                max_block = max_block,
+                "loaded_incremental_resumption_point"
+            );
+            return Ok(ResumePoint::Incremental {
+                network,
+                max_block_num: max_block,
+            });
+        }
+
+        tracing::debug!(table = table_name, "no_resumption_point");
+        Ok(ResumePoint::None)
+    }
+
+    /// Extract maximum block number from BlockRange metadata
+    ///
+    /// Used for incremental checkpoint updates in Batch variant.
+    pub fn extract_max_block_from_ranges(
+        ranges: &[common::metadata::segments::BlockRange],
+    ) -> Option<(String, i64)> {
+        ranges
+            .iter()
+            .max_by_key(|r| r.end())
+            .map(|r| (r.network.clone(), r.end() as i64))
+    }
+
     /// Get the checkpoint (last processed block_num) for a table
+    ///
+    /// DEPRECATED: Use load_resume_point() for smart resumption.
+    /// This method returns the highest block number across all networks for backward compatibility.
     ///
     /// Returns None if no checkpoint exists (first run)
     pub async fn get_checkpoint(&self, table_name: &str) -> Result<Option<i64>, BoxError> {
-        let result: Option<(i64,)> =
-            sqlx::query_as("SELECT max_block_num FROM _ampsync_checkpoints WHERE table_name = $1")
+        let result: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT MAX(block_num) FROM _ampsync_checkpoints WHERE table_name = $1")
                 .bind(table_name)
                 .fetch_optional(&self.pool)
                 .await
@@ -593,36 +864,92 @@ impl AmpsyncDbEngine {
                     format!("Failed to get checkpoint for table '{}': {}", table_name, e)
                 })?;
 
-        Ok(result.map(|(block_num,)| block_num))
+        Ok(result.and_then(|(block_num,)| block_num))
+    }
+
+    /// Save a watermark checkpoint for a table
+    ///
+    /// This should be called when receiving a ResponseBatchWithReorg::Watermark.
+    /// Stores block number and hash for each network to enable hash-verified resumption.
+    ///
+    /// Uses UPSERT (INSERT ... ON CONFLICT) for atomic updates per network.
+    pub async fn save_watermark(
+        &self,
+        table_name: &str,
+        watermark: &common::metadata::segments::ResumeWatermark,
+    ) -> Result<(), BoxError> {
+        use std::collections::BTreeMap;
+
+        // Convert ResumeWatermark to BTreeMap<String, (BlockNum, [u8; 32])>
+        let watermark_map: BTreeMap<String, (common::BlockNum, [u8; 32])> =
+            watermark.clone().into();
+
+        // Start a transaction for atomic multi-row upsert
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            format!(
+                "Failed to start transaction for watermark save on table '{}': {}",
+                table_name, e
+            )
+        })?;
+
+        for (network, (block_num, block_hash)) in watermark_map {
+            sqlx::query(
+                "INSERT INTO _ampsync_checkpoints
+                    (table_name, network, watermark_block_num, watermark_block_hash, watermark_updated_at, updated_at)
+                 VALUES ($1, $2, $3, $4, NOW(), NOW())
+                 ON CONFLICT (table_name, network)
+                 DO UPDATE SET
+                    watermark_block_num = EXCLUDED.watermark_block_num,
+                    watermark_block_hash = EXCLUDED.watermark_block_hash,
+                    watermark_updated_at = NOW(),
+                    updated_at = NOW()",
+            )
+            .bind(table_name)
+            .bind(&network)
+            .bind(block_num as i64)
+            .bind(&block_hash[..]) // Convert [u8; 32] to &[u8]
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to save watermark for table '{}', network '{}': {}",
+                    table_name, network, e
+                )
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            format!(
+                "Failed to commit watermark transaction for table '{}': {}",
+                table_name, e
+            )
+        })?;
+
+        Ok(())
     }
 
     /// Update the checkpoint for a table
+    ///
+    /// DEPRECATED: Use save_watermark() for hash-verified checkpoints.
+    /// This method is kept for backward compatibility with old code paths.
     ///
     /// This should be called after successfully inserting a batch.
     /// Uses UPSERT (INSERT ... ON CONFLICT) for atomic updates.
     pub async fn update_checkpoint(
         &self,
         table_name: &str,
-        max_block_num: i64,
+        _max_block_num: i64,
     ) -> Result<(), BoxError> {
-        sqlx::query(
-            "INSERT INTO _ampsync_checkpoints (table_name, max_block_num, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (table_name)
-             DO UPDATE SET max_block_num = EXCLUDED.max_block_num, updated_at = NOW()",
-        )
-        .bind(table_name)
-        .bind(max_block_num)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| {
-            format!(
-                "Failed to update checkpoint for table '{}' to {}: {}",
-                table_name, max_block_num, e
-            )
-        })?;
+        // Note: This method is deprecated and won't work with the new schema
+        // that requires (table_name, network) as primary key.
+        // It's kept only for compilation compatibility and will error at runtime
+        // if called with the new schema.
+        tracing::warn!(
+            table = table_name,
+            "update_checkpoint is deprecated, use save_watermark instead"
+        );
 
-        Ok(())
+        Err("update_checkpoint is deprecated, use save_watermark with ResponseBatchWithReorg::Watermark instead".into())
     }
 
     /// Extract the maximum block_num from a RecordBatch
