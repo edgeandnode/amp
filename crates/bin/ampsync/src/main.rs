@@ -64,12 +64,13 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     // Initialize logging
     monitoring::logging::init();
 
-    info!("Starting ampsync with hot-reload support...");
+    info!("Starting ampsync with hot-reload support");
 
     let mut config = AmpsyncConfig::from_env().await?;
     info!(
-        "Loaded manifest: {} v{}",
-        config.manifest.name, config.manifest.version
+        dataset_name = %config.manifest.name,
+        dataset_version = %config.manifest.version,
+        "manifest_loaded"
     );
 
     // Connect to target database (reused across reloads)
@@ -77,21 +78,24 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     // Connect to Nozzle server (reused across reloads)
     let sql_client = SqlClient::new(&config.amp_flight_addr).await?;
-    info!("Connected to Nozzle server at {}", config.amp_flight_addr);
+    info!(
+        flight_addr = %config.amp_flight_addr,
+        "nozzle_server_connected"
+    );
 
     let ampsync_db_engine = AmpsyncDbEngine::new(&db_pool);
 
     // Initialize checkpoint tracking table
     ampsync_db_engine.init_checkpoint_table().await?;
-    info!("Checkpoint tracking initialized");
+    info!("checkpoint_tracking_initialized");
 
     // Set up file watcher for hot-reload
     let (file_change_tx, mut file_change_rx) = tokio::sync::mpsc::channel(1);
     let manifest_path = config.manifest_path.clone();
     let _file_watcher_handle = file_watcher::spawn_file_watcher(manifest_path, file_change_tx);
     info!(
-        "File watcher initialized for '{}'",
-        config.manifest_path.display()
+        manifest_path = %config.manifest_path.display(),
+        "file_watcher_initialized"
     );
 
     // Setup signal handlers for graceful shutdown
@@ -100,7 +104,12 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     // Main reload loop
     loop {
-        info!("Preparing to sync dataset: {}", config.manifest.name);
+        info!(
+            dataset_name = %config.manifest.name,
+            dataset_version = %config.manifest.version,
+            table_count = config.manifest.tables.len(),
+            "starting_dataset_sync"
+        );
 
         // Spawn stream processing tasks for current configuration
         let shutdown_token = tokio_util::sync::CancellationToken::new();
@@ -116,7 +125,10 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         tokio::select! {
             // File changed - reload configuration
             Some(file_watcher::FileWatchEvent::Changed) = file_change_rx.recv() => {
-                info!("Manifest file changed, initiating hot-reload...");
+                info!(
+                    manifest_path = %config.manifest_path.display(),
+                    "hot_reload_triggered"
+                );
 
                 // Gracefully stop all streams
                 shutdown_token.cancel();
@@ -126,14 +138,20 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                 match config.reload_manifest().await {
                     Ok(new_config) => {
                         info!(
-                            "Successfully loaded new manifest: {} v{}",
-                            new_config.manifest.name, new_config.manifest.version
+                            dataset_name = %new_config.manifest.name,
+                            dataset_version = %new_config.manifest.version,
+                            table_count = new_config.manifest.tables.len(),
+                            "hot_reload_success"
                         );
                         config = new_config;
                         // Loop continues with new config
                     }
                     Err(e) => {
-                        error!("Failed to reload manifest: {}", e);
+                        error!(
+                            error = %e,
+                            manifest_path = %config.manifest_path.display(),
+                            "hot_reload_failed"
+                        );
                         error!("Keeping previous configuration active");
                         // Loop continues with old config (safe fallback)
                     }
@@ -142,7 +160,7 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
             // SIGTERM received - graceful shutdown
             _ = sigterm.recv() => {
-                info!("Received SIGTERM, shutting down gracefully...");
+                info!(signal = "SIGTERM", "shutdown_signal_received");
                 shutdown_token.cancel();
                 shutdown_streams_gracefully(task_handles).await;
                 break;
@@ -150,7 +168,7 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
             // SIGINT received - graceful shutdown
             _ = sigint.recv() => {
-                info!("Received SIGINT, shutting down gracefully...");
+                info!(signal = "SIGINT", "shutdown_signal_received");
                 shutdown_token.cancel();
                 shutdown_streams_gracefully(task_handles).await;
                 break;
@@ -158,7 +176,7 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         }
     }
 
-    info!("Shutdown complete");
+    info!("shutdown_complete");
     Ok(())
 }
 
@@ -190,7 +208,7 @@ async fn spawn_stream_tasks(
 
     // Process each table: create table and set up streaming
     for (table_name, table) in &config.manifest.tables {
-        debug!("Processing table: {}", table_name);
+        debug!(table = %table_name, "processing_table");
 
         // Get the SQL query from the table definition
         let sql_query = match &table.input {
@@ -213,19 +231,21 @@ async fn spawn_stream_tasks(
             SelectColumns::All => {
                 // SELECT * - use the full manifest schema
                 info!(
-                    "Table '{}' uses SELECT * - creating table with all {} columns from manifest",
-                    table_name,
-                    table.schema.arrow.fields.len()
+                    table = %table_name,
+                    column_count = table.schema.arrow.fields.len(),
+                    select_mode = "all",
+                    "creating_table_with_schema"
                 );
                 table.schema.arrow.clone()
             }
             SelectColumns::Specific(column_names) => {
                 // SELECT col1, col2, ... - filter manifest schema to only include these columns
                 info!(
-                    "Table '{}' selects {} specific columns: {}",
-                    table_name,
-                    column_names.len(),
-                    column_names.join(", ")
+                    table = %table_name,
+                    column_count = column_names.len(),
+                    columns = %column_names.join(", "),
+                    select_mode = "specific",
+                    "creating_table_with_schema"
                 );
 
                 // Build a HashMap for O(1) lookups of manifest fields
@@ -260,9 +280,9 @@ async fn spawn_stream_tasks(
                         filtered_fields.push((*field).clone());
                     } else {
                         warn!(
-                            "Column '{}' selected in SQL for table '{}' not found in manifest schema. \
-                             This may be an expression or computed column.",
-                            col_name, table_name
+                            table = %table_name,
+                            column = %col_name,
+                            "column_not_found_in_schema"
                         );
                         // For expressions/computed columns, we'll need to handle them dynamically
                         // For now, skip them - they'll be handled when we get actual data
@@ -301,16 +321,17 @@ async fn spawn_stream_tasks(
         let checkpoint = ampsync_db_engine.get_checkpoint(table_name).await?;
         let sql_query_with_checkpoint = if let Some(max_block) = checkpoint {
             info!(
-                "Resuming table '{}' from checkpoint: block_num > {}",
-                table_name, max_block
+                table = %table_name,
+                checkpoint_block = max_block,
+                "resuming_from_checkpoint"
             );
             // Add WHERE clause to resume from checkpoint
             // Note: This assumes the query has a block_num column accessible
             format!("{} WHERE block_num > {}", sql_query, max_block)
         } else {
             info!(
-                "No checkpoint found for table '{}', starting from beginning",
-                table_name
+                table = %table_name,
+                "starting_from_beginning"
             );
             sql_query.to_string()
         };
@@ -318,8 +339,9 @@ async fn spawn_stream_tasks(
         // Add streaming settings to the query
         let streaming_query = format!("{} SETTINGS stream = true", sql_query_with_checkpoint);
         debug!(
-            "Executing streaming query for '{}': {}",
-            table_name, streaming_query
+            table = %table_name,
+            query = %streaming_query,
+            "executing_streaming_query"
         );
 
         // Wrap with with_reorg and spawn a task to handle the stream
@@ -338,8 +360,8 @@ async fn spawn_stream_tasks(
                 // Check if shutdown has been requested
                 if shutdown_token_clone.is_cancelled() {
                     info!(
-                        "Shutdown requested for table '{}', stopping gracefully",
-                        table_name_owned
+                        table = %table_name_owned,
+                        "shutdown_requested"
                     );
                     return;
                 }
@@ -351,17 +373,18 @@ async fn spawn_stream_tasks(
                     Ok(stream) => stream,
                     Err(e) => {
                         error!(
-                            "Failed to create stream for table '{}' (attempt {}/{}): {}",
-                            table_name_owned,
-                            retry_count + 1,
-                            max_retries,
-                            e
+                            table = %table_name_owned,
+                            attempt = retry_count + 1,
+                            max_retries = max_retries,
+                            error = %e,
+                            "stream_creation_failed"
                         );
 
                         if retry_count >= max_retries {
                             error!(
-                                "Max retries ({}) reached for table '{}'. Stream will not be retried.",
-                                max_retries, table_name_owned
+                                table = %table_name_owned,
+                                max_retries = max_retries,
+                                "max_retries_reached"
                             );
                             return;
                         }
@@ -369,8 +392,10 @@ async fn spawn_stream_tasks(
                         // Exponential backoff: 2^retry_count seconds, capped at MAX_RETRY_DELAY_SECS
                         let delay_secs = std::cmp::min(2u64.pow(retry_count), MAX_RETRY_DELAY_SECS);
                         warn!(
-                            "Retrying stream for table '{}' in {} seconds...",
-                            table_name_owned, delay_secs
+                            table = %table_name_owned,
+                            retry_delay_secs = delay_secs,
+                            attempt = retry_count + 1,
+                            "retrying_stream_creation"
                         );
                         tokio::time::sleep(Duration::from_secs(delay_secs)).await;
                         retry_count += 1;
@@ -379,7 +404,10 @@ async fn spawn_stream_tasks(
                 };
 
                 let mut reorg_stream = with_reorg(result_stream);
-                info!("Started reorg stream for table: {}", table_name_owned);
+                info!(
+                    table = %table_name_owned,
+                    "stream_started"
+                );
 
                 // Reset retry count on successful connection
                 retry_count = 0;
@@ -388,10 +416,10 @@ async fn spawn_stream_tasks(
                     match result {
                         Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
                             info!(
-                                "Received data batch for table '{}': {} rows, block ranges: {:?}",
-                                table_name_owned,
-                                data.num_rows(),
-                                metadata.ranges
+                                table = %table_name_owned,
+                                rows = data.num_rows(),
+                                block_ranges = ?metadata.ranges,
+                                "batch_received"
                             );
 
                             // Acquire semaphore permit before processing batch
@@ -403,8 +431,8 @@ async fn spawn_stream_tasks(
                                 Err(_) => {
                                     // Semaphore is closed - this means shutdown is in progress
                                     warn!(
-                                        "Semaphore closed for table '{}', shutting down stream",
-                                        table_name_owned
+                                        table = %table_name_owned,
+                                        "semaphore_closed"
                                     );
                                     return;
                                 }
@@ -415,9 +443,9 @@ async fn spawn_stream_tasks(
                                 Ok(batch) => batch,
                                 Err(e) => {
                                     error!(
-                                        "CRITICAL: Failed to convert timestamps for table '{}': {}. \
-                                         This batch will be lost. Halting stream to prevent data loss.",
-                                        table_name_owned, e
+                                        table = %table_name_owned,
+                                        error = %e,
+                                        "timestamp_conversion_failed"
                                     );
                                     // Break to trigger stream reconnection and retry from last good position
                                     break;
@@ -430,20 +458,19 @@ async fn spawn_stream_tasks(
                                 .await
                             {
                                 error!(
-                                    "CRITICAL: Failed to insert {} rows for table '{}': {}. \
-                                     Halting stream to prevent data loss and trigger reconnection.",
-                                    converted_batch.num_rows(),
-                                    table_name_owned,
-                                    e
+                                    table = %table_name_owned,
+                                    rows = converted_batch.num_rows(),
+                                    error = %e,
+                                    "batch_insert_failed"
                                 );
                                 // Break to trigger stream reconnection
                                 // This ensures we don't silently drop data
                                 break;
                             } else {
                                 info!(
-                                    "Successfully bulk inserted {} rows into table '{}'",
-                                    converted_batch.num_rows(),
-                                    table_name_owned
+                                    table = %table_name_owned,
+                                    rows = converted_batch.num_rows(),
+                                    "batch_inserted"
                                 );
 
                                 // Update checkpoint with the max block_num from this batch
@@ -455,16 +482,18 @@ async fn spawn_stream_tasks(
                                         .await
                                     {
                                         error!(
-                                            "Failed to update checkpoint for table '{}' to block {}: {}. \
-                                             Continuing with data processing, but restart may reprocess recent data.",
-                                            table_name_owned, max_block, e
+                                            table = %table_name_owned,
+                                            block_num = max_block,
+                                            error = %e,
+                                            "checkpoint_update_failed"
                                         );
                                         // Don't break - checkpoint failure is not critical enough to halt stream
                                         // Worst case: we'll reprocess some data on restart
                                     } else {
                                         debug!(
-                                            "Updated checkpoint for table '{}' to block {}",
-                                            table_name_owned, max_block
+                                            table = %table_name_owned,
+                                            block_num = max_block,
+                                            "checkpoint_updated"
                                         );
                                     }
                                 }
@@ -473,8 +502,9 @@ async fn spawn_stream_tasks(
                         }
                         Ok(ResponseBatchWithReorg::Reorg { invalidation }) => {
                             warn!(
-                                "Reorg detected for table '{}', invalidating ranges: {:?}",
-                                table_name_owned, invalidation
+                                table = %table_name_owned,
+                                invalidation_ranges = ?invalidation,
+                                "reorg_detected"
                             );
 
                             // Acquire semaphore permit for reorg handling too
@@ -483,8 +513,9 @@ async fn spawn_stream_tasks(
                                 Err(_) => {
                                     // Semaphore is closed - this means shutdown is in progress
                                     warn!(
-                                        "Semaphore closed during reorg for table '{}', shutting down stream",
-                                        table_name_owned
+                                        table = %table_name_owned,
+                                        context = "reorg",
+                                        "semaphore_closed"
                                     );
                                     return;
                                 }
@@ -496,24 +527,25 @@ async fn spawn_stream_tasks(
                                 .await
                             {
                                 error!(
-                                    "CRITICAL: Failed to handle reorg for table '{}': {}. \
-                                     Halting stream to ensure data consistency.",
-                                    table_name_owned, e
+                                    table = %table_name_owned,
+                                    error = %e,
+                                    "reorg_handling_failed"
                                 );
                                 // Break to trigger stream reconnection
                                 // Reorgs must be handled correctly for data consistency
                                 break;
                             } else {
                                 info!(
-                                    "Successfully handled reorg for table '{}'",
-                                    table_name_owned
+                                    table = %table_name_owned,
+                                    "reorg_handled"
                                 );
                             }
                         }
                         Err(e) => {
                             error!(
-                                "Stream error for table '{}': {}. Will attempt to reconnect...",
-                                table_name_owned, e
+                                table = %table_name_owned,
+                                error = %e,
+                                "stream_error"
                             );
                             break; // Break inner loop to trigger reconnection
                         }
@@ -522,8 +554,8 @@ async fn spawn_stream_tasks(
 
                 // Stream ended - will retry with exponential backoff in outer loop
                 warn!(
-                    "Stream ended for table '{}'. Attempting reconnection...",
-                    table_name_owned
+                    table = %table_name_owned,
+                    "stream_ended"
                 );
             }
         });
@@ -539,16 +571,13 @@ async fn spawn_stream_tasks(
 /// Waits for tasks to complete with a timeout, logging any failures.
 /// This ensures in-flight batches are processed before shutdown.
 async fn shutdown_streams_gracefully(task_handles: Vec<tokio::task::JoinHandle<()>>) {
-    info!(
-        "Shutting down {} stream processing tasks...",
-        task_handles.len()
-    );
+    info!(task_count = task_handles.len(), "shutting_down_streams");
 
     let shutdown_future = async {
         for (i, handle) in task_handles.into_iter().enumerate() {
             match handle.await {
-                Ok(_) => debug!("Task {} completed successfully", i),
-                Err(e) => warn!("Task {} join error: {}", i, e),
+                Ok(_) => debug!(task_index = i, "task_completed"),
+                Err(e) => warn!(task_index = i, error = %e, "task_join_error"),
             }
         }
     };
@@ -559,10 +588,10 @@ async fn shutdown_streams_gracefully(task_handles: Vec<tokio::task::JoinHandle<(
     )
     .await
     {
-        Ok(_) => info!("All stream tasks shut down gracefully"),
+        Ok(_) => info!("streams_shutdown_complete"),
         Err(_) => warn!(
-            "Graceful shutdown timeout reached after {}s, some tasks may still be running",
-            GRACEFUL_SHUTDOWN_TIMEOUT_SECS
+            timeout_secs = GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
+            "graceful_shutdown_timeout"
         ),
     }
 }

@@ -186,17 +186,24 @@ pub fn arrow_schema_to_postgres_ddl(
     Ok(ddl)
 }
 
+/// Quote a column name if it's a SQL reserved keyword
+///
+/// This ensures column names like "to", "from", "select" work correctly in SQL statements.
+fn quote_column_name(name: &str) -> String {
+    if RESERVED_KEYWORDS.contains(name) {
+        format!("\"{}\"", name)
+    } else {
+        name.to_string()
+    }
+}
+
 /// Convert a single Arrow field to PostgreSQL column definition
 fn arrow_field_to_postgres_column(field: &Field) -> Result<String, BoxError> {
     let pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
     let nullable = if field.nullable { "" } else { " NOT NULL" };
 
     // wrap reserved keywords in quotes
-    let column_name = if RESERVED_KEYWORDS.contains(field.name.as_str()) {
-        format!("\"{}\"", field.name)
-    } else {
-        field.name.clone()
-    };
+    let column_name = quote_column_name(&field.name);
 
     Ok(format!("{} {}{}", column_name, pg_type, nullable))
 }
@@ -322,10 +329,10 @@ impl AdaptiveBatchManager {
         self.adjust_batch_size();
 
         tracing::debug!(
-            "Batch performance: {}ms for {} rows, new batch size: {}",
-            duration_ms,
-            rows_processed,
-            self.current_batch_size
+            duration_ms = duration_ms,
+            rows = rows_processed,
+            new_batch_size = self.current_batch_size,
+            "batch_performance_recorded"
         );
     }
 
@@ -340,8 +347,8 @@ impl AdaptiveBatchManager {
             self.error_count = 0; // Reset after adjustment
 
             tracing::warn!(
-                "Reducing batch size to {} due to repeated errors",
-                self.current_batch_size
+                new_batch_size = self.current_batch_size,
+                "batch_size_reduced_due_to_errors"
             );
         }
     }
@@ -454,8 +461,8 @@ impl AmpsyncDbEngine {
     fn notify_db_retry(err: &sqlx::Error, dur: Duration) {
         tracing::warn!(
             error = %err,
-            "Database operation failed. Retrying in {:.1}s",
-            dur.as_secs_f32()
+            retry_delay_secs = dur.as_secs_f32(),
+            "db_operation_retry"
         );
     }
 
@@ -478,8 +485,8 @@ impl AmpsyncDbEngine {
         } else {
             // Table exists, check for schema evolution
             tracing::debug!(
-                "Table '{}' already exists, checking for schema changes",
-                table_name
+                table = %table_name,
+                "checking_schema_evolution"
             );
             self.migrate_table_schema(table_name, schema).await?;
         }
@@ -617,7 +624,12 @@ impl AmpsyncDbEngine {
     async fn create_table(&self, table_name: &str, schema: &ArrowSchema) -> Result<(), BoxError> {
         let ddl = arrow_schema_to_postgres_ddl(table_name, schema)?;
 
-        tracing::info!("Creating new table '{}' with DDL: {}", table_name, ddl);
+        tracing::info!(
+            table = %table_name,
+            field_count = schema.fields.len(),
+            ddl = %ddl,
+            "creating_table"
+        );
 
         let pool = &self.pool;
         let ddl_query = &ddl;
@@ -629,7 +641,7 @@ impl AmpsyncDbEngine {
             .await
             .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
 
-        tracing::info!("Successfully created table '{}'", table_name);
+        tracing::info!(table = %table_name, "table_created");
         Ok(())
     }
 
@@ -674,22 +686,25 @@ impl AmpsyncDbEngine {
         // Apply new columns
         if !schema_diff.new_columns.is_empty() {
             tracing::info!(
-                "Detected {} new column(s) in table '{}': {}",
-                schema_diff.new_columns.len(),
-                table_name,
-                schema_diff
+                table = %table_name,
+                new_column_count = schema_diff.new_columns.len(),
+                columns = %schema_diff
                     .new_columns
                     .iter()
                     .map(|f| f.name.as_str())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                "schema_evolution_detected"
             );
 
             for field in &schema_diff.new_columns {
                 self.add_column(table_name, field).await?;
             }
         } else {
-            tracing::debug!("No schema changes detected for table '{}'", table_name);
+            tracing::debug!(
+                table = %table_name,
+                "no_schema_changes"
+            );
         }
 
         Ok(())
@@ -751,7 +766,12 @@ impl AmpsyncDbEngine {
         let column_def = format!("{} {}", column_name, pg_type);
         let alter_stmt = format!("ALTER TABLE {} ADD COLUMN {}", table_name, column_def);
 
-        tracing::info!("Executing schema migration: {}", alter_stmt);
+        tracing::info!(
+            table = %table_name,
+            column = %field.name,
+            pg_type = %pg_type,
+            "adding_column"
+        );
 
         let pool = &self.pool;
         let stmt = &alter_stmt;
@@ -769,9 +789,9 @@ impl AmpsyncDbEngine {
             })?;
 
         tracing::info!(
-            "Successfully added column '{}' to table '{}'",
-            field.name,
-            table_name
+            table = %table_name,
+            column = %field.name,
+            "column_added"
         );
         Ok(())
     }
@@ -793,10 +813,10 @@ impl AmpsyncDbEngine {
         };
 
         tracing::debug!(
-            "Processing {} rows in chunks of {} for table '{}'",
-            total_rows,
-            optimal_batch_size,
-            table_name
+            table = %table_name,
+            total_rows = total_rows,
+            batch_size = optimal_batch_size,
+            "processing_batch_chunks"
         );
 
         // If the batch is smaller than optimal size, process it all at once
@@ -822,12 +842,12 @@ impl AmpsyncDbEngine {
                     batch_manager.record_success(chunk_duration, chunk_size);
 
                     tracing::debug!(
-                        "Successfully processed chunk {}-{} ({} rows) in {}ms for table '{}'",
-                        start_row,
-                        end_row,
-                        chunk_size,
-                        chunk_duration.as_millis(),
-                        table_name
+                        table = %table_name,
+                        start_row = start_row,
+                        end_row = end_row,
+                        rows = chunk_size,
+                        duration_ms = chunk_duration.as_millis(),
+                        "chunk_processed"
                     );
                 }
                 Err(e) => {
@@ -846,9 +866,9 @@ impl AmpsyncDbEngine {
         }
 
         tracing::info!(
-            "Successfully processed all {} rows for table '{}' using adaptive batching",
-            total_rows,
-            table_name
+            table = %table_name,
+            total_rows = total_rows,
+            "batch_processing_complete"
         );
 
         Ok(())
@@ -916,11 +936,12 @@ impl AmpsyncDbEngine {
             .map_err(|e| format!("Failed to write pgpq footer: {:?}", e))?;
 
         // Get column names for the COPY command
+        // IMPORTANT: Wrap reserved keywords in quotes (e.g., "to", "from")
         let schema_fields = batch.schema();
-        let column_names: Vec<&str> = schema_fields
+        let column_names: Vec<String> = schema_fields
             .fields()
             .iter()
-            .map(|f| f.name().as_str())
+            .map(|f| quote_column_name(f.name()))
             .collect();
         let columns_clause = column_names.join(", ");
 
@@ -990,19 +1011,19 @@ impl AmpsyncDbEngine {
                 let rows_inserted = result.rows_affected();
                 if rows_inserted < num_rows as u64 {
                     tracing::debug!(
-                        "Inserted {} of {} rows into '{}' (skipped {} duplicates)",
-                        rows_inserted,
-                        num_rows,
-                        table_name,
-                        num_rows as u64 - rows_inserted
+                        table = %table_name,
+                        rows_inserted = rows_inserted,
+                        input_rows = num_rows,
+                        duplicates_skipped = num_rows as u64 - rows_inserted,
+                        "batch_inserted_with_duplicates"
                     );
                 }
 
                 tracing::trace!(
-                    "Bulk insert with conflict handling completed: {} rows inserted for {} input rows in table '{}'",
-                    rows_inserted,
-                    num_rows,
-                    table_name
+                    table = %table_name,
+                    rows_inserted = rows_inserted,
+                    input_rows = num_rows,
+                    "bulk_insert_complete"
                 );
             } else {
                 // No constraint on block_num (or no block_num column) - use direct COPY
@@ -1015,10 +1036,10 @@ impl AmpsyncDbEngine {
                 let rows_affected = copy_in.finish().await?;
 
                 tracing::trace!(
-                    "COPY operation completed: {} rows affected for {} input rows in table '{}'",
-                    rows_affected,
-                    num_rows,
-                    table_name
+                    table = %table_name,
+                    rows_affected = rows_affected,
+                    input_rows = num_rows,
+                    "copy_operation_complete"
                 );
             }
 
@@ -1065,10 +1086,10 @@ impl AmpsyncDbEngine {
         let delete_query = format!("DELETE FROM {} WHERE {}", table_name, where_clause);
 
         tracing::info!(
-            "Handling reorg for table '{}' with {} invalidation ranges: {}",
-            table_name,
-            invalidation_ranges.len(),
-            delete_query
+            table = %table_name,
+            invalidation_count = invalidation_ranges.len(),
+            query = %delete_query,
+            "handling_reorg"
         );
 
         let pool = &self.pool;
@@ -1089,14 +1110,14 @@ impl AmpsyncDbEngine {
         let rows_deleted = result.rows_affected();
         if rows_deleted > 0 {
             tracing::warn!(
-                "Deleted {} rows from table '{}' due to blockchain reorganization",
-                rows_deleted,
-                table_name
+                table = %table_name,
+                rows_deleted = rows_deleted,
+                "reorg_rows_deleted"
             );
         } else {
             tracing::debug!(
-                "No rows needed deletion in table '{}' for the invalidation ranges",
-                table_name
+                table = %table_name,
+                "reorg_no_rows_deleted"
             );
         }
 

@@ -52,7 +52,7 @@ pub fn spawn_file_watcher(
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn(async move {
         if let Err(e) = run_file_watcher(path, tx).await {
-            error!("File watcher error: {}", e);
+            error!(error = %e, "file_watcher_error");
         }
     })
 }
@@ -79,9 +79,11 @@ async fn run_file_watcher(
         .to_path_buf();
 
     info!(
-        "Starting file watcher for '{}' in directory '{}'",
-        file_name,
-        watch_dir.display()
+        file_name = %file_name,
+        watch_dir = %watch_dir.display(),
+        poll_interval_secs = 2,
+        debounce_ms = 500,
+        "file_watcher_starting"
     );
 
     // Channel for raw file system events from notify
@@ -108,20 +110,24 @@ async fn run_file_watcher(
                     // If receiver dropped, watcher stops automatically
                     let _ = notify_tx.send(event);
                 }
-                Err(e) => error!("File watcher error: {}", e),
+                Err(e) => error!(error = %e, "file_watcher_notify_error"),
             },
             config,
         ) {
             Ok(w) => w,
             Err(e) => {
-                error!("Failed to create file watcher: {}", e);
+                error!(error = %e, "file_watcher_creation_failed");
                 return;
             }
         };
 
         // Watch the directory for changes
         if let Err(e) = watcher.watch(&watch_dir_clone, RecursiveMode::NonRecursive) {
-            error!("Failed to watch directory: {}", e);
+            error!(
+                error = %e,
+                dir = %watch_dir_clone.display(),
+                "failed_to_watch_directory"
+            );
             return;
         }
 
@@ -147,7 +153,7 @@ async fn run_file_watcher(
                         }
                     }
                     Err(_) => {
-                        warn!("File watcher notify channel closed");
+                        warn!("file_watcher_channel_closed");
                         break;
                     }
                 }
@@ -161,9 +167,12 @@ async fn run_file_watcher(
                 }
             } => {
                 if pending_event {
-                    info!("File '{}' changed, triggering reload", file_name);
+                    info!(
+                        file_name = %file_name,
+                        "file_change_detected"
+                    );
                     if event_tx.send(FileWatchEvent::Changed).await.is_err() {
-                        warn!("File watcher receiver dropped, shutting down");
+                        warn!("file_watcher_receiver_dropped");
                         break;
                     }
                     pending_event = false;

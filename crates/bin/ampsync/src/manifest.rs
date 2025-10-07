@@ -280,10 +280,10 @@ async fn resolve_qualified_version(
         .clone();
 
     tracing::info!(
-        "Resolved version '{}' to qualified version '{}' for dataset '{}'",
-        version,
-        qualified_version,
-        name
+        dataset = %name,
+        requested_version = %version,
+        qualified_version = %qualified_version,
+        "version_resolved"
     );
 
     Ok(qualified_version)
@@ -328,12 +328,13 @@ pub async fn fetch_manifest_with_startup_poll(
             Err(e) if e.is_retryable() => {
                 if !first_error_logged {
                     tracing::warn!(
-                        "Dataset not found in admin-api. This is expected on first run."
+                        error = %e,
+                        "dataset_not_found_waiting_for_publish"
                     );
                     tracing::warn!(
                         "Have you run 'nozzle dump --dataset <name>' to publish the dataset?"
                     );
-                    tracing::info!("Waiting for dataset to become available...");
+                    tracing::info!("waiting_for_dataset");
                     first_error_logged = true;
                 }
 
@@ -347,9 +348,9 @@ pub async fn fetch_manifest_with_startup_poll(
 
                 if attempt > 0 && attempt % 5 == 0 {
                     tracing::info!(
-                        "Still waiting for dataset... (attempt {}, retrying in {}s)",
-                        attempt + 1,
-                        backoff_secs
+                        attempt = attempt + 1,
+                        retry_delay_secs = backoff_secs,
+                        "still_waiting_for_dataset"
                     );
                 }
 
@@ -394,8 +395,9 @@ pub async fn fetch_manifest_with_retry(
             Ok(manifest) => {
                 if attempt > 0 {
                     tracing::info!(
-                        "Successfully fetched manifest after {} retry attempts",
-                        attempt
+                        attempts = attempt,
+                        dataset = %manifest.name,
+                        "manifest_fetched_after_retry"
                     );
                 }
                 return Ok(manifest);
@@ -410,10 +412,10 @@ pub async fn fetch_manifest_with_retry(
                 .min(30);
 
                 tracing::warn!(
-                    "Dataset not found (attempt {}/{}). Retrying in {}s to allow dump command to complete...",
-                    attempt + 1,
-                    max_retries,
-                    backoff_secs
+                    attempt = attempt + 1,
+                    max_retries = max_retries,
+                    retry_delay_secs = backoff_secs,
+                    "dataset_not_found_retrying"
                 );
 
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
@@ -494,10 +496,10 @@ pub async fn fetch_manifest(
     let qualified_version = resolve_qualified_version(admin_api_addr, &name, &version).await?;
 
     tracing::info!(
-        "Fetching schema for dataset '{}' version '{}' from admin-api at {}",
-        name,
-        qualified_version,
-        admin_api_addr
+        dataset = %name,
+        version = %qualified_version,
+        admin_api_addr = %admin_api_addr,
+        "fetching_schema"
     );
 
     // Fetch schema from admin-api using the qualified version

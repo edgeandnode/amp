@@ -55,8 +55,8 @@ impl DbConnPool {
         fn notify_retry(err: &sqlx::Error, dur: Duration) {
             warn!(
                 error = %err,
-                "Database connection failed. Retrying in {:.1}s",
-                dur.as_secs_f32()
+                retry_delay_secs = dur.as_secs_f32(),
+                "db_connection_retry"
             );
         }
 
