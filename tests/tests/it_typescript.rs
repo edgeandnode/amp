@@ -42,10 +42,7 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
     // Run vitest with isolated infrastructure connection info
     let status = tokio::process::Command::new("pnpm")
         .args(&["vitest", "run", &path, "--no-file-parallelism"])
-        .env(
-            "NOZZLE_ADMIN_URL",
-            ctx.daemon_server().admin_api_server_url(),
-        )
+        .env("NOZZLE_ADMIN_URL", ctx.daemon_controller().admin_api_url())
         .env("NOZZLE_JSONL_URL", ctx.daemon_server().jsonl_server_url())
         .env("NOZZLE_FLIGHT_URL", ctx.daemon_server().flight_server_url())
         .env("ANVIL_RPC_URL", ctx.anvil().connection_url())

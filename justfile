@@ -109,7 +109,7 @@ test-unit *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests 
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude nozzleup
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
@@ -118,7 +118,7 @@ test-unit *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================================="
         sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
+        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --exclude nozzleup -- --nocapture
     fi
 
 # Run integration tests
@@ -154,6 +154,24 @@ test-local *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================="
         exit 1
+    fi
+
+# Run nozzleup tests
+test-nozzleup *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --package nozzleup
+    else
+        >&2 echo "================================================================="
+        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo ""
+        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================================="
+        sleep 1 # Give the user a moment to read the warning
+        cargo test {{EXTRA_FLAGS}} --package nozzleup --test it_nozzleup -- --nocapture
     fi
 
 

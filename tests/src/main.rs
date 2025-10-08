@@ -52,7 +52,7 @@ use common::{BoxError, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
-use dump::consistency_check;
+use dump::{EndBlock, consistency_check};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
@@ -302,7 +302,7 @@ async fn bless(
         metadata_db,
         vec![dataset_name.clone()],
         true,                     // force_reprocess
-        Some(end as i64),         // end_block
+        EndBlock::Absolute(end),  // end_block
         BLESS_JOB_COUNT,          // n_jobs
         PARTITION_SIZE_MB as u64, // partition_size_mb
         None,                     // start_block
@@ -367,7 +367,7 @@ async fn bless(
 /// - The workspace root: `cargo run -p tests`
 /// - The tests crate directory: `cargo run`
 fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
-    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/data", "data"];
+    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
     TEST_DATA_BASE_DIRS
         .iter()
         .filter_map(|dir| std::path::Path::new(dir).canonicalize().ok())

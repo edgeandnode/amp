@@ -2300,6 +2300,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
+name = "controller"
+version = "0.1.0"
+dependencies = [
+ "admin-api",
+ "common",
+ "monitoring",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5559,6 +5568,7 @@ dependencies = [
  "axum 0.8.6",
  "clap",
  "common",
+ "controller",
  "datafusion",
  "dataset-store",
  "datasets-common",
@@ -5608,7 +5618,9 @@ dependencies = [
  "fs-err",
  "futures",
  "indicatif",
+ "pretty_assertions",
  "reqwest",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "tempfile",
@@ -8226,6 +8238,7 @@ dependencies = [
  "clap",
  "color-backtrace",
  "common",
+ "controller",
  "ctor",
  "dataset-store",
  "datasets-common",

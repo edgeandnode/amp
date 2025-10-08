@@ -6,6 +6,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
+use dump::EndBlock;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
 use worker::Worker;
@@ -39,15 +40,22 @@ enum Command {
         dataset: Vec<String>,
 
         /// If set to true, only the listed datasets will be dumped in the order they are listed.
-        /// By default dump listed datasets and their dependencies, ordered such that each dataset
+        /// By default, dump listed datasets and their dependencies, ordered such that each dataset
         /// will be dumped after all datasets they depend on.
         #[arg(long, env = "DUMP_IGNORE_DEPS")]
         ignore_deps: bool,
 
-        /// The block number to end at, inclusive. If omitted, defaults to a recent block. If
-        /// starts with "-" then relative to the latest block for this dataset.
+        /// The block number to end at, inclusive.
+        ///
+        /// Accepts:
+        /// - Positive integer (e.g., "1000000"): Stop at this specific block number
+        /// - "latest": Stop at the latest available block
+        /// - Negative integer (e.g., "-100"): Stop 100 blocks before latest
+        /// - Omitted: Continuous dumping (only supported for single dataset)
+        ///
+        /// When combined with --run-every-mins, omitting this defaults to "latest".
         #[arg(long, short, env = "DUMP_END_BLOCK")]
-        end_block: Option<i64>,
+        end_block: Option<EndBlock>,
 
         /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
         /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -95,15 +103,13 @@ enum Command {
         /// Enable JSON Lines Server.
         #[arg(long, env = "JSONL_SERVER")]
         jsonl_server: bool,
-        /// Enable Admin API Server.
-        #[arg(long, env = "ADMIN_SERVER")]
-        admin_server: bool,
     },
     Worker {
         /// The node id of the worker.
         #[arg(long, env = "NOZZLE_NODE_ID")]
         node_id: String,
     },
+    Controller,
     GenerateManifest {
         /// The name of the network.
         #[arg(long, required = true, env = "GM_NETWORK")]
@@ -149,15 +155,10 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
-    let Args { config, command } = Args::parse();
-    let config_path = config;
-
-    let allow_temp_db = matches!(command, Command::Dev { .. });
-    let (config, metadata_db) =
-        load_config_and_metadata_db(config_path.as_ref(), allow_temp_db).await?;
-
-    let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
-        monitoring::init(config.opentelemetry.as_ref())?;
+    let Args {
+        config: config_path,
+        command,
+    } = Args::parse();
 
     // Log version info
     tracing::info!(
@@ -166,18 +167,26 @@ async fn main_inner() -> Result<(), BoxError> {
         env!("VERGEN_GIT_DESCRIBE"),
     );
 
-    let cmd_result = match command {
+    match command {
         Command::Dev {
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
         } => {
+            // If neither of the flags are set, enable all servers
             if !flight_server && !jsonl_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
                 admin_server = true;
             }
 
+            let (config, metadata_db) =
+                load_config_and_metadata_db(config_path.as_ref(), true).await?;
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
+            // Spawn worker
             let worker = Worker::new(
                 config.clone(),
                 metadata_db.clone(),
@@ -186,20 +195,64 @@ async fn main_inner() -> Result<(), BoxError> {
             );
             tokio::spawn(async move {
                 if let Err(err) = worker.run().await {
-                    tracing::error!("{err}");
+                    tracing::error!("Worker error: {err}");
                 }
             });
 
-            let (_, server) = nozzle::server::run(
-                config,
-                metadata_db,
-                flight_server,
-                jsonl_server,
-                admin_server,
-                telemetry_metrics_meter.as_ref(),
-            )
-            .await?;
-            server.await
+            // Spawn controller (Admin API) if enabled
+            let controller_fut = if admin_server {
+                let (addr, controller_future) = controller::serve(
+                    config.addrs.admin_api_addr,
+                    config.clone(),
+                    telemetry_metrics_meter.as_ref(),
+                )
+                .await?;
+
+                tracing::info!("Controller Admin API running at {}", addr);
+                Some(controller_future)
+            } else {
+                None
+            };
+
+            // Spawn server only if at least one query server is enabled
+            let server_fut = if flight_server || jsonl_server {
+                let (addrs, future) = nozzle::server::run(
+                    config,
+                    metadata_db,
+                    flight_server,
+                    jsonl_server,
+                    telemetry_metrics_meter.as_ref(),
+                )
+                .await?;
+
+                if flight_server {
+                    tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
+                }
+                if jsonl_server {
+                    tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
+                }
+                Some(future)
+            } else {
+                None
+            };
+
+            // Wait for either server or controller to complete
+            let result = match (server_fut, controller_fut) {
+                (Some(server_fut), None) => server_fut.await,
+                (None, Some(controller_fut)) => controller_fut.await,
+                (Some(server_fut), Some(controller_fut)) => {
+                    tokio::select! {
+                        result = server_fut => result,
+                        result = controller_fut => result,
+                    }
+                }
+                (None, None) => {
+                    Err("At least one server (flight, jsonl, or admin) must be enabled".into())
+                }
+            };
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result
         }
         Command::Dump {
             end_block,
@@ -212,8 +265,25 @@ async fn main_inner() -> Result<(), BoxError> {
             fresh,
             only_finalized_blocks,
         } => {
+            let (config, metadata_db) =
+                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
             if let Some(ref opentelemetry) = config.opentelemetry {
                 dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
+            }
+
+            // When --run-every-mins is set without end_block, default to "latest"
+            // Otherwise default to continuous mode
+            let end_block = end_block
+                .or(run_every_mins.and(Some(EndBlock::Latest)))
+                .unwrap_or(EndBlock::None);
+
+            if end_block == EndBlock::None && datasets.len() > 1 {
+                return Err("Continuous mode (no end_block) is not supported when dumping multiple datasets. \
+                            Please specify an end_block value or dump datasets individually.".into());
             }
 
             let mut datasets_to_dump = Vec::new();
@@ -252,7 +322,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
             }
 
-            dump_cmd::dump(
+            let result = dump_cmd::dump(
                 config,
                 metadata_db,
                 datasets_to_dump,
@@ -267,39 +337,83 @@ async fn main_inner() -> Result<(), BoxError> {
                 telemetry_metrics_meter.as_ref(),
                 only_finalized_blocks,
             )
-            .await?;
+            .await;
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result?;
             Ok(())
         }
         Command::Server {
             mut flight_server,
             mut jsonl_server,
-            mut admin_server,
         } => {
-            if !flight_server && !jsonl_server && !admin_server {
+            // If neither of the flags are set, enable both servers
+            if !flight_server && !jsonl_server {
                 flight_server = true;
                 jsonl_server = true;
-                admin_server = true;
             }
 
-            let (_, server) = nozzle::server::run(
+            let (config, metadata_db) =
+                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
+            let (addrs, server) = nozzle::server::run(
                 config,
                 metadata_db,
                 flight_server,
                 jsonl_server,
-                admin_server,
                 telemetry_metrics_meter.as_ref(),
             )
             .await?;
-            server.await
+            if flight_server {
+                tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
+            }
+            if jsonl_server {
+                tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
+            }
+            let result = server.await;
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result
         }
         Command::Worker { node_id } => {
+            let (config, metadata_db) =
+                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
             let worker = Worker::new(
                 config.clone(),
                 metadata_db,
                 node_id.parse()?,
                 telemetry_metrics_meter.clone(),
             );
-            worker.run().await.map_err(Into::into)
+            let result = worker.run().await.map_err(Into::into);
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result
+        }
+        Command::Controller => {
+            let (config, _metadata_db) =
+                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
+            let (addr, server) = controller::serve(
+                config.addrs.admin_api_addr,
+                config,
+                telemetry_metrics_meter.as_ref(),
+            )
+            .await?;
+            tracing::info!("Controller Admin API running at {}", addr);
+            let result = server.await;
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result
         }
         Command::GenerateManifest {
             network,
@@ -309,7 +423,10 @@ async fn main_inner() -> Result<(), BoxError> {
             manifest,
             module,
         } => {
-            if let Some(mut out) = out {
+            let (telemetry_tracing_provider, telemetry_metrics_provider, _telemetry_metrics_meter) =
+                monitoring::init(None)?;
+
+            let result = if let Some(mut out) = out {
                 if out.is_dir() {
                     out.push(format!("{}.json", &kind));
                 }
@@ -319,11 +436,17 @@ async fn main_inner() -> Result<(), BoxError> {
             } else {
                 let mut stdout = std::io::stdout();
                 generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
-            }
+            };
+
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result
         }
         Command::Migrate => {
             let config_path = config_path.ok_or("--config parameter is mandatory")?;
             let config = Arc::new(Config::load(config_path, true, None, false).await?);
+
+            let (telemetry_tracing_provider, telemetry_metrics_provider, _telemetry_metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
 
             let url = config
                 .metadata_db
@@ -336,16 +459,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 MetadataDb::connect_with_config(url, config.metadata_db.pool_size, true).await?;
             tracing::info!("Migrations completed successfully");
 
+            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
             Ok(())
         }
-    };
-
-    cmd_result.and_then(move |_| {
-        monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-        Ok(())
-    })?;
-
-    Ok(())
+    }
 }
 
 async fn load_config_and_metadata_db(

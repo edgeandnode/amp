@@ -5,46 +5,51 @@ use crate::{
     github::GitHubClient,
     install::Installer,
     platform::{Architecture, Platform},
+    ui,
+    version_manager::VersionManager,
 };
 
 pub async fn run(
+    install_dir: Option<std::path::PathBuf>,
+    repo: String,
+    github_token: Option<String>,
     version: Option<String>,
     arch_override: Option<String>,
     platform_override: Option<String>,
 ) -> Result<()> {
-    let config = Config::new()?;
-    let github = GitHubClient::new(&config)?;
+    let config = Config::new(install_dir)?;
+    let github = GitHubClient::new(repo, github_token)?;
+    let version_manager = VersionManager::new(config);
 
     // Determine version to install
     let version = match version {
         Some(v) => v,
         None => {
-            println!("nozzleup: Fetching latest version...");
+            ui::info!("Fetching latest version");
             github.get_latest_version().await?
         }
     };
 
     // Check if this version is already installed
-    let version_binary = config.version_binary_path(&version);
-    if version_binary.exists() {
-        println!("nozzleup: Version {} is already installed", version);
+    if version_manager.is_installed(&version) {
+        ui::info!("Version {} is already installed", ui::version(&version));
 
         // Check if it's the current version
-        let current_version = config.current_version()?;
+        let current_version = version_manager.get_current()?;
         if current_version.as_deref() == Some(&version) {
-            println!("nozzleup: Already using version {}", version);
+            ui::success!("Already using version {}", ui::version(&version));
             return Ok(());
         }
 
         // Switch to this version
-        println!("nozzleup: Switching to version {}", version);
-        crate::commands::use_version::switch_to_version(&config, &version)?;
-        println!("nozzleup: Successfully switched to nozzle ({})", version);
-        println!("nozzleup: Run 'nozzle --version' to verify installation");
+        ui::info!("Switching to version {}", ui::version(&version));
+        crate::commands::use_version::switch_to_version(&version_manager, &version)?;
+        ui::success!("Switched to nozzle {}", ui::version(&version));
+        ui::detail!("Run 'nozzle --version' to verify installation");
         return Ok(());
     }
 
-    println!("nozzleup: Installing version {}", version);
+    ui::info!("Installing version {}", ui::version(&version));
 
     // Detect or override platform and architecture
     let platform = match platform_override {
@@ -65,16 +70,16 @@ pub async fn run(
         None => Architecture::detect()?,
     };
 
-    println!("nozzleup: Platform: {}, Architecture: {}", platform, arch);
+    ui::detail!("Platform: {}, Architecture: {}", platform, arch);
 
     // Install the binary
-    let installer = Installer::new(config, github);
+    let installer = Installer::new(version_manager, github);
     installer
         .install_from_release(&version, platform, arch)
         .await?;
 
-    println!("nozzleup: Successfully installed nozzle ({})", version);
-    println!("nozzleup: Run 'nozzle --version' to verify installation");
+    ui::success!("Installed nozzle {}", ui::version(&version));
+    ui::detail!("Run 'nozzle --version' to verify installation");
 
     Ok(())
 }

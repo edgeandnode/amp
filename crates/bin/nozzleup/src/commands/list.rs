@@ -1,38 +1,31 @@
-use anyhow::{Context, Result};
-use fs_err as fs;
+use anyhow::Result;
+use console::style;
 
-use crate::config::Config;
+use crate::{config::Config, ui, version_manager::VersionManager};
 
-pub fn run() -> Result<()> {
-    let config = Config::new()?;
+pub fn run(install_dir: Option<std::path::PathBuf>) -> Result<()> {
+    let config = Config::new(install_dir)?;
+    let version_manager = VersionManager::new(config);
 
-    if !config.versions_dir.exists() {
-        println!("nozzleup: No versions installed");
+    let versions = version_manager.list_installed()?;
+
+    if versions.is_empty() {
+        ui::info!("No versions installed");
         return Ok(());
     }
 
-    let current_version = config.current_version()?;
+    let current_version = version_manager.get_current()?;
 
-    println!("nozzleup: Installed versions:");
-
-    let mut versions = Vec::new();
-    for entry in fs::read_dir(&config.versions_dir).context("Failed to read versions directory")? {
-        let entry = entry.context("Failed to read directory entry")?;
-        if entry
-            .file_type()
-            .context("Failed to get file type")?
-            .is_dir()
-        {
-            let version = entry.file_name().to_string_lossy().to_string();
-            versions.push(version);
-        }
-    }
-
-    versions.sort();
+    ui::info!("Installed versions:");
 
     for version in versions {
         if Some(&version) == current_version.as_ref() {
-            println!("  * {} (current)", version);
+            println!(
+                "  {} {} {}",
+                style("*").green().bold(),
+                style(&version).bold(),
+                style("(current)").dim()
+            );
         } else {
             println!("    {}", version);
         }

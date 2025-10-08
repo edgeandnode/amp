@@ -59,6 +59,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "admin_api",
     "ampsync",
     "common",
+    "controller",
     "dataset_store",
     "datasets_common",
     "datasets_derived",

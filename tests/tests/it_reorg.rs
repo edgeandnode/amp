@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use dump::EndBlock;
 use monitoring::logging;
 use nozzle::dump_cmd::dump as nozzle_dump;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
@@ -124,7 +125,7 @@ async fn dump_finalized() {
                 metadata_db,
                 vec!["anvil_rpc".to_string()],
                 true, // only_finalized_blocks
-                None,
+                EndBlock::None,
                 1,   // n_jobs
                 100, // partition_size_mb
                 None,
@@ -166,6 +167,9 @@ async fn flight_data_app_metadata() {
     test.dump("anvil_rpc", 0).await;
     let mut flight_data = test.flight_metadata_stream(query).await;
 
+    // This sleep avoids a race between the first schema message, the flight data message,
+    // and receiving both.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
     assert_eq!(

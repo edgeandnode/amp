@@ -72,6 +72,10 @@ importers:
         specifier: workspace:*
         version: link:../../../typescript/nozzle
 
+  tests/datasets/sql_over_anvil_1: {}
+
+  tests/datasets/sql_over_anvil_2: {}
+
   tests/datasets/sql_stream_ds: {}
 
   typescript/nozzle:

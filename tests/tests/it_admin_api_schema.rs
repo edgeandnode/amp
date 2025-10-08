@@ -163,7 +163,7 @@ impl TestCtx {
             .expect("failed to build test context");
 
         let client = reqwest::Client::new();
-        let admin_api_url = ctx.daemon_server().admin_api_server_url();
+        let admin_api_url = ctx.daemon_controller().admin_api_url();
 
         let test_ctx = Self {
             _ctx: ctx,

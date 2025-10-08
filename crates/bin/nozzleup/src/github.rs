@@ -3,11 +3,10 @@ use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 
-use crate::config::Config;
-
 #[derive(Debug, Deserialize)]
 struct Release {
-    tag_name: String,
+    #[serde(rename = "tag_name")]
+    tag: String,
     assets: Vec<Asset>,
 }
 
@@ -15,7 +14,7 @@ struct Release {
 struct Asset {
     id: u64,
     name: String,
-    browser_download_url: String,
+    url: String,
 }
 
 pub struct GitHubClient {
@@ -25,14 +24,14 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
-    pub fn new(config: &Config) -> Result<Self> {
+    pub fn new(repo: String, github_token: Option<String>) -> Result<Self> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::USER_AGENT,
             reqwest::header::HeaderValue::from_static("nozzleup"),
         );
 
-        if let Some(token) = &config.github_token {
+        if let Some(token) = &github_token {
             let auth_value = format!("Bearer {}", token);
             headers.insert(
                 reqwest::header::AUTHORIZATION,
@@ -48,8 +47,8 @@ impl GitHubClient {
 
         Ok(Self {
             client,
-            repo: config.repo.clone(),
-            token: config.github_token.clone(),
+            repo,
+            token: github_token,
         })
     }
 
@@ -75,7 +74,7 @@ impl GitHubClient {
             .await
             .context("Failed to parse release response")?;
 
-        Ok(release.tag_name)
+        Ok(release.tag)
     }
 
     /// Get a specific release
@@ -133,8 +132,7 @@ impl GitHubClient {
             self.download_asset_via_api(asset.id).await
         } else {
             // For public repositories, use direct download URL
-            self.download_asset_direct(&asset.browser_download_url)
-                .await
+            self.download_asset_direct(&asset.url).await
         }
     }
 
