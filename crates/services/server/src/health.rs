@@ -122,7 +122,7 @@ async fn handle_ready(
 }
 
 /// Check database connectivity
-async fn check_database(metadata_db: &MetadataDb) -> Result<(), String> {
+pub async fn check_database(metadata_db: &MetadataDb) -> Result<(), String> {
     metadata_db
         .active_workers()
         .await
@@ -131,7 +131,7 @@ async fn check_database(metadata_db: &MetadataDb) -> Result<(), String> {
 }
 
 /// Check storage backend accessibility
-async fn check_storage(config: &Config) -> Result<(), String> {
+pub async fn check_storage(config: &Config) -> Result<(), String> {
     config
         .data_store
         .list("")
@@ -143,7 +143,7 @@ async fn check_storage(config: &Config) -> Result<(), String> {
 }
 
 /// Check worker availability
-async fn check_workers(metadata_db: &MetadataDb) -> Result<(), String> {
+pub async fn check_workers(metadata_db: &MetadataDb) -> Result<(), String> {
     let workers = metadata_db
         .active_workers()
         .await
