@@ -79,7 +79,7 @@ pub fn add_to_path(bin_dir: &str) -> Result<()> {
 
     // Check if already in PATH
     if content.contains(&export_line) {
-        ui::detail(format!("{} already in PATH", bin_dir));
+        ui::detail!("{} already in PATH", bin_dir);
         return Ok(());
     }
 
@@ -94,15 +94,15 @@ pub fn add_to_path(bin_dir: &str) -> Result<()> {
 
     fs::write(&profile_path, new_content).context("Failed to write to shell profile")?;
 
-    ui::success(format!(
+    ui::success!(
         "Added {} to PATH in {}",
         bin_dir,
         ui::path(profile_path.display())
-    ));
-    ui::detail(format!(
+    );
+    ui::detail!(
         "Run 'source {}' or start a new terminal session",
         profile_path.display()
-    ));
+    );
 
     Ok(())
 }

@@ -1,29 +1,38 @@
 use console::style;
 
 /// Print a success message with a green checkmark
-pub fn success(msg: impl std::fmt::Display) {
-    println!("{} {}", style("✓").green().bold(), msg);
+macro_rules! success {
+    ($($arg:tt)*) => {
+        println!("{} {}", console::style("✓").green().bold(), format!($($arg)*))
+    };
 }
 
 /// Print an info message with a cyan arrow
-pub fn info(msg: impl std::fmt::Display) {
-    println!("{} {}", style("→").cyan(), msg);
+macro_rules! info {
+    ($($arg:tt)*) => {
+        println!("{} {}", console::style("→").cyan(), format!($($arg)*))
+    };
 }
 
 /// Print a warning message with a yellow warning symbol
-pub fn warn(msg: impl std::fmt::Display) {
-    eprintln!("{} {}", style("⚠").yellow().bold(), msg);
-}
-
-/// Print an error message with a red X
-pub fn error(msg: impl std::fmt::Display) {
-    eprintln!("{} {}", style("✗").red().bold(), msg);
+#[allow(unused_macros)]
+macro_rules! warning {
+    ($($arg:tt)*) => {
+        eprintln!("{} {}", console::style("⚠").yellow().bold(), format!($($arg)*))
+    };
 }
 
 /// Print a dimmed detail message (indented)
-pub fn detail(msg: impl std::fmt::Display) {
-    println!("  {}", style(msg).dim());
+macro_rules! detail {
+    ($($arg:tt)*) => {
+        println!("  {}", console::style(format!($($arg)*)).dim())
+    };
 }
+
+pub(crate) use detail;
+pub(crate) use info;
+pub(crate) use success;
+pub(crate) use warning as warn;
 
 /// Style a version string (bold white)
 pub fn version(v: impl std::fmt::Display) -> String {

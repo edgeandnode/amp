@@ -46,7 +46,7 @@ pub async fn run(
         _ => unreachable!("Clap should prevent conflicting options"),
     };
 
-    ui::info(format!("Building from source: {}", source));
+    ui::info!("Building from source: {}", source);
 
     // Create builder
     let config = Config::new(install_dir)?;

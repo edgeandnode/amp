@@ -23,10 +23,7 @@ pub async fn run(
         );
     }
 
-    ui::info(format!(
-        "Installing to {}",
-        ui::path(config.nozzle_dir.display())
-    ));
+    ui::info!("Installing to {}", ui::path(config.nozzle_dir.display()));
 
     // Create directory structure using Config's ensure_dirs
     config.ensure_dirs()?;
@@ -52,28 +49,28 @@ pub async fn run(
             .context("Failed to set nozzleup binary permissions")?;
     }
 
-    ui::success(format!(
+    ui::success!(
         "Installed nozzleup to {}",
         ui::path(nozzleup_path.display())
-    ));
+    );
 
     // Modify PATH if requested
     if !no_modify_path {
         let bin_dir_str = config.bin_dir.to_string_lossy();
         if let Err(e) = shell::add_to_path(&bin_dir_str) {
-            ui::warn(format!("Failed to add to PATH: {}", e));
-            ui::detail(format!("Please manually add {} to your PATH", bin_dir_str));
+            ui::warn!("Failed to add to PATH: {}", e);
+            ui::detail!("Please manually add {} to your PATH", bin_dir_str);
         }
     } else {
-        ui::detail(format!(
+        ui::detail!(
             "Skipping PATH modification. Add {} to your PATH manually",
             ui::path(config.bin_dir.display())
-        ));
+        );
     }
 
     // Install latest nozzle if requested
     if !no_install_latest {
-        ui::info("Installing latest nozzle version");
+        ui::info!("Installing latest nozzle version");
         // We'll use the existing install command
         crate::commands::install::run(
             Some(config.nozzle_dir),
@@ -85,11 +82,11 @@ pub async fn run(
         )
         .await?;
     } else {
-        ui::detail("Skipping installation of latest nozzle");
-        ui::detail("Run 'nozzleup install' to install nozzle when ready");
+        ui::detail!("Skipping installation of latest nozzle");
+        ui::detail!("Run 'nozzleup install' to install nozzle when ready");
     }
 
-    ui::success("Installation complete!");
+    ui::success!("Installation complete!");
 
     Ok(())
 }

@@ -4,7 +4,7 @@ use semver::Version;
 use crate::{github::GitHubClient, ui, updater::Updater};
 
 pub async fn run(repo: String, github_token: Option<String>) -> Result<()> {
-    ui::info("Checking for updates");
+    ui::info!("Checking for updates");
 
     let github = GitHubClient::new(repo, github_token)?;
     let updater = Updater::new(github);
@@ -18,11 +18,11 @@ pub async fn run(repo: String, github_token: Option<String>) -> Result<()> {
         .unwrap_or(&current_version);
     let latest_normalized = latest_version.strip_prefix('v').unwrap_or(&latest_version);
 
-    ui::info(format!(
+    ui::info!(
         "Current version: {}, Latest version: {}",
         ui::version(&current_normalized),
         ui::version(&latest_normalized)
-    ));
+    );
 
     // Parse versions for proper semver comparison
     let current_semver =
@@ -31,10 +31,10 @@ pub async fn run(repo: String, github_token: Option<String>) -> Result<()> {
         Version::parse(latest_normalized).context("Failed to parse latest version")?;
 
     if latest_semver > current_semver {
-        ui::info(format!("Updating to {}", ui::version(&latest_version)));
+        ui::info!("Updating to {}", ui::version(&latest_version));
         updater.update_self(&latest_version).await?;
     } else {
-        ui::success("No updates available");
+        ui::success!("No updates available");
     }
 
     Ok(())

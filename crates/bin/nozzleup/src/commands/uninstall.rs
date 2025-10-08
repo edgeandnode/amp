@@ -12,11 +12,11 @@ pub fn run(install_dir: Option<std::path::PathBuf>, version: &str) -> Result<()>
     // Uninstall the version
     version_manager.uninstall(version)?;
 
-    ui::success(format!("Uninstalled nozzle {}", ui::version(version)));
+    ui::success!("Uninstalled nozzle {}", ui::version(version));
 
     if was_current {
-        ui::warn("No version is currently active");
-        ui::detail("Run 'nozzleup use <version>' to activate a version");
+        ui::warn!("No version is currently active");
+        ui::detail!("Run 'nozzleup use <version>' to activate a version");
     }
 
     Ok(())

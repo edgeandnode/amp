@@ -10,13 +10,13 @@ pub fn run(install_dir: Option<std::path::PathBuf>) -> Result<()> {
     let versions = version_manager.list_installed()?;
 
     if versions.is_empty() {
-        ui::info("No versions installed");
+        ui::info!("No versions installed");
         return Ok(());
     }
 
     let current_version = version_manager.get_current()?;
 
-    ui::info("Installed versions:");
+    ui::info!("Installed versions:");
 
     for version in versions {
         if Some(&version) == current_version.as_ref() {

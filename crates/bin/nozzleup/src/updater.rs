@@ -36,7 +36,7 @@ impl Updater {
 
         // Download the nozzleup binary
         let artifact_name = format!("nozzleup-{}-{}", platform.as_str(), arch.as_str());
-        ui::info(format!("Downloading {}", artifact_name));
+        ui::info!("Downloading {}", artifact_name);
 
         let binary_data = self
             .github
@@ -67,7 +67,7 @@ impl Updater {
         // Replace the current executable
         fs::rename(&temp_path, &current_exe).context("Failed to replace executable")?;
 
-        ui::success(format!("Updated to {}", ui::version(version)));
+        ui::success!("Updated to {}", ui::version(version));
 
         Ok(())
     }

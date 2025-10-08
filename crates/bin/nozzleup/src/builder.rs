@@ -272,7 +272,7 @@ impl<'a> GitRepo<'a> {
 
         let repo_url = format!("https://github.com/{}.git", repo);
 
-        ui::info(format!("Cloning {}", repo_url));
+        ui::info!("Cloning {}", repo_url);
 
         let mut args = vec!["clone"];
 
@@ -377,7 +377,7 @@ fn build_and_install(
 ) -> Result<()> {
     check_command_exists("cargo")?;
 
-    ui::info("Building nozzle");
+    ui::info!("Building nozzle");
 
     let mut args = vec!["build", "--release", "-p", "nozzle"];
 
@@ -432,11 +432,8 @@ fn build_and_install(
     // Activate this version
     version_manager.activate(version_label)?;
 
-    ui::success(format!(
-        "Built and installed nozzle {}",
-        ui::version(version_label)
-    ));
-    ui::detail("Run 'nozzle --version' to verify installation");
+    ui::success!("Built and installed nozzle {}", ui::version(version_label));
+    ui::detail!("Run 'nozzle --version' to verify installation");
 
     Ok(())
 }

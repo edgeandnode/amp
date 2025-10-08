@@ -14,7 +14,7 @@ pub fn run(install_dir: Option<std::path::PathBuf>, version: Option<String>) -> 
     };
 
     switch_to_version(&version_manager, &version)?;
-    ui::success(format!("Switched to nozzle {}", ui::version(&version)));
+    ui::success!("Switched to nozzle {}", ui::version(&version));
 
     Ok(())
 }

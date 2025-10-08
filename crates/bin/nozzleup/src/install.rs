@@ -31,11 +31,7 @@ impl Installer {
         self.version_manager.config().ensure_dirs()?;
 
         let artifact = format!("nozzle-{}-{}", platform.as_str(), arch.as_str());
-        ui::info(format!(
-            "Downloading {} for {}",
-            ui::version(version),
-            artifact
-        ));
+        ui::info!("Downloading {} for {}", ui::version(version), artifact);
 
         // Download the binary over HTTPS (TLS provides integrity verification)
         let binary_data = self
@@ -48,7 +44,7 @@ impl Installer {
             anyhow::bail!("Downloaded binary is empty");
         }
 
-        ui::detail(format!("Downloaded {} bytes", binary_data.len()));
+        ui::detail!("Downloaded {} bytes", binary_data.len());
 
         // Install the binary
         self.install_binary(version, &binary_data)?;
