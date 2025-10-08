@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Release {
+    #[serde(rename = "tag_name")]
     tag: String,
     assets: Vec<Asset>,
 }

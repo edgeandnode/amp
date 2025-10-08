@@ -108,6 +108,32 @@ jobs:
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
           BEACON_ETH_MAINNET_URL: ${{ secrets.BEACON_ETH_MAINNET_URL }}
 
+  nozzleup-tests:
+    name: Test nozzleup
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
+        with:
+          cache: true
+          rustflags: ""
+
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
+        with:
+          crate: cargo-nextest
+          version: ^0.9
+
+      - name: Run nozzleup tests
+        run: just test-nozzleup --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   rustfmt:
     name: Check rustfmt style
     runs-on: ubuntu-latest
