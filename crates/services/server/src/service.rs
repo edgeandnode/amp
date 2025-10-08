@@ -757,14 +757,15 @@ fn flight_data_stream(
                     QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
                         assert!(ranges.is_empty());
                         ranges.push(range);
-                    }
-                    QueryMessage::Data(batch) => {
+
                         if first_message {
                             first_message = false;
                             let schema_message =
                                 FlightData::from(SchemaAsIpc::new(&schema, &IpcWriteOptions::default()));
                             yield Ok(schema_message);
                         }
+                    }
+                    QueryMessage::Data(batch) => {
                         let app_metadata = json!({
                             "ranges": &ranges,
                             "ranges_complete": false,
