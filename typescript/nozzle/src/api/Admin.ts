@@ -62,7 +62,7 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      endBlock: EndBlock.pipe(Schema.propertySignature, Schema.fromKey("end_block")),
+      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
     }),
   )
 
@@ -82,7 +82,7 @@ const dumpDatasetVersion = HttpApiEndpoint.post(
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      endBlock: EndBlock.pipe(Schema.propertySignature, Schema.fromKey("end_block")),
+      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
     }),
   )
 
@@ -556,7 +556,7 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   readonly dumpDataset: (
     name: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
@@ -572,7 +572,7 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
     name: string,
     version: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
@@ -760,7 +760,7 @@ export const make = Effect.fn(function*(url: string) {
   const dumpDataset = Effect.fn("dumpDataset")(function*(
     name: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     },
   ) {
     const request = client.dataset.dumpDataset({
@@ -786,7 +786,7 @@ export const make = Effect.fn(function*(url: string) {
     name: string,
     version: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     },
   ) {
     const request = client.dataset.dumpDatasetVersion({
