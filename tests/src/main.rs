@@ -367,7 +367,7 @@ async fn bless(
 /// - The workspace root: `cargo run -p tests`
 /// - The tests crate directory: `cargo run`
 fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
-    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
+    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/data", "data"];
     TEST_DATA_BASE_DIRS
         .iter()
         .filter_map(|dir| std::path::Path::new(dir).canonicalize().ok())

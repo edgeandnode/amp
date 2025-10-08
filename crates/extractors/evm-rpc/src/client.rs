@@ -596,18 +596,7 @@ fn rpc_to_rows(
         );
         return Err(err.into());
     }
-    let tx_receipt_pairs = block
-        .transactions
-        .clone()
-        .into_transactions()
-        .zip(receipts)
-        .filter(|(_, receipt)| {
-            // Filter out failed transactions.
-            match receipt.inner.inner.inner.receipt.status {
-                alloy::consensus::Eip658Value::Eip658(status) => status,
-                alloy::consensus::Eip658Value::PostState(fixed_bytes) => !fixed_bytes.is_zero(),
-            }
-        });
+    let tx_receipt_pairs = block.transactions.clone().into_transactions().zip(receipts);
 
     let header = rpc_header_to_row(block.header.clone())?;
     let mut logs = Vec::new();
