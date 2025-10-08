@@ -8,12 +8,22 @@ mod install;
 mod platform;
 mod shell;
 
+use nozzleup::DEFAULT_REPO;
+
 /// The nozzle installer and version manager
 #[derive(Parser, Debug)]
 #[command(name = "nozzleup")]
 #[command(about = "The nozzle installer and version manager", long_about = None)]
 #[command(version)]
 struct Cli {
+    /// Installation directory (defaults to $NOZZLE_DIR or $XDG_CONFIG_HOME/.nozzle or $HOME/.nozzle)
+    #[arg(long, global = true, env = "NOZZLE_DIR")]
+    install_dir: Option<std::path::PathBuf>,
+
+    /// GitHub token for private repository access (defaults to $GITHUB_TOKEN)
+    #[arg(long, global = true, env = "GITHUB_TOKEN")]
+    github_token: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -23,10 +33,6 @@ enum Commands {
     /// Initialize nozzleup (called by install script)
     #[command(hide = true)]
     Init {
-        /// Installation directory (default: $XDG_CONFIG_HOME/.nozzle or $HOME/.nozzle)
-        #[arg(long)]
-        install_dir: Option<std::path::PathBuf>,
-
         /// Don't modify PATH environment variable
         #[arg(long)]
         no_modify_path: bool,
@@ -40,6 +46,10 @@ enum Commands {
     Install {
         /// Version to install (e.g., v0.1.0). If not specified, installs latest
         version: Option<String>,
+
+        /// GitHub repository in format "owner/repo"
+        #[arg(long, default_value_t = DEFAULT_REPO.to_string())]
+        repo: String,
 
         /// Override architecture detection (x86_64, aarch64)
         #[arg(long)]
@@ -71,7 +81,7 @@ enum Commands {
         #[arg(short, long, conflicts_with_all = ["repo", "branch", "commit", "pr"])]
         path: Option<std::path::PathBuf>,
 
-        /// GitHub repository in format "owner/repo" (default: configured repo)
+        /// GitHub repository in format "owner/repo"
         #[arg(short, long, conflicts_with = "path")]
         repo: Option<String>,
 
@@ -97,7 +107,11 @@ enum Commands {
     },
 
     /// Update nozzleup itself
-    Update,
+    Update {
+        /// GitHub repository in format "owner/repo"
+        #[arg(long, default_value_t = DEFAULT_REPO.to_string())]
+        repo: String,
+    },
 }
 
 #[tokio::main]
@@ -106,27 +120,35 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Init {
-            install_dir,
             no_modify_path,
             no_install_latest,
         }) => {
-            commands::init::run(install_dir, no_modify_path, no_install_latest).await?;
+            commands::init::run(cli.install_dir, no_modify_path, no_install_latest).await?;
         }
         Some(Commands::Install {
             version,
+            repo,
             arch,
             platform,
         }) => {
-            commands::install::run(version, arch, platform).await?;
+            commands::install::run(
+                cli.install_dir,
+                repo,
+                cli.github_token,
+                version,
+                arch,
+                platform,
+            )
+            .await?;
         }
         Some(Commands::List) => {
-            commands::list::run()?;
+            commands::list::run(cli.install_dir)?;
         }
         Some(Commands::Use { version }) => {
-            commands::use_version::run(version)?;
+            commands::use_version::run(cli.install_dir, version)?;
         }
         Some(Commands::Uninstall { version }) => {
-            commands::uninstall::run(&version)?;
+            commands::uninstall::run(cli.install_dir, &version)?;
         }
         Some(Commands::Build {
             path,
@@ -137,14 +159,23 @@ async fn main() -> Result<()> {
             name,
             jobs,
         }) => {
-            commands::build::run(path, repo, branch, commit, pr, name, jobs).await?;
+            commands::build::run(cli.install_dir, repo, path, branch, commit, pr, name, jobs)
+                .await?;
         }
-        Some(Commands::Update) => {
-            commands::update::run().await?;
+        Some(Commands::Update { repo }) => {
+            commands::update::run(cli.install_dir, repo, cli.github_token).await?;
         }
         None => {
             // Default: install latest version
-            commands::install::run(None, None, None).await?;
+            commands::install::run(
+                cli.install_dir,
+                DEFAULT_REPO.to_string(),
+                cli.github_token,
+                None,
+                None,
+                None,
+            )
+            .await?;
         }
     }
 

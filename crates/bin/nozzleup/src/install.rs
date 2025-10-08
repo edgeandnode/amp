@@ -6,7 +6,7 @@ use fs_err as fs;
 use crate::{
     config::Config,
     github::GitHubClient,
-    platform::{Architecture, Platform, artifact_name},
+    platform::{Architecture, Platform},
 };
 
 pub struct Installer {
@@ -28,8 +28,7 @@ impl Installer {
     ) -> Result<()> {
         self.config.ensure_dirs()?;
 
-        let artifact = artifact_name(platform, arch);
-
+        let artifact = format!("nozzle-{}-{}", platform.as_str(), arch.as_str());
         println!("nozzleup: Downloading {} for {}...", version, artifact);
 
         // Download the binary over HTTPS (TLS provides integrity verification)

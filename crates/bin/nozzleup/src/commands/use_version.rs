@@ -6,20 +6,15 @@ use fs_err as fs;
 
 use crate::config::Config;
 
-pub fn run(version: Option<String>) -> Result<()> {
-    let config = Config::new()?;
-
-    // If version is provided, use it directly
+pub fn run(install_dir: Option<std::path::PathBuf>, version: Option<String>) -> Result<()> {
+    let config = Config::new(install_dir)?;
+    // If version is provided, use it directly, otherwise prompt user to select from installed versions
     let version = match version {
         Some(v) => v,
-        None => {
-            // Interactive mode: prompt user to select from installed versions
-            select_version(&config)?
-        }
+        None => select_version(&config)?,
     };
 
     switch_to_version(&config, &version)?;
-
     println!("nozzleup: Switched to nozzle {}", version);
 
     Ok(())

@@ -3,8 +3,8 @@ use fs_err as fs;
 
 use crate::config::Config;
 
-pub fn run(version: &str) -> Result<()> {
-    let config = Config::new()?;
+pub fn run(install_dir: Option<std::path::PathBuf>, version: &str) -> Result<()> {
+    let config = Config::new(install_dir)?;
 
     let version_dir = config.versions_dir.join(version);
     if !version_dir.exists() {

@@ -7,11 +7,15 @@ use crate::{
     platform::{Architecture, Platform},
 };
 
-pub async fn run() -> Result<()> {
+pub async fn run(
+    install_dir: Option<std::path::PathBuf>,
+    repo: String,
+    github_token: Option<String>,
+) -> Result<()> {
     println!("nozzleup: Updating nozzleup...");
 
-    let config = Config::new()?;
-    let github = GitHubClient::new(&config)?;
+    let _config = Config::new(install_dir)?;
+    let github = GitHubClient::new(repo, github_token)?;
 
     // Get the current version
     let current_version = env!("CARGO_PKG_VERSION");
@@ -44,7 +48,6 @@ pub async fn run() -> Result<()> {
 
     // Download the nozzleup binary
     let artifact_name = format!("nozzleup-{}-{}", platform.as_str(), arch.as_str());
-
     println!("nozzleup: Downloading {} ...", artifact_name);
 
     let binary_data = github

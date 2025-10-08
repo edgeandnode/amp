@@ -7,26 +7,20 @@ use std::{
 use anyhow::{Context, Result};
 use fs_err as fs;
 
-use crate::config::Config;
+use crate::{DEFAULT_REPO, config::Config};
 
 /// Represents the source from which to build nozzle
 enum BuildSource {
     /// Build from a local repository path
     Local { path: PathBuf },
-    /// Build from a specific branch (repo = None means default repo)
-    Branch {
-        repo: Option<String>,
-        branch: String,
-    },
-    /// Build from a specific commit (repo = None means default repo)
-    Commit {
-        repo: Option<String>,
-        commit: String,
-    },
-    /// Build from a pull request (repo = None means default repo)
-    Pr { repo: Option<String>, number: u32 },
-    /// Build from main branch (repo = None means default repo)
-    Main { repo: Option<String> },
+    /// Build from a specific branch
+    Branch { repo: String, branch: String },
+    /// Build from a specific commit
+    Commit { repo: String, commit: String },
+    /// Build from a pull request
+    Pr { repo: String, number: u32 },
+    /// Build from main branch
+    Main { repo: String },
 }
 
 impl BuildSource {
@@ -41,7 +35,7 @@ impl BuildSource {
         let base = match self {
             Self::Local { .. } => "local".to_string(),
             Self::Branch { repo, branch } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     let slug = repo.replace('/', "-");
                     format!("{}-branch-{}", slug, branch)
                 } else {
@@ -51,7 +45,7 @@ impl BuildSource {
             Self::Commit { repo, commit } => {
                 // Commit already has hash in it, don't append git hash later
                 let commit_hash = &commit[..8.min(commit.len())];
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     let slug = repo.replace('/', "-");
                     return format!("{}-commit-{}", slug, commit_hash);
                 } else {
@@ -59,7 +53,7 @@ impl BuildSource {
                 }
             }
             Self::Pr { repo, number } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     let slug = repo.replace('/', "-");
                     format!("{}-pr-{}", slug, number)
                 } else {
@@ -67,7 +61,7 @@ impl BuildSource {
                 }
             }
             Self::Main { repo } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     let slug = repo.replace('/', "-");
                     format!("{}-main", slug)
                 } else {
@@ -87,11 +81,11 @@ impl BuildSource {
     /// Execute the build for this source
     pub async fn build(
         &self,
-        default_repo: &str,
+        install_dir: Option<PathBuf>,
         custom_name: Option<&str>,
         jobs: Option<usize>,
     ) -> Result<()> {
-        let config = Config::new()?;
+        let config = Config::new(install_dir)?;
 
         match self {
             Self::Local { path } => {
@@ -104,7 +98,8 @@ impl BuildSource {
                 }
 
                 // Check for git repository and extract commit hash
-                let git_hash = get_git_commit_hash(path)?;
+                let git = GitRepo::new(path);
+                let git_hash = git.get_commit_hash()?;
 
                 // If not a git repo and no custom name provided, error out
                 if git_hash.is_none() && custom_name.is_none() {
@@ -120,56 +115,52 @@ impl BuildSource {
                 build_and_install(&config, path, &version_label, jobs)?;
             }
             Self::Branch { repo, branch } => {
-                let repo = repo.as_deref().unwrap_or(default_repo);
                 let temp_dir =
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository with specific branch
-                clone_repository(repo, temp_dir.path(), Some(branch.as_str())).await?;
+                let git = GitRepo::clone(repo, temp_dir.path(), Some(branch.as_str())).await?;
 
                 // Extract git commit hash, generate version label, and build
-                let git_hash = get_git_commit_hash(temp_dir.path())?;
+                let git_hash = git.get_commit_hash()?;
                 let version_label = self.generate_version_label(git_hash.as_deref(), custom_name);
                 build_and_install(&config, temp_dir.path(), &version_label, jobs)?;
             }
             Self::Commit { repo, commit } => {
-                let repo = repo.as_deref().unwrap_or(default_repo);
                 let temp_dir =
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository and checkout specific commit
-                clone_repository(repo, temp_dir.path(), None).await?;
-                checkout_commit(temp_dir.path(), commit)?;
+                let git = GitRepo::clone(repo, temp_dir.path(), None).await?;
+                git.checkout_commit(commit)?;
 
                 // Extract git commit hash, generate version label, and build
-                let git_hash = get_git_commit_hash(temp_dir.path())?;
+                let git_hash = git.get_commit_hash()?;
                 let version_label = self.generate_version_label(git_hash.as_deref(), custom_name);
                 build_and_install(&config, temp_dir.path(), &version_label, jobs)?;
             }
             Self::Pr { repo, number } => {
-                let repo = repo.as_deref().unwrap_or(default_repo);
                 let temp_dir =
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository and checkout pull request
-                clone_repository(repo, temp_dir.path(), None).await?;
-                fetch_and_checkout_pr(temp_dir.path(), *number)?;
+                let git = GitRepo::clone(repo, temp_dir.path(), None).await?;
+                git.fetch_and_checkout_pr(*number)?;
 
                 // Extract git commit hash, generate version label, and build
-                let git_hash = get_git_commit_hash(temp_dir.path())?;
+                let git_hash = git.get_commit_hash()?;
                 let version_label = self.generate_version_label(git_hash.as_deref(), custom_name);
                 build_and_install(&config, temp_dir.path(), &version_label, jobs)?;
             }
             Self::Main { repo } => {
-                let repo = repo.as_deref().unwrap_or(default_repo);
                 let temp_dir =
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository (main branch)
-                clone_repository(repo, temp_dir.path(), None).await?;
+                let git = GitRepo::clone(repo, temp_dir.path(), None).await?;
 
                 // Extract git commit hash, generate version label, and build
-                let git_hash = get_git_commit_hash(temp_dir.path())?;
+                let git_hash = git.get_commit_hash()?;
                 let version_label = self.generate_version_label(git_hash.as_deref(), custom_name);
                 build_and_install(&config, temp_dir.path(), &version_label, jobs)?;
             }
@@ -184,28 +175,28 @@ impl fmt::Display for BuildSource {
         match self {
             Self::Local { path } => write!(f, "local path: {}", path.display()),
             Self::Branch { repo, branch } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     write!(f, "repository: {}, branch: {}", repo, branch)
                 } else {
                     write!(f, "branch: {}", branch)
                 }
             }
             Self::Commit { repo, commit } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     write!(f, "repository: {}, commit: {}", repo, commit)
                 } else {
                     write!(f, "commit: {}", commit)
                 }
             }
             Self::Pr { repo, number } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     write!(f, "repository: {}, pull request #{}", repo, number)
                 } else {
                     write!(f, "pull request #{}", number)
                 }
             }
             Self::Main { repo } => {
-                if let Some(repo) = repo {
+                if repo != DEFAULT_REPO {
                     write!(f, "repository: {} (main branch)", repo)
                 } else {
                     write!(f, "default repository (main branch)")
@@ -217,134 +208,163 @@ impl fmt::Display for BuildSource {
 
 /// Main entry point for build command - handles all build source combinations
 pub async fn run(
-    path: Option<PathBuf>,
+    install_dir: Option<PathBuf>,
     repo: Option<String>,
+    path: Option<PathBuf>,
     branch: Option<String>,
     commit: Option<String>,
     pr: Option<u32>,
     name: Option<String>,
     jobs: Option<usize>,
 ) -> Result<()> {
-    // Get config to access default repo
-    let config = Config::new()?;
-
     // Determine build source based on provided options
-    let source = match (path, branch, commit, pr) {
-        (Some(path), None, None, None) => BuildSource::Local { path },
-        (None, Some(branch), None, None) => BuildSource::Branch { repo, branch },
-        (None, None, Some(commit), None) => BuildSource::Commit { repo, commit },
-        (None, None, None, Some(number)) => BuildSource::Pr { repo, number },
-        (None, None, None, None) => BuildSource::Main { repo },
+    let source = match (path, repo, branch, commit, pr) {
+        (Some(path), _, None, None, None) => BuildSource::Local { path },
+        (None, Some(repo), Some(branch), None, None) => BuildSource::Branch { repo, branch },
+        (None, Some(repo), None, Some(commit), None) => BuildSource::Commit { repo, commit },
+        (None, Some(repo), None, None, Some(number)) => BuildSource::Pr { repo, number },
+        (None, Some(repo), None, None, None) => BuildSource::Main { repo },
+        (None, None, Some(branch), None, None) => BuildSource::Branch {
+            repo: DEFAULT_REPO.to_string(),
+            branch,
+        },
+        (None, None, None, Some(commit), None) => BuildSource::Commit {
+            repo: DEFAULT_REPO.to_string(),
+            commit,
+        },
+        (None, None, None, None, Some(number)) => BuildSource::Pr {
+            repo: DEFAULT_REPO.to_string(),
+            number,
+        },
+        (None, None, None, None, None) => BuildSource::Main {
+            repo: DEFAULT_REPO.to_string(),
+        },
         _ => unreachable!("Clap should prevent conflicting options"),
     };
 
     println!("nozzleup: Building from source: {}", source);
 
     // Execute the build
-    source.build(&config.repo, name.as_deref(), jobs).await?;
+    source.build(install_dir, name.as_deref(), jobs).await?;
 
     Ok(())
 }
 
-/// Get the git commit hash from a repository path
-/// Returns None if the path is not a git repository
-fn get_git_commit_hash(repo_path: &Path) -> Result<Option<String>> {
-    // Check if .git directory exists
-    if !repo_path.join(".git").exists() {
-        return Ok(None);
-    }
-
-    // Try to get the commit hash
-    let output = Command::new("git")
-        .args(["rev-parse", "--short=8", "HEAD"])
-        .current_dir(repo_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .context("Failed to execute git rev-parse")?;
-
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let hash = String::from_utf8(output.stdout)
-        .context("Failed to parse git output")?
-        .trim()
-        .to_string();
-
-    Ok(Some(hash))
+/// Git repository operations
+struct GitRepo<'a> {
+    path: &'a Path,
+    remote: String,
 }
 
-/// Checkout a specific commit
-fn checkout_commit(repo_path: &Path, commit: &str) -> Result<()> {
-    let status = Command::new("git")
-        .args(["checkout", commit])
-        .current_dir(repo_path)
-        .status()
-        .context("Failed to execute git checkout")?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to checkout commit {}", commit);
+impl<'a> GitRepo<'a> {
+    /// Create a new GitRepo instance for an existing repository
+    fn new(path: &'a Path) -> Self {
+        Self {
+            path,
+            remote: "origin".to_string(),
+        }
     }
 
-    Ok(())
-}
+    /// Clone a repository from GitHub and create a GitRepo instance
+    async fn clone(repo: &str, destination: &'a Path, branch: Option<&str>) -> Result<Self> {
+        check_command_exists("git")?;
 
-/// Fetch and checkout a pull request
-fn fetch_and_checkout_pr(repo_path: &Path, number: u32) -> Result<()> {
-    // Fetch the PR
-    let pr_ref = format!("pull/{}/head:pr-{}", number, number);
-    let status = Command::new("git")
-        .args(["fetch", "origin", &pr_ref])
-        .current_dir(repo_path)
-        .status()
-        .context("Failed to execute git fetch")?;
+        let repo_url = format!("https://github.com/{}.git", repo);
 
-    if !status.success() {
-        anyhow::bail!("Failed to fetch pull request #{}", number);
+        println!("nozzleup: Cloning {}...", repo_url);
+
+        let mut args = vec!["clone"];
+
+        if let Some(branch) = branch {
+            args.extend(["--branch", branch]);
+        }
+
+        args.push(&repo_url);
+        args.push(destination.to_str().unwrap());
+
+        let status = Command::new("git")
+            .args(&args)
+            .status()
+            .context("Failed to execute git clone")?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to clone repository {}", repo);
+        }
+
+        Ok(Self::new(destination))
     }
 
-    // Checkout the PR
-    let status = Command::new("git")
-        .args(["checkout", &format!("pr-{}", number)])
-        .current_dir(repo_path)
-        .status()
-        .context("Failed to execute git checkout")?;
+    /// Get the commit hash from this repository
+    /// Returns None if the path is not a git repository
+    fn get_commit_hash(&self) -> Result<Option<String>> {
+        // Check if .git directory exists
+        if !self.path.join(".git").exists() {
+            return Ok(None);
+        }
 
-    if !status.success() {
-        anyhow::bail!("Failed to checkout pull request #{}", number);
+        // Try to get the commit hash
+        let output = Command::new("git")
+            .args(["rev-parse", "--short=8", "HEAD"])
+            .current_dir(self.path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .context("Failed to execute git rev-parse")?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let hash = String::from_utf8(output.stdout)
+            .context("Failed to parse git output")?
+            .trim()
+            .to_string();
+
+        Ok(Some(hash))
     }
 
-    Ok(())
-}
+    /// Checkout a specific commit
+    fn checkout_commit(&self, commit: &str) -> Result<()> {
+        let status = Command::new("git")
+            .args(["checkout", commit])
+            .current_dir(self.path)
+            .status()
+            .context("Failed to execute git checkout")?;
 
-/// Clone a repository from GitHub
-async fn clone_repository(repo: &str, destination: &Path, branch: Option<&str>) -> Result<()> {
-    check_command_exists("git")?;
+        if !status.success() {
+            anyhow::bail!("Failed to checkout commit {}", commit);
+        }
 
-    let repo_url = format!("https://github.com/{}.git", repo);
-
-    println!("nozzleup: Cloning {}...", repo_url);
-
-    let mut args = vec!["clone"];
-
-    if let Some(branch) = branch {
-        args.extend(["--branch", branch]);
+        Ok(())
     }
 
-    args.push(&repo_url);
-    args.push(destination.to_str().unwrap());
+    /// Fetch and checkout a pull request
+    fn fetch_and_checkout_pr(&self, number: u32) -> Result<()> {
+        // Fetch the PR
+        let pr_ref = format!("pull/{}/head:pr-{}", number, number);
+        let status = Command::new("git")
+            .args(["fetch", &self.remote, &pr_ref])
+            .current_dir(self.path)
+            .status()
+            .context("Failed to execute git fetch")?;
 
-    let status = Command::new("git")
-        .args(&args)
-        .status()
-        .context("Failed to execute git clone")?;
+        if !status.success() {
+            anyhow::bail!("Failed to fetch pull request #{}", number);
+        }
 
-    if !status.success() {
-        anyhow::bail!("Failed to clone repository {}", repo);
+        // Checkout the PR
+        let status = Command::new("git")
+            .args(["checkout", &format!("pr-{}", number)])
+            .current_dir(self.path)
+            .status()
+            .context("Failed to execute git checkout")?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to checkout pull request #{}", number);
+        }
+
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Build and install the nozzle binary

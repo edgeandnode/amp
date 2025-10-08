@@ -8,12 +8,15 @@ use crate::{
 };
 
 pub async fn run(
+    install_dir: Option<std::path::PathBuf>,
+    repo: String,
+    github_token: Option<String>,
     version: Option<String>,
     arch_override: Option<String>,
     platform_override: Option<String>,
 ) -> Result<()> {
-    let config = Config::new()?;
-    let github = GitHubClient::new(&config)?;
+    let config = Config::new(install_dir)?;
+    let github = GitHubClient::new(repo, github_token)?;
 
     // Determine version to install
     let version = match version {

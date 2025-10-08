@@ -64,26 +64,9 @@ impl std::fmt::Display for Architecture {
     }
 }
 
-/// Get the artifact name for the current platform and architecture
-pub fn artifact_name(platform: Platform, arch: Architecture) -> String {
-    format!("nozzle-{}-{}", platform.as_str(), arch.as_str())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_artifact_name() {
-        assert_eq!(
-            artifact_name(Platform::Linux, Architecture::X86_64),
-            "nozzle-linux-x86_64"
-        );
-        assert_eq!(
-            artifact_name(Platform::Darwin, Architecture::Aarch64),
-            "nozzle-darwin-aarch64"
-        );
-    }
 
     #[test]
     fn test_platform_detect() {

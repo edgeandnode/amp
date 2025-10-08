@@ -11,41 +11,32 @@ pub struct Config {
     pub bin_dir: PathBuf,
     /// Versions directory (~/.nozzle/versions)
     pub versions_dir: PathBuf,
-    /// GitHub repository (owner/repo)
-    pub repo: String,
-    /// GitHub token for private repository access
-    pub github_token: Option<String>,
 }
 
 impl Config {
     /// Create a new configuration
-    pub fn new() -> Result<Self> {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .context("Could not determine home directory")?;
+    pub fn new(install_dir: Option<PathBuf>) -> Result<Self> {
+        let nozzle_dir = if let Some(dir) = install_dir {
+            dir
+        } else {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .context("Could not determine home directory")?;
 
-        let base = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(&home));
+            let base = std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(&home));
 
-        let nozzle_dir = std::env::var("NOZZLE_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| base.join(".nozzle"));
+            base.join(".nozzle")
+        };
 
         let bin_dir = nozzle_dir.join("bin");
         let versions_dir = nozzle_dir.join("versions");
-
-        let repo = std::env::var("NOZZLE_REPO")
-            .unwrap_or_else(|_| "edgeandnode/project-nozzle".to_string());
-
-        let github_token = std::env::var("GITHUB_TOKEN").ok();
 
         Ok(Self {
             nozzle_dir,
             bin_dir,
             versions_dir,
-            repo,
-            github_token,
         })
     }
 
@@ -77,6 +68,11 @@ impl Config {
         Ok(())
     }
 
+    /// Get the path to the nozzleup binary
+    pub fn nozzleup_binary_path(&self) -> PathBuf {
+        self.bin_dir.join("nozzleup")
+    }
+
     /// Get the binary path for a specific version
     pub fn version_binary_path(&self, version: &str) -> PathBuf {
         self.versions_dir.join(version).join("nozzle")
@@ -98,6 +94,6 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::new().expect("Failed to create default config")
+        Self::new(None).expect("Failed to create default config")
     }
 }

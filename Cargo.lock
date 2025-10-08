@@ -5304,6 +5304,7 @@ dependencies = [
  "fs-err",
  "futures",
  "indicatif",
+ "pretty_assertions",
  "reqwest",
  "serde",
  "serde_json",
