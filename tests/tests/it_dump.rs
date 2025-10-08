@@ -461,7 +461,6 @@ async fn evm_rpc_base_failed_tx_filtering() {
             None,                   // microbatch_max_interval
             None,                   // microbatch_max_rows
             false,                  // skip_consistency_check
-            None,                   // metrics
             None,                   // meter
             false,                  // track_progress
         )
