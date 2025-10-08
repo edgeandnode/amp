@@ -3,8 +3,8 @@ use fs_err as fs;
 
 use crate::config::Config;
 
-pub fn run() -> Result<()> {
-    let config = Config::new()?;
+pub fn run(install_dir: Option<std::path::PathBuf>) -> Result<()> {
+    let config = Config::new(install_dir)?;
 
     if !config.versions_dir.exists() {
         println!("nozzleup: No versions installed");
