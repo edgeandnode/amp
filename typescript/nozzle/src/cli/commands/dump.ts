@@ -43,11 +43,11 @@ export const dump = Command.make("dump", {
 
       if (version) {
         yield* admin.dumpDatasetVersion(name, version, {
-          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+          endBlock: args.endBlock.pipe(Option.map(String), Option.getOrUndefined),
         })
       } else {
         yield* admin.dumpDataset(name, {
-          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+          endBlock: args.endBlock.pipe(Option.map(String), Option.getOrUndefined),
         })
       }
 

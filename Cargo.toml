@@ -99,6 +99,7 @@ tracing = "0.1"
 tracing-opentelemetry = { version = "0.32", features = ["default"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 url = { version = "2.5.0", features = ["serde"] }
+utoipa = "5.4.0"
 uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates

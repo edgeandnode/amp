@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use common::{BoxError, catalog::physical::PhysicalTable};
 pub use dump::Ctx;
-use dump::{default_partition_size, metrics};
+use dump::{EndBlock, default_partition_size, metrics};
 pub use metadata_db::JobStatus;
 
 use crate::JobCreationError;
@@ -21,7 +21,7 @@ pub use self::{
 /// metadata DB table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Descriptor {
-    Dump { end_block: Option<i64> },
+    Dump { end_block: EndBlock },
 }
 
 /// The kind of job is inferred from the location and associated dataset information.
@@ -37,8 +37,8 @@ pub enum Job {
         ctx: Ctx,
         /// All tables must belong to the same dataset.
         tables: Vec<Arc<PhysicalTable>>,
-        /// The end block to dump, or `None` for the latest block.
-        end_block: Option<i64>,
+        /// The end block configuration for the dump.
+        end_block: EndBlock,
         /// Metrics registry.
         metrics: Option<Arc<metrics::MetricsRegistry>>,
         /// Meter for creating telemetry objects.

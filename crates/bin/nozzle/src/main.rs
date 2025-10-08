@@ -6,6 +6,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
+use dump::EndBlock;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
 use worker::Worker;
@@ -44,10 +45,17 @@ enum Command {
         #[arg(long, env = "DUMP_IGNORE_DEPS")]
         ignore_deps: bool,
 
-        /// The block number to end at, inclusive. If omitted, defaults to a recent block. If
-        /// starts with "-" then relative to the latest block for this dataset.
+        /// The block number to end at, inclusive.
+        ///
+        /// Accepts:
+        /// - Positive integer (e.g., "1000000"): Stop at this specific block number
+        /// - "latest": Stop at the latest available block
+        /// - Negative integer (e.g., "-100"): Stop 100 blocks before latest
+        /// - Omitted: Continuous dumping (only supported for single dataset)
+        ///
+        /// When combined with --run-every-mins, omitting this defaults to "latest".
         #[arg(long, short, env = "DUMP_END_BLOCK")]
-        end_block: Option<i64>,
+        end_block: Option<EndBlock>,
 
         /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
         /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -265,6 +273,17 @@ async fn main_inner() -> Result<(), BoxError> {
 
             if let Some(ref opentelemetry) = config.opentelemetry {
                 dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
+            }
+
+            // When --run-every-mins is set without end_block, default to "latest"
+            // Otherwise default to continuous mode
+            let end_block = end_block
+                .or(run_every_mins.and(Some(EndBlock::Latest)))
+                .unwrap_or(EndBlock::None);
+
+            if end_block == EndBlock::None && datasets.len() > 1 {
+                return Err("Continuous mode (no end_block) is not supported when dumping multiple datasets. \
+                            Please specify an end_block value or dump datasets individually.".into());
             }
 
             let mut datasets_to_dump = Vec::new();

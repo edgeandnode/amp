@@ -74,14 +74,14 @@ export const make = Effect.gen(function*() {
         const dependencies = Object.values(manifest.dependencies)
         yield* Effect.forEach(dependencies, (dependency) =>
           admin.dumpDatasetVersion(dependency.name, dependency.version, {
-            endBlock: Number(block),
+            endBlock: String(block),
           }), {
           concurrency: "unbounded",
           discard: true,
         })
 
         yield* admin.dumpDatasetVersion(manifest.name, manifest.version, {
-          endBlock: Number(block),
+          endBlock: String(block),
         })
       }).pipe(
         Effect.tapErrorCause(Utils.logCauseWith("Failed to dump datasets")),

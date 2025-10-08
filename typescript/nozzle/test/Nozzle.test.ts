@@ -33,7 +33,7 @@ Testing.layer((it) => {
       // Register and dump the root dataset.
       yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
       yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
-        endBlock: Number(block),
+        endBlock: String(block),
       })
 
       // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
@@ -90,7 +90,7 @@ Testing.layer((it) => {
       yield* admin.registerDataset(dataset.name, dataset.version, dataset)
 
       yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
-        endBlock: Number(block),
+        endBlock: String(block),
       })
 
       // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
