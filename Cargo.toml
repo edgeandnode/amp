@@ -24,6 +24,7 @@ members = [
     "crates/extractors/substreams/gen",
     "crates/services/admin-api",
     "crates/services/admin-api/gen",
+    "crates/services/controller",
     "crates/services/http-common",
     "crates/services/server",
     "crates/services/worker",

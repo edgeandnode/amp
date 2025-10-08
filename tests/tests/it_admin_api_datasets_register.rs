@@ -305,7 +305,7 @@ impl TestCtx {
             .expect("failed to build test context");
 
         let client = reqwest::Client::new();
-        let admin_api_url = ctx.daemon_server().admin_api_server_url();
+        let admin_api_url = ctx.daemon_controller().admin_api_url();
 
         Self {
             ctx,
@@ -316,10 +316,7 @@ impl TestCtx {
 
     async fn register(&self, request: RegisterRequest) -> reqwest::Response {
         self.client
-            .post(&format!(
-                "{}/datasets",
-                self.ctx.daemon_server().admin_api_server_url()
-            ))
+            .post(&format!("{}/datasets", self.admin_api_url))
             .json(&request)
             .send()
             .await

@@ -69,6 +69,25 @@
         }
       ]
     },
+    "controller": {
+      "summary": "Start controller service",
+      "description": "Starts the controller service that provides the Admin API for managing Nozzle operations. The controller runs as a standalone service separate from query servers, enabling independent deployment and scaling of management operations. Default port: Admin API (1610). The controller provides endpoints for dataset management, job control, worker coordination, and file operations. It runs continuously until terminated (Ctrl+C or kill signal).",
+      "parameters": [],
+      "responses": {
+        "0": {
+          "description": "Controller shut down gracefully"
+        },
+        "1": {
+          "description": "Error occurred during controller operation or configuration is invalid"
+        }
+      },
+      "x-examples": [
+        {
+          "command": "nozzle --config config.toml controller",
+          "description": "Start the controller with Admin API"
+        }
+      ]
+    },
     "generate-manifest": {
       "summary": "Generate dataset manifests",
       "description": "Generates dataset manifest files for different dataset types (firehose, substreams, evm-rpc, etc.). The manifest can be output to a file, directory, or stdout. For Substreams datasets, additional manifest and module parameters are required. The --config parameter is NOT required for this command (unlike other commands). If --out is omitted, the manifest is printed to stdout for easy piping. If --out points to a directory, the output file will be named after the 'kind' parameter. The generated manifest is in JSON format and can be used with the dump command.",
@@ -160,70 +179,9 @@
         }
       ]
     },
-    "dev": {
-      "summary": "Start development server with embedded worker",
-      "description": "Starts query servers with an embedded worker in the same process for simplified local development. This is the recommended mode for local testing and development, eliminating the need to run a separate worker process. By default, all three servers (Arrow Flight, JSON Lines, and Admin API) are started. Servers can be selectively enabled using flags. If no server flags are specified, ALL THREE servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). The server and embedded worker run continuously until terminated (Ctrl+C or kill signal).",
-      "parameters": [
-        {
-          "name": "flight-server",
-          "in": "flag",
-          "description": "Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.",
-          "required": false,
-          "schema": {
-            "type": "boolean",
-            "default": false
-          },
-          "x-environment": "FLIGHT_SERVER"
-        },
-        {
-          "name": "jsonl-server",
-          "in": "flag",
-          "description": "Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.",
-          "required": false,
-          "schema": {
-            "type": "boolean",
-            "default": false
-          },
-          "x-environment": "JSONL_SERVER"
-        },
-        {
-          "name": "admin-server",
-          "in": "flag",
-          "description": "Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the nozzle system.",
-          "required": false,
-          "schema": {
-            "type": "boolean",
-            "default": false
-          },
-          "x-environment": "ADMIN_SERVER"
-        }
-      ],
-      "responses": {
-        "0": {
-          "description": "Server and embedded worker shut down gracefully"
-        },
-        "1": {
-          "description": "Error occurred during operation or configuration is invalid"
-        }
-      },
-      "x-examples": [
-        {
-          "command": "nozzle --config config.toml dev",
-          "description": "Start all three servers with an embedded worker for local development"
-        },
-        {
-          "command": "nozzle --config config.toml dev --flight-server",
-          "description": "Start only the Arrow Flight RPC Server with an embedded worker"
-        },
-        {
-          "command": "nozzle --config config.toml dev --flight-server --admin-server",
-          "description": "Start Flight and Admin servers with an embedded worker"
-        }
-      ]
-    },
     "server": {
       "summary": "Start query servers",
-      "description": "Starts one or more query servers for serving blockchain data through different protocols. This command starts ONLY the query servers without any embedded worker - extraction jobs must be handled by separate worker processes or serverless dump commands. By default, all three servers (Arrow Flight, JSON Lines, and Admin API) are started. Servers can be selectively enabled using flags. If no server flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). The server runs continuously until terminated (Ctrl+C or kill signal).",
+      "description": "Starts one or more query servers for serving blockchain data through different protocols. By default, both query servers (Arrow Flight and JSON Lines) are started. Servers can be selectively enabled using flags. If no server flags (--flight-server, --jsonl-server) are specified, BOTH servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603). The server runs continuously until terminated (Ctrl+C or kill signal).",
       "parameters": [
         {
           "name": "flight-server",
@@ -246,17 +204,6 @@
             "default": false
           },
           "x-environment": "JSONL_SERVER"
-        },
-        {
-          "name": "admin-server",
-          "in": "flag",
-          "description": "Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the nozzle system.",
-          "required": false,
-          "schema": {
-            "type": "boolean",
-            "default": false
-          },
-          "x-environment": "ADMIN_SERVER"
         }
       ],
       "responses": {
@@ -270,15 +217,76 @@
       "x-examples": [
         {
           "command": "nozzle --config config.toml server",
-          "description": "Start all three servers (Arrow Flight, JSON Lines, and Admin API)"
+          "description": "Start both query servers (Arrow Flight and JSON Lines)"
         },
         {
           "command": "nozzle --config config.toml server --flight-server",
           "description": "Start only the Arrow Flight RPC Server"
         },
         {
-          "command": "nozzle --config config.toml server --flight-server --jsonl-server",
-          "description": "Start only Flight and JSON Lines servers"
+          "command": "nozzle --config config.toml server --jsonl-server",
+          "description": "Start only the JSON Lines Server"
+        }
+      ]
+    },
+    "dev": {
+      "summary": "Start development mode with embedded worker and query servers",
+      "description": "Starts a combined server, controller, and worker in a single process for simplified local development and testing. By default, all three components (Arrow Flight, JSON Lines, and Admin API) are started along with an embedded worker. Components can be selectively enabled using flags. If no flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE are enabled by default. When any flag is specified, only the explicitly enabled components will start. The worker always runs with node ID 'worker'. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). Dev mode allows temporary database configuration for quick local testing. The process runs continuously until terminated (Ctrl+C or kill signal).",
+      "parameters": [
+        {
+          "name": "flight-server",
+          "in": "flag",
+          "description": "Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "x-environment": "FLIGHT_SERVER"
+        },
+        {
+          "name": "jsonl-server",
+          "in": "flag",
+          "description": "Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "x-environment": "JSONL_SERVER"
+        },
+        {
+          "name": "admin-server",
+          "in": "flag",
+          "description": "Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the nozzle system.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "x-environment": "ADMIN_SERVER"
+        }
+      ],
+      "responses": {
+        "0": {
+          "description": "Dev mode shut down gracefully"
+        },
+        "1": {
+          "description": "Error occurred during dev mode operation or configuration is invalid"
+        }
+      },
+      "x-examples": [
+        {
+          "command": "nozzle --config config.toml dev",
+          "description": "Start dev mode with all components (query servers, Admin API, and embedded worker)"
+        },
+        {
+          "command": "nozzle --config config.toml dev --flight-server --admin-server",
+          "description": "Start dev mode with only Arrow Flight server and Admin API (no JSON Lines server)"
+        },
+        {
+          "command": "nozzle --config config.toml dev --jsonl-server",
+          "description": "Start dev mode with only JSON Lines server (no Flight server or Admin API)"
         }
       ]
     },

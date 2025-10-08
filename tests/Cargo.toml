@@ -17,6 +17,7 @@ backon.workspace = true
 clap.workspace = true
 color-backtrace = { version = "0.7.1", default-features = false, features = ["use-btparse-crate"] }
 common = { path = "../crates/core/common" }
+controller = { path = "../crates/services/controller" }
 ctor = "0.5.0"
 dataset-store = { path = "../crates/core/dataset-store" }
 datasets-common = { path = "../crates/core/datasets-common" }
