@@ -25,6 +25,7 @@ dump = { path = "../../core/dump" }
 futures.workspace = true
 generate-manifest = { path = "../generate-manifest" }
 http-common = { path = "../../services/http-common" }
+hyper-util = { version = "0.1", features = ["tokio"] }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde_json.workspace = true

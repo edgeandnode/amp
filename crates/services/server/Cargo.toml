@@ -14,11 +14,16 @@ datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
+http-body-util = "0.1"
 http-common = { path = "../http-common" }
+hyper = "1"
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
+object_store.workspace = true
 prost.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tonic.workspace = true
+tower.workspace = true
 tracing.workspace = true

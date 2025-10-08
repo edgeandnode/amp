@@ -13,9 +13,10 @@ use common::{
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
+use hyper_util::rt::TokioExecutor;
 use metadata_db::MetadataDb;
-use server::service::Service;
-use tonic::transport::{Server, server::TcpIncoming};
+use server::{Service, health::Multiplexer};
+use tonic::transport::Server;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Copy)]
@@ -55,18 +56,44 @@ pub async fn run(
         let flight_tcp_listener = TcpListener::bind(config.addrs.flight_addr)?;
         let flight_addr = flight_tcp_listener.local_addr()?;
         flight_tcp_listener.set_nonblocking(true)?;
-        let flight_server = Server::builder()
+
+        // Create gRPC service
+        let grpc_service = Server::builder()
             .add_service(FlightServiceServer::new(service.clone()))
-            .serve_with_incoming(TcpIncoming::from_listener(
-                tokio::net::TcpListener::from_std(flight_tcp_listener)?,
-                true,
-                None,
-            )?)
-            .map_err(|e| {
-                tracing::error!("Flight server error: {}", e);
-                e.into()
-            })
-            .boxed();
+            .into_service();
+
+        // Wrap with multiplexer for health checks
+        let multiplexed = Multiplexer::new(grpc_service, config.clone(), metadata_db.clone());
+
+        // Serve with hyper
+        let listener = tokio::net::TcpListener::from_std(flight_tcp_listener)?;
+        let flight_server = async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        tracing::error!("Flight server accept error: {}", e);
+                        return Err::<(), BoxError>(e.into());
+                    }
+                };
+
+                let io = hyper_util::rt::TokioIo::new(stream);
+                let multiplexed_clone = multiplexed.clone();
+
+                tokio::spawn(async move {
+                    // Use auto builder to support both HTTP/1.1 (health checks) and HTTP/2 (gRPC)
+                    if let Err(e) =
+                        hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                            .serve_connection(io, multiplexed_clone)
+                            .await
+                    {
+                        tracing::debug!("Flight connection error: {}", e);
+                    }
+                });
+            }
+        }
+        .boxed();
+
         services_futures.push(flight_server);
         bound_addrs.flight_addr = flight_addr;
         tracing::info!("Serving Arrow Flight RPC at {}", flight_addr);
