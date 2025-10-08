@@ -1,86 +1,39 @@
-use std::os::unix::fs::symlink;
-
 use anyhow::{Context, Result};
 use dialoguer::{Select, theme::ColorfulTheme};
-use fs_err as fs;
 
-use crate::config::Config;
+use crate::{config::Config, ui, version_manager::VersionManager};
 
 pub fn run(install_dir: Option<std::path::PathBuf>, version: Option<String>) -> Result<()> {
     let config = Config::new(install_dir)?;
+    let version_manager = VersionManager::new(config);
+
     // If version is provided, use it directly, otherwise prompt user to select from installed versions
     let version = match version {
         Some(v) => v,
-        None => select_version(&config)?,
+        None => select_version(&version_manager)?,
     };
 
-    switch_to_version(&config, &version)?;
-    println!("nozzleup: Switched to nozzle {}", version);
+    switch_to_version(&version_manager, &version)?;
+    ui::success!("Switched to nozzle {}", ui::version(&version));
 
     Ok(())
 }
 
 /// Switch to a specific installed version
-pub fn switch_to_version(config: &Config, version: &str) -> Result<()> {
-    let version_dir = config.versions_dir.join(version);
-    if !version_dir.exists() {
-        anyhow::bail!(
-            "Version {} is not installed. Run 'nozzleup install {}' to install it",
-            version,
-            version
-        );
-    }
-
-    let binary_path = config.version_binary_path(version);
-    if !binary_path.exists() {
-        anyhow::bail!("Binary not found for version {}", version);
-    }
-
-    let active_path = config.active_binary_path();
-
-    // Remove existing symlink if it exists
-    if active_path.exists() || active_path.is_symlink() {
-        fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
-    }
-
-    // Create new symlink
-    symlink(&binary_path, &active_path).context("Failed to create symlink")?;
-
-    // Update current version file
-    config.set_current_version(version)?;
-
+pub fn switch_to_version(version_manager: &VersionManager, version: &str) -> Result<()> {
+    version_manager.activate(version)?;
     Ok(())
 }
 
-fn select_version(config: &Config) -> Result<String> {
-    // Check if versions directory exists
-    if !config.versions_dir.exists() {
-        anyhow::bail!("No versions installed. Run 'nozzleup install' to install nozzle");
-    }
-
-    // Get list of installed versions
-    let mut versions = Vec::new();
-    for entry in fs::read_dir(&config.versions_dir).context("Failed to read versions directory")? {
-        let entry = entry.context("Failed to read directory entry")?;
-        if entry
-            .file_type()
-            .context("Failed to get file type")?
-            .is_dir()
-        {
-            let version = entry.file_name().to_string_lossy().to_string();
-            versions.push(version);
-        }
-    }
+fn select_version(version_manager: &VersionManager) -> Result<String> {
+    let versions = version_manager.list_installed()?;
 
     if versions.is_empty() {
         anyhow::bail!("No versions installed. Run 'nozzleup install' to install nozzle");
     }
 
-    // Sort versions
-    versions.sort();
-
     // Get current version
-    let current_version = config.current_version()?;
+    let current_version = version_manager.get_current()?;
 
     // Create display items with current indicator
     let display_items: Vec<String> = versions

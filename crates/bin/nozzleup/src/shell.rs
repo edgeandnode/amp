@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use fs_err as fs;
 
+use crate::ui;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Shell {
     Zsh,
@@ -77,7 +79,7 @@ pub fn add_to_path(bin_dir: &str) -> Result<()> {
 
     // Check if already in PATH
     if content.contains(&export_line) {
-        println!("nozzleup: {} already in PATH", bin_dir);
+        ui::detail!("{} already in PATH", bin_dir);
         return Ok(());
     }
 
@@ -92,13 +94,13 @@ pub fn add_to_path(bin_dir: &str) -> Result<()> {
 
     fs::write(&profile_path, new_content).context("Failed to write to shell profile")?;
 
-    println!(
-        "nozzleup: Added {} to PATH in {}",
+    ui::success!(
+        "Added {} to PATH in {}",
         bin_dir,
-        profile_path.display()
+        ui::path(profile_path.display())
     );
-    println!(
-        "nozzleup: Run 'source {}' or start a new terminal session",
+    ui::detail!(
+        "Run 'source {}' or start a new terminal session",
         profile_path.display()
     );
 
