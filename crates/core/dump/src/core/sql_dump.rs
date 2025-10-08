@@ -94,7 +94,7 @@
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
