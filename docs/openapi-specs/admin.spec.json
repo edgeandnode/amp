@@ -1212,53 +1212,11 @@
         }
       },
       "EndBlock": {
-        "oneOf": [
-          {
-            "type": "string",
-            "description": "Continuous dumping - never stops",
-            "enum": [
-              "None"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Stop at the latest available block",
-            "enum": [
-              "Latest"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "Stop at a specific block number",
-            "required": [
-              "Absolute"
-            ],
-            "properties": {
-              "Absolute": {
-                "type": "integer",
-                "format": "int64",
-                "description": "Stop at a specific block number",
-                "minimum": 0
-              }
-            }
-          },
-          {
-            "type": "object",
-            "description": "Stop N blocks before the latest block",
-            "required": [
-              "LatestMinus"
-            ],
-            "properties": {
-              "LatestMinus": {
-                "type": "integer",
-                "format": "int64",
-                "description": "Stop N blocks before the latest block",
-                "minimum": 0
-              }
-            }
-          }
+        "type": [
+          "string",
+          "null"
         ],
-        "description": "End block configuration for dump operations.\n\nDefines when a dump should stop processing blocks:\n- `None`: Continuous dumping (never stops)\n- `Latest`: Stop at the latest available block\n- `Absolute(N)`: Stop at specific block number N\n- `LatestMinus(N)`: Stop at latest block - N (e.g., 100 means latest - 100)"
+        "description": "End block configuration for API requests.\n\nDetermines when the dump process should stop extracting blocks.\nAccepts the following values:\n\n- `null` (or omitted): Continuous dumping - never stops, keeps extracting new blocks as they arrive\n- `\"latest\"`: Stop at the latest available block at the time the dump starts\n- A positive number as a string (e.g., `\"1000000\"`): Stop at the specified absolute block number\n- A negative number as a string (e.g., `\"-100\"`): Stop at (latest block - N), useful for staying N blocks behind the chain tip\n\n# Examples\n\n```json\n{\"end_block\": null}           // Continuous mode\n{\"end_block\": \"latest\"}       // Stop at latest block\n{\"end_block\": \"5000000\"}      // Stop at block 5,000,000\n{\"end_block\": \"-100\"}         // Stop 100 blocks before latest\n```"
       },
       "ErrorResponse": {
         "type": "object",

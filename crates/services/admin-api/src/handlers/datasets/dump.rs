@@ -4,7 +4,6 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
-use dump::EndBlock;
 use worker::JobId;
 
 use super::tracing::display_selector_version;
@@ -174,7 +173,7 @@ async fn handler_inner(
 
     let job_id = ctx
         .scheduler
-        .schedule_dataset_dump(dataset, options.end_block)
+        .schedule_dataset_dump(dataset, options.end_block.into())
         .await
         .map_err(|err| {
             tracing::error!(
@@ -187,6 +186,36 @@ async fn handler_inner(
         })?;
 
     Ok(Json(DumpResponse { job_id }))
+}
+
+/// End block configuration for API requests.
+///
+/// Determines when the dump process should stop extracting blocks.
+/// Accepts the following values:
+///
+/// - `null` (or omitted): Continuous dumping - never stops, keeps extracting new blocks as they arrive
+/// - `"latest"`: Stop at the latest available block at the time the dump starts
+/// - A positive number as a string (e.g., `"1000000"`): Stop at the specified absolute block number
+/// - A negative number as a string (e.g., `"-100"`): Stop at (latest block - N), useful for staying N blocks behind the chain tip
+///
+/// # Examples
+///
+/// ```json
+/// {"end_block": null}           // Continuous mode
+/// {"end_block": "latest"}       // Stop at latest block
+/// {"end_block": "5000000"}      // Stop at block 5,000,000
+/// {"end_block": "-100"}         // Stop 100 blocks before latest
+/// ```
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+#[serde(transparent)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+pub struct EndBlock(dump::EndBlock);
+
+impl From<EndBlock> for dump::EndBlock {
+    fn from(value: EndBlock) -> Self {
+        value.0
+    }
 }
 
 /// Request options for dataset dump operations

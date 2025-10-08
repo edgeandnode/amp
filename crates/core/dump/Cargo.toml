@@ -23,4 +23,3 @@ rand.workspace = true
 tokio-util.workspace = true
 alloy.workspace = true
 monitoring = { path = "../monitoring" }
-utoipa.workspace = true
