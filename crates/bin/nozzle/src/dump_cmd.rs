@@ -15,6 +15,7 @@ use dataset_store::{
 };
 use datasets_common::version::Version;
 use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, manifest::TableInput};
+use dump::EndBlock;
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;
@@ -24,7 +25,7 @@ pub async fn dump(
     metadata_db: MetadataDb,
     mut datasets: Vec<String>,
     ignore_deps: bool,
-    end_block: Option<i64>,
+    end_block: EndBlock,
     n_jobs: u16,
     partition_size_mb: u64,
     run_every_mins: Option<u64>,

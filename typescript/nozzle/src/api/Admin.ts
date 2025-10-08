@@ -13,6 +13,22 @@ import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
 /**
+ * End block configuration for dump operations.
+ *
+ * Can be one of:
+ * - null/undefined: Continuous dumping (never stops)
+ * - "latest": Stop at the latest available block
+ * - "123": Stop at specific block number (as string)
+ * - "-100": Stop N blocks before latest (as string, e.g., "-100" means latest - 100)
+ */
+const EndBlock = Schema.NullOr(
+  Schema.Union(
+    Schema.Literal("latest"),
+    Schema.String, // Accepts numeric strings like "123" or "-100"
+  ),
+)
+
+/**
  * The dataset name parameter (GET /datasets/{name}).
  */
 const datasetName = HttpApiSchema.param("name", Model.DatasetName)
@@ -46,7 +62,7 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      endBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("end_block")),
+      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
     }),
   )
 
@@ -66,7 +82,7 @@ const dumpDatasetVersion = HttpApiEndpoint.post(
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      endBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("end_block")),
+      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
     }),
   )
 
@@ -540,7 +556,7 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   readonly dumpDataset: (
     name: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
@@ -556,7 +572,7 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
     name: string,
     version: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
@@ -744,7 +760,7 @@ export const make = Effect.fn(function*(url: string) {
   const dumpDataset = Effect.fn("dumpDataset")(function*(
     name: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     },
   ) {
     const request = client.dataset.dumpDataset({
@@ -770,7 +786,7 @@ export const make = Effect.fn(function*(url: string) {
     name: string,
     version: string,
     options?: {
-      endBlock?: number | undefined
+      endBlock?: string | null | undefined
     },
   ) {
     const request = client.dataset.dumpDatasetVersion({

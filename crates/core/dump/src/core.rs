@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+pub use block_ranges::{EndBlock, ResolvedEndBlock};
 use common::{
     BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
@@ -20,7 +21,7 @@ use object_store::ObjectMeta;
 
 use crate::metrics;
 
-mod block_ranges;
+pub mod block_ranges;
 mod raw_dataset;
 mod sql_dump;
 mod tasks;
@@ -32,7 +33,7 @@ pub async fn dump_tables(
     n_jobs: u16,
     partition_size: u64,
     microbatch_max_interval: u64,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
@@ -68,7 +69,7 @@ pub async fn dump_raw_tables(
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
@@ -141,7 +142,7 @@ pub async fn dump_user_tables(
     tables: &[Arc<PhysicalTable>],
     microbatch_max_interval: u64,
     n_jobs: u16,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {

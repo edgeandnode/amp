@@ -94,7 +94,7 @@
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
 
-use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
@@ -108,7 +108,7 @@ use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use tracing::instrument;
 
-use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
     compaction::{CompactionProperties, NozzleCompactor},
     metrics,
@@ -128,7 +128,7 @@ pub async fn dump_table(
     parquet_opts: &ParquetWriterProperties,
     compaction_opts: &Arc<CompactionProperties>,
     microbatch_max_interval: u64,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
@@ -179,20 +179,25 @@ pub async fn dump_table(
             tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
             return Ok::<(), BoxError>(());
         };
-        let end = match end {
-            Some(end) if end >= 0 => end as BlockNum,
-            _ => {
+
+        let resolved = end
+            .resolve(start, async {
                 let query_ctx =
                     QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                let Some(max_end_block) = query_ctx
+                query_ctx
                     .max_end_block(&plan.clone().attach_to(&query_ctx)?)
-                    .await?
-                else {
-                    tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
-                    return Ok::<(), BoxError>(());
-                };
-                block_ranges::resolve_relative(start, end, max_end_block)?
+                    .await
+                    .map_err(Into::into)
+            })
+            .await?;
+
+        let end = match resolved {
+            ResolvedEndBlock::Continuous => None,
+            ResolvedEndBlock::NoDataAvailable => {
+                tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+                return Ok::<(), BoxError>(());
             }
+            ResolvedEndBlock::Block(block) => Some(block),
         };
 
         if let IncrementalCheck::NonIncremental(op) = incremental_check {
@@ -210,7 +215,8 @@ pub async fn dump_table(
             &env,
             &catalog,
             plan.clone(),
-            start..=end,
+            start,
+            end,
             resume_watermark,
             table.clone(),
             &parquet_opts,
@@ -262,7 +268,8 @@ async fn dump_sql_query(
     env: &QueryEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
-    range: RangeInclusive<BlockNum>,
+    start: BlockNum,
+    end: Option<BlockNum>,
     resume_watermark: Option<ResumeWatermark>,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
@@ -274,8 +281,8 @@ async fn dump_sql_query(
     tracing::info!(
         "dumping {} [{}-{}]",
         physical_table.table_ref(),
-        range.start(),
-        range.end(),
+        start,
+        end.map(|e| e.to_string()).unwrap_or_default(),
     );
     let mut stream = {
         StreamingQuery::spawn(
@@ -283,8 +290,8 @@ async fn dump_sql_query(
             catalog.clone(),
             ctx.dataset_store.clone(),
             query,
-            *range.start(),
-            Some(*range.end()),
+            start,
+            end,
             resume_watermark,
             notification_multiplexer,
             Some(physical_table.clone()),
@@ -294,7 +301,7 @@ async fn dump_sql_query(
         .as_stream()
     };
 
-    let mut microbatch_start = *range.start();
+    let mut microbatch_start = start;
     let mut writer = ParquetFileWriter::new(
         physical_table.clone(),
         parquet_opts.clone(),
@@ -389,7 +396,6 @@ async fn dump_sql_query(
             }
         }
     }
-    assert!(microbatch_start == range.end() + 1);
 
     Ok(())
 }

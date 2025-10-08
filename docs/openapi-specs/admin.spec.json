@@ -1192,12 +1192,8 @@
         "description": "Request options for dataset dump operations\n\nControls the behavior and scope of the data extraction job.\nThese options determine the range of blocks to extract.",
         "properties": {
           "end_block": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "The last block number to extract (optional)\n\nIf not specified, the extraction will continue indefinitely\n(until manually stopped or the blockchain tip)."
+            "$ref": "#/components/schemas/EndBlock",
+            "description": "The end block configuration for the dump\n\nSupports multiple modes:\n- `null` or omitted: Continuous dumping (never stops)\n- `\"latest\"`: Stop at the latest available block\n- `<number>`: Stop at specific block number (e.g., `1000000`)\n- `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)\n\nIf not specified, defaults to continuous mode."
           }
         }
       },
@@ -1214,6 +1210,13 @@
             "description": "The ID of the scheduled dump job (64-bit integer)"
           }
         }
+      },
+      "EndBlock": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "End block configuration for API requests.\n\nDetermines when the dump process should stop extracting blocks.\nAccepts the following values:\n\n- `null` (or omitted): Continuous dumping - never stops, keeps extracting new blocks as they arrive\n- `\"latest\"`: Stop at the latest available block at the time the dump starts\n- A positive number as a string (e.g., `\"1000000\"`): Stop at the specified absolute block number\n- A negative number as a string (e.g., `\"-100\"`): Stop at (latest block - N), useful for staying N blocks behind the chain tip\n\n# Examples\n\n```json\n{\"end_block\": null}           // Continuous mode\n{\"end_block\": \"latest\"}       // Stop at latest block\n{\"end_block\": \"5000000\"}      // Stop at block 5,000,000\n{\"end_block\": \"-100\"}         // Stop 100 blocks before latest\n```"
       },
       "ErrorResponse": {
         "type": "object",
