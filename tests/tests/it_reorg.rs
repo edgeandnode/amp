@@ -166,6 +166,7 @@ async fn flight_data_app_metadata() {
     test.dump("anvil_rpc", 0).await;
     let mut flight_data = test.flight_metadata_stream(query).await;
 
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
     assert_eq!(
