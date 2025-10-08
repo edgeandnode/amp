@@ -1,82 +1,41 @@
 use anyhow::{Context, Result};
-use fs_err as fs;
+use semver::Version;
 
-use crate::{
-    config::Config,
-    github::GitHubClient,
-    platform::{Architecture, Platform},
-};
+use crate::{github::GitHubClient, ui, updater::Updater};
 
-pub async fn run(
-    install_dir: Option<std::path::PathBuf>,
-    repo: String,
-    github_token: Option<String>,
-) -> Result<()> {
-    println!("nozzleup: Updating nozzleup...");
+pub async fn run(repo: String, github_token: Option<String>) -> Result<()> {
+    ui::info("Checking for updates");
 
-    let _config = Config::new(install_dir)?;
     let github = GitHubClient::new(repo, github_token)?;
+    let updater = Updater::new(github);
 
-    // Get the current version
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    // Get the latest version
-    let latest_version = github.get_latest_version().await?;
-    println!("nozzleup: Latest version: {}", latest_version);
+    let current_version = updater.get_current_version();
+    let latest_version = updater.get_latest_version().await?;
 
     // Normalize versions for comparison (strip 'v' prefix if present)
-    let current_normalized = current_version.strip_prefix('v').unwrap_or(current_version);
+    let current_normalized = current_version
+        .strip_prefix('v')
+        .unwrap_or(&current_version);
     let latest_normalized = latest_version.strip_prefix('v').unwrap_or(&latest_version);
 
-    // Check if already on latest version
-    if current_normalized == latest_normalized {
-        println!(
-            "nozzleup: Already on the latest version ({})",
-            current_version
-        );
-        return Ok(());
+    ui::info(format!(
+        "Current version: {}, Latest version: {}",
+        ui::version(&current_normalized),
+        ui::version(&latest_normalized)
+    ));
+
+    // Parse versions for proper semver comparison
+    let current_semver =
+        Version::parse(current_normalized).context("Failed to parse current version")?;
+    let latest_semver =
+        Version::parse(latest_normalized).context("Failed to parse latest version")?;
+
+    if latest_semver > current_semver {
+        ui::info(format!("Updating to {}", ui::version(&latest_version)));
+        updater.update_self(&latest_version).await?;
+    } else {
+        ui::success("No updates available");
     }
-
-    println!(
-        "nozzleup: Updating from {} to {}",
-        current_version, latest_version
-    );
-
-    // Detect platform and architecture
-    let platform = Platform::detect()?;
-    let arch = Architecture::detect()?;
-
-    // Download the nozzleup binary
-    let artifact_name = format!("nozzleup-{}-{}", platform.as_str(), arch.as_str());
-    println!("nozzleup: Downloading {} ...", artifact_name);
-
-    let binary_data = github
-        .download_release_asset(&latest_version, &artifact_name)
-        .await
-        .context("Failed to download nozzleup binary")?;
-
-    // Get the current executable path
-    let current_exe = std::env::current_exe().context("Failed to get current executable path")?;
-
-    // Write to a temporary file first
-    let temp_path = current_exe.with_extension("tmp");
-    fs::write(&temp_path, &binary_data).context("Failed to write temporary file")?;
-
-    // Make it executable
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&temp_path)
-            .context("Failed to get temp file metadata")?
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&temp_path, perms).context("Failed to set executable permissions")?;
-    }
-
-    // Replace the current executable
-    fs::rename(&temp_path, &current_exe).context("Failed to replace executable")?;
-
-    println!("nozzleup: Updated successfully to {}", latest_version);
 
     Ok(())
 }

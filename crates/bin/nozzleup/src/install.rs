@@ -1,22 +1,24 @@
-use std::os::unix::fs::symlink;
-
 use anyhow::{Context, Result};
 use fs_err as fs;
 
 use crate::{
-    config::Config,
     github::GitHubClient,
     platform::{Architecture, Platform},
+    ui,
+    version_manager::VersionManager,
 };
 
 pub struct Installer {
-    config: Config,
+    version_manager: VersionManager,
     github: GitHubClient,
 }
 
 impl Installer {
-    pub fn new(config: Config, github: GitHubClient) -> Self {
-        Self { config, github }
+    pub fn new(version_manager: VersionManager, github: GitHubClient) -> Self {
+        Self {
+            version_manager,
+            github,
+        }
     }
 
     /// Install nozzle from a GitHub release
@@ -26,10 +28,14 @@ impl Installer {
         platform: Platform,
         arch: Architecture,
     ) -> Result<()> {
-        self.config.ensure_dirs()?;
+        self.version_manager.config().ensure_dirs()?;
 
         let artifact = format!("nozzle-{}-{}", platform.as_str(), arch.as_str());
-        println!("nozzleup: Downloading {} for {}...", version, artifact);
+        ui::info(format!(
+            "Downloading {} for {}",
+            ui::version(version),
+            artifact
+        ));
 
         // Download the binary over HTTPS (TLS provides integrity verification)
         let binary_data = self
@@ -42,7 +48,7 @@ impl Installer {
             anyhow::bail!("Downloaded binary is empty");
         }
 
-        println!("nozzleup: Downloaded {} bytes", binary_data.len());
+        ui::detail(format!("Downloaded {} bytes", binary_data.len()));
 
         // Install the binary
         self.install_binary(version, &binary_data)?;
@@ -52,8 +58,10 @@ impl Installer {
 
     /// Install the binary to the version directory
     fn install_binary(&self, version: &str, data: &[u8]) -> Result<()> {
+        let config = self.version_manager.config();
+
         // Create version directory
-        let version_dir = self.config.versions_dir.join(version);
+        let version_dir = config.versions_dir.join(version);
         fs::create_dir_all(&version_dir).context("Failed to create version directory")?;
 
         let binary_path = version_dir.join("nozzle");
@@ -73,19 +81,8 @@ impl Installer {
                 .context("Failed to set executable permissions")?;
         }
 
-        // Create symlink
-        let active_path = self.config.active_binary_path();
-
-        // Remove existing symlink if it exists
-        if active_path.exists() || active_path.is_symlink() {
-            fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
-        }
-
-        // Create new symlink
-        symlink(&binary_path, &active_path).context("Failed to create symlink")?;
-
-        // Update current version
-        self.config.set_current_version(version)?;
+        // Activate this version using the version manager
+        self.version_manager.activate(version)?;
 
         Ok(())
     }

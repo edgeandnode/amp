@@ -5306,6 +5306,7 @@ dependencies = [
  "indicatif",
  "pretty_assertions",
  "reqwest",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "tempfile",
