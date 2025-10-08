@@ -9,6 +9,7 @@ use crate::scheduler::Scheduler;
 /// The Admin API context
 #[derive(Clone)]
 pub struct Ctx {
+    pub config: Arc<common::config::Config>,
     pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub scheduler: Scheduler,

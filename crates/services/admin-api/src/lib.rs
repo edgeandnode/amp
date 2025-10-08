@@ -14,6 +14,7 @@ use tower_http::cors::CorsLayer;
 
 mod ctx;
 pub mod handlers;
+mod health;
 mod scheduler;
 
 use ctx::Ctx;
@@ -44,6 +45,7 @@ pub async fn serve(
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     let ctx = Ctx {
+        config: config.clone(),
         metadata_db,
         dataset_store,
         scheduler,
@@ -51,6 +53,8 @@ pub async fn serve(
 
     // Register the routes
     let mut app = Router::new()
+        .route("/health", get(health::handle_health))
+        .route("/ready", get(health::handle_ready))
         .route(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::register::handler),
