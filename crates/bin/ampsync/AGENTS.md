@@ -102,6 +102,116 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 
 ## Critical Architecture Patterns
 
+### 🔑 System Metadata Architecture
+
+**ALL tables use consistent 3-column system metadata**, regardless of whether `block_num` exists in user's schema:
+
+#### Injected System Columns
+
+**1. `_id` (BYTEA NOT NULL)** - PRIMARY KEY
+- **Purpose**: Deterministic, content-based deduplication
+- **Hash Algorithm**: xxh3_128 (high-performance 128-bit hash)
+- **Hash Input**: `row_content + block_range + row_index`
+  - `row_content`: Deterministic serialization of ALL user columns (see `serialize_arrow_value()`)
+  - `block_range`: `block_num_start` + `block_num_end` from batch metadata
+  - `row_index`: Position within batch (ensures uniqueness even for identical rows)
+- **Serialization**: Little-endian byte order, portable across platforms
+- **Collision Protection**: PRIMARY KEY constraint ensures hash collisions fail loudly (not silently)
+- **Benefits**:
+  - Prevents duplicate inserts on reconnect
+  - Works with `ON CONFLICT DO NOTHING` for idempotency
+  - Consistent across ALL tables (no conditional logic)
+
+**2. `_block_num_start` (BIGINT NOT NULL)**
+- **Purpose**: First block number in batch range
+- **Used for**: Batch boundary tracking, conservative reorg deletion
+- **Source**: `MIN(ranges.start())` from batch metadata
+
+**3. `_block_num_end` (BIGINT NOT NULL)**
+- **Purpose**: Last block number in batch range
+- **Used for**: Reorg handling (DELETE WHERE `_block_num_end` >= reorg_block)
+- **Source**: `MAX(ranges.end())` from batch metadata
+- **Reorg Strategy**: Conservative - deletes entire batch if ANY block is invalidated
+
+#### User Schema Columns
+
+**If user's query includes `block_num`**:
+- `block_num` column is preserved as a separate user column
+- INDEX automatically created on `block_num` for query performance
+- PRIMARY KEY remains on `_id` (not `block_num`)
+- Example DDL:
+  ```sql
+  CREATE TABLE blocks (
+    _id BYTEA NOT NULL,
+    _block_num_start BIGINT NOT NULL,
+    _block_num_end BIGINT NOT NULL,
+    block_num NUMERIC(20) NOT NULL,  -- User column
+    timestamp TIMESTAMPTZ NOT NULL,
+    hash BYTEA NOT NULL,
+    PRIMARY KEY (_id)
+  );
+  CREATE INDEX blocks_block_num_idx ON blocks (block_num);
+  ```
+
+**If user's query does NOT include `block_num`**:
+- Only 3 system columns + user columns
+- No `block_num` column or index
+- Example DDL:
+  ```sql
+  CREATE TABLE transfers (
+    _id BYTEA NOT NULL,
+    _block_num_start BIGINT NOT NULL,
+    _block_num_end BIGINT NOT NULL,
+    from_addr TEXT NOT NULL,
+    to_addr TEXT NOT NULL,
+    value NUMERIC(38, 0) NOT NULL,
+    PRIMARY KEY (_id)
+  );
+  ```
+
+#### Why This Design?
+
+**Simplicity**:
+- Single code path for ALL tables (no conditional branching)
+- No cache needed for tracking which tables have `block_num`
+- Easier to reason about and maintain
+
+**Robustness**:
+- Hash-based PRIMARY KEY prevents silent data loss from duplicates
+- Works correctly even when user queries don't SELECT `block_num`
+- Conservative reorg handling is safe (deletes entire batch if unsure)
+
+**Performance**:
+- xxh3_128 is extremely fast (30-50 GB/s)
+- Reusable hash buffer eliminates allocations (see `batch_utils.rs`)
+- INDEX on user's `block_num` provides query performance when needed
+
+#### Implementation Details
+
+**Batch Processing** (`batch_utils.rs::inject_system_metadata()`):
+1. Validate batch size (MAX_BATCH_ROWS: 50,000, MAX_BATCH_BYTES: 100MB)
+2. Extract block range from metadata
+3. For each row:
+   - Serialize ALL columns deterministically (little-endian)
+   - Append block range (start + end)
+   - Append row index
+   - Compute xxh3_128 hash → `_id`
+4. Create 3 system column arrays
+5. Prepend to user column arrays
+6. Return new RecordBatch with all columns
+
+**DDL Generation** (`sync_engine.rs::arrow_schema_to_postgres_ddl()`):
+1. ALWAYS inject 3 system column definitions first
+2. Add user columns from schema
+3. PRIMARY KEY on `_id`
+4. Check if user schema has `block_num`
+5. If yes, create INDEX separately in `create_table()`
+
+**Reorg Handling** (`sync_engine.rs::handle_reorg()`):
+- ALWAYS uses `_block_num_end` for deletion (no conditional logic)
+- Query: `DELETE FROM table WHERE _block_num_end >= reorg_block`
+- Conservative: May delete more than strictly necessary, but safe
+
 ### 🚨 Data Consistency Guarantees
 
 **Never Lose Data**:
@@ -116,7 +226,8 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - Reorg handling is atomic (delete + wait for corrected data)
 
 **Idempotency**:
-- Tables have PRIMARY KEY on `block_num` (if column exists)
+- ALL tables have PRIMARY KEY on `_id` (deterministic hash-based)
+- Hash includes: row_content + block_range + row_index (ensures uniqueness within batch)
 - Duplicate inserts use `ON CONFLICT DO NOTHING` via temp table approach
 - Safe to restart at any point
 
@@ -482,8 +593,10 @@ export default defineDataset(() => ({
 - `validate_incremental_query()`: Check for non-incremental patterns
 - `sanitize_sql()`: Remove ORDER BY and LIMIT
 
-**`src/batch_utils.rs`** - RecordBatch utilities
-- `convert_nanosecond_timestamps()`: Timestamp conversion for PostgreSQL
+**`src/batch_utils.rs`** - RecordBatch utilities and system metadata injection
+- `inject_system_metadata()`: Injects 3 system columns (`_id`, `_block_num_start`, `_block_num_end`) into ALL batches
+- `serialize_arrow_value()`: Deterministic Arrow value serialization for hashing (little-endian, portable)
+- `convert_nanosecond_timestamps()`: Timestamp conversion for PostgreSQL (nanosecond → microsecond)
 
 **`src/dataset_definition.rs`** - User-facing config structures
 - `DatasetDefinition`: Simple config format

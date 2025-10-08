@@ -26,6 +26,7 @@ arrow-schema = { version = "55.2.0" }
 backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
@@ -62,6 +63,7 @@ tracing.workspace = true
 vergen-gitcl = { version = "1.0.8", features = ["build"] }
 
 [dev-dependencies]
+alloy.workspace = true
 mockito = "1.7.0"
 pgtemp = "0.6.0"
 tempfile.workspace = true

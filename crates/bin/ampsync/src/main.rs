@@ -16,7 +16,7 @@ use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    batch_utils::convert_nanosecond_timestamps,
+    batch_utils::{convert_nanosecond_timestamps, inject_system_metadata},
     conn::{DEFAULT_POOL_SIZE, DbConnPool},
     sync_engine::AmpsyncDbEngine,
 };
@@ -480,14 +480,30 @@ async fn spawn_stream_tasks(
                                 }
                             };
 
+                            // Inject system metadata columns (_id, _block_num_start, _block_num_end)
+                            // This ensures all tables have consistent PRIMARY KEY and reorg handling
+                            let batch_with_metadata =
+                                match inject_system_metadata(converted_batch, &metadata.ranges) {
+                                    Ok(batch) => batch,
+                                    Err(e) => {
+                                        error!(
+                                            table = %table_name_owned,
+                                            error = %e,
+                                            "system_metadata_injection_failed"
+                                        );
+                                        // Break to trigger stream reconnection
+                                        break;
+                                    }
+                                };
+
                             // High-performance bulk insert using pgpq
                             if let Err(e) = ampsync_db_engine_clone
-                                .insert_record_batch(&table_name_owned, &converted_batch)
+                                .insert_record_batch(&table_name_owned, &batch_with_metadata)
                                 .await
                             {
                                 error!(
                                     table = %table_name_owned,
-                                    rows = converted_batch.num_rows(),
+                                    rows = batch_with_metadata.num_rows(),
                                     error = %e,
                                     "batch_insert_failed"
                                 );
@@ -497,7 +513,7 @@ async fn spawn_stream_tasks(
                             } else {
                                 info!(
                                     table = %table_name_owned,
-                                    rows = converted_batch.num_rows(),
+                                    rows = batch_with_metadata.num_rows(),
                                     "batch_inserted"
                                 );
 

@@ -56,12 +56,27 @@ async fn test_insert_with_reserved_word_columns() {
         Field::new("block_num", DataType::Int64, false),
     ]));
 
-    // Create test data
-    let from_array = StringArray::from(vec!["0xaaa", "0xbbb"]);
-    let to_array = StringArray::from(vec!["0xccc", "0xddd"]);
-    let select_array = StringArray::from(vec!["transfer1", "transfer2"]);
-    let amount_array = Int64Array::from(vec![100, 200]);
-    let block_num_array = Int64Array::from(vec![1, 2]);
+    // Create test data with realistic batch size (50 transfers across multiple blocks)
+    let num_transfers = 50;
+    let mut from_addrs = Vec::with_capacity(num_transfers);
+    let mut to_addrs = Vec::with_capacity(num_transfers);
+    let mut select_values = Vec::with_capacity(num_transfers);
+    let mut amounts = Vec::with_capacity(num_transfers);
+    let mut block_nums = Vec::with_capacity(num_transfers);
+
+    for i in 0..num_transfers {
+        from_addrs.push(format!("0x{:040x}", i + 1000)); // Unique addresses
+        to_addrs.push(format!("0x{:040x}", i + 2000));
+        select_values.push(format!("transfer{}", i + 1));
+        amounts.push((i + 1) as i64 * 100); // Increasing amounts: 100, 200, 300, ...
+        block_nums.push((i + 1) as i64); // Blocks 1-50
+    }
+
+    let from_array = StringArray::from(from_addrs);
+    let to_array = StringArray::from(to_addrs);
+    let select_array = StringArray::from(select_values);
+    let amount_array = Int64Array::from(amounts);
+    let block_num_array = Int64Array::from(block_nums);
 
     let batch = RecordBatch::try_new(
         schema,
@@ -98,21 +113,28 @@ async fn test_insert_with_reserved_word_columns() {
             .await
             .expect("Failed to query inserted data");
 
-            assert_eq!(rows.len(), 2);
+            assert_eq!(rows.len(), 50, "Expected 50 transfers to be inserted");
 
-            // First row
-            assert_eq!(rows[0].0, "0xaaa"); // from
-            assert_eq!(rows[0].1, "0xccc"); // to
+            // Verify first transfer (block 1)
+            assert_eq!(rows[0].0, format!("0x{:040x}", 1000)); // from
+            assert_eq!(rows[0].1, format!("0x{:040x}", 2000)); // to
             assert_eq!(rows[0].2, "transfer1"); // select
             assert_eq!(rows[0].3, 100); // amount
             assert_eq!(rows[0].4, 1); // block_num
 
-            // Second row
-            assert_eq!(rows[1].0, "0xbbb"); // from
-            assert_eq!(rows[1].1, "0xddd"); // to
-            assert_eq!(rows[1].2, "transfer2"); // select
-            assert_eq!(rows[1].3, 200); // amount
-            assert_eq!(rows[1].4, 2); // block_num
+            // Verify last transfer (block 50)
+            assert_eq!(rows[49].0, format!("0x{:040x}", 1049)); // from
+            assert_eq!(rows[49].1, format!("0x{:040x}", 2049)); // to
+            assert_eq!(rows[49].2, "transfer50"); // select
+            assert_eq!(rows[49].3, 5000); // amount (50 * 100)
+            assert_eq!(rows[49].4, 50); // block_num
+
+            // Verify a middle transfer (block 25)
+            assert_eq!(rows[24].0, format!("0x{:040x}", 1024)); // from
+            assert_eq!(rows[24].1, format!("0x{:040x}", 2024)); // to
+            assert_eq!(rows[24].2, "transfer25"); // select
+            assert_eq!(rows[24].3, 2500); // amount (25 * 100)
+            assert_eq!(rows[24].4, 25); // block_num
 
             println!("Data verification passed for reserved word columns!");
         }
@@ -146,7 +168,7 @@ async fn test_insert_with_reserved_word_columns() {
         .await
         .expect("Failed to count rows");
 
-    assert_eq!(count.0, 2, "Duplicate should have been skipped");
+    assert_eq!(count.0, 50, "Duplicate should have been skipped");
     println!("Duplicate handling test passed!");
 
     // Cleanup

@@ -25,6 +25,7 @@ just up
 ```
 
 This will:
+
 - Build ampsync inside Docker (multi-stage build)
 - Start all services:
   - PostgreSQL (ports 5432, 6434)
@@ -40,6 +41,7 @@ just dev
 ```
 
 This runs in parallel:
+
 - Next.js app (http://localhost:3001)
 - Nozzle proxy
 - Nozzle dev watcher
@@ -52,7 +54,9 @@ Open [http://localhost:3001](http://localhost:3001) to see real-time blockchain 
 
 ### Modify the dataset configuration
 
-Edit `nozzle.config.ts` to change what data is synced. Ampsync will automatically detect changes and reload.
+Edit [nozzle.config.ts](./nozzle.config.ts) to change what data is synced. Ampsync will automatically detect changes and reload.
+
+**Note** it is best when you make changes to the `nozzle.config.ts`, that you bump the version each time. This helps ampsync find the dataset schema and keeps each version <-> schema unique.
 
 ### View logs
 
@@ -100,6 +104,7 @@ This is normal on first start. Wait for Amp to index some blocks from Anvil.
 ### Ampsync not detecting config changes
 
 Check that the file watcher is working:
+
 ```bash
 just logs ampsync | grep -i "hot-reload"
 ```
@@ -107,6 +112,7 @@ just logs ampsync | grep -i "hot-reload"
 ### Database connection errors
 
 Ensure PostgreSQL is healthy:
+
 ```bash
 docker compose ps db
 ```

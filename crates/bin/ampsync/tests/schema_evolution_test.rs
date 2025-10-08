@@ -68,19 +68,23 @@ async fn test_create_new_table() {
     .await
     .expect("Failed to query columns");
 
-    assert_eq!(columns.len(), 3);
-    assert_eq!(columns[0].0, "id");
-    assert_eq!(columns[1].0, "name");
-    assert_eq!(columns[2].0, "block_num");
+    // Now has 6 columns: _id, _block_num_start, _block_num_end (system) + id, name, block_num (user)
+    assert_eq!(columns.len(), 6);
+    assert_eq!(columns[0].0, "_id"); // System column (PRIMARY KEY)
+    assert_eq!(columns[1].0, "_block_num_start"); // System column
+    assert_eq!(columns[2].0, "_block_num_end"); // System column
+    assert_eq!(columns[3].0, "id");
+    assert_eq!(columns[4].0, "name");
+    assert_eq!(columns[5].0, "block_num"); // User column (with INDEX)
 
-    // Verify PRIMARY KEY exists on block_num
+    // Verify PRIMARY KEY exists on _id (not block_num)
     let pk_exists: Option<(bool,)> = sqlx::query_as(
         "SELECT EXISTS (
             SELECT 1 FROM pg_constraint c
             JOIN pg_class t ON c.conrelid = t.oid
             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
             WHERE t.relname = 'test_table'
-            AND a.attname = 'block_num'
+            AND a.attname = '_id'
             AND c.contype = 'p'
         )",
     )
@@ -121,7 +125,13 @@ async fn test_restart_with_same_schema() {
     .await
     .expect("Failed to query columns");
 
-    assert_eq!(columns.len(), 2);
+    // We now have 5 columns: _id, _block_num_start, _block_num_end (injected), id, name
+    assert_eq!(columns.len(), 5);
+    assert_eq!(columns[0].0, "_id"); // System column (PRIMARY KEY)
+    assert_eq!(columns[1].0, "_block_num_start"); // System column
+    assert_eq!(columns[2].0, "_block_num_end"); // System column
+    assert_eq!(columns[3].0, "id");
+    assert_eq!(columns[4].0, "name");
 }
 
 #[tokio::test]
@@ -162,8 +172,14 @@ async fn test_add_new_column() {
     .await
     .expect("Failed to query columns");
 
-    assert_eq!(columns.len(), 3);
-    assert_eq!(columns[2].0, "email");
+    // We now have 6 columns: _id, _block_num_start, _block_num_end (injected), id, name, email
+    assert_eq!(columns.len(), 6);
+    assert_eq!(columns[0].0, "_id"); // System column (PRIMARY KEY)
+    assert_eq!(columns[1].0, "_block_num_start"); // System column
+    assert_eq!(columns[2].0, "_block_num_end"); // System column
+    assert_eq!(columns[3].0, "id");
+    assert_eq!(columns[4].0, "name");
+    assert_eq!(columns[5].0, "email");
 }
 
 #[tokio::test]
@@ -200,11 +216,15 @@ async fn test_add_multiple_columns() {
     .await
     .expect("Failed to query columns");
 
-    assert_eq!(columns.len(), 4);
-    assert_eq!(columns[0].0, "id");
-    assert_eq!(columns[1].0, "name");
-    assert_eq!(columns[2].0, "email");
-    assert_eq!(columns[3].0, "age");
+    // We now have 7 columns: _id, _block_num_start, _block_num_end (injected), id, name, email, age
+    assert_eq!(columns.len(), 7);
+    assert_eq!(columns[0].0, "_id"); // System column (PRIMARY KEY)
+    assert_eq!(columns[1].0, "_block_num_start"); // System column
+    assert_eq!(columns[2].0, "_block_num_end"); // System column
+    assert_eq!(columns[3].0, "id");
+    assert_eq!(columns[4].0, "name");
+    assert_eq!(columns[5].0, "email");
+    assert_eq!(columns[6].0, "age");
 }
 
 #[tokio::test]
@@ -289,7 +309,7 @@ async fn test_add_block_num_with_primary_key() {
         .await
         .expect("Failed to create table");
 
-    // Add block_num column (should add PRIMARY KEY automatically)
+    // Add block_num column (will be indexed but PRIMARY KEY stays on _id)
     let schema_v2 = create_test_schema(vec![
         ("id", DataType::UInt64, false),
         ("name", DataType::Utf8, true),
@@ -314,6 +334,6 @@ async fn test_add_block_num_with_primary_key() {
 
     assert_eq!(has_block_num, Some((true,)));
 
-    // Note: PRIMARY KEY is only added during initial table creation, not via ALTER TABLE
-    // This is expected behavior - adding constraints to existing tables requires manual intervention
+    // Note: PRIMARY KEY is always on _id (system column).
+    // block_num is indexed for query performance when present in user schema.
 }

@@ -1,4 +1,5 @@
 // Library interface for testing
+pub mod batch_utils;
 pub mod conn;
 pub mod dataset_definition;
 pub mod file_watcher;

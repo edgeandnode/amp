@@ -824,6 +824,7 @@ name = "ampsync"
 version = "0.1.0"
 dependencies = [
  "admin-api",
+ "alloy",
  "arrow-array",
  "arrow-schema",
  "backon",
@@ -858,6 +859,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "vergen-gitcl",
+ "xxhash-rust",
 ]
 
 [[package]]

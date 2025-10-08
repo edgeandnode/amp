@@ -263,12 +263,63 @@ docker compose up
 
 #### User Tables
 
-Created automatically from your nozzle config with schemas fetched from Admin API:
+Created automatically from your nozzle config with schemas fetched from Admin API.
 
-- Column types mapped from Arrow to PostgreSQL
-- Primary key on `block_num` (if present)
-- Supports schema evolution (adding new columns)
+**System Metadata Columns** (automatically injected into ALL tables):
+
+- **`_id` (BYTEA)**: PRIMARY KEY - Deterministic hash for deduplication
+  - Computed from: row content + block range + row index
+  - Uses xxh3_128 (high-performance 128-bit hash)
+  - Prevents duplicate inserts on reconnect
+  - Hash collisions fail loudly (PRIMARY KEY constraint)
+
+- **`_block_num_start` (BIGINT)**: First block number in batch range
+  - Used for batch boundary tracking
+
+- **`_block_num_end` (BIGINT)**: Last block number in batch range
+  - Used for blockchain reorganization handling
+  - Reorg deletes: `DELETE WHERE _block_num_end >= reorg_block`
+
+**User Schema Columns**:
+
+- Column types automatically mapped from Arrow to PostgreSQL
+- If your query includes `block_num`, it's preserved as a separate column with INDEX
+- Supports schema evolution (adding new columns via hot-reload)
 - Automatically quotes SQL reserved keyword column names ("to", "from", "select", etc.)
+
+**Example Table Structure**:
+
+```sql
+-- Table WITH block_num in user's query
+CREATE TABLE blocks (
+  _id BYTEA NOT NULL,              -- System: PRIMARY KEY
+  _block_num_start BIGINT NOT NULL, -- System: Batch start
+  _block_num_end BIGINT NOT NULL,   -- System: Batch end
+  block_num NUMERIC(20) NOT NULL,   -- User: From query
+  timestamp TIMESTAMPTZ NOT NULL,   -- User: From query
+  hash BYTEA NOT NULL,              -- User: From query
+  PRIMARY KEY (_id)
+);
+CREATE INDEX blocks_block_num_idx ON blocks (block_num);
+
+-- Table WITHOUT block_num in user's query
+CREATE TABLE transfers (
+  _id BYTEA NOT NULL,               -- System: PRIMARY KEY
+  _block_num_start BIGINT NOT NULL, -- System: Batch start
+  _block_num_end BIGINT NOT NULL,   -- System: Batch end
+  from_addr TEXT NOT NULL,          -- User: From query
+  to_addr TEXT NOT NULL,            -- User: From query
+  value NUMERIC(38, 0) NOT NULL,    -- User: From query
+  PRIMARY KEY (_id)
+);
+```
+
+**Key Benefits**:
+
+- **Idempotency**: Safe to restart at any point (hash-based deduplication)
+- **Reorg Safety**: Conservative deletion ensures no missed invalidations
+- **Consistency**: All tables use identical PRIMARY KEY strategy
+- **Performance**: Fast hashing (30-50 GB/s) with reusable buffers
 
 #### Internal Tables
 

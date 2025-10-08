@@ -93,38 +93,87 @@ async fn test_anvil_blocks_insert() {
         Field::new("gas_limit", DataType::UInt64, false),
     ]));
 
-    // Create test data for a single block
-    // Using microsecond precision (PostgreSQL-compatible)
-    let timestamp =
-        TimestampMicrosecondArray::from(vec![1727914811000000i64]).with_timezone("+00:00");
-    let mix_hash = FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let base_fee_per_gas = Decimal128Array::from(vec![1000000000i128])
+    // Create test data for multiple blocks (realistic batch size)
+    // Simulating 100 blocks to test batch insert performance and correctness
+    let num_blocks = 100;
+    let base_timestamp = 1727914811000000i64;
+
+    let mut timestamps = Vec::with_capacity(num_blocks);
+    let mut mix_hashes = Vec::with_capacity(num_blocks);
+    let mut base_fees = Vec::with_capacity(num_blocks);
+    let mut blob_gas_useds = Vec::with_capacity(num_blocks);
+    let mut miners = Vec::with_capacity(num_blocks);
+    let mut block_nums = Vec::with_capacity(num_blocks);
+    let mut parent_hashes = Vec::with_capacity(num_blocks);
+    let mut excess_blob_gases = Vec::with_capacity(num_blocks);
+    let mut state_roots = Vec::with_capacity(num_blocks);
+    let mut receipt_roots = Vec::with_capacity(num_blocks);
+    let mut withdrawals_roots = Vec::with_capacity(num_blocks);
+    let mut hashes = Vec::with_capacity(num_blocks);
+    let mut difficulties = Vec::with_capacity(num_blocks);
+    let mut ommers_hashes = Vec::with_capacity(num_blocks);
+    let mut transactions_roots = Vec::with_capacity(num_blocks);
+    let mut nonces = Vec::with_capacity(num_blocks);
+    let mut parent_beacon_roots = Vec::with_capacity(num_blocks);
+    let mut extra_datas = Vec::with_capacity(num_blocks);
+    let mut gas_useds = Vec::with_capacity(num_blocks);
+    let mut logs_blooms = Vec::with_capacity(num_blocks);
+    let mut gas_limits = Vec::with_capacity(num_blocks);
+
+    for i in 0..num_blocks {
+        timestamps.push(base_timestamp + (i as i64 * 12_000_000)); // 12 second block time
+        mix_hashes.push(vec![0u8; 32]);
+        base_fees.push(1000000000i128 + (i as i128 * 1000)); // Increasing base fee
+        blob_gas_useds.push(i as u64);
+        miners.push(vec![0u8; 20]);
+        block_nums.push((i + 1) as u64); // Blocks 1-100
+        parent_hashes.push(vec![0u8; 32]);
+        excess_blob_gases.push(0u64);
+        state_roots.push(vec![0u8; 32]);
+        receipt_roots.push(vec![0u8; 32]);
+        withdrawals_roots.push(vec![0u8; 32]);
+        hashes.push(vec![(i + 1) as u8; 32]); // Unique hash per block
+        difficulties.push(0i128);
+        ommers_hashes.push(vec![0u8; 32]);
+        transactions_roots.push(vec![0u8; 32]);
+        nonces.push(i as u64);
+        parent_beacon_roots.push(vec![0u8; 32]);
+        extra_datas.push(vec![0u8; 0]);
+        gas_useds.push(21000u64 + (i as u64 * 1000)); // Varying gas usage
+        logs_blooms.push(vec![0u8; 256]);
+        gas_limits.push(30000000u64);
+    }
+
+    let timestamp = TimestampMicrosecondArray::from(timestamps).with_timezone("+00:00");
+    let mix_hash = FixedSizeBinaryArray::try_from_iter(mix_hashes.into_iter()).unwrap();
+    let base_fee_per_gas = Decimal128Array::from(base_fees)
         .with_precision_and_scale(38, 0)
         .unwrap();
-    let blob_gas_used = UInt64Array::from(vec![0u64]);
-    let miner = FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 20]].into_iter()).unwrap();
-    let block_num = UInt64Array::from(vec![1u64]);
-    let parent_hash = FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let excess_blob_gas = UInt64Array::from(vec![0u64]);
-    let state_root = FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let receipt_root =
-        FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
+    let blob_gas_used = UInt64Array::from(blob_gas_useds);
+    let miner = FixedSizeBinaryArray::try_from_iter(miners.into_iter()).unwrap();
+    let block_num = UInt64Array::from(block_nums);
+    let parent_hash = FixedSizeBinaryArray::try_from_iter(parent_hashes.into_iter()).unwrap();
+    let excess_blob_gas = UInt64Array::from(excess_blob_gases);
+    let state_root = FixedSizeBinaryArray::try_from_iter(state_roots.into_iter()).unwrap();
+    let receipt_root = FixedSizeBinaryArray::try_from_iter(receipt_roots.into_iter()).unwrap();
     let withdrawals_root =
-        FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let hash = FixedSizeBinaryArray::try_from_iter(vec![vec![1u8; 32]].into_iter()).unwrap();
-    let difficulty = Decimal128Array::from(vec![0i128])
+        FixedSizeBinaryArray::try_from_iter(withdrawals_roots.into_iter()).unwrap();
+    let hash = FixedSizeBinaryArray::try_from_iter(hashes.into_iter()).unwrap();
+    let difficulty = Decimal128Array::from(difficulties)
         .with_precision_and_scale(38, 0)
         .unwrap();
-    let ommers_hash = FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
+    let ommers_hash = FixedSizeBinaryArray::try_from_iter(ommers_hashes.into_iter()).unwrap();
     let transactions_root =
-        FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let nonce = UInt64Array::from(vec![0u64]);
+        FixedSizeBinaryArray::try_from_iter(transactions_roots.into_iter()).unwrap();
+    let nonce = UInt64Array::from(nonces);
     let parent_beacon_root =
-        FixedSizeBinaryArray::try_from_iter(vec![vec![0u8; 32]].into_iter()).unwrap();
-    let extra_data = BinaryArray::from(vec![vec![0u8; 0].as_slice()]);
-    let gas_used = UInt64Array::from(vec![21000u64]);
-    let logs_bloom = BinaryArray::from(vec![vec![0u8; 256].as_slice()]);
-    let gas_limit = UInt64Array::from(vec![30000000u64]);
+        FixedSizeBinaryArray::try_from_iter(parent_beacon_roots.into_iter()).unwrap();
+    let extra_data =
+        BinaryArray::from(extra_datas.iter().map(|v| v.as_slice()).collect::<Vec<_>>());
+    let gas_used = UInt64Array::from(gas_useds);
+    let logs_bloom =
+        BinaryArray::from(logs_blooms.iter().map(|v| v.as_slice()).collect::<Vec<_>>());
+    let gas_limit = UInt64Array::from(gas_limits);
 
     let batch = RecordBatch::try_new(
         schema,
@@ -169,20 +218,42 @@ async fn test_anvil_blocks_insert() {
             println!("Successfully inserted batch!");
 
             // Verify the data was inserted correctly
+            // Note: ORDER BY block_num (numeric) not block_num::TEXT (lexicographic)
             let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-                "SELECT difficulty::TEXT, base_fee_per_gas::TEXT, block_num::TEXT, gas_used::TEXT FROM blocks ORDER BY block_num",
+                "SELECT difficulty::TEXT, base_fee_per_gas::TEXT, block_num::TEXT, gas_used::TEXT FROM blocks ORDER BY block_num::BIGINT",
             )
             .fetch_all(&pool)
             .await
             .expect("Failed to query inserted data");
 
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].0, "0"); // difficulty
-            assert_eq!(rows[0].1, "1000000000"); // base_fee_per_gas
-            assert_eq!(rows[0].2, "1"); // block_num
-            assert_eq!(rows[0].3, "21000"); // gas_used
+            assert_eq!(rows.len(), 100, "Expected 100 blocks to be inserted");
 
-            println!("Data verification passed!");
+            // Verify first block (block 1, i=0)
+            assert_eq!(rows[0].0, "0"); // difficulty
+            assert_eq!(rows[0].1, "1000000000"); // base_fee_per_gas (1000000000 + 0 * 1000)
+            assert_eq!(rows[0].2, "1"); // block_num
+            assert_eq!(rows[0].3, "21000"); // gas_used (21000 + 0 * 1000)
+
+            // Verify last block (block 100, i=99)
+            // Note: Each block i has: base_fee = 1000000000 + i*1000, gas_used = 21000 + i*1000
+            let last_block_num: i64 = rows[99].2.parse().unwrap();
+            let expected_base_fee = 1000000000 + ((last_block_num - 1) * 1000);
+            let expected_gas = 21000 + ((last_block_num - 1) * 1000);
+            assert_eq!(rows[99].0, "0"); // difficulty
+            assert_eq!(rows[99].1, expected_base_fee.to_string()); // base_fee_per_gas
+            assert_eq!(last_block_num, 100); // block_num
+            assert_eq!(rows[99].3, expected_gas.to_string()); // gas_used
+
+            // Verify a middle block (block 50, i=49)
+            let mid_block_num: i64 = rows[49].2.parse().unwrap();
+            let expected_mid_base_fee = 1000000000 + ((mid_block_num - 1) * 1000);
+            let expected_mid_gas = 21000 + ((mid_block_num - 1) * 1000);
+            assert_eq!(rows[49].0, "0"); // difficulty
+            assert_eq!(rows[49].1, expected_mid_base_fee.to_string()); // base_fee_per_gas
+            assert_eq!(mid_block_num, 50); // block_num
+            assert_eq!(rows[49].3, expected_mid_gas.to_string()); // gas_used
+
+            println!("Data verification passed for all 100 blocks!");
         }
         Err(e) => {
             panic!("Failed to insert: {}", e);

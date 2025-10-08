@@ -112,12 +112,16 @@ fn compare_schemas<'a>(
     }
 
     // Check for dropped columns
+    // Note: Ignore system columns (prefixed with _) as they are auto-injected
     let expected_column_names: std::collections::HashSet<_> =
         expected.fields.iter().map(|f| &f.name).collect();
     let dropped_columns: Vec<String> = existing
         .columns
         .keys()
-        .filter(|col_name| !expected_column_names.contains(col_name))
+        .filter(|col_name| {
+            // Ignore system columns like _block_num (auto-injected)
+            !col_name.starts_with('_') && !expected_column_names.contains(col_name)
+        })
         .cloned()
         .collect();
 
@@ -162,43 +166,53 @@ fn normalize_pg_type(pg_type: &str) -> String {
 /// only the first occurrence is used. This handles cases where manifests
 /// contain duplicate field definitions.
 ///
-/// If a `block_num` column exists in the schema, it will be set as the PRIMARY KEY.
+/// Three system columns are ALWAYS injected:
+/// - `_id` (BYTEA): Deterministic hash for PRIMARY KEY and deduplication
+/// - `_block_num_start` (BIGINT): First block in batch range
+/// - `_block_num_end` (BIGINT): Last block in batch range
+///
+/// PRIMARY KEY is always `_id` for consistency across all tables.
+/// If user's schema includes `block_num`, it's preserved and indexed for query performance.
 pub fn arrow_schema_to_postgres_ddl(
     table_name: &str,
     schema: &ArrowSchema,
 ) -> Result<String, BoxError> {
     let mut columns = Vec::new();
     let mut seen_names = std::collections::HashSet::new();
-    let mut has_block_num = false;
 
+    // Always inject three system columns first
+    // _id: deterministic xxh3_128 hash for PRIMARY KEY and deduplication
+    //      - PRIMARY KEY constraint ensures hash collisions fail loudly (not silently)
+    //      - Hash is computed from: row_content + block_range + row_index
+    //      - Enables deduplication on reconnect and prevents duplicate inserts
+    // _block_num_start/_block_num_end: block range for reorg handling
+    //      - Conservative reorg: deletes entire batch if any block is invalidated
+    columns.push("_id BYTEA NOT NULL".to_string());
+    columns.push("_block_num_start BIGINT NOT NULL".to_string());
+    columns.push("_block_num_end BIGINT NOT NULL".to_string());
+    seen_names.insert("_id".to_string());
+    seen_names.insert("_block_num_start".to_string());
+    seen_names.insert("_block_num_end".to_string());
+
+    // Add all fields from the schema
     for field in &schema.fields {
         // Skip duplicate field names
         if !seen_names.insert(field.name.clone()) {
             continue;
         }
 
-        // Check if this is the block_num column
-        if field.name == "block_num" {
-            has_block_num = true;
-        }
-
         let column_def = arrow_field_to_postgres_column(field)?;
         columns.push(column_def);
     }
 
-    // Add PRIMARY KEY constraint if block_num exists
-    let constraints = if has_block_num {
-        ",\n  PRIMARY KEY (block_num)"
-    } else {
-        ""
-    };
-
+    // Build DDL with PRIMARY KEY on _id
     let ddl = format!(
-        "CREATE TABLE IF NOT EXISTS {} (\n  {}{}\n)",
+        "CREATE TABLE IF NOT EXISTS {} (\n  {},\n  PRIMARY KEY (_id)\n)",
         table_name,
         columns.join(",\n  "),
-        constraints
     );
+
+    // Note: Index on block_num (if present) is created separately in create_table_from_schema
 
     Ok(ddl)
 }
@@ -908,6 +922,14 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
+    /// Get the block number column name for reorg handling.
+    ///
+    /// Always returns "_block_num_end" since all tables use the same system metadata columns.
+    /// This is used for conservative reorg handling (deletes entire batch if any block is invalidated).
+    async fn get_block_num_column(&self, _table_name: &str) -> Result<String, BoxError> {
+        Ok("_block_num_end".to_string())
+    }
+
     /// Returns true if the table exists.
     async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(
@@ -946,6 +968,34 @@ impl AmpsyncDbEngine {
             .notify(Self::notify_db_retry)
             .await
             .map_err(|e| format!("Failed to create table '{}': {}", table_name, e))?;
+
+        // Create index on block_num if it exists in user's schema (for query performance)
+        let has_block_num = schema.fields.iter().any(|f| f.name == "block_num");
+        if has_block_num {
+            let index_name = format!("{}_block_num_idx", table_name);
+            let create_index_sql = format!(
+                "CREATE INDEX IF NOT EXISTS {} ON {} (block_num)",
+                index_name, table_name
+            );
+
+            tracing::info!(
+                table = %table_name,
+                index = %index_name,
+                "creating_block_num_index"
+            );
+
+            let create_index_query = &create_index_sql;
+            (|| async move { sqlx::query(create_index_query).execute(pool).await })
+                .retry(Self::db_retry_policy())
+                .when(Self::create_retryable_with_circuit_breaker(
+                    Self::db_max_retry_duration(),
+                ))
+                .notify(Self::notify_db_retry)
+                .await
+                .map_err(|e| format!("Failed to create index on '{}': {}", table_name, e))?;
+
+            tracing::info!(table = %table_name, index = %index_name, "index_created");
+        }
 
         tracing::info!(table = %table_name, "table_created");
         Ok(())
@@ -1187,7 +1237,7 @@ impl AmpsyncDbEngine {
                 JOIN pg_class t ON c.conrelid = t.oid
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
                 WHERE t.relname = $1
-                AND a.attname = 'block_num'
+                AND a.attname IN ('block_num', '_block_num')
                 AND c.contype IN ('p', 'u')
             )",
         )
@@ -1202,6 +1252,109 @@ impl AmpsyncDbEngine {
         })?;
 
         Ok(result.map(|(exists,)| exists).unwrap_or(false))
+    }
+
+    /// Helper to insert data using the temporary table approach for conflict handling.
+    ///
+    /// This approach is used when the table has a PRIMARY KEY constraint on block_num.
+    /// Steps:
+    /// 1. Create temporary table with same structure (no constraints)
+    /// 2. COPY data into temp table (fast bulk load)
+    /// 3. INSERT from temp table into main table with ON CONFLICT DO NOTHING
+    /// 4. Drop temp table
+    ///
+    /// Returns the number of rows inserted.
+    async fn insert_via_temp_table(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        table_name: &str,
+        columns_clause: &str,
+        conflict_column: &str,
+        buffer_data: &bytes::Bytes,
+        num_rows: usize,
+    ) -> Result<u64, sqlx::Error> {
+        // Generate unique temp table name using process ID
+        let temp_table = format!("{}_tmp_{}", table_name, std::process::id());
+
+        // Create temporary table with same structure (without constraints)
+        // Temp table is session-scoped and will be auto-dropped at end of session
+        let create_temp = format!(
+            "CREATE TEMPORARY TABLE {} (LIKE {} INCLUDING DEFAULTS)",
+            temp_table, table_name
+        );
+        sqlx::query(&create_temp).execute(&mut **tx).await?;
+
+        // COPY into temporary table
+        let copy_query = format!(
+            "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
+            temp_table, columns_clause
+        );
+        let mut copy_in = tx.copy_in_raw(&copy_query).await?;
+        copy_in.send(buffer_data.clone()).await?;
+        copy_in.finish().await?;
+
+        // INSERT from temp table into main table with conflict handling
+        let insert_query = format!(
+            "INSERT INTO {} ({}) SELECT {} FROM {} ON CONFLICT ({}) DO NOTHING",
+            table_name, columns_clause, columns_clause, temp_table, conflict_column
+        );
+        let result = sqlx::query(&insert_query).execute(&mut **tx).await?;
+
+        // Drop temporary table explicitly before committing
+        let drop_temp = format!("DROP TABLE {}", temp_table);
+        sqlx::query(&drop_temp).execute(&mut **tx).await?;
+
+        let rows_inserted = result.rows_affected();
+
+        // Log if some rows were skipped due to duplicates
+        if rows_inserted < num_rows as u64 {
+            tracing::debug!(
+                table = %table_name,
+                rows_inserted = rows_inserted,
+                input_rows = num_rows,
+                duplicates_skipped = num_rows as u64 - rows_inserted,
+                "batch_inserted_with_duplicates"
+            );
+        }
+
+        tracing::trace!(
+            table = %table_name,
+            rows_inserted = rows_inserted,
+            input_rows = num_rows,
+            "bulk_insert_complete"
+        );
+
+        Ok(rows_inserted)
+    }
+
+    /// Helper to insert data using direct COPY (no conflict handling).
+    ///
+    /// This approach is used when the table has no PRIMARY KEY constraint on block_num.
+    /// Simply performs a fast COPY operation directly into the target table.
+    ///
+    /// Returns the number of rows inserted.
+    async fn insert_via_direct_copy(
+        conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+        table_name: &str,
+        columns_clause: &str,
+        buffer_data: &bytes::Bytes,
+        num_rows: usize,
+    ) -> Result<u64, sqlx::Error> {
+        let copy_query = format!(
+            "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
+            table_name, columns_clause
+        );
+        let mut copy_in = conn.copy_in_raw(&copy_query).await?;
+        copy_in.send(buffer_data.clone()).await?;
+        let rows_affected = copy_in.finish().await?;
+
+        tracing::trace!(
+            table = %table_name,
+            rows_affected = rows_affected,
+            input_rows = num_rows,
+            "copy_operation_complete"
+        );
+
+        Ok(rows_affected)
     }
 
     /// Insert a single batch chunk using high-performance bulk copy with conflict handling
@@ -1250,15 +1403,16 @@ impl AmpsyncDbEngine {
             .collect();
         let columns_clause = column_names.join(", ");
 
-        // Check if schema has block_num column (primary key)
-        let has_block_num = schema_fields
+        // Check if schema has block_num or _block_num column (primary key)
+        let block_num_col = schema_fields
             .fields()
             .iter()
-            .any(|f| f.name() == "block_num");
+            .find(|f| f.name() == "block_num" || f.name() == "_block_num")
+            .map(|f| f.name().to_string());
 
         // Check constraint ONCE before entering retry closure - critical for performance!
         // This query result is cached and reused across all retry attempts.
-        let has_constraint = if has_block_num {
+        let has_constraint = if block_num_col.is_some() {
             self.has_block_num_constraint(table_name).await?
         } else {
             false
@@ -1268,6 +1422,7 @@ impl AmpsyncDbEngine {
         let buffer_data = &buffer.freeze();
         let num_rows = batch.num_rows();
         let columns_clause_ref = &columns_clause;
+        let block_num_col_ref = block_num_col.as_deref();
 
         // Use retry logic for the entire operation
         (|| async move {
@@ -1276,76 +1431,35 @@ impl AmpsyncDbEngine {
 
             if has_constraint {
                 // Use temporary table approach for conflict handling
-                // Generate unique temp table name using process ID and timestamp
-                let temp_table = format!("{}_tmp_{}", table_name, std::process::id());
-
                 // Begin transaction to ensure temp table is properly scoped
                 let mut tx = conn.begin().await?;
 
-                // Create temporary table with same structure (without constraints)
-                // Temp table is session-scoped and will be auto-dropped at end of session
-                let create_temp = format!(
-                    "CREATE TEMPORARY TABLE {} (LIKE {} INCLUDING DEFAULTS)",
-                    temp_table, table_name
-                );
-                sqlx::query(&create_temp).execute(&mut *tx).await?;
+                // Use the correct block_num column name (block_num or _block_num)
+                let conflict_column = block_num_col_ref.unwrap_or("block_num");
 
-                // COPY into temporary table
-                let copy_query = format!(
-                    "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
-                    temp_table, columns_clause_ref
-                );
-                let mut copy_in = tx.copy_in_raw(&copy_query).await?;
-                copy_in.send(buffer_data.clone()).await?;
-                copy_in.finish().await?;
-
-                // INSERT from temp table into main table with conflict handling
-                let insert_query = format!(
-                    "INSERT INTO {} ({}) SELECT {} FROM {} ON CONFLICT (block_num) DO NOTHING",
-                    table_name, columns_clause_ref, columns_clause_ref, temp_table
-                );
-                let result = sqlx::query(&insert_query).execute(&mut *tx).await?;
-
-                // Drop temporary table explicitly before committing
-                let drop_temp = format!("DROP TABLE {}", temp_table);
-                sqlx::query(&drop_temp).execute(&mut *tx).await?;
+                // Insert via temp table with conflict handling
+                Self::insert_via_temp_table(
+                    &mut tx,
+                    table_name,
+                    columns_clause_ref,
+                    conflict_column,
+                    buffer_data,
+                    num_rows,
+                )
+                .await?;
 
                 // Commit the transaction
                 tx.commit().await?;
-
-                let rows_inserted = result.rows_affected();
-                if rows_inserted < num_rows as u64 {
-                    tracing::debug!(
-                        table = %table_name,
-                        rows_inserted = rows_inserted,
-                        input_rows = num_rows,
-                        duplicates_skipped = num_rows as u64 - rows_inserted,
-                        "batch_inserted_with_duplicates"
-                    );
-                }
-
-                tracing::trace!(
-                    table = %table_name,
-                    rows_inserted = rows_inserted,
-                    input_rows = num_rows,
-                    "bulk_insert_complete"
-                );
             } else {
-                // No constraint on block_num (or no block_num column) - use direct COPY
-                let copy_query = format!(
-                    "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
-                    table_name, columns_clause_ref
-                );
-                let mut copy_in = conn.copy_in_raw(&copy_query).await?;
-                copy_in.send(buffer_data.clone()).await?;
-                let rows_affected = copy_in.finish().await?;
-
-                tracing::trace!(
-                    table = %table_name,
-                    rows_affected = rows_affected,
-                    input_rows = num_rows,
-                    "copy_operation_complete"
-                );
+                // No constraint - use direct COPY
+                Self::insert_via_direct_copy(
+                    &mut conn,
+                    table_name,
+                    columns_clause_ref,
+                    buffer_data,
+                    num_rows,
+                )
+                .await?;
             }
 
             Ok::<(), sqlx::Error>(())
@@ -1371,6 +1485,9 @@ impl AmpsyncDbEngine {
             return Ok(());
         }
 
+        // Get the correct block number column name (block_num or _block_num)
+        let block_num_col = self.get_block_num_column(table_name).await?;
+
         // Build a WHERE clause that covers all invalidation ranges
         // Pre-allocate capacity to avoid reallocations: estimate ~50 chars per condition
         let estimated_capacity = invalidation_ranges.len() * 50;
@@ -1383,8 +1500,10 @@ impl AmpsyncDbEngine {
             use std::fmt::Write;
             write!(
                 &mut where_clause,
-                "(block_num >= {} AND block_num <= {})",
+                "({} >= {} AND {} <= {})",
+                block_num_col,
                 range.numbers.start(),
+                block_num_col,
                 range.numbers.end()
             )
             .unwrap(); // Writing to String never fails
