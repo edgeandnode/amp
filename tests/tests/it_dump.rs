@@ -454,16 +454,16 @@ async fn evm_rpc_base_failed_tx_filtering() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                   // force_reprocess
-            Some(end_block as i64), // end_block
-            1,                      // n_jobs
-            100,                    // partition_size_mb
-            None,                   // start_block
-            None,                   // microbatch_max_interval
-            None,                   // microbatch_max_rows
-            false,                  // skip_consistency_check
-            None,                   // meter
-            false,                  // track_progress
+            true,                          // force_reprocess
+            EndBlock::Absolute(end_block), // end_block
+            1,                             // n_jobs
+            100,                           // partition_size_mb
+            None,                          // start_block
+            None,                          // microbatch_max_interval
+            None,                          // microbatch_max_rows
+            false,                         // skip_consistency_check
+            None,                          // meter
+            false,                         // track_progress
         )
         .await
         .expect("Failed to dump dataset");
