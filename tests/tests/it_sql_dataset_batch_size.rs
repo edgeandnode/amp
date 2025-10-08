@@ -156,7 +156,7 @@ impl TestCtx {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
         let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
+        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props, None);
         opts.compactor_active = true;
         opts.collector_active = false;
         opts.file_lock_duration = Duration::from_millis(25);
@@ -175,7 +175,7 @@ impl TestCtx {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
         let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
+        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props, None);
         opts.compactor_active = false;
         opts.collector_active = true;
         opts.file_lock_duration = Duration::ZERO;

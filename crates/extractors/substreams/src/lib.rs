@@ -8,6 +8,7 @@ pub mod transform;
 use dataset::Manifest;
 pub mod dataset;
 mod dataset_kind;
+pub mod metrics;
 #[allow(dead_code)]
 mod proto;
 

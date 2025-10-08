@@ -78,7 +78,8 @@ pub async fn dump_raw_tables(
     }
 
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
-    let compaction_opts = crate::compaction_opts(&ctx.config.compaction, &parquet_opts).into();
+    let compaction_opts =
+        crate::compaction_opts(&ctx.config.compaction, &parquet_opts, metrics.clone()).into();
 
     // Check that all tables belong to the same dataset.
     let dataset = {
@@ -149,7 +150,8 @@ pub async fn dump_user_tables(
 
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env()?;
-    let compaction_opts = crate::compaction_opts(&ctx.config.compaction, &parquet_opts).into();
+    let compaction_opts =
+        crate::compaction_opts(&ctx.config.compaction, &parquet_opts, metrics.clone()).into();
 
     for table in tables {
         consistency_check(table).await?;

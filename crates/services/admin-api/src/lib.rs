@@ -24,6 +24,7 @@ use scheduler::Scheduler;
 pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
@@ -42,8 +43,14 @@ pub async fn serve(
     };
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
+    let ctx = Ctx {
+        metadata_db,
+        dataset_store,
+        scheduler,
+    };
+
     // Register the routes
-    let app = Router::new()
+    let mut app = Router::new()
         .route(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::register::handler),
@@ -94,11 +101,17 @@ pub async fn serve(
             get(providers::get_by_id::handler).delete(providers::delete_by_id::handler),
         )
         .route("/schema", post(schema::handler))
-        .with_state(Ctx {
-            metadata_db,
-            dataset_store,
-            scheduler,
-        });
+        .with_state(ctx);
+
+    // Add OpenTelemetry HTTP metrics middleware if meter is provided
+    if let Some(meter) = meter {
+        let metrics_layer = opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder::builder()
+            .with_meter(meter.clone())
+            .build()?;
+        app = app.layer(metrics_layer);
+    }
+
+    let app = app;
 
     let listener = TcpListener::bind(at)
         .await?

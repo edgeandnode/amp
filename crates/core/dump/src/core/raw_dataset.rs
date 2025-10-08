@@ -124,6 +124,8 @@ pub async fn dump(
     meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
+    let dump_start_time = Instant::now();
+
     let mut client = ctx
         .dataset_store
         .get_client(dataset_name, None, only_finalized_blocks, meter)
@@ -235,12 +237,42 @@ pub async fn dump(
         // Wait for all the jobs to finish, returning an error if any job panics or fails.
         if let Err(err) = join_set.try_wait_all().await {
             tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+
+            // Record error metrics
+            if let Some(ref metrics) = metrics {
+                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
+                for table in tables {
+                    let table_name = table.table_name().to_string();
+                    metrics.record_dump_error(
+                        dataset_name.to_string(),
+                        dataset_version.clone(),
+                        table_name,
+                    );
+                }
+            }
+
             return Err(err.into_box_error());
         }
 
         if let Some(end) = end
             && latest_block >= end
         {
+            // Record dump duration on successful completion
+            if let Some(ref metrics) = metrics {
+                let duration_millis = dump_start_time.elapsed().as_millis() as f64;
+                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
+                for table in tables {
+                    let table_name = table.table_name().to_string();
+                    let job_id = format!("{}_{}", dataset_name, table_name);
+                    metrics.record_dump_duration(
+                        duration_millis,
+                        dataset_name.to_string(),
+                        dataset_version.clone(),
+                        table_name,
+                        job_id,
+                    );
+                }
+            }
             return Ok(());
         }
 
@@ -435,18 +467,33 @@ impl<S: BlockStreamer> DumpPartition<S> {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
                     let table_name = table_rows.table.name().to_string();
-                    let location_id = self
+                    let block_num = table_rows.block_num();
+                    let physical_table = self
                         .catalog
                         .tables()
                         .iter()
                         .find(|t| t.table_name() == table_name)
-                        .map(|t| t.location_id())
                         .expect("table should exist");
-                    metrics.inc_raw_dataset_rows_by(
+                    let location_id = *physical_table.location_id();
+                    let dataset_version = physical_table
+                        .dataset()
+                        .dataset_version()
+                        .unwrap_or_default();
+                    // Record rows only (bytes tracked separately in writer)
+                    metrics.record_ingestion_rows(
                         num_rows,
                         self.dataset_name.clone(),
+                        dataset_version.clone(),
+                        table_name.clone(),
+                        location_id,
+                    );
+                    // Update latest block gauge
+                    metrics.set_latest_block(
+                        block_num,
+                        self.dataset_name.clone(),
+                        dataset_version,
                         table_name,
-                        *location_id,
+                        location_id,
                     );
                 }
 

@@ -31,6 +31,7 @@ pub async fn run(
     enable_flight: bool,
     enable_jsonl: bool,
     enable_admin: bool,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -43,7 +44,7 @@ pub async fn run(
         !config.spill_location.is_empty()
     );
 
-    let service = Service::new(config.clone(), metadata_db.clone()).await?;
+    let service = Service::new(config.clone(), metadata_db.clone(), meter).await?;
 
     let mut services_futures = Vec::new();
     let mut bound_addrs = BoundAddrs {
@@ -91,7 +92,7 @@ pub async fn run(
     // Start Admin API Server if enabled
     if enable_admin {
         let (admin_api_addr, admin_api) =
-            admin_api::serve(config.addrs.admin_api_addr, config).await?;
+            admin_api::serve(config.addrs.admin_api_addr, config, meter).await?;
         let admin_api = admin_api
             .map_err(|e| {
                 tracing::error!("Admin API error: {}", e);

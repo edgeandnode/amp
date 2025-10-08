@@ -183,6 +183,61 @@ impl Counter {
     }
 }
 
+/// An OpenTelemetry UpDownCounter for values that can increase and decrease.
+///
+/// Unlike Counter (which only increases), UpDownCounter supports both add and subtract operations.
+/// Useful for tracking active connections, queue depth, or any metric that fluctuates.
+#[derive(Debug, Clone)]
+pub struct UpDownCounter(opentelemetry::metrics::UpDownCounter<i64>);
+
+impl UpDownCounter {
+    /// Create a new OpenTelemetry UpDownCounter.
+    pub fn new(
+        meter: &Meter,
+        name: impl Into<Cow<'static, str>>,
+        description: impl Into<Cow<'static, str>>,
+        unit: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        let inner = meter
+            .i64_up_down_counter(name)
+            .with_description(description)
+            .with_unit(unit)
+            .build();
+
+        Self(inner)
+    }
+
+    /// Add (increment) or subtract (decrement) with additional key-value pairs.
+    pub fn add_with_kvs(&self, value: i64, kv_pairs: &[KeyValue]) {
+        self.0.add(value, kv_pairs);
+    }
+
+    /// Add (increment) or subtract (decrement) without labels.
+    pub fn add(&self, value: i64) {
+        self.add_with_kvs(value, &[]);
+    }
+
+    /// Increment by 1 with additional key-value pairs.
+    pub fn inc_with_kvs(&self, kv_pairs: &[KeyValue]) {
+        self.add_with_kvs(1, kv_pairs);
+    }
+
+    /// Increment by 1.
+    pub fn inc(&self) {
+        self.add(1);
+    }
+
+    /// Decrement by 1 with additional key-value pairs.
+    pub fn dec_with_kvs(&self, kv_pairs: &[KeyValue]) {
+        self.add_with_kvs(-1, kv_pairs);
+    }
+
+    /// Decrement by 1.
+    pub fn dec(&self) {
+        self.add(-1);
+    }
+}
+
 /// An OpenTelemetry counter that can also be read from.
 ///
 /// If reading the counter value isn't needed, users can create a regular [Counter].

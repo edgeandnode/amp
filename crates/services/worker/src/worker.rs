@@ -39,7 +39,6 @@ impl Worker {
         config: Arc<Config>,
         metadata_db: MetadataDb,
         node_id: NodeId,
-        metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let dataset_store = {
@@ -62,6 +61,11 @@ impl Worker {
 
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
+
+        // Create metrics registry if meter is available
+        let metrics = meter
+            .as_ref()
+            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m)));
 
         Self {
             node_id,
