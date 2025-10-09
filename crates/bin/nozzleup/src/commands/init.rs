@@ -1,14 +1,37 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use fs_err as fs;
 
 use crate::{DEFAULT_REPO, config::Config, shell, ui};
+
+#[derive(Debug)]
+pub enum InitError {
+    AlreadyInitialized { install_dir: PathBuf },
+}
+
+impl std::fmt::Display for InitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyInitialized { install_dir } => {
+                writeln!(f, "nozzleup is already initialized")?;
+                writeln!(f, "  Installation: {}", install_dir.display())?;
+                writeln!(f)?;
+                writeln!(f, "  If you want to reinstall, remove the directory first:")?;
+                writeln!(f, "    rm -rf {}", install_dir.display())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for InitError {}
 
 pub async fn run(
     install_dir: Option<PathBuf>,
     no_modify_path: bool,
     no_install_latest: bool,
+    github_token: Option<String>,
 ) -> Result<()> {
     // Create config to get all the paths
     let config = Config::new(install_dir)?;
@@ -16,11 +39,10 @@ pub async fn run(
 
     // Check if already initialized
     if nozzleup_path.exists() {
-        bail!(
-            "nozzleup is already initialized at {}. \
-             If you want to reinstall, please remove the directory first.",
-            config.nozzle_dir.display()
-        );
+        return Err(InitError::AlreadyInitialized {
+            install_dir: config.nozzle_dir.clone(),
+        }
+        .into());
     }
 
     ui::info!("Installing to {}", ui::path(config.nozzle_dir.display()));
@@ -75,7 +97,7 @@ pub async fn run(
         crate::commands::install::run(
             Some(config.nozzle_dir),
             DEFAULT_REPO.to_string(),
-            None,
+            github_token,
             None,
             None,
             None,

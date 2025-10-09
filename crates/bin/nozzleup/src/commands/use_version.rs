@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use dialoguer::{Select, theme::ColorfulTheme};
 
-use crate::{config::Config, ui, version_manager::VersionManager};
+use crate::{
+    config::Config,
+    ui,
+    version_manager::{VersionError, VersionManager},
+};
 
 pub fn run(install_dir: Option<std::path::PathBuf>, version: Option<String>) -> Result<()> {
     let config = Config::new(install_dir)?;
@@ -29,7 +33,7 @@ fn select_version(version_manager: &VersionManager) -> Result<String> {
     let versions = version_manager.list_installed()?;
 
     if versions.is_empty() {
-        anyhow::bail!("No versions installed. Run 'nozzleup install' to install nozzle");
+        return Err(VersionError::NoVersionsInstalled.into());
     }
 
     // Get current version

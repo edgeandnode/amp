@@ -1,4 +1,42 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+
+#[derive(Debug)]
+pub enum PlatformError {
+    UnsupportedPlatform { detected: String },
+    UnsupportedArchitecture { detected: String },
+}
+
+impl std::fmt::Display for PlatformError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedPlatform { detected } => {
+                writeln!(f, "Unsupported platform")?;
+                writeln!(f, "  Detected: {}", detected)?;
+                writeln!(f, "  Supported: linux, macos")?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  If you're on a supported platform, this may be a detection issue."
+                )?;
+                writeln!(f, "  Try using --platform flag to override (linux, darwin)")?;
+            }
+            Self::UnsupportedArchitecture { detected } => {
+                writeln!(f, "Unsupported architecture")?;
+                writeln!(f, "  Detected: {}", detected)?;
+                writeln!(f, "  Supported: x86_64, aarch64 (arm64)")?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  If you're on a supported architecture, this may be a detection issue."
+                )?;
+                writeln!(f, "  Try using --arch flag to override (x86_64, aarch64)")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for PlatformError {}
 
 /// Supported platforms
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,7 +51,10 @@ impl Platform {
         match std::env::consts::OS {
             "linux" => Ok(Self::Linux),
             "macos" => Ok(Self::Darwin),
-            os => Err(anyhow!("Unsupported platform: {}", os)),
+            os => Err(PlatformError::UnsupportedPlatform {
+                detected: os.to_string(),
+            }
+            .into()),
         }
     }
 
@@ -45,7 +86,10 @@ impl Architecture {
         match std::env::consts::ARCH {
             "x86_64" | "amd64" => Ok(Self::X86_64),
             "aarch64" | "arm64" => Ok(Self::Aarch64),
-            arch => Err(anyhow!("Unsupported architecture: {}", arch)),
+            arch => Err(PlatformError::UnsupportedArchitecture {
+                detected: arch.to_string(),
+            }
+            .into()),
         }
     }
 

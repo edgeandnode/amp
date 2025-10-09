@@ -28,6 +28,10 @@ enum Commands {
         /// Don't install latest nozzle version after setup
         #[arg(long)]
         no_install_latest: bool,
+
+        /// GitHub token for private repository access (defaults to $GITHUB_TOKEN)
+        #[arg(long, env = "GITHUB_TOKEN", hide_env = true)]
+        github_token: Option<String>,
     },
 
     /// Install a specific version from binaries (default: latest)
@@ -131,7 +135,16 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        // Print the error with some custom formatting
+        use console::style;
+        eprintln!("{} {}", style("✗").red().bold(), e);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -139,8 +152,10 @@ async fn main() -> Result<()> {
             install_dir,
             no_modify_path,
             no_install_latest,
+            github_token,
         }) => {
-            commands::init::run(install_dir, no_modify_path, no_install_latest).await?;
+            commands::init::run(install_dir, no_modify_path, no_install_latest, github_token)
+                .await?;
         }
         Some(Commands::Install {
             install_dir,

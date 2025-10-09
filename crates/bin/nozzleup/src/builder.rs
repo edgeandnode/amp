@@ -9,6 +9,145 @@ use fs_err as fs;
 
 use crate::{DEFAULT_REPO, ui, version_manager::VersionManager};
 
+#[derive(Debug)]
+pub enum BuildError {
+    LocalPathNotFound {
+        path: PathBuf,
+    },
+    LocalPathNotDirectory {
+        path: PathBuf,
+    },
+    LocalPathNotGitRepo {
+        path: PathBuf,
+    },
+    GitCloneFailed {
+        repo: String,
+        branch: Option<String>,
+    },
+    GitCheckoutFailed {
+        target: String,
+    },
+    GitFetchPrFailed {
+        pr: u32,
+    },
+    CargoBuildFailed,
+    BinaryNotFound {
+        path: PathBuf,
+    },
+    CommandNotFound {
+        command: String,
+    },
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LocalPathNotFound { path } => {
+                writeln!(f, "Local path does not exist")?;
+                writeln!(f, "  Path: {}", path.display())?;
+                writeln!(f)?;
+                writeln!(f, "  Check that the path is correct and accessible.")?;
+            }
+            Self::LocalPathNotDirectory { path } => {
+                writeln!(f, "Local path is not a directory")?;
+                writeln!(f, "  Path: {}", path.display())?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  The build command requires a directory containing a Cargo workspace."
+                )?;
+            }
+            Self::LocalPathNotGitRepo { path } => {
+                writeln!(f, "Local path is not a git repository")?;
+                writeln!(f, "  Path: {}", path.display())?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  Use --name flag to specify a version name for non-git builds."
+                )?;
+                writeln!(
+                    f,
+                    "  Example: nozzleup build --path {} --name my-version",
+                    path.display()
+                )?;
+            }
+            Self::GitCloneFailed { repo, branch } => {
+                writeln!(f, "Failed to clone repository")?;
+                writeln!(f, "  Repository: {}", repo)?;
+                if let Some(b) = branch {
+                    writeln!(f, "  Branch: {}", b)?;
+                }
+                writeln!(f)?;
+                writeln!(f, "  Ensure the repository exists and is accessible.")?;
+                writeln!(f, "  Check your network connection and GitHub permissions.")?;
+            }
+            Self::GitCheckoutFailed { target } => {
+                writeln!(f, "Failed to checkout git reference")?;
+                writeln!(f, "  Target: {}", target)?;
+                writeln!(f)?;
+                writeln!(f, "  The commit/branch may not exist in the repository.")?;
+            }
+            Self::GitFetchPrFailed { pr } => {
+                writeln!(f, "Failed to fetch pull request")?;
+                writeln!(f, "  PR: #{}", pr)?;
+                writeln!(f)?;
+                writeln!(f, "  Ensure the pull request exists and is accessible.")?;
+            }
+            Self::CargoBuildFailed => {
+                writeln!(f, "Cargo build failed")?;
+                writeln!(f)?;
+                writeln!(f, "  Check the build output above for compilation errors.")?;
+                writeln!(
+                    f,
+                    "  Ensure all dependencies are installed and the code compiles."
+                )?;
+            }
+            Self::BinaryNotFound { path } => {
+                writeln!(f, "Binary not found after build")?;
+                writeln!(f, "  Expected: {}", path.display())?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  Build succeeded but the nozzle binary was not created."
+                )?;
+                writeln!(
+                    f,
+                    "  This may indicate an issue with the build configuration."
+                )?;
+            }
+            Self::CommandNotFound { command } => {
+                writeln!(f, "Required command not found")?;
+                writeln!(f, "  Command: {}", command)?;
+                writeln!(f)?;
+                match command.as_str() {
+                    "git" => {
+                        writeln!(f, "  Install git:")?;
+                        writeln!(f, "    macOS: brew install git")?;
+                        writeln!(f, "    Ubuntu/Debian: sudo apt install git")?;
+                    }
+                    "cargo" => {
+                        writeln!(f, "  Install Rust toolchain:")?;
+                        writeln!(
+                            f,
+                            "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+                        )?;
+                    }
+                    _ => {
+                        writeln!(
+                            f,
+                            "  Please install {} and ensure it's in your PATH.",
+                            command
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for BuildError {}
+
 /// Represents the source from which to build nozzle
 pub enum BuildSource {
     /// Build from a local repository path
@@ -139,10 +278,10 @@ impl Builder {
             BuildSource::Local { path } => {
                 // Validate path exists and is a directory
                 if !path.exists() {
-                    anyhow::bail!("Local path does not exist: {}", path.display());
+                    return Err(BuildError::LocalPathNotFound { path: path.clone() }.into());
                 }
                 if !path.is_dir() {
-                    anyhow::bail!("Local path is not a directory: {}", path.display());
+                    return Err(BuildError::LocalPathNotDirectory { path: path.clone() }.into());
                 }
 
                 // Check for git repository and extract commit hash
@@ -151,11 +290,7 @@ impl Builder {
 
                 // If not a git repo and no custom name provided, error out
                 if git_hash.is_none() && options.name.is_none() {
-                    anyhow::bail!(
-                        "Local path is not a git repository. Use --name to specify a version name.\n\
-                         Example: nozzleup build --path {} --name my-version",
-                        path.display()
-                    );
+                    return Err(BuildError::LocalPathNotGitRepo { path: path.clone() }.into());
                 }
 
                 // Generate version label and build
@@ -289,7 +424,11 @@ impl<'a> GitRepo<'a> {
             .context("Failed to execute git clone")?;
 
         if !status.success() {
-            anyhow::bail!("Failed to clone repository {}", repo);
+            return Err(BuildError::GitCloneFailed {
+                repo: repo.to_string(),
+                branch: branch.map(|s| s.to_string()),
+            }
+            .into());
         }
 
         Ok(Self::new(destination))
@@ -333,7 +472,10 @@ impl<'a> GitRepo<'a> {
             .context("Failed to execute git checkout")?;
 
         if !status.success() {
-            anyhow::bail!("Failed to checkout commit {}", commit);
+            return Err(BuildError::GitCheckoutFailed {
+                target: commit.to_string(),
+            }
+            .into());
         }
 
         Ok(())
@@ -350,7 +492,7 @@ impl<'a> GitRepo<'a> {
             .context("Failed to execute git fetch")?;
 
         if !status.success() {
-            anyhow::bail!("Failed to fetch pull request #{}", number);
+            return Err(BuildError::GitFetchPrFailed { pr: number }.into());
         }
 
         // Checkout the PR
@@ -361,7 +503,10 @@ impl<'a> GitRepo<'a> {
             .context("Failed to execute git checkout")?;
 
         if !status.success() {
-            anyhow::bail!("Failed to checkout pull request #{}", number);
+            return Err(BuildError::GitCheckoutFailed {
+                target: format!("PR #{}", number),
+            }
+            .into());
         }
 
         Ok(())
@@ -394,17 +539,17 @@ fn build_and_install(
         .context("Failed to execute cargo build")?;
 
     if !status.success() {
-        anyhow::bail!("Build failed");
+        return Err(BuildError::CargoBuildFailed.into());
     }
 
     // Find the built binary
     let binary_source = repo_path.join("target/release/nozzle");
 
     if !binary_source.exists() {
-        anyhow::bail!(
-            "Build succeeded but binary not found at {}",
-            binary_source.display()
-        );
+        return Err(BuildError::BinaryNotFound {
+            path: binary_source.clone(),
+        }
+        .into());
     }
 
     let config = version_manager.config();
@@ -448,6 +593,9 @@ fn check_command_exists(command: &str) -> Result<()> {
 
     match status {
         Ok(_) => Ok(()),
-        Err(_) => anyhow::bail!("Command '{}' not found. Please install it first.", command),
+        Err(_) => Err(BuildError::CommandNotFound {
+            command: command.to_string(),
+        }
+        .into()),
     }
 }
