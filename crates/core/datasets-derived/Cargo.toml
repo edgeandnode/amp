@@ -8,7 +8,7 @@ schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
 datafusion.workspace = true
-datasets-common = { version = "0.1.0", path = "../datasets-common" }
+datasets-common = { path = "../datasets-common" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = {workspace = true, optional = true}

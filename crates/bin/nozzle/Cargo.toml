@@ -20,7 +20,7 @@ controller = { path = "../../services/controller" }
 datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
-datasets-derived = { version = "0.1.0", path = "../../core/datasets-derived" }
+datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 generate-manifest = { path = "../generate-manifest" }

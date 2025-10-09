@@ -42,7 +42,7 @@ tower.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
-datasets-derived = { version = "0.1.0", path = "../datasets-derived" }
+datasets-derived = { path = "../datasets-derived" }
 
 [dev-dependencies]
 chrono.workspace = true
