@@ -4,7 +4,10 @@
 //! Derived datasets replace the legacy SQL dataset format, providing versioned, dependency-aware dataset
 //! definitions with explicit schemas and functions.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use datafusion::{
     arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
@@ -188,6 +191,40 @@ pub enum DependencyValidationError {
 
 impl Manifest {
     pub fn validate_dependencies(&self) -> Result<(), DependencyValidationError> {
-        todo!()
+        let mut sql_deps: BTreeSet<String> = Default::default();
+        for table in self.tables.values() {
+            let sql = match &table.input {
+                TableInput::View(view) => &view.sql,
+            };
+            let statements = datafusion::sql::parser::DFParser::parse_sql(sql)
+                .map_err(|err| DependencyValidationError::InvalidSql(err.to_string()))?;
+            let statement = match statements {
+                _ if statements.len() == 1 => &statements[0],
+                _ => {
+                    return Err(DependencyValidationError::InvalidSql(format!(
+                        "a single SQL statement is expected, found {}",
+                        statements.len()
+                    )));
+                }
+            };
+            let (references, _) =
+                datafusion::sql::resolve::resolve_table_references(statement, true)
+                    .map_err(|err| DependencyValidationError::InvalidSql(err.to_string()))?;
+            for reference in references.iter().filter_map(|r| r.schema()) {
+                sql_deps.insert(reference.to_string());
+            }
+        }
+
+        let declared_deps: BTreeSet<String> = self
+            .dependencies
+            .values()
+            .map(|dep| dep.name.to_string())
+            .collect();
+        let missing_deps: Vec<String> = sql_deps.difference(&declared_deps).cloned().collect();
+        if !missing_deps.is_empty() {
+            return Err(DependencyValidationError::Missing(missing_deps));
+        }
+
+        Ok(())
     }
 }
