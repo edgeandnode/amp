@@ -19,7 +19,7 @@ export GITHUB_TOKEN=$(gh auth token)
 # Install nozzleup
 curl --proto '=https' --tlsv1.2 -sSf \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | sh
+  https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/crates/bin/nozzleup/install | sh
 ```
 
 This will install `nozzleup` and the latest version of `nozzle`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.

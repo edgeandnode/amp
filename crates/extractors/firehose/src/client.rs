@@ -246,11 +246,11 @@ impl BlockStreamer for Client {
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
         let stream = self.blocks(-1, 0).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
-        Ok(block.transpose()?.map(|block| block.number).unwrap_or(0))
+        Ok(block.transpose()?.map(|block| block.number))
     }
 
     fn provider_name(&self) -> &str {

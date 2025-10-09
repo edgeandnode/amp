@@ -1,4 +1,4 @@
-use admin_api::handlers::datasets::register::RegisterRequest;
+use admin_api::handlers::{datasets::register::RegisterRequest, error::ErrorResponse};
 use datasets_common::{name::Name, version::Version};
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use reqwest::StatusCode;
@@ -111,6 +111,34 @@ async fn register_with_invalid_version_fails() {
     assert!(
         error_message.contains("invalid request format"),
         "error message should indicate invalid format"
+    );
+}
+
+#[tokio::test]
+async fn register_with_missing_dependency_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_register_invalid_dependency").await;
+    let mut manifest = create_test_manifest("missing_dep", "1.0.0", "test_owner");
+    manifest.dependencies.clear();
+    let manifest_json =
+        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+    let register_request = RegisterRequest {
+        name: "missing_dep".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
+        manifest: manifest_json.parse().expect("Valid JSON"),
+    };
+
+    //* When
+    let resp = ctx.register(register_request).await;
+
+    //* Then
+    let status = resp.status();
+    let body: ErrorResponse = resp.json().await.expect("error response body");
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body.error_code, "DEPENDENCY_VALIDATION_ERROR");
+    assert_eq!(
+        body.error_message,
+        r#"Manifest dependency error: undeclared dependencies of SQL query: ["eth_firehose"]"#,
     );
 }
 
@@ -365,7 +393,7 @@ fn create_test_manifest(name: &str, version: &str, owner: &str) -> DerivedDatase
             "dependencies": {{
                 "raw_mainnet": {{
                     "owner": "{owner}",
-                    "name": "base_dataset",
+                    "name": "eth_firehose",
                     "version": "0.0.1"
                 }}
             }},

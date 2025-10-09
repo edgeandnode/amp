@@ -6,7 +6,10 @@ use axum::{
 use common::BoxError;
 use dataset_store::RegisterManifestError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
-use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest};
+use datasets_derived::{
+    DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest,
+    manifest::DependencyValidationError,
+};
 use evm_rpc_datasets::{DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest};
 
 use crate::{
@@ -154,6 +157,17 @@ pub async fn handler(
                     Error::InvalidManifest(err)
                 })?;
 
+            manifest.validate_dependencies().map_err(|err| {
+                tracing::error!(
+                    name = %manifest.name,
+                    version = %manifest.version,
+                    kind = DERIVED_DATASET_KIND,
+                    error = ?err,
+                    "Manifest dependency validation failed"
+                );
+                Error::DependencyValidationError(err)
+            })?;
+
             ctx.dataset_store
                 .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
@@ -267,6 +281,14 @@ pub enum Error {
     #[error("Manifest name '{0}' and version '{1}' do not match with manifest")]
     ManifestValidationError(String, String),
 
+    /// Dependency validation error
+    ///
+    /// This occurs when:
+    /// - SQL queries are invalid
+    /// - SQL queries reference datasets not declared in dependencies
+    #[error("Manifest dependency error: {0}")]
+    DependencyValidationError(#[from] DependencyValidationError),
+
     /// Failed to register manifest in the system
     ///
     /// This occurs when:
@@ -310,6 +332,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPayloadFormat => "INVALID_PAYLOAD_FORMAT",
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
             Error::ManifestValidationError(_, _) => "MANIFEST_VALIDATION_ERROR",
+            Error::DependencyValidationError(_) => "DEPENDENCY_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
             Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
             Error::StoreError(_) => "STORE_ERROR",
@@ -322,6 +345,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPayloadFormat => StatusCode::BAD_REQUEST,
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
             Error::ManifestValidationError(_, _) => StatusCode::BAD_REQUEST,
+            Error::DependencyValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,

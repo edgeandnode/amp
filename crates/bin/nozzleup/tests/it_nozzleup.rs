@@ -21,6 +21,7 @@ async fn init_creates_directory_structure() -> Result<()> {
         Some(temp.path().to_path_buf()),
         true, // no_modify_path
         true, // no_install_latest
+        None, // github_token
     )
     .await?;
 
@@ -42,10 +43,11 @@ async fn init_fails_if_already_initialized() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // First init should succeed
-    nozzleup::commands::init::run(Some(temp.path().to_path_buf()), true, true).await?;
+    nozzleup::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await?;
 
     // Second init should fail
-    let result = nozzleup::commands::init::run(Some(temp.path().to_path_buf()), true, true).await;
+    let result =
+        nozzleup::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await;
 
     assert!(
         result.is_err(),

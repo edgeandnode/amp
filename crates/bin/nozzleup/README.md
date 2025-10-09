@@ -9,13 +9,13 @@ The official version manager and installer for nozzle.
 While the repository is private, you need to authenticate with GitHub:
 
 ```sh
-# Obtain a personal access token.
+# Obtain a GitHub personal access token (required while repo is private)
 export GITHUB_TOKEN=$(gh auth token)
 
-# Set up `nozzleup` from the private repository.
+# Install nozzleup
 curl --proto '=https' --tlsv1.2 -sSf \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | sh
+  https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/crates/bin/nozzleup/install | sh
 ```
 
 Once installed, you can conveniently manage your `nozzle` versions through `nozzleup`.

@@ -5,6 +5,36 @@ use fs_err as fs;
 
 use crate::ui;
 
+#[derive(Debug)]
+pub enum ShellError {
+    ShellNotDetected,
+}
+
+impl std::fmt::Display for ShellError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShellNotDetected => {
+                writeln!(f, "Could not detect shell type")?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  The SHELL environment variable is not set or is unsupported."
+                )?;
+                writeln!(f, "  Supported shells: bash, zsh, fish, ash")?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  You can manually add the following to your shell profile:"
+                )?;
+                writeln!(f, "    export PATH=\"$PATH:$HOME/.nozzle/bin\"")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ShellError {}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Shell {
     Zsh,
@@ -61,7 +91,7 @@ impl Shell {
 
 /// Add a directory to PATH by modifying the shell profile
 pub fn add_to_path(bin_dir: &str) -> Result<()> {
-    let shell = Shell::detect().context("Could not detect shell type")?;
+    let shell = Shell::detect().ok_or(ShellError::ShellNotDetected)?;
     let profile_path = shell.profile_path()?;
     let export_line = shell.path_export_line(bin_dir);
 
