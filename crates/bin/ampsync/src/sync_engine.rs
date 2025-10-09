@@ -220,7 +220,7 @@ pub fn arrow_schema_to_postgres_ddl(
 /// Quote a column name if it's a SQL reserved keyword
 ///
 /// This ensures column names like "to", "from", "select" work correctly in SQL statements.
-fn quote_column_name(name: &str) -> String {
+pub fn quote_column_name(name: &str) -> String {
     if RESERVED_KEYWORDS.contains(name) {
         format!("\"{}\"", name)
     } else {

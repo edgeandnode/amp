@@ -15,11 +15,5 @@ export default defineDataset(() => ({
     blocks: {
       sql: `SELECT block_num, timestamp, hash, nonce FROM anvil.blocks`,
     },
-    logs: {
-      sql: `SELECT * FROM anvil.logs`,
-    },
-    transactions: {
-      sql: `SELECT * FROM anvil.transactions`,
-    },
   },
 }));

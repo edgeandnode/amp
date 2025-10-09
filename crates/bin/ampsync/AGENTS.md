@@ -9,51 +9,53 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 ## Architecture Overview
 
 ### Data Flow
-1. **Config Loading**: Parse nozzle config file (JSON/TS/JS) to extract table SQL queries
-2. **Schema Fetching**: Query Nozzle Admin API to get Arrow schemas for all tables
+1. **Configuration**: Load dataset name and optional version from environment variables
+2. **Schema Fetching**: Query Nozzle Admin API to get Arrow schemas and dataset version
    - **First-Run Behavior**: If dataset not published yet, polls indefinitely (2-30s backoff) until available
    - Logs helpful message: "Have you run 'nozzle dump --dataset <name>'?"
    - No restart needed - automatically detects when dataset becomes available
-3. **Schema Setup**: Create PostgreSQL tables from Arrow schemas (with evolution support)
-4. **Checkpoint Recovery**: Smart resumption strategy using hybrid checkpoints
+3. **SQL Generation**: Automatically generate SQL queries from Arrow schema for each table
+   - Format: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+   - Reserved keywords automatically quoted (e.g., "to", "from", "select")
+4. **Schema Setup**: Create PostgreSQL tables from Arrow schemas (with evolution support)
+5. **Checkpoint Recovery**: Smart resumption strategy using hybrid checkpoints
    - **Watermark (preferred)**: Hash-verified resumption point passed to `query()` (server-side)
    - **Incremental (fallback)**: Best-effort checkpoint, adds `WHERE block_num > X` to SQL (client-side)
    - **None**: No checkpoint available, starts from the beginning
    - **Benefits**: Minimizes reprocessing (typically < 1 batch) while providing fork detection
-5. **Streaming**: Execute SQL queries with `SETTINGS stream = true` on Nozzle Arrow Flight server
-6. **Reorg Detection**: Wrap streams with `with_reorg()` to detect blockchain reorganizations
-7. **Batch Processing**: Convert Arrow RecordBatches to PostgreSQL binary format and bulk insert via COPY
+6. **Streaming**: Execute SQL queries with `SETTINGS stream = true` on Nozzle Arrow Flight server
+7. **Reorg Detection**: Wrap streams with `with_reorg()` to detect blockchain reorganizations
+8. **Batch Processing**: Convert Arrow RecordBatches to PostgreSQL binary format and bulk insert via COPY
    - **Incremental Checkpoint**: Update progress tracking after each successful batch insertion
    - **Purpose**: Minimize reprocessing between watermark events (typically emitted when ranges complete)
-8. **Watermark Processing**: Save canonical checkpoints when server signals ranges are complete
+9. **Watermark Processing**: Save canonical checkpoints when server signals ranges are complete
    - **Hash-Verified**: Includes block number + block hash for fork detection
    - **Multi-Network**: Supports cross-chain datasets with per-network checkpoints
    - **Atomic Updates**: Transaction ensures all networks updated together
-9. **Hot-Reload**: Watch config file for changes, gracefully restart streams with new configuration
-   - **Hot-Reload Retry**: Limited retries (default: 3) when fetching updated manifest
-   - Gives `nozzle dump` command time to complete (~2-30s depending on retries)
-   - Configurable via `HOT_RELOAD_MAX_RETRIES` environment variable
+10. **Version Polling**: When DATASET_VERSION not specified, poll for new versions every 5 seconds
+    - Detects when new dataset version is published
+    - Gracefully restarts streams with new version
+    - Configurable interval via `VERSION_POLL_INTERVAL_SECS`
 
 ### Technology Stack
 - **Language**: Rust (async/await heavily used)
 - **Wire Format**: Apache Arrow (RecordBatch streaming)
 - **Database**: PostgreSQL (target sync destination)
 - **Data Encoding**: pgpq library for Arrow → PostgreSQL COPY binary format
-- **Config Parsing**: oxc_parser for JS/TS AST parsing, serde_json for JSON
-- **File Watching**: notify crate with PollWatcher for hot-reload (polling-based for Docker compatibility)
 - **HTTP Client**: reqwest for Admin API queries
 - **Concurrency**: tokio async runtime with per-table tasks and semaphore-based backpressure
 
 ## Key Components
 
 ### 1. Main Binary (`src/main.rs`)
-- **Purpose**: Entry point, streaming orchestration, hot-reload coordination
+- **Purpose**: Entry point, streaming orchestration, version polling coordination
 - **Key Functions**:
-  - `ampsync_runner()`: Main loop handling config loading, stream spawning, hot-reload events
+  - `ampsync_runner()`: Main loop handling config loading, stream spawning, version change events
   - `spawn_stream_tasks()`: Creates per-table async tasks for streaming data
   - `shutdown_streams_gracefully()`: Ensures in-flight batches complete before shutdown
+  - `version_poll_task()`: Background task that polls for new dataset versions (when DATASET_VERSION not set)
 - **Signal Handling**: SIGTERM/SIGINT for Docker-compatible graceful shutdown
-- **File Watching**: Monitors nozzle config file for changes, triggers reload on modification
+- **Version Polling**: Monitors admin-api for new versions, triggers graceful reload when detected
 
 ### 2. Sync Engine (`src/sync_engine.rs`)
 - **Purpose**: Database operations, schema management, bulk data insertion
@@ -68,15 +70,17 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - **Critical**: All database errors use exponential backoff retry logic
 
 ### 3. Config & Manifest (`src/manifest.rs`)
-- **Purpose**: Parse nozzle configs, fetch schemas from Admin API
-- **Two-Tier Architecture**:
-  - `DatasetDefinition`: User-facing config (just SQL queries in tables)
-  - `Manifest`: Internal format with complete Arrow schemas from Admin API
-- **Schema Resolution**: Queries Admin API to resolve version (e.g., "0.2.0" → "0.2.0-LTcyNjgzMjc1NA")
-- **SQL Sanitization**: Automatically removes ORDER BY clauses (non-incremental queries not supported)
-- **Supported Formats**: JSON, JS, TS (uses oxc_parser for AST parsing)
+- **Purpose**: Fetch dataset schemas from Admin API, generate SQL queries
+- **Key Functions**:
+  - `fetch_manifest()`: Fetches schemas from Admin API for a dataset name/version
+  - `resolve_qualified_version()`: Resolves version (e.g., "0.2.0" → "0.2.0-LTcyNjgzMjc1NA")
+  - `generate_query_from_schema()`: Automatically generates SQL from Arrow schema fields
+- **SQL Generation**: Creates `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+  - Automatically quotes SQL reserved keywords (using `quote_column_name()` from sync_engine)
+- **Version Resolution**:
+  - If DATASET_VERSION specified: Matches version prefix to find qualified version
+  - If DATASET_VERSION not specified: Returns latest version from admin-api
 - **Startup Polling**: `fetch_manifest_with_startup_poll()` polls indefinitely if dataset not found
-- **Hot-Reload Retry**: `fetch_manifest_with_retry()` retries with configurable limit for hot-reload scenarios
 
 ### 4. PostgreSQL Binary Encoder (`src/pgpq/`)
 - **Purpose**: Convert Arrow RecordBatches to PostgreSQL COPY binary format
@@ -84,21 +88,12 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - **Type Support**: Comprehensive Arrow → PostgreSQL type mapping
 - **Critical**: Decimal128, UInt64, and timestamp conversions require special handling
 
-### 5. File Watcher (`src/file_watcher.rs`)
-- **Purpose**: Hot-reload support via file system monitoring
-- **Implementation**: Uses `PollWatcher` (polling-based) instead of native OS events
-- **Polling Interval**: 2 seconds (configurable via `Config::with_poll_interval`)
-- **Content Comparison**: Uses `with_compare_contents(true)` to detect actual content changes (not just mtime)
-- **Debouncing**: 500ms delay to handle editors that write files in chunks
-- **Docker Compatibility**: Polling mode works reliably with Docker volume mounts where native events (inotify/kqueue) often fail
-- **Event Detection**: Accepts `Modify(Metadata(_))` events which PollWatcher emits when content changes
-- **Detection Latency**: 2-4 seconds (2s poll interval + 500ms debounce)
-
-### 6. SQL Validator (`src/sql_validator.rs`)
+### 5. SQL Validator (`src/sql_validator.rs`)
 - **Purpose**: Validate and sanitize SQL queries for incremental streaming
 - **Validation Rules**: Rejects ORDER BY, GROUP BY, DISTINCT, aggregates, window functions
 - **Sanitization**: Removes ORDER BY and LIMIT clauses automatically
 - **Parser**: Uses DataFusion SQL parser for robust validation
+- **Note**: Used internally for validation, but SQL is now generated automatically from schema
 
 ## Critical Architecture Patterns
 
@@ -236,38 +231,45 @@ Ampsync is a high-performance synchronization service that streams dataset chang
 - Detects blockchain forks that simple block number comparison cannot
 - Multi-network support enables cross-chain dataset synchronization
 
-### 🔄 Hot-Reload Flow
+### 🔄 Version Polling Flow
 
-**File Watcher Detection** (Polling-Based):
-- PollWatcher checks file system every 2 seconds
-- Compares file contents (not just modification time)
-- Debounces for 500ms to handle rapid saves
-- Detection latency: 2-4 seconds total
-- Works reliably in Docker (native events often fail with volume mounts)
+**Version Detection** (When DATASET_VERSION not specified):
+- Polls admin-api **versions endpoint ONLY** every 5 seconds (configurable via `VERSION_POLL_INTERVAL_SECS`)
+- Fetches latest version using `fetch_latest_version()` - does NOT fetch schema (efficient!)
+- Compares current version with newly fetched version
+- Skips missed ticks if polling falls behind (prevents backlog)
+- **Optimization**: Only fetches full schema when version actually changes
 
 **Critical State Management**:
-1. File change detected (via polling) → Send event to main loop
+1. New version detected by polling task → Send version to main loop via channel
 2. Main loop cancels all stream tasks via `CancellationToken`
 3. Await all tasks with timeout (graceful shutdown)
-4. Load new config, fetch new schemas from Admin API
+4. Fetch new manifest with explicit version from Admin API
 5. Apply schema migrations (add new columns if needed)
-6. Spawn new stream tasks with updated config
+6. Spawn new stream tasks with updated manifest
 7. **Important**: Database connection pool is REUSED across reloads
 
+**What Triggers Reload**:
+- New dataset version published to admin-api
+- Only when DATASET_VERSION env var is NOT set
+- Detects version changes every 5 seconds (configurable)
+
 **What Can Change**:
-- SQL queries in tables (with compatible schema)
-- Adding new columns (automatic migration)
-- Dataset version (will re-fetch schemas)
+- Dataset version (automatic detection and reload)
+- Table schemas (adding new columns)
+- SQL queries (regenerated from new schema)
 
 **What Cannot Change**:
 - Column type changes (rejected with error to prevent data corruption)
 - Dropping columns (rejected with error to prevent data loss)
 - Database connection (requires restart)
+- Dataset name (requires restart)
 
-**Debugging Hot-Reload**:
-- Enable debug logs: `RUST_LOG=debug,ampsync::file_watcher=trace`
-- Look for: `"File watcher received event"` → `"File change detected"` → `"Manifest file changed, initiating hot-reload"`
-- If not detecting changes: wait 2-4 seconds, verify file mount in Docker, check DATASET_MANIFEST path
+**Debugging Version Polling**:
+- Enable debug logs: `RUST_LOG=debug,ampsync=debug`
+- Look for: `"new_version_detected"` → `"version_reload_successful"` or `"version_reload_failed"`
+- Check polling status: `"version_poll_failed"` indicates admin-api issues
+- Verify VERSION_POLL_INTERVAL_SECS if polling seems slow
 
 ### 🎯 Concurrency Model
 
@@ -431,16 +433,29 @@ Restart → Load incremental → Resume from block 300 (best-effort, WHERE claus
 ### Environment Variables
 
 **Required**:
-- `DATASET_MANIFEST`: Path to nozzle config file (.ts, .js, .json)
+- `DATASET_NAME`: Name of the dataset to sync (must be valid `datasets_common::name::Name`)
+  - Example: `my_dataset`, `ethereum_blocks`
 - `DATABASE_URL` OR (`DATABASE_USER` + `DATABASE_NAME`)
 
-**Optional**:
+**Optional - Dataset Configuration**:
+- `DATASET_VERSION`: Specific dataset version to sync
+  - Format: Simple version like `0.1.0` (resolved to qualified version like `0.1.0-LTcyNjgzMjc1NA`)
+  - If NOT specified: Automatically uses latest version and polls for new versions
+  - If specified: Uses exact version, no automatic updates
+- `VERSION_POLL_INTERVAL_SECS`: How often to check for new versions (default: 5 seconds)
+  - Only used when `DATASET_VERSION` is NOT specified
+  - Range: 1-3600 seconds recommended
+
+**Optional - Nozzle Connection**:
 - `AMP_FLIGHT_ADDR`: Nozzle Arrow Flight server (default: http://localhost:1602)
 - `AMP_ADMIN_API_ADDR`: Nozzle Admin API server (default: http://localhost:1610)
+
+**Optional - Performance & Reliability**:
 - `MAX_CONCURRENT_BATCHES`: Concurrent batch limit (default: 10)
-- `HOT_RELOAD_MAX_RETRIES`: Hot-reload retry attempts (default: 3)
 - `DB_MAX_RETRY_DURATION_SECS`: Connection retry circuit breaker duration (default: 300 seconds)
 - `DB_OPERATION_MAX_RETRY_DURATION_SECS`: Database operation retry circuit breaker duration (default: 60 seconds)
+
+**Optional - Logging**:
 - `RUST_LOG`: Logging configuration (default: info)
 
 **Database Connection Options**:
@@ -456,27 +471,24 @@ DATABASE_HOST=localhost   # default: localhost
 DATABASE_PORT=5432        # default: 5432
 ```
 
-### Nozzle Config Format
+### How It Works
 
-**Simple Format (User-Facing)**:
-```typescript
-export default defineDataset(() => ({
-  name: "my-dataset",
-  version: "0.1.0",
-  network: "mainnet",
-  tables: {
-    blocks: {
-      sql: "SELECT block_num, timestamp FROM anvil.blocks",
-    },
-  },
-}))
-```
+**Automatic SQL Generation**:
+- No config files needed - SQL queries generated automatically from dataset schema
+- Fetches Arrow schema from Admin API (`GET /datasets/{name}/versions/{version}/schema`)
+- Generates SQL: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+- Reserved keywords automatically quoted (e.g., "to", "from", "select")
 
-**Key Points**:
-- Tables only need `sql` field - schemas fetched from Admin API
-- SQL queries are validated and sanitized automatically
-- ORDER BY clauses are removed (non-incremental queries not supported)
-- Version can be simple (e.g., "0.2.0") - resolved to qualified version via Admin API
+**Version Management**:
+- **Fixed Version Mode** (DATASET_VERSION set): Uses specified version, never changes
+- **Auto-Update Mode** (DATASET_VERSION not set): Uses latest version, polls for updates every 5s
+
+**First-Run Behavior**:
+On initial startup, if the dataset hasn't been published yet:
+- Polls the Admin API every 2-30 seconds (exponential backoff)
+- Logs helpful messages: "Have you run 'nozzle dump --dataset <name>'?"
+- Continues polling indefinitely until the dataset becomes available
+- Once found, proceeds normally with streaming
 
 ## Mandatory Development Workflow
 
@@ -551,12 +563,39 @@ export default defineDataset(() => ({
 
 ### Core Modules (Read These First)
 
-**`src/main.rs`** - Start here to understand overall flow
-- `ampsync_runner()`: Main entry point
-- `spawn_stream_tasks()`: Per-table streaming setup
-- `AmpsyncConfig`: Configuration management
+**`src/main.rs`** - Entry point and orchestration (198 lines, down from 987)
+- `ampsync_runner()`: Main entry point - coordinates all subsystems
+- Handles signal handlers (SIGTERM/SIGINT)
+- Coordinates version polling, stream management, graceful shutdown
+- **Minimal, focused orchestration only** - all logic delegated to modules
 
-**`src/sync_engine.rs`** - Database operations (most changes happen here)
+**`src/config.rs`** - Configuration management
+- `AmpsyncConfig`: Main configuration struct
+- `AmpsyncConfig::from_env()`: Load config from environment variables
+- `sanitize_database_url()`: Password redaction for safe logging
+- Database URL construction from components
+
+**`src/stream_manager.rs`** - Stream task coordination
+- `spawn_stream_tasks()`: Creates per-table streaming tasks
+- `shutdown_streams_gracefully()`: Graceful shutdown with timeout
+- Schema filtering (SELECT * vs SELECT col1, col2, ...)
+- Table creation and checkpoint recovery
+
+**`src/stream_task.rs`** - Per-table streaming logic
+- `StreamTask`: Encapsulates single table's streaming state and behavior
+- `StreamTask::run()`: Main streaming loop with reconnection
+- `handle_batch()`: Batch processing, timestamp conversion, metadata injection
+- `handle_reorg()`: Reorg detection and cleanup
+- `handle_watermark()`: Watermark checkpoint persistence
+- Exponential backoff retry logic
+
+**`src/version_polling.rs`** - Version change detection
+- `version_poll_task()`: Background polling for new dataset versions
+- Polls admin-api every 5 seconds (configurable)
+- Sends version changes to main loop via channel
+- Only active when DATASET_VERSION not set
+
+**`src/sync_engine.rs`** - Database operations (largest module)
 - `AmpsyncDbEngine`: Main database interface
 - `ResumePoint`: Enum for smart resumption strategy (Watermark/Incremental/None)
 - `arrow_schema_to_postgres_ddl()`: Schema conversion
@@ -569,10 +608,10 @@ export default defineDataset(() => ({
   - `update_incremental_checkpoint()`: Update best-effort progress tracking
   - `extract_max_block_from_ranges()`: Helper to extract checkpoint from metadata
 
-**`src/manifest.rs`** - Config parsing and Admin API integration
+**`src/manifest.rs`** - Schema fetching and Admin API integration
 - `fetch_manifest()`: Main entry point for schema fetching
-- `load_dataset_definition()`: Parse nozzle config files
-- `resolve_qualified_version()`: Version resolution
+- `resolve_qualified_version()`: Version resolution (prefix matching or latest)
+- `generate_query_from_schema()`: Automatic SQL generation from Arrow schema
 
 ### Support Modules
 
@@ -585,43 +624,42 @@ export default defineDataset(() => ({
 - `encoders.rs`: Type-specific encoding logic
 - `pg_schema.rs`: Arrow → PostgreSQL type mapping
 
-**`src/file_watcher.rs`** - Hot-reload file monitoring
-- `spawn_file_watcher()`: Start file watching
-- Debouncing and event filtering
-
 **`src/sql_validator.rs`** - SQL validation and sanitization
 - `validate_incremental_query()`: Check for non-incremental patterns
-- `sanitize_sql()`: Remove ORDER BY and LIMIT
+- `extract_select_columns()`: Parse SQL to determine selected columns
+- Note: Used internally for validation
 
 **`src/batch_utils.rs`** - RecordBatch utilities and system metadata injection
 - `inject_system_metadata()`: Injects 3 system columns (`_id`, `_block_num_start`, `_block_num_end`) into ALL batches
 - `serialize_arrow_value()`: Deterministic Arrow value serialization for hashing (little-endian, portable)
 - `convert_nanosecond_timestamps()`: Timestamp conversion for PostgreSQL (nanosecond → microsecond)
 
-**`src/dataset_definition.rs`** - User-facing config structures
-- `DatasetDefinition`: Simple config format
-- `TableDefinition`: Table with just SQL
-
 ## Testing Strategy
 
 ### Unit Tests (in each module)
 - Arrow type mappings (`sync_engine.rs`)
 - SQL validation rules (`sql_validator.rs`)
-- File event filtering (`file_watcher.rs`)
+- SQL generation from schema (`manifest.rs`)
 - Binary encoding (`pgpq/encoders.rs`)
 
 ### Integration Tests (`tests/`)
-- `checkpoint_test.rs`: Checkpoint tracking and recovery
-- `decimal_insert_test.rs`: Decimal type handling
-- `hot_reload_test.rs`: Config reload functionality
-- `schema_evolution_test.rs`: Schema migration scenarios
-- `reserved_words_test.rs`: SQL reserved keyword column handling
-- `circuit_breaker_test.rs`: Database retry circuit breaker functionality
+- `checkpoint_test.rs`: Checkpoint tracking and recovery (9 tests)
+- `circuit_breaker_test.rs`: Database retry circuit breaker functionality (3 tests)
+- `decimal_insert_test.rs`: Decimal type handling (1 test)
+- `injected_block_num_test.rs`: System metadata injection and reorg handling (2 tests)
+- `reserved_words_test.rs`: SQL reserved keyword column handling (1 test)
+- `schema_evolution_test.rs`: Schema migration scenarios (7 tests)
+- `version_polling_test.rs`: Version polling and schema reload functionality (5 tests)
 
 **Testing with PostgreSQL**:
 - Tests use `pgtemp` crate for temporary databases
 - Each test gets isolated database instance
 - Tests are safe to run in parallel
+
+**Testing with HTTP Mocking**:
+- Version polling tests use `mockito` for HTTP mocking
+- Tests verify that only the versions endpoint is called (not schema endpoint)
+- Tests verify version change detection and error handling
 
 ## Common Implementation Patterns
 
@@ -642,8 +680,8 @@ export default defineDataset(() => ({
 
 1. Parse in `AmpsyncConfig::from_env()` in `src/main.rs`
 2. Add field to `AmpsyncConfig` struct
-3. Document in README.md under "Environment Variables"
-4. Add validation test in `tests/hot_reload_test.rs`
+3. Document in README.md and AGENTS.md under "Environment Variables"
+4. Add validation test if needed
 
 ### Adding New Database Operation
 
@@ -745,21 +783,22 @@ RUST_LOG=trace,ampsync=trace cargo run -p ampsync
 - **Behavior**: Polls indefinitely with exponential backoff (2-30s intervals)
 - **Code Location**: `src/manifest.rs::fetch_manifest_with_startup_poll()`
 
-### "Failed to fetch manifest after N retries"
-- **Cause**: Hot-reload detected config change but new dataset version not found after retries
-- **Fix**: Ensure `nozzle dump` completed successfully. Increase `HOT_RELOAD_MAX_RETRIES` if needed.
-- **Behavior**: Limited retries (default: 3) to allow dump command to complete
-- **Code Location**: `src/manifest.rs::fetch_manifest_with_retry()`
-
 ### "Failed to fetch schema from admin-api"
 - **Cause**: Dataset not published to Nozzle server, wrong endpoint, or version mismatch
-- **Fix**: Verify dataset exists, check `AMP_ADMIN_API_ADDR`, confirm version matches
+- **Fix**: Verify dataset exists, check `AMP_ADMIN_API_ADDR`, confirm version matches DATASET_VERSION if set
 - **Code Location**: `src/manifest.rs::fetch_manifest()`
 
-### "Schema mismatch: table exists in admin-api but not in config"
-- **Cause**: Local config missing tables that exist in published dataset
-- **Fix**: Add missing tables to nozzle config
-- **Code Location**: `src/manifest.rs::fetch_manifest()`
+### "version_poll_failed" (in logs)
+- **Cause**: Version polling task failed to fetch manifest from admin-api
+- **Fix**: Check admin-api availability, network connectivity, DATASET_NAME spelling
+- **Behavior**: Non-fatal - polling continues with exponential backoff
+- **Code Location**: `src/main.rs::version_poll_task()`
+
+### "version_reload_failed" (in logs)
+- **Cause**: New version detected but failed to reload manifest
+- **Fix**: Check admin-api, verify new version is fully published
+- **Behavior**: Continues with current version, will retry on next poll
+- **Code Location**: `src/main.rs::ampsync_runner()` main loop
 
 ### "CRITICAL: Failed to insert N rows"
 - **Cause**: Database error, connection issue, or type incompatibility
@@ -801,7 +840,7 @@ just check-crate ampsync
 cargo test -p ampsync
 
 # Run specific test
-cargo test -p ampsync --test hot_reload_test
+cargo test -p ampsync --test checkpoint_test
 
 # Run with debug logging
 RUST_LOG=debug cargo run -p ampsync
@@ -812,11 +851,19 @@ cargo build --release -p ampsync
 # Build Docker image
 docker build -t ampsync:latest -f crates/bin/ampsync/Dockerfile .
 
-# Run Docker image
+# Run Docker image (auto-update mode)
 docker run --rm \
-  -e DATASET_MANIFEST=/home/ampsync/nozzle.config.ts \
+  -e DATASET_NAME=my_dataset \
   -e DATABASE_URL=postgresql://user:pass@host:5432/db \
-  -v $(pwd)/nozzle.config.ts:/home/ampsync/nozzle.config.ts \
+  -e AMP_ADMIN_API_ADDR=http://nozzle-server:1610 \
+  ampsync:latest
+
+# Run Docker image (fixed version mode)
+docker run --rm \
+  -e DATASET_NAME=my_dataset \
+  -e DATASET_VERSION=0.1.0 \
+  -e DATABASE_URL=postgresql://user:pass@host:5432/db \
+  -e AMP_ADMIN_API_ADDR=http://nozzle-server:1610 \
   ampsync:latest
 ```
 
@@ -833,7 +880,7 @@ docker run --rm \
 1. This is a **streaming** service - it never stops running
 2. **Data consistency** is more important than performance
 3. **Checkpoints** prevent reprocessing - always update them
-4. **Hot-reload** allows config changes without restart - test it
+4. **Version polling** (when DATASET_VERSION not set) enables automatic updates
 5. **Reorgs** are blockchain corrections - handle them correctly
 
 **When in Doubt**:
@@ -847,4 +894,4 @@ docker run --rm \
 - `cargo test -p ampsync` all tests pass ✅
 - No compiler warnings ✅
 - Data consistency maintained ✅
-- Hot-reload works correctly ✅
+- Version polling works correctly (when DATASET_VERSION not set) ✅

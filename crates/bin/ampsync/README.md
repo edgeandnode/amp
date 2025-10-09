@@ -13,7 +13,8 @@ and handling blockchain reorganizations automatically.
 ## Key Features
 
 - **Real-time Streaming**: Continuously syncs dataset changes as they occur
-- **Hot-Reload Support**: Automatically reloads when nozzle config changes (no restarts needed)
+- **Automatic SQL Generation**: Generates SQL queries from schema - no config files needed
+- **Version Polling**: Automatically detects and loads new dataset versions (when not pinned to specific version)
 - **Automatic Schema Inference**: Fetches table schemas from Nozzle Admin API automatically
 - **Schema Evolution**: Supports adding new columns to existing tables seamlessly
 - **Progress Checkpointing**: Resumes from last processed block on restart (no reprocessing)
@@ -32,13 +33,12 @@ The service is configured through environment variables:
 
 ### Required Environment Variables
 
-#### Dataset Manifest
+#### Dataset Configuration
 
-- **`DATASET_MANIFEST`** - Path to your nozzle config file
-    - **Type**: File path (string)
-    - **Example**: `./nozzle.config.ts` or `/app/nozzle.config.json`
-    - **Supported formats**: `.ts`, `.js`, `.mts`, `.mjs`, `.json`
-    - **Notes**: Can be relative or absolute path. File must exist and be readable.
+- **`DATASET_NAME`** - Name of the dataset to sync
+    - **Type**: Dataset name (string, must be valid `datasets_common::name::Name`)
+    - **Example**: `my_dataset`, `ethereum_blocks`
+    - **Notes**: Must match a published dataset in Nozzle Admin API
 
 #### Database Connection
 
@@ -71,6 +71,20 @@ Option 2: Individual components (all required except password)
 
 ### Optional Environment Variables
 
+#### Dataset Configuration
+
+- **`DATASET_VERSION`** - Specific dataset version to sync
+    - **Type**: Version string (simple version like `0.1.0`)
+    - **Example**: `0.1.0`, `1.2.3`
+    - **Default**: None (uses latest version)
+    - **Notes**: If specified, syncs this exact version. If not specified, automatically uses latest version and polls for updates.
+
+- **`VERSION_POLL_INTERVAL_SECS`** - How often to check for new dataset versions
+    - **Type**: Integer (seconds)
+    - **Default**: `5`
+    - **Range**: `1-3600` (recommended)
+    - **Notes**: Only used when `DATASET_VERSION` is NOT specified. Controls how frequently ampsync checks for new versions.
+
 #### Nozzle Connection
 
 - **`AMP_FLIGHT_ADDR`** - URL to Nozzle Arrow Flight server
@@ -82,7 +96,7 @@ Option 2: Individual components (all required except password)
     - **Type**: HTTP/HTTPS URL
     - **Default**: `http://localhost:1610`
     - **Example**: `https://nozzle.example.com:1610`
-    - **Notes**: Used to fetch dataset schemas for table creation
+    - **Notes**: Used to fetch dataset schemas and versions
 
 #### Performance Tuning
 
@@ -91,14 +105,6 @@ Option 2: Individual components (all required except password)
     - **Default**: `10`
     - **Range**: `1-100` (recommended)
     - **Notes**: Controls backpressure to prevent OOM. Lower values reduce memory usage but may decrease throughput.
-
-#### Hot-Reload Configuration
-
-- **`HOT_RELOAD_MAX_RETRIES`** - Maximum retry attempts when hot-reloading fails to fetch manifest
-    - **Type**: Integer
-    - **Default**: `3`
-    - **Range**: `1-10` (recommended)
-    - **Notes**: When config file changes, ampsync will retry fetching the manifest this many times before failing. This gives the `nozzle dump` command time to complete (~2-30s depending on retries). Uses exponential backoff.
 
 #### Reliability & Error Handling
 
@@ -125,15 +131,20 @@ Option 2: Individual components (all required except password)
         - `warn,sqlx=error` - Warn globally, only errors from sqlx
     - **Levels**: `error`, `warn`, `info`, `debug`, `trace`
 
-### How Schema Fetching Works
+### How It Works
 
-1. Ampsync parses your nozzle config file to extract table SQL queries
-2. Fetches the complete schema from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/schema`)
-3. Combines the schema (from Admin API) with SQL queries (from config file)
-4. Creates PostgreSQL tables with the fetched schema
-5. Starts streaming data using your SQL queries
+**Automatic SQL Generation**:
+1. Ampsync fetches the complete dataset schema from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/schema`)
+2. Automatically generates SQL queries for each table: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+3. Quotes SQL reserved keywords automatically (e.g., "to", "from", "select")
+4. Creates PostgreSQL tables with the fetched Arrow schema
+5. Starts streaming data using the generated SQL queries
 
-This means you maintain SQL queries in your config, and schemas are always in sync with the Nozzle server.
+This means you don't need to maintain any config files - everything is driven by the dataset schema in Nozzle.
+
+**Version Management**:
+- **Auto-Update Mode** (default): When `DATASET_VERSION` is NOT set, ampsync uses the latest version and polls for updates every 5 seconds
+- **Fixed Version Mode**: When `DATASET_VERSION` is set, ampsync uses that specific version and never auto-updates
 
 **First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `nozzle dump` run), ampsync will wait patiently:
 - Polls the Admin API every 2-30 seconds (exponential backoff)
@@ -160,7 +171,8 @@ services:
     image: ghcr.io/edgeandnode/ampsync:latest
     environment:
       # Dataset configuration
-      DATASET_MANIFEST: /home/ampsync/nozzle.config.ts
+      DATASET_NAME: my_dataset
+      # DATASET_VERSION: 0.1.0  # Optional: pin to specific version
 
       # Nozzle server endpoints
       AMP_FLIGHT_ADDR: http://nozzle-server:1602
@@ -171,9 +183,6 @@ services:
 
       # Logging
       RUST_LOG: info,ampsync=debug
-    volumes:
-      # Mount config for hot-reload (writeable for file events)
-      - ./nozzle.config.ts:/home/ampsync/nozzle.config.ts
     depends_on:
       - postgres
     restart: unless-stopped
@@ -183,7 +192,8 @@ services:
 
 ```bash
 # Set environment variables
-export DATASET_MANIFEST=./nozzle.config.ts
+export DATASET_NAME=my_dataset
+# export DATASET_VERSION=0.1.0  # Optional: pin to specific version
 export DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
 export AMP_FLIGHT_ADDR=http://localhost:1602
 export AMP_ADMIN_API_ADDR=http://localhost:1610
@@ -199,13 +209,21 @@ cargo run --release -p ampsync
 # Build the Docker image (from repository root)
 docker build -t ampsync:local -f crates/bin/ampsync/Dockerfile .
 
-# Run the container
+# Run the container (auto-update mode)
 docker run --rm \
-  -e DATASET_MANIFEST=/home/ampsync/nozzle.config.ts \
+  -e DATASET_NAME=my_dataset \
   -e DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/mydb \
   -e AMP_FLIGHT_ADDR=http://host.docker.internal:1602 \
   -e AMP_ADMIN_API_ADDR=http://host.docker.internal:1610 \
-  -v $(pwd)/nozzle.config.ts:/home/ampsync/nozzle.config.ts \
+  ampsync:local
+
+# Run the container (fixed version mode)
+docker run --rm \
+  -e DATASET_NAME=my_dataset \
+  -e DATASET_VERSION=0.1.0 \
+  -e DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/mydb \
+  -e AMP_FLIGHT_ADDR=http://host.docker.internal:1602 \
+  -e AMP_ADMIN_API_ADDR=http://host.docker.internal:1610 \
   ampsync:local
 ```
 
@@ -228,25 +246,27 @@ docker compose up
 
 ### Data Flow
 
-1. **Config Loading**: Ampsync reads your nozzle config file and fetches schemas from Admin API
-2. **Schema Setup**: Creates PostgreSQL tables based on fetched Arrow schemas
-3. **Checkpoint Recovery**: Determines resumption strategy:
+1. **Configuration**: Loads dataset name and optional version from environment variables
+2. **Schema Fetching**: Fetches Arrow schemas from Admin API for the dataset
+3. **SQL Generation**: Automatically generates SQL queries from schema: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+4. **Schema Setup**: Creates PostgreSQL tables based on fetched Arrow schemas
+5. **Checkpoint Recovery**: Determines resumption strategy:
     - **Watermark available**: Hash-verified resumption (server-side, via `query()` parameter)
     - **Incremental only**: Best-effort resumption (client-side, adds `WHERE block_num > X`)
     - **None**: Starts from the beginning
-4. **Streaming**: Executes SQL queries with `SETTINGS stream = true` on Nozzle server
-5. **Reorg Detection**: Wraps streams with `with_reorg()` to detect blockchain reorganizations
-6. **Batch Processing**:
+6. **Streaming**: Executes generated SQL queries with `SETTINGS stream = true` on Nozzle server
+7. **Reorg Detection**: Wraps streams with `with_reorg()` to detect blockchain reorganizations
+8. **Batch Processing**:
     - Receives `Batch` events from streams
     - Converts Arrow data to PostgreSQL binary format using pgpq
     - Inserts data using PostgreSQL COPY protocol for high throughput
     - Updates **incremental checkpoint** after successful insertion (progress tracking)
-7. **Watermark Processing**:
+9. **Watermark Processing**:
     - Receives `Watermark` events when ranges are complete
     - Saves **watermark checkpoint** with block hash (canonical, hash-verified)
     - Preferred for resumption over incremental checkpoints
-8. **Reorg Handling**: Deletes affected rows and waits for corrected data
-9. **Hot-Reload**: Watches config file, gracefully restarts streams on changes
+10. **Reorg Handling**: Deletes affected rows and waits for corrected data
+11. **Version Polling** (when DATASET_VERSION not set): Polls for new versions, gracefully reloads when detected
 
 ### Performance Architecture
 
@@ -353,32 +373,33 @@ Ampsync handles errors at multiple levels:
 4. **Critical Errors**: Logs error, stops stream for that table to prevent data loss
 5. **Reorg Errors**: Halts stream to ensure data consistency
 
-### Hot-Reload Mechanism
+### Version Polling
 
-When the nozzle config file changes:
+When `DATASET_VERSION` is NOT specified, ampsync automatically detects and loads new dataset versions:
 
-1. File watcher detects the change (polling every 2 seconds + 500ms debounce)
-2. All active streams are gracefully stopped via cancellation token
-3. New config is loaded and validated
-4. Schemas are fetched from Admin API
-5. Tables are migrated if needed (adds new columns)
-6. Streams are restarted with new configuration
+**Polling Mechanism**:
+1. Background task polls Admin API every 5 seconds (configurable via `VERSION_POLL_INTERVAL_SECS`)
+2. Fetches latest version and compares with current version
+3. When new version detected:
+   - All active streams are gracefully stopped via cancellation token
+   - New manifest fetched from Admin API with the new version
+   - Tables are migrated if needed (adds new columns)
+   - SQL queries regenerated from new schema
+   - Streams are restarted with new configuration
 
-**File Watching Implementation**:
+**Version Management Modes**:
+- **Auto-Update Mode** (DATASET_VERSION not set): Automatically detects and loads new versions
+- **Fixed Version Mode** (DATASET_VERSION set): Uses specified version, never auto-updates
 
-The file watcher uses **polling-based detection** rather than native OS events (inotify/kqueue) for maximum compatibility with Docker volume mounts. This approach:
+**What Can Change**:
+- Dataset version (automatic detection and reload)
+- Table schemas (adding new columns)
+- SQL queries (regenerated from new schema)
 
-- **Polls every 2 seconds**: Checks the file system for changes on a fixed interval
-- **Compares file contents**: Uses content comparison (not just modification time) for reliable change detection
-- **Works with Docker volumes**: Docker volume mounts on macOS and some Linux configurations don't always propagate native file system events, making polling more reliable
-- **2-4 second detection latency**: Changes are typically detected within 2-4 seconds (2s poll + 500ms debounce)
-- **Debounces rapid changes**: 500ms debounce prevents reload storms from editors that write files in chunks
-
-**Limitations**:
-
-- Hot-reload **does not support** dropping columns (rejected with error to prevent data loss)
-- Hot-reload **does not support** changing column types (rejected with error)
-- Changes detected within 2-4 seconds (not instant like native file watchers)
+**What Cannot Change**:
+- Column type changes (rejected with error to prevent data corruption)
+- Dropping columns (rejected with error to prevent data loss)
+- Dataset name (requires restart)
 - To remove columns or change types, manually alter the database and restart ampsync
 
 ## Development
@@ -396,38 +417,41 @@ docker build -t ampsync:latest -f crates/bin/ampsync/Dockerfile .
 ### Testing
 
 ```bash
-# Run all tests (6 integration tests)
+# Run all tests
 cargo test -p ampsync
 
 # Run specific test
-cargo test -p ampsync --test hot_reload_test
+cargo test -p ampsync --test checkpoint_test
 
 # Run with logging
 RUST_LOG=debug cargo test -p ampsync -- --nocapture
 ```
 
-**Integration Tests**:
-- `checkpoint_test.rs`: Checkpoint tracking and recovery
-- `decimal_insert_test.rs`: Decimal type handling
-- `hot_reload_test.rs`: Config reload functionality
-- `schema_evolution_test.rs`: Schema migration scenarios
-- `reserved_words_test.rs`: SQL reserved keyword column handling
-- `circuit_breaker_test.rs`: Database retry circuit breaker functionality
+**Integration Tests** (28 tests total):
+- `checkpoint_test.rs`: Checkpoint tracking and recovery (9 tests)
+- `circuit_breaker_test.rs`: Database retry circuit breaker functionality (3 tests)
+- `decimal_insert_test.rs`: Decimal type handling (1 test)
+- `injected_block_num_test.rs`: System metadata injection and reorg handling (2 tests)
+- `reserved_words_test.rs`: SQL reserved keyword column handling (1 test)
+- `schema_evolution_test.rs`: Schema migration scenarios (7 tests)
+- `version_polling_test.rs`: Version polling and automatic schema reload (5 tests)
 
 ### Project Structure
 
 ```
 crates/bin/ampsync/
 ├── src/
-│   ├── main.rs              # Main entry point, streaming logic
+│   ├── main.rs              # Main entry point and orchestration
 │   ├── lib.rs               # Public library interface
+│   ├── config.rs            # Configuration management
+│   ├── version_polling.rs   # Version change detection
+│   ├── stream_manager.rs    # Stream task coordination and table setup
+│   ├── stream_task.rs       # Per-table streaming logic
 │   ├── sync_engine.rs       # Database operations, schema management
 │   ├── conn.rs              # PostgreSQL connection pooling
-│   ├── manifest.rs          # Config parsing, Admin API client
-│   ├── file_watcher.rs      # Hot-reload file watching
+│   ├── manifest.rs          # Schema fetching, Admin API client, SQL generation
 │   ├── sql_validator.rs     # SQL query validation/sanitization
-│   ├── batch_utils.rs       # RecordBatch utilities
-│   ├── dataset_definition.rs # User-facing config structures
+│   ├── batch_utils.rs       # RecordBatch utilities, system metadata injection
 │   └── pgpq/                # PostgreSQL COPY protocol encoder
 │       ├── mod.rs
 │       ├── encoders.rs      # Arrow to PostgreSQL binary encoding
@@ -457,12 +481,6 @@ crates/bin/ampsync/
   - Dataset name and version match between config and published dataset
   - `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
   - Dataset was successfully published (check Nozzle server logs)
-
-**"Schema mismatch: table 'X' exists in admin-api schema but not in local config"**
-
-- Your local config is missing tables that exist in the published dataset
-- Ensure your config includes all tables from the dataset
-- Check that you're using the correct version of the dataset
 
 **"Database connection failed"**
 
@@ -499,29 +517,21 @@ crates/bin/ampsync/
 - Increase `DB_OPERATION_MAX_RETRY_DURATION_SECS` if needed
 - Monitor PostgreSQL logs for slow queries or locks
 
-**"Hot-reload not detecting file changes"**
+**"version_poll_failed" or "version_reload_failed" in logs**
 
-- File watcher uses polling (2-second intervals) - wait 2-4 seconds after saving
-- Enable debug logging: `RUST_LOG=debug,ampsync::file_watcher=trace`
-- Look for `"File watcher received event"` log messages
-- Verify the file is mounted correctly in Docker (check with `docker exec`)
-- Ensure the file path matches `DATASET_MANIFEST` environment variable
+- Version polling encountered an error while checking for new versions
+- Check admin-api availability and network connectivity
+- Verify `DATASET_NAME` spelling and that dataset exists in admin-api
+- Non-fatal - polling will continue with exponential backoff
+- If persistent, check `AMP_ADMIN_API_ADDR` configuration
 
-**"Failed to fetch manifest after N retries: Dataset version not found"**
+**"Version reload failed: Columns dropped from schema (unsupported)"**
 
-- This occurs during hot-reload when ampsync can't find the new dataset version
-- After changing the config file, run `nozzle dump --dataset <name>` to publish the updated dataset
-- Ampsync retries up to `HOT_RELOAD_MAX_RETRIES` times (default: 3) to give dump time to complete
-- If dump takes longer, increase `HOT_RELOAD_MAX_RETRIES` (e.g., `5` or `10`)
-- This is different from startup behavior (which waits indefinitely)
-
-**"Hot-reload failed: Columns dropped from schema (unsupported)"**
-
-- Hot-reload does not support removing columns (data safety feature)
+- Version update attempted to drop columns (not supported for data safety)
 - To remove a column:
   1. Manually drop the column from PostgreSQL: `ALTER TABLE blocks DROP COLUMN column_name;`
-  2. Update your nozzle config to remove the column from the SELECT
-  3. Restart ampsync (hot-reload won't work for this case)
+  2. Publish new dataset version with column removed
+  3. Restart ampsync (automatic reload won't work for this case)
 
 ### Debug Logging
 

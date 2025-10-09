@@ -37,11 +37,6 @@ lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
 notify = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
 nozzle-client = { path = "../../client" }
-oxc_allocator = "0.94"
-oxc_ast = "0.94"
-oxc_ast_visit = "0.94"
-oxc_parser = "0.94"
-oxc_span = "0.94"
 phf = { version = "0.13.1", features = ["macros"] }
 reqwest.workspace = true
 serde.workspace = true

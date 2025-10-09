@@ -1,40 +1,25 @@
 mod batch_utils;
+mod config;
 mod conn;
-mod dataset_definition;
-mod file_watcher;
 mod manifest;
 mod pgpq;
 mod sql_validator;
+mod stream_manager;
+mod stream_task;
 mod sync_engine;
-
-use std::{env, path::PathBuf, sync::Arc, time::Duration};
+mod version_polling;
 
 use common::BoxError;
-use datasets_derived::{Manifest, manifest::TableInput};
-use futures::StreamExt;
-use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
-use tracing::{debug, error, info, warn};
+use conn::{DEFAULT_POOL_SIZE, DbConnPool};
+use nozzle_client::SqlClient;
+use tracing::{error, info};
 
 use crate::{
-    batch_utils::{convert_nanosecond_timestamps, inject_system_metadata},
-    conn::{DEFAULT_POOL_SIZE, DbConnPool},
+    config::AmpsyncConfig,
+    stream_manager::{shutdown_streams_gracefully, spawn_stream_tasks},
     sync_engine::AmpsyncDbEngine,
+    version_polling::version_poll_task,
 };
-
-/// Default maximum number of concurrent batch operations across all tables
-const DEFAULT_MAX_CONCURRENT_BATCHES: usize = 10;
-
-/// Default number of retries when hot-reloading fails to fetch manifest
-const DEFAULT_HOT_RELOAD_MAX_RETRIES: u32 = 3;
-
-/// Maximum number of stream reconnection attempts before giving up
-const MAX_STREAM_RETRIES: u32 = 5;
-
-/// Maximum delay between reconnection attempts (in seconds)
-const MAX_RETRY_DELAY_SECS: u64 = 60;
-
-/// Graceful shutdown timeout - maximum time to wait for in-flight operations (in seconds)
-const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -45,30 +30,41 @@ async fn main() {
     match ampsync_runner().await {
         Ok(()) => {}
         Err(e) => {
-            // Manually print the error so we can control the format.
             eprintln!("Exiting with error: {e}");
             std::process::exit(1);
         }
     }
 }
 
-/// Grab the configuration object of the db to connect to, as well as the amp dataset.
-/// Listen to changes on the dataset and sync those changes to the db instance.
+/// Main ampsync orchestrator.
 ///
-/// This will run in tandem with both amp (nozzle) and with a sync engine such as electricsql-sql
-/// to provide subsets of the nozzle dataset to build a reactive query layer for application development.
+/// Coordinates:
+/// - Configuration loading
+/// - Database and Nozzle client connections
+/// - Stream task spawning and management
+/// - Version polling (when enabled)
+/// - Graceful shutdown on signals
 ///
-/// Supports hot-reloading: when the manifest file changes, streams are gracefully stopped,
-/// schema migrations are applied, and streams are restarted with the new configuration.
+/// Supports version polling: when DATASET_VERSION is not specified, polls for new versions
+/// and gracefully reloads when a new version is detected.
 async fn ampsync_runner() -> Result<(), BoxError> {
     // Initialize logging
     monitoring::logging::init();
 
-    info!("Starting ampsync with hot-reload support");
-
     let mut config = AmpsyncConfig::from_env().await?;
+
+    let version_polling_enabled = config.dataset_version.is_none();
+    if version_polling_enabled {
+        info!("Starting ampsync with version polling enabled");
+    } else {
+        info!(
+            dataset_version = %config.dataset_version.as_ref().unwrap(),
+            "Starting ampsync with fixed version (version polling disabled)"
+        );
+    }
+
     info!(
-        dataset_name = %config.manifest.name,
+        dataset_name = %config.dataset_name,
         dataset_version = %config.manifest.version,
         "manifest_loaded"
     );
@@ -89,14 +85,34 @@ async fn ampsync_runner() -> Result<(), BoxError> {
     ampsync_db_engine.init_checkpoint_table().await?;
     info!("checkpoint_tracking_initialized");
 
-    // Set up file watcher for hot-reload
-    let (file_change_tx, mut file_change_rx) = tokio::sync::mpsc::channel(1);
-    let manifest_path = config.manifest_path.clone();
-    let _file_watcher_handle = file_watcher::spawn_file_watcher(manifest_path, file_change_tx);
-    info!(
-        manifest_path = %config.manifest_path.display(),
-        "file_watcher_initialized"
-    );
+    // Set up version polling (only if DATASET_VERSION not specified)
+    let (version_change_tx, mut version_change_rx) =
+        tokio::sync::mpsc::channel::<datasets_common::version::Version>(1);
+    let version_poll_handle = if version_polling_enabled {
+        let admin_api_addr = config.amp_admin_api_addr.clone();
+        let dataset_name = config.dataset_name.clone();
+        let poll_interval = config.version_poll_interval_secs;
+        let current_version = config.manifest.version.clone();
+
+        info!(
+            poll_interval_secs = poll_interval,
+            "version_polling_initialized"
+        );
+
+        Some(tokio::spawn(async move {
+            version_poll_task(
+                admin_api_addr,
+                dataset_name,
+                current_version,
+                poll_interval,
+                version_change_tx,
+            )
+            .await
+        }))
+    } else {
+        info!("version_polling_disabled");
+        None
+    };
 
     // Setup signal handlers for graceful shutdown
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -121,36 +137,38 @@ async fn ampsync_runner() -> Result<(), BoxError> {
         )
         .await?;
 
-        // Wait for reload trigger or shutdown signal
+        // Wait for version change, or shutdown signal
         tokio::select! {
-            // File changed - reload configuration
-            Some(file_watcher::FileWatchEvent::Changed) = file_change_rx.recv() => {
+            // New version detected - reload configuration
+            Some(new_version) = version_change_rx.recv() => {
                 info!(
-                    manifest_path = %config.manifest_path.display(),
-                    "hot_reload_triggered"
+                    old_version = %config.manifest.version,
+                    new_version = %new_version,
+                    "version_change_detected"
                 );
 
                 // Gracefully stop all streams
                 shutdown_token.cancel();
                 shutdown_streams_gracefully(task_handles).await;
 
-                // Reload manifest
-                match config.reload_manifest().await {
-                    Ok(new_config) => {
+                // Fetch new manifest with the detected version
+                match manifest::fetch_manifest(&config.amp_admin_api_addr, &config.dataset_name, Some(&new_version)).await {
+                    Ok(new_manifest) => {
                         info!(
-                            dataset_name = %new_config.manifest.name,
-                            dataset_version = %new_config.manifest.version,
-                            table_count = new_config.manifest.tables.len(),
-                            "hot_reload_success"
+                            dataset_name = %new_manifest.name,
+                            dataset_version = %new_manifest.version,
+                            table_count = new_manifest.tables.len(),
+                            "version_reload_success"
                         );
-                        config = new_config;
-                        // Loop continues with new config
+                        config.manifest = std::sync::Arc::new(new_manifest);
+                        // Loop continues with new manifest
                     }
                     Err(e) => {
                         error!(
                             error = %e,
-                            manifest_path = %config.manifest_path.display(),
-                            "hot_reload_failed"
+                            dataset_name = %config.dataset_name,
+                            new_version = %new_version,
+                            "version_reload_failed"
                         );
                         error!("Keeping previous configuration active");
                         // Loop continues with old config (safe fallback)
@@ -163,6 +181,9 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                 info!(signal = "SIGTERM", "shutdown_signal_received");
                 shutdown_token.cancel();
                 shutdown_streams_gracefully(task_handles).await;
+                if let Some(handle) = version_poll_handle {
+                    handle.abort();
+                }
                 break;
             }
 
@@ -171,6 +192,9 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                 info!(signal = "SIGINT", "shutdown_signal_received");
                 shutdown_token.cancel();
                 shutdown_streams_gracefully(task_handles).await;
+                if let Some(handle) = version_poll_handle {
+                    handle.abort();
+                }
                 break;
             }
         }
@@ -178,762 +202,4 @@ async fn ampsync_runner() -> Result<(), BoxError> {
 
     info!("shutdown_complete");
     Ok(())
-}
-
-/// Spawns stream processing tasks for all tables in the manifest.
-///
-/// Creates tables (with schema evolution if needed), retrieves checkpoints,
-/// and spawns background tasks to process streaming data from Nozzle.
-///
-/// Returns task handles that can be used to await completion during shutdown.
-async fn spawn_stream_tasks(
-    config: &AmpsyncConfig,
-    sql_client: &SqlClient,
-    ampsync_db_engine: &AmpsyncDbEngine,
-    shutdown_token: tokio_util::sync::CancellationToken,
-) -> Result<Vec<tokio::task::JoinHandle<()>>, BoxError> {
-    // Create a semaphore to limit concurrent batch processing across all tables
-    // This provides backpressure to prevent OOM when many tables receive large batches simultaneously.
-    // When all permits are taken, the stream processing will wait at semaphore.acquire(),
-    // preventing the stream from pulling more data until processing capacity is available.
-    // Default: Allow 10 concurrent batch operations (configurable via env)
-    let max_concurrent_batches = env::var("MAX_CONCURRENT_BATCHES")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_MAX_CONCURRENT_BATCHES);
-    let batch_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_batches));
-
-    // Collect task handles for graceful shutdown
-    let mut task_handles = Vec::new();
-
-    // Process each table: create table and set up streaming
-    for (table_name, table) in &config.manifest.tables {
-        debug!(table = %table_name, "processing_table");
-
-        // Get the SQL query from the table definition
-        let sql_query = match &table.input {
-            TableInput::View(view) => &view.sql,
-        };
-
-        // Validate that the query only uses incremental operations
-        use crate::sql_validator::{
-            SelectColumns, extract_select_columns, validate_incremental_query,
-        };
-        validate_incremental_query(sql_query)
-            .map_err(|e| format!("Table '{}' has invalid query:\n{}", table_name, e))?;
-
-        // Extract which columns are selected in the SQL query
-        let selected_columns = extract_select_columns(sql_query)
-            .map_err(|e| format!("Failed to parse SQL for table '{}': {}", table_name, e))?;
-
-        // Filter the manifest schema based on what columns are actually selected
-        let arrow_schema = match selected_columns {
-            SelectColumns::All => {
-                // SELECT * - use the full manifest schema
-                info!(
-                    table = %table_name,
-                    column_count = table.schema.arrow.fields.len(),
-                    select_mode = "all",
-                    "creating_table_with_schema"
-                );
-                table.schema.arrow.clone()
-            }
-            SelectColumns::Specific(column_names) => {
-                // SELECT col1, col2, ... - filter manifest schema to only include these columns
-                info!(
-                    table = %table_name,
-                    column_count = column_names.len(),
-                    columns = %column_names.join(", "),
-                    select_mode = "specific",
-                    "creating_table_with_schema"
-                );
-
-                // Build a HashMap for O(1) lookups of manifest fields
-                // Key: unqualified column name (last segment after '.')
-                // Value: reference to the field
-                let mut field_map: std::collections::HashMap<
-                    &str,
-                    &datasets_derived::manifest::Field,
-                > = std::collections::HashMap::new();
-
-                for field in &table.schema.arrow.fields {
-                    // Extract the unqualified column name (e.g., "block_num" from "anvil.blocks.block_num")
-                    let unqualified_name = field.name.rsplit('.').next().unwrap_or(&field.name);
-                    field_map.insert(unqualified_name, field);
-
-                    // Also insert the fully qualified name for exact matches
-                    field_map.insert(&field.name, field);
-                }
-
-                // Create a filtered schema with only the selected columns
-                let mut filtered_fields = Vec::new();
-                for col_name in &column_names {
-                    // Extract unqualified name from the selected column
-                    // (handles cases like "anvil.blocks.block_num" or just "block_num")
-                    let unqualified_col = col_name.rsplit('.').next().unwrap_or(col_name);
-
-                    // Try exact match first, then unqualified match
-                    if let Some(field) = field_map
-                        .get(col_name.as_str())
-                        .or_else(|| field_map.get(unqualified_col))
-                    {
-                        filtered_fields.push((*field).clone());
-                    } else {
-                        warn!(
-                            table = %table_name,
-                            column = %col_name,
-                            "column_not_found_in_schema"
-                        );
-                        // For expressions/computed columns, we'll need to handle them dynamically
-                        // For now, skip them - they'll be handled when we get actual data
-                    }
-                }
-
-                if filtered_fields.is_empty() {
-                    return Err(format!(
-                        "No matching columns found in manifest schema for table '{}'. \
-                         Selected columns: {:?}, Available fields: {:?}",
-                        table_name,
-                        column_names,
-                        table
-                            .schema
-                            .arrow
-                            .fields
-                            .iter()
-                            .map(|f| &f.name)
-                            .collect::<Vec<_>>()
-                    )
-                    .into());
-                }
-
-                datasets_derived::manifest::ArrowSchema {
-                    fields: filtered_fields,
-                }
-            }
-        };
-
-        // Create the table based on the filtered schema
-        ampsync_db_engine
-            .create_table_from_schema(table_name, &arrow_schema)
-            .await?;
-
-        // Load resume point for this table (watermark-first, fallback to incremental)
-        let resume_point = ampsync_db_engine.load_resume_point(table_name).await?;
-
-        let (resume_watermark, streaming_query) = match &resume_point {
-            sync_engine::ResumePoint::Watermark(watermark) => {
-                info!(
-                    table = %table_name,
-                    watermark = ?watermark,
-                    "resuming_from_watermark"
-                );
-                // Watermark handles resumption at server level - no WHERE clause needed
-                (
-                    Some(watermark.clone()),
-                    format!("{} SETTINGS stream = true", sql_query),
-                )
-            }
-            sync_engine::ResumePoint::Incremental {
-                network,
-                max_block_num,
-            } => {
-                info!(
-                    table = %table_name,
-                    network = %network,
-                    max_block_num = max_block_num,
-                    "resuming_from_incremental_checkpoint"
-                );
-                // Incremental checkpoint uses WHERE clause for resumption
-                (
-                    None,
-                    format!(
-                        "{} WHERE block_num > {} SETTINGS stream = true",
-                        sql_query, max_block_num
-                    ),
-                )
-            }
-            sync_engine::ResumePoint::None => {
-                info!(
-                    table = %table_name,
-                    "starting_from_beginning"
-                );
-                (None, format!("{} SETTINGS stream = true", sql_query))
-            }
-        };
-        debug!(
-            table = %table_name,
-            query = %streaming_query,
-            "executing_streaming_query"
-        );
-
-        // Wrap with with_reorg and spawn a task to handle the stream
-        let table_name_owned = table_name.clone();
-        let ampsync_db_engine_clone = ampsync_db_engine.clone();
-        let batch_semaphore_clone = batch_semaphore.clone();
-        let mut sql_client_clone = sql_client.clone();
-        let streaming_query_clone = streaming_query.clone();
-        let shutdown_token_clone = shutdown_token.clone();
-        let resume_watermark_clone = resume_watermark.clone();
-
-        let task_handle = tokio::spawn(async move {
-            let mut retry_count = 0u32;
-            let max_retries = MAX_STREAM_RETRIES;
-
-            loop {
-                // Check if shutdown has been requested
-                if shutdown_token_clone.is_cancelled() {
-                    info!(
-                        table = %table_name_owned,
-                        "shutdown_requested"
-                    );
-                    return;
-                }
-
-                // Query with watermark for hash-verified resumption
-                let result_stream = match sql_client_clone
-                    .query(
-                        &streaming_query_clone,
-                        None,
-                        resume_watermark_clone.as_ref(),
-                    )
-                    .await
-                {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!(
-                            table = %table_name_owned,
-                            attempt = retry_count + 1,
-                            max_retries = max_retries,
-                            error = %e,
-                            "stream_creation_failed"
-                        );
-
-                        if retry_count >= max_retries {
-                            error!(
-                                table = %table_name_owned,
-                                max_retries = max_retries,
-                                "max_retries_reached"
-                            );
-                            return;
-                        }
-
-                        // Exponential backoff: 2^retry_count seconds, capped at MAX_RETRY_DELAY_SECS
-                        let delay_secs = std::cmp::min(2u64.pow(retry_count), MAX_RETRY_DELAY_SECS);
-                        warn!(
-                            table = %table_name_owned,
-                            retry_delay_secs = delay_secs,
-                            attempt = retry_count + 1,
-                            "retrying_stream_creation"
-                        );
-                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
-                        retry_count += 1;
-                        continue;
-                    }
-                };
-
-                let mut reorg_stream = with_reorg(result_stream);
-                info!(
-                    table = %table_name_owned,
-                    "stream_started"
-                );
-
-                // Reset retry count on successful connection
-                retry_count = 0;
-
-                while let Some(result) = reorg_stream.next().await {
-                    match result {
-                        Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
-                            info!(
-                                table = %table_name_owned,
-                                rows = data.num_rows(),
-                                block_ranges = ?metadata.ranges,
-                                "batch_received"
-                            );
-
-                            // Acquire semaphore permit before processing batch
-                            // This provides backpressure to prevent OOM when many tables
-                            // receive large batches simultaneously. The stream won't pull
-                            // more data until we release this permit after processing.
-                            let _permit = match batch_semaphore_clone.acquire().await {
-                                Ok(permit) => permit,
-                                Err(_) => {
-                                    // Semaphore is closed - this means shutdown is in progress
-                                    warn!(
-                                        table = %table_name_owned,
-                                        "semaphore_closed"
-                                    );
-                                    return;
-                                }
-                            };
-
-                            // Convert nanosecond timestamps to microseconds for PostgreSQL compatibility
-                            let converted_batch = match convert_nanosecond_timestamps(data) {
-                                Ok(batch) => batch,
-                                Err(e) => {
-                                    error!(
-                                        table = %table_name_owned,
-                                        error = %e,
-                                        "timestamp_conversion_failed"
-                                    );
-                                    // Break to trigger stream reconnection and retry from last good position
-                                    break;
-                                }
-                            };
-
-                            // Inject system metadata columns (_id, _block_num_start, _block_num_end)
-                            // This ensures all tables have consistent PRIMARY KEY and reorg handling
-                            let batch_with_metadata =
-                                match inject_system_metadata(converted_batch, &metadata.ranges) {
-                                    Ok(batch) => batch,
-                                    Err(e) => {
-                                        error!(
-                                            table = %table_name_owned,
-                                            error = %e,
-                                            "system_metadata_injection_failed"
-                                        );
-                                        // Break to trigger stream reconnection
-                                        break;
-                                    }
-                                };
-
-                            // High-performance bulk insert using pgpq
-                            if let Err(e) = ampsync_db_engine_clone
-                                .insert_record_batch(&table_name_owned, &batch_with_metadata)
-                                .await
-                            {
-                                error!(
-                                    table = %table_name_owned,
-                                    rows = batch_with_metadata.num_rows(),
-                                    error = %e,
-                                    "batch_insert_failed"
-                                );
-                                // Break to trigger stream reconnection
-                                // This ensures we don't silently drop data
-                                break;
-                            } else {
-                                info!(
-                                    table = %table_name_owned,
-                                    rows = batch_with_metadata.num_rows(),
-                                    "batch_inserted"
-                                );
-
-                                // Update incremental checkpoint for progress tracking between watermarks
-                                if let Some((network, max_block)) =
-                                    AmpsyncDbEngine::extract_max_block_from_ranges(&metadata.ranges)
-                                {
-                                    if let Err(e) = ampsync_db_engine_clone
-                                        .update_incremental_checkpoint(
-                                            &table_name_owned,
-                                            &network,
-                                            max_block,
-                                        )
-                                        .await
-                                    {
-                                        warn!(
-                                            table = %table_name_owned,
-                                            network = %network,
-                                            block_num = max_block,
-                                            error = %e,
-                                            "incremental_checkpoint_update_failed"
-                                        );
-                                        // Don't break - incremental checkpoint failure is not critical
-                                        // Worst case: we'll reprocess some data on restart
-                                    } else {
-                                        debug!(
-                                            table = %table_name_owned,
-                                            network = %network,
-                                            block_num = max_block,
-                                            "incremental_checkpoint_updated"
-                                        );
-                                    }
-                                }
-
-                                // Note: Canonical watermark checkpoint is updated via ResponseBatchWithReorg::Watermark
-                                // Watermarks provide hash-verified resumption and are emitted when ranges are complete.
-                            }
-                            // Permit is automatically released when _permit is dropped
-                        }
-                        Ok(ResponseBatchWithReorg::Reorg { invalidation }) => {
-                            warn!(
-                                table = %table_name_owned,
-                                invalidation_ranges = ?invalidation,
-                                "reorg_detected"
-                            );
-
-                            // Acquire semaphore permit for reorg handling too
-                            let _permit = match batch_semaphore_clone.acquire().await {
-                                Ok(permit) => permit,
-                                Err(_) => {
-                                    // Semaphore is closed - this means shutdown is in progress
-                                    warn!(
-                                        table = %table_name_owned,
-                                        context = "reorg",
-                                        "semaphore_closed"
-                                    );
-                                    return;
-                                }
-                            };
-
-                            // Handle reorg by deleting affected rows
-                            if let Err(e) = ampsync_db_engine_clone
-                                .handle_reorg(&table_name_owned, &invalidation)
-                                .await
-                            {
-                                error!(
-                                    table = %table_name_owned,
-                                    error = %e,
-                                    "reorg_handling_failed"
-                                );
-                                // Break to trigger stream reconnection
-                                // Reorgs must be handled correctly for data consistency
-                                break;
-                            } else {
-                                info!(
-                                    table = %table_name_owned,
-                                    "reorg_handled"
-                                );
-                            }
-                        }
-                        Ok(ResponseBatchWithReorg::Watermark(watermark)) => {
-                            info!(
-                                table = %table_name_owned,
-                                watermark = ?watermark,
-                                "watermark_received"
-                            );
-
-                            // Acquire semaphore permit for watermark save
-                            let _permit = match batch_semaphore_clone.acquire().await {
-                                Ok(permit) => permit,
-                                Err(_) => {
-                                    // Semaphore is closed - this means shutdown is in progress
-                                    warn!(
-                                        table = %table_name_owned,
-                                        context = "watermark",
-                                        "semaphore_closed"
-                                    );
-                                    return;
-                                }
-                            };
-
-                            // Save watermark for hash-verified stream resumption
-                            if let Err(e) = ampsync_db_engine_clone
-                                .save_watermark(&table_name_owned, &watermark)
-                                .await
-                            {
-                                error!(
-                                    table = %table_name_owned,
-                                    error = %e,
-                                    "watermark_save_failed"
-                                );
-                                // Break to trigger stream reconnection
-                                // Watermark persistence is critical for resumption
-                                break;
-                            } else {
-                                info!(
-                                    table = %table_name_owned,
-                                    "watermark_saved"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                table = %table_name_owned,
-                                error = %e,
-                                "stream_error"
-                            );
-                            break; // Break inner loop to trigger reconnection
-                        }
-                    }
-                }
-
-                // Stream ended - will retry with exponential backoff in outer loop
-                warn!(
-                    table = %table_name_owned,
-                    "stream_ended"
-                );
-            }
-        });
-
-        task_handles.push(task_handle);
-    }
-
-    Ok(task_handles)
-}
-
-/// Gracefully shuts down all stream processing tasks.
-///
-/// Waits for tasks to complete with a timeout, logging any failures.
-/// This ensures in-flight batches are processed before shutdown.
-async fn shutdown_streams_gracefully(task_handles: Vec<tokio::task::JoinHandle<()>>) {
-    info!(task_count = task_handles.len(), "shutting_down_streams");
-
-    let shutdown_future = async {
-        for (i, handle) in task_handles.into_iter().enumerate() {
-            match handle.await {
-                Ok(_) => debug!(task_index = i, "task_completed"),
-                Err(e) => warn!(task_index = i, error = %e, "task_join_error"),
-            }
-        }
-    };
-
-    match tokio::time::timeout(
-        Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT_SECS),
-        shutdown_future,
-    )
-    .await
-    {
-        Ok(_) => info!("streams_shutdown_complete"),
-        Err(_) => warn!(
-            timeout_secs = GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
-            "graceful_shutdown_timeout"
-        ),
-    }
-}
-
-/// Sanitize a database URL for safe logging by redacting the password
-///
-/// Converts: postgresql://user:password@host:5432/db
-/// To:       postgresql://user:***@host:5432/db
-///
-/// Handles passwords containing special characters including '@'
-fn sanitize_database_url(url: &str) -> String {
-    // Find password section (between : and last @ before /)
-    if let Some(scheme_end) = url.find("://") {
-        let after_scheme = &url[scheme_end + 3..];
-
-        // Find the host/port section by looking for the last @ before any /
-        // This handles passwords with @ in them
-        let host_start = if let Some(slash_pos) = after_scheme.find('/') {
-            // There's a database path - find last @ before it
-            after_scheme[..slash_pos].rfind('@')
-        } else {
-            // No database path - find last @
-            after_scheme.rfind('@')
-        };
-
-        if let Some(at_pos) = host_start {
-            // Found @ - check if there's a password (look for : before @)
-            if let Some(colon_pos) = after_scheme[..at_pos].find(':') {
-                // Password exists - replace it with ***
-                let before_password = &url[..scheme_end + 3 + colon_pos + 1];
-                let after_password = &url[scheme_end + 3 + at_pos..];
-                return format!("{}***{}", before_password, after_password);
-            }
-        }
-    }
-    // No password found or parsing failed - return as-is
-    url.to_string()
-}
-
-#[derive(Clone)]
-pub struct AmpsyncConfig {
-    /// Ampsync database url to connect.
-    pub database_url: String,
-    /// Amp ArrowFlight server endpoint to connect to.
-    pub amp_flight_addr: String,
-    /// Amp Admin API endpoint for schema resolution.
-    pub amp_admin_api_addr: String,
-    /// Path to the dataset manifest file (for hot-reloading).
-    pub manifest_path: PathBuf,
-    /// Parsed dataset manifest.
-    pub manifest: Arc<Manifest>,
-    /// Maximum number of retries for hot-reload manifest fetch (configurable via HOT_RELOAD_MAX_RETRIES env var)
-    pub hot_reload_max_retries: u32,
-}
-impl AmpsyncConfig {
-    /// Get a sanitized version of the database URL safe for logging
-    /// (redacts password if present)
-    pub fn sanitized_database_url(&self) -> String {
-        sanitize_database_url(&self.database_url)
-    }
-
-    pub async fn from_env() -> Result<Self, BoxError> {
-        // Get dataset manifest path - required
-        let dataset_manifest_path = env::var("DATASET_MANIFEST")
-            .map_err(|_| "DATASET_MANIFEST environment variable is required")?;
-
-        let dataset_manifest = PathBuf::from(dataset_manifest_path);
-
-        // Verify the manifest file exists
-        if !dataset_manifest.exists() {
-            return Err(format!(
-                "Dataset manifest file does not exist: {}",
-                dataset_manifest.display()
-            )
-            .into());
-        }
-
-        // Verify it's a file, not a directory
-        if !dataset_manifest.is_file() {
-            return Err(format!(
-                "Dataset manifest path is not a file: {}",
-                dataset_manifest.display()
-            )
-            .into());
-        }
-
-        // Optionally validate the extension
-        let valid_extensions = ["ts", "js", "mts", "mjs", "json"];
-        if let Some(ext) = dataset_manifest.extension() {
-            let ext_str = ext.to_string_lossy();
-            if !valid_extensions.contains(&ext_str.as_ref()) {
-                return Err(format!(
-                    "Invalid dataset manifest extension '{}'. Expected one of: {}",
-                    ext_str,
-                    valid_extensions.join(", ")
-                )
-                .into());
-            }
-        } else {
-            return Err(
-                "Dataset manifest file must have an extension (ts, js, mts, mjs, or json)".into(),
-            );
-        }
-
-        // Get Nozzle configuration (needed for schema inference)
-        let amp_flight_addr =
-            env::var("AMP_FLIGHT_ADDR").unwrap_or_else(|_| "http://localhost:1602".to_string());
-        // Wire up the Amp admin api (used to fetch the manifest schema)
-        let amp_admin_api_addr =
-            env::var("AMP_ADMIN_API_ADDR").unwrap_or_else(|_| "http://localhost:1610".to_string());
-
-        // Get hot-reload retry configuration
-        let hot_reload_max_retries = env::var("HOT_RELOAD_MAX_RETRIES")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(DEFAULT_HOT_RELOAD_MAX_RETRIES);
-
-        // Load manifest with startup polling (polls indefinitely until dataset is published)
-        let manifest = Arc::new(
-            manifest::fetch_manifest_with_startup_poll(&amp_admin_api_addr, &dataset_manifest)
-                .await?,
-        );
-
-        // First, try to get DATABASE_URL directly
-        if let Ok(database_url) = env::var("DATABASE_URL") {
-            return Ok(Self {
-                database_url,
-                amp_flight_addr,
-                amp_admin_api_addr,
-                manifest_path: dataset_manifest,
-                manifest,
-                hot_reload_max_retries,
-            });
-        }
-
-        // Otherwise, try to construct from individual components
-        let user = env::var("DATABASE_USER").ok();
-        let password = env::var("DATABASE_PASSWORD").ok();
-        let host = env::var("DATABASE_HOST").unwrap_or_else(|_| "localhost".to_string());
-        let port = env::var("DATABASE_PORT")
-            .unwrap_or_else(|_| "5432".to_string())
-            .parse::<u16>()
-            .map_err(|_| "Invalid DATABASE_PORT")?;
-        let name = env::var("DATABASE_NAME").ok();
-
-        // Check if we have the minimum required components
-        if user.is_none() || name.is_none() {
-            return Err(
-                "Either DATABASE_URL or (DATABASE_USER and DATABASE_NAME) must be provided".into(),
-            );
-        }
-
-        // Construct the PostgreSQL URL. format: postgresql://{user}:{password}@{host}:{port}/{database}
-        let mut database_url = String::from("postgresql://");
-
-        // Add user
-        database_url.push_str(&user.unwrap());
-
-        // Add password if provided
-        if let Some(pass) = password {
-            database_url.push(':');
-            database_url.push_str(&pass);
-        }
-
-        // Add host and port
-        database_url.push('@');
-        database_url.push_str(&host);
-        database_url.push(':');
-        database_url.push_str(&port.to_string());
-
-        // Add database name
-        database_url.push('/');
-        database_url.push_str(&name.unwrap());
-
-        Ok(Self {
-            database_url,
-            amp_flight_addr,
-            amp_admin_api_addr,
-            manifest_path: dataset_manifest,
-            manifest,
-            hot_reload_max_retries,
-        })
-    }
-
-    /// Reload the manifest from disk (used for hot-reloading).
-    ///
-    /// This creates a new config with the updated manifest while preserving
-    /// database connection details.
-    ///
-    /// Uses limited retries (configurable via hot_reload_max_retries) to give
-    /// the dump command time to complete, then fails if dataset still not found.
-    pub async fn reload_manifest(&self) -> Result<Self, BoxError> {
-        info!("Reloading manifest from '{}'", self.manifest_path.display());
-
-        let manifest = Arc::new(
-            manifest::fetch_manifest_with_retry(
-                &self.amp_admin_api_addr,
-                &self.manifest_path,
-                self.hot_reload_max_retries,
-            )
-            .await?,
-        );
-
-        Ok(Self {
-            database_url: self.database_url.clone(),
-            amp_flight_addr: self.amp_flight_addr.clone(),
-            amp_admin_api_addr: self.amp_admin_api_addr.clone(),
-            manifest_path: self.manifest_path.clone(),
-            manifest,
-            hot_reload_max_retries: self.hot_reload_max_retries,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sanitize_database_url_with_password() {
-        let url = "postgresql://user:secret_pass@localhost:5432/mydb";
-        let sanitized = sanitize_database_url(url);
-        assert_eq!(sanitized, "postgresql://user:***@localhost:5432/mydb");
-        assert!(!sanitized.contains("secret_pass"));
-    }
-
-    #[test]
-    fn test_sanitize_database_url_without_password() {
-        let url = "postgresql://user@localhost:5432/mydb";
-        let sanitized = sanitize_database_url(url);
-        assert_eq!(sanitized, "postgresql://user@localhost:5432/mydb");
-    }
-
-    #[test]
-    fn test_sanitize_database_url_complex_password() {
-        let url = "postgresql://admin:p@ssw0rd!@#$@db.example.com:5432/production";
-        let sanitized = sanitize_database_url(url);
-        assert_eq!(
-            sanitized,
-            "postgresql://admin:***@db.example.com:5432/production"
-        );
-        assert!(!sanitized.contains("p@ssw0rd!@#$"));
-    }
-
-    #[test]
-    fn test_sanitize_database_url_invalid_format() {
-        let url = "not-a-valid-url";
-        let sanitized = sanitize_database_url(url);
-        assert_eq!(sanitized, "not-a-valid-url");
-    }
 }

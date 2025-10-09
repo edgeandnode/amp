@@ -25,8 +25,8 @@ services:
       retries: 5
 
   amp:
-    image: ghcr.io/edgeandnode/nozzle:sha-b6a469c
-    command: ["--config", "/var/lib/amp/config.toml", "server"]
+    image: ghcr.io/edgeandnode/nozzle:latest
+    command: ["--config", "/var/lib/amp/config.toml", "dev"]
     depends_on:
       db:
         condition: service_healthy
@@ -54,12 +54,13 @@ services:
     image: ampsync:latest
     pull_policy: build
     environment:
-      # Dataset manifest configuration
-      DATASET_MANIFEST: /nozzle.config.ts
+      # Dataset name - schema is auto-fetched from admin-api
+      DATASET_NAME: "ampsync_example"
+      # DATASET_VERSION: "0.1.0"  # Optional: pin to specific version (omit for auto-update mode)
 
-      # Amp ArrowFlight URL. Used to perform queries on amp dataset
+      # Amp ArrowFlight URL. Used to stream data from Nozzle
       AMP_FLIGHT_ADDR: http://amp:1602
-      # Amp AdminApi URL. Used to fetch the manifest table schema
+      # Amp Admin API URL. Used to fetch dataset schema and detect version updates
       AMP_ADMIN_API_ADDR: http://amp:1610
 
       # Database connection to sync data to
@@ -79,10 +80,6 @@ services:
         condition: service_started
       anvil:
         condition: service_started
-
-    volumes:
-      # Mount the nozzle config file for hot-reload (writeable for file events)
-      - ./nozzle.config.ts:/nozzle.config.ts
 
     restart: unless-stopped
 

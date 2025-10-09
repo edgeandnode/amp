@@ -5,7 +5,8 @@ use arrow_array::{
     Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, LargeBinaryArray,
     LargeStringArray, RecordBatch, StringArray, TimestampMicrosecondArray,
     TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt8Array,
-    UInt16Array, UInt32Array, UInt64Array, builder::PrimitiveBuilder,
+    UInt16Array, UInt32Array, UInt64Array,
+    builder::{BinaryBuilder, PrimitiveBuilder},
     types::TimestampMicrosecondType,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
@@ -30,11 +31,18 @@ const MAX_BATCH_BYTES: usize = 100 * 1024 * 1024;
 /// * `column` - The Arrow array column
 /// * `row_idx` - The row index to serialize
 /// * `buf` - The buffer to write serialized bytes to
-fn serialize_arrow_value(column: &dyn Array, row_idx: usize, buf: &mut Vec<u8>) {
+///
+/// # Errors
+/// Returns an error if the Arrow data type is not supported for hashing
+fn serialize_arrow_value(
+    column: &dyn Array,
+    row_idx: usize,
+    buf: &mut Vec<u8>,
+) -> Result<(), BoxError> {
     // Handle NULL values with a special marker
     if column.is_null(row_idx) {
         buf.push(0x00); // NULL marker
-        return;
+        return Ok(());
     }
 
     buf.push(0x01); // NOT NULL marker
@@ -167,15 +175,18 @@ fn serialize_arrow_value(column: &dyn Array, row_idx: usize, buf: &mut Vec<u8>) 
             buf.extend_from_slice(&arr.value(row_idx).to_le_bytes());
         }
 
-        // Unsupported types - fail loudly
+        // Unsupported types - return error
         other => {
-            panic!(
+            return Err(format!(
                 "Unsupported Arrow type for hashing: {:?}. \
                 Please add support for this type in serialize_arrow_value()",
                 other
-            );
+            )
+            .into());
         }
     }
+
+    Ok(())
 }
 
 /// Convert nanosecond timestamps to microseconds in a RecordBatch for PostgreSQL compatibility.
@@ -322,8 +333,9 @@ pub fn inject_system_metadata(
     let schema = batch.schema();
 
     // Create _id array: hash(row_content + block_range + row_index)
-    // Pre-allocate with capacity and reuse buffer for performance
-    let mut row_hashes = Vec::with_capacity(num_rows);
+    // Use BinaryBuilder to avoid allocating a Vec for each hash (eliminates ~50,000 allocations for max-size batch)
+    // Pre-allocate capacity: num_rows entries, each 16 bytes (xxh3_128 output size)
+    let mut id_builder = BinaryBuilder::with_capacity(num_rows, num_rows * 16);
 
     // Reusable buffer for hash input - avoids allocation on every row
     // Start with 1KB which covers most row sizes
@@ -335,7 +347,7 @@ pub fn inject_system_metadata(
         // Serialize all column values for this row using deterministic Arrow serialization
         for col_idx in 0..batch.num_columns() {
             let column = batch.column(col_idx);
-            serialize_arrow_value(column.as_ref(), row_idx, &mut hasher_input);
+            serialize_arrow_value(column.as_ref(), row_idx, &mut hasher_input)?;
         }
 
         // Add block range to hash input
@@ -345,13 +357,13 @@ pub fn inject_system_metadata(
         // Add row index to hash input (ensures uniqueness within batch)
         hasher_input.extend_from_slice(&(row_idx as u64).to_le_bytes());
 
-        // Compute xxh3 128-bit hash (16 bytes)
+        // Compute xxh3 128-bit hash (16 bytes) and append directly to builder
         let hash = xxh3_128(&hasher_input);
-        row_hashes.push(hash.to_le_bytes().to_vec());
+        id_builder.append_value(&hash.to_le_bytes());
     }
 
     // Create arrays for system columns
-    let id_array = BinaryArray::from(row_hashes.iter().map(|h| h.as_slice()).collect::<Vec<_>>());
+    let id_array = id_builder.finish();
     let block_start_array = Int64Array::from(vec![block_num_start as i64; num_rows]);
     let block_end_array = Int64Array::from(vec![block_num_end as i64; num_rows]);
 
