@@ -94,7 +94,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
-use futures::{TryFutureExt as _, TryStreamExt as _};
+use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
@@ -135,9 +135,7 @@ pub async fn dump(
     tracing::info!("connected to provider: {}", client.provider_name());
 
     let mut start = tables[0].dataset().start_block.unwrap_or(0);
-    let resolved = end
-        .resolve(start, client.latest_block().map_ok(Some))
-        .await?;
+    let resolved = end.resolve(start, client.latest_block()).await?;
 
     let end = match resolved {
         ResolvedEndBlock::NoDataAvailable => {
@@ -153,7 +151,10 @@ pub async fn dump(
     loop {
         timer.tick().await;
 
-        let latest_block = client.latest_block().await?;
+        let Some(latest_block) = client.latest_block().await? else {
+            // No data to dump
+            continue;
+        };
         if latest_block < start {
             continue;
         }
