@@ -248,14 +248,13 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
         let stream = self.blocks(-1, 0).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
         Ok(block
             .transpose()?
-            .map(|b| b.clock.map(|c| c.number).unwrap_or(b.final_block_height))
-            .unwrap_or(0))
+            .map(|b| b.clock.map(|c| c.number).unwrap_or(b.final_block_height)))
     }
 
     fn provider_name(&self) -> &str {

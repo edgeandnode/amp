@@ -456,7 +456,7 @@ impl BlockStreamer for JsonRpcClient {
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
         let number = match self.final_blocks_only {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
@@ -468,7 +468,7 @@ impl BlockStreamer for JsonRpcClient {
                 c.get_block_by_number(number).await
             })
             .await?;
-        Ok(block.map(|b| b.header.number).unwrap_or(0))
+        Ok(block.map(|b| b.header.number))
     }
 
     fn provider_name(&self) -> &str {

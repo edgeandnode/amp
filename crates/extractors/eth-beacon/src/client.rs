@@ -89,7 +89,7 @@ impl common::BlockStreamer for BeaconClient {
         }
     }
 
-    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
         let _permit = self.concurrency_limiter.acquire().await;
         if let Some(rate_limiter) = &self.rate_limiter {
             rate_limiter.until_ready().await;
@@ -124,6 +124,6 @@ impl common::BlockStreamer for BeaconClient {
         }
         let response: Response = response.json().await?;
 
-        Ok(response.data.message.slot)
+        Ok(Some(response.data.message.slot))
     }
 }
