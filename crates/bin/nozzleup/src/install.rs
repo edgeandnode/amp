@@ -8,6 +8,38 @@ use crate::{
     version_manager::VersionManager,
 };
 
+#[derive(Debug)]
+pub enum InstallError {
+    EmptyBinary { version: String },
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyBinary { version } => {
+                writeln!(f, "Downloaded binary is empty")?;
+                writeln!(f, "  Version: {}", version)?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "  The release asset was downloaded but contains no data."
+                )?;
+                writeln!(
+                    f,
+                    "  This may indicate a problem with the release packaging."
+                )?;
+                writeln!(
+                    f,
+                    "  Try downloading a different version or report this issue."
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for InstallError {}
+
 pub struct Installer {
     version_manager: VersionManager,
     github: GitHubClient,
@@ -37,11 +69,13 @@ impl Installer {
         let binary_data = self
             .github
             .download_release_asset(version, &artifact)
-            .await
-            .context("Failed to download binary")?;
+            .await?;
 
         if binary_data.is_empty() {
-            anyhow::bail!("Downloaded binary is empty");
+            return Err(InstallError::EmptyBinary {
+                version: version.to_string(),
+            }
+            .into());
         }
 
         ui::detail!("Downloaded {} bytes", binary_data.len());

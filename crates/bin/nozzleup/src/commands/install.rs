@@ -56,7 +56,11 @@ pub async fn run(
         Some(p) => match p.as_str() {
             "linux" => Platform::Linux,
             "darwin" => Platform::Darwin,
-            _ => anyhow::bail!("Unsupported platform: {}", p),
+            _ => {
+                return Err(
+                    crate::platform::PlatformError::UnsupportedPlatform { detected: p }.into(),
+                );
+            }
         },
         None => Platform::detect()?,
     };
@@ -65,7 +69,12 @@ pub async fn run(
         Some(a) => match a.as_str() {
             "x86_64" | "amd64" => Architecture::X86_64,
             "aarch64" | "arm64" => Architecture::Aarch64,
-            _ => anyhow::bail!("Unsupported architecture: {}", a),
+            _ => {
+                return Err(crate::platform::PlatformError::UnsupportedArchitecture {
+                    detected: a,
+                }
+                .into());
+            }
         },
         None => Architecture::detect()?,
     };

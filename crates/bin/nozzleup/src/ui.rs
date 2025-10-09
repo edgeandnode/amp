@@ -15,7 +15,6 @@ macro_rules! info {
 }
 
 /// Print a warning message with a yellow warning symbol
-#[allow(unused_macros)]
 macro_rules! warning {
     ($($arg:tt)*) => {
         eprintln!("{} {}", console::style("⚠").yellow().bold(), format!($($arg)*))

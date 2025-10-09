@@ -5,6 +5,42 @@ use fs_err as fs;
 
 use crate::config::Config;
 
+/// Version management errors
+#[derive(Debug)]
+pub enum VersionError {
+    NotInstalled { version: String },
+    NoVersionsInstalled,
+    BinaryNotFound { version: String },
+}
+
+impl std::fmt::Display for VersionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotInstalled { version } => {
+                writeln!(f, "Version not installed")?;
+                writeln!(f, "  Version: {}", version)?;
+                writeln!(f)?;
+                writeln!(f, "  Try: nozzleup install {}", version)?;
+            }
+            Self::NoVersionsInstalled => {
+                writeln!(f, "No versions installed")?;
+                writeln!(f)?;
+                writeln!(f, "  Try: nozzleup install")?;
+            }
+            Self::BinaryNotFound { version } => {
+                writeln!(f, "Binary not found")?;
+                writeln!(f, "  Version: {}", version)?;
+                writeln!(f)?;
+                writeln!(f, "  Installation may be corrupted.")?;
+                writeln!(f, "  Try: nozzleup install {}", version)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for VersionError {}
+
 /// Manages installed nozzle versions
 pub struct VersionManager {
     config: Config,
@@ -60,16 +96,18 @@ impl VersionManager {
     pub fn activate(&self, version: &str) -> Result<()> {
         let version_dir = self.config.versions_dir.join(version);
         if !version_dir.exists() {
-            anyhow::bail!(
-                "Version {} is not installed. Run 'nozzleup install {}' to install it",
-                version,
-                version
-            );
+            return Err(VersionError::NotInstalled {
+                version: version.to_string(),
+            }
+            .into());
         }
 
         let binary_path = self.config.version_binary_path(version);
         if !binary_path.exists() {
-            anyhow::bail!("Binary not found for version {}", version);
+            return Err(VersionError::BinaryNotFound {
+                version: version.to_string(),
+            }
+            .into());
         }
 
         let active_path = self.config.active_binary_path();
@@ -92,7 +130,10 @@ impl VersionManager {
     pub fn uninstall(&self, version: &str) -> Result<()> {
         let version_dir = self.config.versions_dir.join(version);
         if !version_dir.exists() {
-            anyhow::bail!("Version {} is not installed", version);
+            return Err(VersionError::NotInstalled {
+                version: version.to_string(),
+            }
+            .into());
         }
 
         // Check if this is the current version
