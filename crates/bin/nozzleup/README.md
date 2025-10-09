@@ -15,7 +15,7 @@ export GITHUB_TOKEN=$(gh auth token)
 # Set up `nozzleup` from the private repository.
 curl --proto '=https' --tlsv1.2 -sSf \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/nozzleup/install | sh
+  https://raw.githubusercontent.com/edgeandnode/project-nozzle/main/crates/bin/nozzleup/install | sh
 ```
 
 Once installed, you can conveniently manage your `nozzle` versions through `nozzleup`.
