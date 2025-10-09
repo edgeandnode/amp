@@ -365,7 +365,7 @@ fn create_test_manifest(name: &str, version: &str, owner: &str) -> DerivedDatase
             "dependencies": {{
                 "raw_mainnet": {{
                     "owner": "{owner}",
-                    "name": "base_dataset",
+                    "name": "eth_firehose",
                     "version": "0.0.1"
                 }}
             }},
