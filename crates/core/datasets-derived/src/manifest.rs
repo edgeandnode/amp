@@ -177,3 +177,17 @@ pub struct Field {
     /// Whether the field can contain null values
     pub nullable: bool,
 }
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum DependencyValidationError {
+    #[error("invalid SQL query: {0}")]
+    InvalidSql(String),
+    #[error("undeclared dependencies of SQL query: {0:?}")]
+    Missing(Vec<String>),
+}
+
+impl Manifest {
+    pub fn validate_dependencies(&self) -> Result<(), DependencyValidationError> {
+        todo!()
+    }
+}
