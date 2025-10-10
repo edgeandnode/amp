@@ -35,7 +35,7 @@
   },
   "publishConfig": {
     "bin": {
-      "@edgeandnode/amp": "./dist/cli/main.js"
+      "amp": "./dist/cli/main.js"
     },
     "exports": {
       ".": "./dist/index.js",
