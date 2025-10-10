@@ -5,12 +5,10 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 use axum::{
     Router,
     routing::{get, post, put},
-    serve::{Listener as _, ListenerExt as _},
 };
 use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
-use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
+use http_common::serve_at;
 
 mod ctx;
 pub mod handlers;
@@ -111,16 +109,7 @@ pub async fn serve(
         app = app.layer(metrics_layer);
     }
 
-    let app = app;
-
-    let listener = TcpListener::bind(at)
-        .await?
-        .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
-    let addr = listener.local_addr()?;
-
-    let app = app.layer(CorsLayer::permissive());
-    let server = async move { axum::serve(listener, app).await.map_err(Into::into) };
-    Ok((addr, server))
+    serve_at(at, app).await
 }
 
 #[cfg(feature = "utoipa")]

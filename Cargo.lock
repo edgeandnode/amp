@@ -35,6 +35,7 @@ dependencies = [
  "dump",
  "evm-rpc-datasets",
  "futures",
+ "http-common",
  "metadata-db",
  "monitoring",
  "object_store",

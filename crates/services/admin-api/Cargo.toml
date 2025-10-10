@@ -29,3 +29,4 @@ toml.workspace = true
 tracing.workspace = true
 utoipa = { version = "5.4.0", features = ["axum_extras"], optional = true }
 worker = { path = "../worker" }
+http-common = { version = "0.1.0", path = "../http-common" }

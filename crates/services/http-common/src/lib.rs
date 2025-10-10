@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     serve::{Listener, ListenerExt as _},
 };
-use common::BoxResult;
+use common::{BoxResult, utils::shutdown_signal};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
@@ -44,6 +44,11 @@ pub async fn serve_at(
     let addr = listener.local_addr()?;
 
     let router = router.layer(CorsLayer::permissive());
-    let server = async move { axum::serve(listener, router).await.map_err(Into::into) };
+    let server = async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            .map_err(Into::into)
+    };
     Ok((addr, server))
 }

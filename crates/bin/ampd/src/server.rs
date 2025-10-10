@@ -8,7 +8,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
 use common::{
     BoxError, BoxResult, arrow, config::Config, query_context::parse_sql,
-    stream_helpers::is_streaming,
+    stream_helpers::is_streaming, utils::shutdown_signal,
 };
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
@@ -57,11 +57,14 @@ pub async fn run(
         flight_tcp_listener.set_nonblocking(true)?;
         let flight_server = Server::builder()
             .add_service(FlightServiceServer::new(service.clone()))
-            .serve_with_incoming(TcpIncoming::from_listener(
-                tokio::net::TcpListener::from_std(flight_tcp_listener)?,
-                true,
-                None,
-            )?)
+            .serve_with_incoming_shutdown(
+                TcpIncoming::from_listener(
+                    tokio::net::TcpListener::from_std(flight_tcp_listener)?,
+                    true,
+                    None,
+                )?,
+                shutdown_signal(),
+            )
             .map_err(|e| {
                 tracing::error!("Flight server error: {}", e);
                 e.into()
