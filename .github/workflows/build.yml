@@ -154,6 +154,10 @@ jobs:
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
         with:
           draft: false
+          # When using the repository's GITHUB_TOKEN to perform tasks, events triggered by the
+          # GITHUB_TOKEN will not create a new workflow run. Therefore, we need to use a separate
+          # token for publishing the release.
+          token: ${{ secrets.PUBLISH_RELEASE_TOKEN }}
 
   containerize:
     name: Containerize
