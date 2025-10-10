@@ -225,7 +225,7 @@ mod tests {
     fn test_env_vars_convenience_function() {
         // Test the convenience function that uses actual environment variables
         // We'll use a unique variable name to avoid conflicts
-        let test_var = "NOZZLE_TEST_UNIQUE_VAR_12345";
+        let test_var = "AMP_TEST_UNIQUE_VAR_12345";
 
         unsafe {
             env::set_var(test_var, "test_value");

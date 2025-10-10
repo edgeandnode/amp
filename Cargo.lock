@@ -822,6 +822,75 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-client"
+version = "0.1.0"
+dependencies = [
+ "arrow-flight",
+ "async-stream",
+ "bytes",
+ "common",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "tonic 0.12.3",
+]
+
+[[package]]
+name = "ampd"
+version = "0.1.0"
+dependencies = [
+ "admin-api",
+ "arrow-flight",
+ "axum 0.8.4",
+ "clap",
+ "common",
+ "controller",
+ "datafusion",
+ "dataset-store",
+ "datasets-common",
+ "datasets-derived",
+ "dump",
+ "futures",
+ "generate-manifest",
+ "http-common",
+ "metadata-db",
+ "monitoring",
+ "serde_json",
+ "server",
+ "snmalloc-rs",
+ "static_assertions",
+ "tokio",
+ "tonic 0.12.3",
+ "tower-http",
+ "tracing",
+ "vergen-gitcl",
+ "worker",
+]
+
+[[package]]
+name = "ampup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "console",
+ "dialoguer",
+ "fs-err",
+ "futures",
+ "indicatif",
+ "reqwest",
+ "semver 1.0.26",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
+ "vergen-gitcl",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,76 +5315,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
-name = "nozzle"
-version = "0.1.0"
-dependencies = [
- "admin-api",
- "arrow-flight",
- "axum 0.8.4",
- "clap",
- "common",
- "controller",
- "datafusion",
- "dataset-store",
- "datasets-common",
- "datasets-derived",
- "dump",
- "futures",
- "generate-manifest",
- "http-common",
- "metadata-db",
- "monitoring",
- "serde_json",
- "server",
- "snmalloc-rs",
- "static_assertions",
- "tokio",
- "tonic 0.12.3",
- "tower-http",
- "tracing",
- "vergen-gitcl",
- "worker",
-]
-
-[[package]]
-name = "nozzle-client"
-version = "0.1.0"
-dependencies = [
- "arrow-flight",
- "async-stream",
- "bytes",
- "common",
- "futures",
- "serde",
- "serde_json",
- "thiserror 2.0.16",
- "tokio",
- "tonic 0.12.3",
-]
-
-[[package]]
-name = "nozzleup"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "console",
- "dialoguer",
- "fs-err",
- "futures",
- "indicatif",
- "pretty_assertions",
- "reqwest",
- "semver 1.0.26",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "url",
- "vergen-gitcl",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6119,7 +6118,7 @@ version = "0.13.3"
 source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork-0.13.3#38d1ee0d94d1ee343eeca4949dec07062a0129dc"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -7641,6 +7640,8 @@ version = "0.1.0"
 dependencies = [
  "admin-api",
  "alloy",
+ "amp-client",
+ "ampd",
  "arrow-flight",
  "backon",
  "clap",
@@ -7664,8 +7665,6 @@ dependencies = [
  "indoc",
  "metadata-db",
  "monitoring",
- "nozzle",
- "nozzle-client",
  "object_store",
  "opentelemetry",
  "opentelemetry_sdk",

@@ -1,4 +1,4 @@
-//! Test support CLI for the Nozzle project.
+//! Test support CLI for the Amp project.
 //!
 //! This module provides a command-line interface for test-related operations,
 //! particularly for creating and managing blessed dataset snapshots used in
@@ -47,6 +47,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use ampd::dump_cmd::{datasets_and_dependencies, dump};
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::{
@@ -57,7 +58,6 @@ use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use monitoring::logging;
-use nozzle::dump_cmd::{datasets_and_dependencies, dump};
 use tests::testlib::{
     fixtures::{DaemonConfigBuilder, TempMetadataDb},
     helpers as test_helpers,
@@ -83,7 +83,7 @@ const BLESS_JOB_COUNT: u16 = 1;
 /// dataset snapshots that can be used in integration tests.
 #[derive(Parser, Debug)]
 #[command(name = "tests")]
-#[command(about = "Test support utilities for the Nozzle project")]
+#[command(about = "Test support utilities for the Amp project")]
 #[command(
     long_about = "Provides commands for creating and managing blessed dataset snapshots used in integration tests"
 )]

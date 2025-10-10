@@ -1,8 +1,8 @@
 {
-  "name": "nozzle-test-multi-version",
+  "name": "amp-test-multi-version",
   "private": true,
   "type": "module",
   "dependencies": {
-    "nozzl": "workspace:*"
+    "@edgeandnode/amp": "workspace:*"
   }
 }

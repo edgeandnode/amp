@@ -1,10 +1,10 @@
-# Nozzle Telemetry Metrics
+# Amp Telemetry Metrics
 
-This document enumerates all metrics collected by Nozzle for observability and performance monitoring. Metrics are exported via OpenTelemetry and designed for Prometheus-compatible backends.
+This document enumerates all metrics collected by Amp for observability and performance monitoring. Metrics are exported via OpenTelemetry and designed for Prometheus-compatible backends.
 
 ## Metric Types
 
-Nozzle uses four OpenTelemetry instrument types:
+Amp uses four OpenTelemetry instrument types:
 
 - **Counter**: Monotonically increasing value (e.g., total requests). Always named with `_total` suffix per Prometheus conventions.
 - **Gauge**: Value that can increase or decrease, sampled from external source (e.g., queue depth from DB).

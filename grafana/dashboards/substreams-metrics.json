@@ -1034,6 +1034,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "Substreams Metrics",
-  "uid": "nozzle-substreams-metrics",
+  "uid": "amp-substreams-metrics",
   "version": 1
 }

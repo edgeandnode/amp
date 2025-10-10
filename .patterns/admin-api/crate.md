@@ -2,13 +2,13 @@
 =========================
 
 This document serves as both human and AI agent context for understanding and contributing to the `admin-api` crate.
-The goal is a focused administrative HTTP API for Project Nozzle management operations.
+The goal is a focused administrative HTTP API for Project Amp management operations.
 
 ## Context and Purpose
 
 **🎯 PRIMARY PURPOSE: Administrative HTTP API Layer**
 
-The `admin-api` crate has ONE responsibility: **provide HTTP REST API endpoints for administrative operations in Project Nozzle**. This crate is strictly an HTTP presentation layer that exposes administrative functionality through REST endpoints - nothing more.
+The `admin-api` crate has ONE responsibility: **provide HTTP REST API endpoints for administrative operations in Project Amp**. This crate is strictly an HTTP presentation layer that exposes administrative functionality through REST endpoints - nothing more.
 
 **✅ What `admin-api` IS:**
 - An HTTP server providing REST API endpoints for admin operations
@@ -20,7 +20,7 @@ The `admin-api` crate has ONE responsibility: **provide HTTP REST API endpoints 
 **❌ What `admin-api` is NOT:**
 - A business logic container (domain logic belongs in consuming crates like dataset-store, metadata-db)
 - A data storage system (data persistence is handled by dataset-store, metadata-db, etc.)
-- A computation engine (data processing belongs in nozzle, worker crates)
+- A computation engine (data processing belongs in amp, worker crates)
 - A general-purpose web service (only administrative operations, not user-facing features)
 
 **🎯 Single Responsibility Principle:**
@@ -29,7 +29,7 @@ This crate exists solely to **expose administrative operations via HTTP REST API
 
 **🏗️ Architectural Context:**
 
-In Nozzle's distributed architecture, admin-api serves as the **HTTP presentation layer** for administrative operations:
+In Amp's distributed architecture, admin-api serves as the **HTTP presentation layer** for administrative operations:
 - Exposes dataset management endpoints (delegates to dataset-store)
 - Provides system monitoring endpoints (delegates to metadata-db)
 - Offers worker management endpoints (delegates to metadata-db)

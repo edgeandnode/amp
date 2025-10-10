@@ -14,7 +14,7 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
     compaction::{
-        CompactionProperties, NozzleCompactorTaskType,
+        AmpCompactorTaskType, CompactionProperties,
         error::{CollectionResult, CollectorError},
     },
     consistency_check,
@@ -89,7 +89,7 @@ impl Display for Collector {
     }
 }
 
-impl NozzleCompactorTaskType for Collector {
+impl AmpCompactorTaskType for Collector {
     type Error = CollectorError;
 
     fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {

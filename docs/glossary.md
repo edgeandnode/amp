@@ -1,6 +1,6 @@
 # Glossary
 
-A glossary defining key concepts and terminology used throughout the Nozzle project. Organized by logical and physical architecture layers.
+A glossary defining key concepts and terminology used throughout the Amp project. Organized by logical and physical architecture layers.
 
 ## Logical
 
@@ -38,7 +38,7 @@ Datasets define how data is extracted, transformed, and materialized into [Parqu
 ### Dataset Manifest
 A structured definition file that specifies a [dataset's](#dataset) configuration, including its [kind](#dataset-kind),
 data sources, transformations, [schema](#schema), and dependencies.
-Acts as the blueprint for how Nozzle should process and materialize the dataset.
+Acts as the blueprint for how Amp should process and materialize the dataset.
 
 ### Dataset Kind
 The implementation type that determines how a [dataset](#dataset) processes data:
@@ -54,10 +54,10 @@ A high-level classification grouping [datasets](#dataset) by their data processi
 
 ## Physical
 
-Nozzle currently adopts the FDAP stack for its physical layer, see https://www.influxdata.com/glossary/fdap-stack/.
+Amp currently adopts the FDAP stack for its physical layer, see https://www.influxdata.com/glossary/fdap-stack/.
 
 ### DataFusion
-The query planner and execution engine used by Nozzle, see https://datafusion.apache.org.
+The query planner and execution engine used by Amp, see https://datafusion.apache.org.
 
 ### Arrow record batch
 Arrow is an in-memory and over-the-wire data format. Query results are returned by DataFusion as a stream of Arrow record batches. See https://arrow.apache.org/docs/index.html.
@@ -66,5 +66,5 @@ Arrow is an in-memory and over-the-wire data format. Query results are returned 
 The file format in which record batches are persisted, for example to materialize query results. See https://parquet.apache.org.
 
 ### Arrow Flight
-The RPC protocol Nozzle uses for queries, with results returned as Arrow record batches over gRPC, see https://arrow.apache.org/docs/format/Flight.html.
+The RPC protocol Amp uses for queries, with results returned as Arrow record batches over gRPC, see https://arrow.apache.org/docs/format/Flight.html.
 

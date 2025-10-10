@@ -26,10 +26,10 @@ def _():
 def _():
     import pyarrow.compute as pc
 
-    from nozzle.client import Client
-    from nozzle.loaders import PSQLClient
-    from nozzle.util import process_query, to_hex
-    from nozzle.util import Abi
+    from amp.client import Client
+    from amp.loaders import PSQLClient
+    from amp.util import process_query, to_hex
+    from amp.util import Abi
     return Abi, Client, PSQLClient, pc, process_query, to_hex
 
 

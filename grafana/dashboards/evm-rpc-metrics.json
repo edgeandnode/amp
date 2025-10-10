@@ -1037,6 +1037,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "EVM-RPC Metrics",
-  "uid": "nozzle-evm-rpc-metrics",
+  "uid": "amp-evm-rpc-metrics",
   "version": 1
 }

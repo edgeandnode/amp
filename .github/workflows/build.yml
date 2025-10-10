@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       - name: Build binaries
-        run: cargo build --target ${{ matrix.target }} --release -p nozzle -p nozzleup
+        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampup
 
       - name: Sign binaries
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
@@ -61,49 +61,49 @@ jobs:
             --options runtime \
             --entitlements entitlements.plist \
             --timestamp \
-            target/${{ matrix.target }}/release/nozzle
+            target/${{ matrix.target }}/release/ampd
 
           /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
             --options runtime \
             --entitlements entitlements.plist \
             --timestamp \
-            target/${{ matrix.target }}/release/nozzleup
+            target/${{ matrix.target }}/release/ampup
 
           # Reset to login keychain before deleting
           security default-keychain -s login.keychain-db
           security delete-keychain macos-build.keychain
           rm certificate.p12
 
-      - name: Notarize nozzle
+      - name: Notarize ampd
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
-          product-path: target/${{ matrix.target }}/release/nozzle
+          product-path: target/${{ matrix.target }}/release/ampd
           appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Notarize nozzleup
+      - name: Notarize ampup
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
-          product-path: target/${{ matrix.target }}/release/nozzleup
+          product-path: target/${{ matrix.target }}/release/ampup
           appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Upload nozzle artifact
+      - name: Upload ampd artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ matrix.target }}-nozzle
-          path: target/${{ matrix.target }}/release/nozzle
+          name: ${{ matrix.target }}-ampd
+          path: target/${{ matrix.target }}/release/ampd
           retention-days: 30
 
-      - name: Upload nozzleup artifact
+      - name: Upload ampup artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ matrix.target }}-nozzleup
-          path: target/${{ matrix.target }}/release/nozzleup
+          name: ${{ matrix.target }}-ampup
+          path: target/${{ matrix.target }}/release/ampup
           retention-days: 30
 
   release:
@@ -127,15 +127,15 @@ jobs:
           # Organize binaries for release
           mkdir -p release
 
-          # Copy and rename nozzle binaries
-          cp artifacts/x86_64-unknown-linux-gnu-nozzle/nozzle release/nozzle-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-nozzle/nozzle release/nozzle-linux-aarch64
-          cp artifacts/aarch64-apple-darwin-nozzle/nozzle release/nozzle-darwin-aarch64
+          # Copy and rename ampd binaries
+          cp artifacts/x86_64-unknown-linux-gnu-ampd/ampd release/ampd-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-ampd/ampd release/ampd-linux-aarch64
+          cp artifacts/aarch64-apple-darwin-ampd/ampd release/ampd-darwin-aarch64
 
-          # Copy and rename nozzleup binaries
-          cp artifacts/x86_64-unknown-linux-gnu-nozzleup/nozzleup release/nozzleup-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-nozzleup/nozzleup release/nozzleup-linux-aarch64
-          cp artifacts/aarch64-apple-darwin-nozzleup/nozzleup release/nozzleup-darwin-aarch64
+          # Copy and rename ampup binaries
+          cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
+          cp artifacts/aarch64-apple-darwin-ampup/ampup release/ampup-darwin-aarch64
 
           # Make all binaries executable
           chmod +x release/*
@@ -171,13 +171,13 @@ jobs:
       - name: Download Linux AMD64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: x86_64-unknown-linux-gnu-nozzle
+          name: x86_64-unknown-linux-gnu-ampd
           path: ./amd64/
 
       - name: Download Linux ARM64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: aarch64-unknown-linux-gnu-nozzle
+          name: aarch64-unknown-linux-gnu-ampd
           path: ./arm64/
           
       - name: Login to GitHub Container Registry
@@ -194,11 +194,17 @@ jobs:
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         id: metadata
         with:
-          images: ghcr.io/edgeandnode/nozzle
+          images: ghcr.io/edgeandnode/amp
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
             type=sha
+          labels: |
+            org.opencontainers.image.source=https://github.com/edgeandnode/amp
+            org.opencontainers.image.url=https://github.com/edgeandnode/amp
+            org.opencontainers.image.vendor=Edge & Node
+            org.opencontainers.image.title=Amp
+            org.opencontainers.image.description=A tool for building and managing blockchain datasets
 
       - name: Create multi-arch Dockerfile
         run: |
@@ -213,21 +219,21 @@ jobs:
               rm -rf /var/lib/apt/lists/*
 
           # Copy the appropriate binary based on target architecture
-          COPY nozzle-linux-$TARGETARCH /nozzle
-          RUN chmod +x /nozzle
-          ENTRYPOINT ["/nozzle"]
+          COPY ampd-linux-$TARGETARCH /ampd
+          RUN chmod +x /ampd
+          ENTRYPOINT ["/ampd"]
           EOF
 
       - name: Rename binaries for Docker context
         run: |
           # Copy and rename the binaries from their download directories
-          cp ./amd64/nozzle ./nozzle-linux-amd64
-          chmod +x ./nozzle-linux-amd64
-          cp ./arm64/nozzle ./nozzle-linux-arm64
-          chmod +x ./nozzle-linux-arm64
+          cp ./amd64/ampd ./ampd-linux-amd64
+          chmod +x ./ampd-linux-amd64
+          cp ./arm64/ampd ./ampd-linux-arm64
+          chmod +x ./ampd-linux-arm64
 
           # Verify binaries exist
-          ls -la nozzle-linux-*
+          ls -la ampd-linux-*
 
       - name: Build and push Docker image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6

@@ -23,7 +23,7 @@ def _():
 
 @app.cell
 def _():
-    from nozzle.client import Client
+    from amp.client import Client
     return (Client,)
 
 

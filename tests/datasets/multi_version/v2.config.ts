@@ -1,4 +1,4 @@
-import { defineDataset } from "nozzl"
+import { defineDataset } from "@edgeandnode/amp"
 
 export default defineDataset(() => ({
   name: "multi_version",

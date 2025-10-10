@@ -1,4 +1,4 @@
-# Project Nozzle
+# Project Amp
 
 _The data goes in the bucket_
 
@@ -6,56 +6,51 @@ _The data goes in the bucket_
 
 ## What is this
 
-An experiment in ETL architecture for data services on The Graph. 'Project Nozzle' is a codename.
+An experiment in ETL architecture for data services on The Graph. 'Project Amp' is a codename.
 
 ## Installation
 
-The easiest way to install Nozzle is using `nozzleup`, the official version manager and installer:
+The easiest way to install Amp is using `ampup`, the official version manager and installer:
 
 ```sh
-# Obtain a GitHub personal access token (required while repo is private)
-export GITHUB_TOKEN=$(gh auth token)
-
-# Install nozzleup
-curl --proto '=https' --tlsv1.2 -sSf \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/edgeandnode/project-nozzle/refs/heads/main/crates/bin/nozzleup/install | sh
+# Install ampup
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install | sh
 ```
 
-This will install `nozzleup` and the latest version of `nozzle`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.
+This will install `ampup` and the latest version of `ampd`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.
 
-Once installed, you can manage `nozzle` versions:
+Once installed, you can manage `ampd` versions:
 
 ```sh
 # Install or update to the latest version
-nozzleup install
+ampup install
 
 # Switch between installed versions
-nozzleup use v0.1.0
+ampup use v0.1.0
 
 # Build from source (main branch)
-nozzleup build
+ampup build
 
 # Build from a specific PR or branch
-nozzleup build --pr 123
-nozzleup build --branch develop
+ampup build --pr 123
+ampup build --branch develop
 ```
 
-For more details and advanced options, see the [nozzleup README](nozzleup/README.md).
+For more details and advanced options, see the [ampup README](ampup/README.md).
 
 ### Installation via Nix
 
-For Nix users, `nozzle` is available as a flake:
+For Nix users, `ampd` is available as a flake:
 
 ```sh
 # Run directly without installing
-nix run github:edgeandnode/project-nozzle
+nix run github:edgeandnode/amp
 
 # Install to your profile
-nix profile install github:edgeandnode/project-nozzle
+nix profile install github:edgeandnode/amp
 
 # Try it out temporarily
-nix shell github:edgeandnode/project-nozzle -c nozzle --version
+nix shell github:edgeandnode/amp -c ampd --version
 ```
 
 You can also add it to your NixOS or home-manager configuration:
@@ -64,48 +59,48 @@ You can also add it to your NixOS or home-manager configuration:
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    nozzle = {
-      url = "github:edgeandnode/project-nozzle";
+    amp = {
+      url = "github:edgeandnode/amp";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, nozzle, ... }: {
+  outputs = { nixpkgs, amp, ... }: {
     # NixOS configuration
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
       # ...
       environment.systemPackages = [
-        nozzle.packages.${system}.nozzle
+        amp.packages.${system}.ampd
       ];
     };
 
     # Or home-manager configuration
     home.packages = [
-      nozzle.packages.${system}.nozzle
+      amp.packages.${system}.ampd
     ];
   };
 }
 ```
 
-Note: Nix handles version management, so `nozzleup` is not needed for Nix users.
+Note: Nix handles version management, so `ampup` is not needed for Nix users.
 
 ### Building from Source (Manual)
 
-If you prefer to build manually without using `nozzleup`:
+If you prefer to build manually without using `ampup`:
 
 ```sh
-cargo build --release -p nozzle
+cargo build --release -p ampd
 ```
 
-The binary will be available at `target/release/nozzle`.
+The binary will be available at `target/release/ampd`.
 
 ### Python Quickstart
 
-To quickly dive into the power of Nozzle with Python, best is to run the [`marimo_example_nb.ipynb](python/notebooks/marimo_example_nb.pyy). Follow the instructions in thy [Python README](python/README.md).
+To quickly dive into the power of Amp with Python, best is to run the [`marimo_example_nb.ipynb](python/notebooks/marimo_example_nb.pyy). Follow the instructions in thy [Python README](python/README.md).
 
 ## Components
 
-See [config.md](docs/config.md) for how to configure nozzle.
+See [config.md](docs/config.md) for how to configure amp.
 
 ### Prerequisites
 
@@ -116,14 +111,14 @@ will need to run the metadata DB. You can do this with `docker-compose`:
 docker-compose up -d
 ```
 
-This will run the metadata DB at `postgresql://postgres:postgres@localhost:5432/nozzle`.
+This will run the metadata DB at `postgresql://postgres:postgres@localhost:5432/amp`.
 Update your config file to include it:
 
 ```toml
-metadata_db_url = "postgresql://postgres:postgres@localhost:5432/nozzle"
+metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
-### nozzle dump
+### ampd dump
 
 Dump extractor interfaces to parquet files.
 
@@ -136,7 +131,7 @@ you can simply refer to the dataset by name. An example usage to dump first four
 dataset named `eth_firehose`, running two parallel jobs:
 
 ```
-cargo run --release -p nozzle -- dump --dataset eth_firehose -e 4000000 -j 2
+cargo run --release -p ampd -- dump --dataset eth_firehose -e 4000000 -j 2
 ```
 
 You will now be able to find your tables under `<dataset>/<table>/` in your data directory. Each
@@ -153,9 +148,9 @@ linearely with the number of jobs (`DUMP_N_JOBS`), the partition size (`DUMP_PAR
 the number of tables being written to. As a reference point, at 50 workers and a 4 GB partition
 size, memory usage was measured to peak at about 10 GB for the EVM dataset with 4 tables.
 
-### nozzle server
+### ampd server
 
-To run, just `cargo run -p nozzle -- server`.
+To run, just `cargo run -p ampd -- server`.
 
 This starts both a JSON Lines over HTTP server and an Arrow Flight (gRPC) server.
 The HTTP server is straightforward, send it a query and get results, one row per line:
@@ -165,7 +160,7 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 ```
 
 The Arrow Flight server requires a specialized client. We currently have a Python client,
-see docs for that [here](https://github.com/edgeandnode/project-nozzle/tree/main/python).
+see docs for that [here](https://github.com/edgeandnode/amp/tree/main/python).
 
 > **Note:**
 >
@@ -174,7 +169,7 @@ see docs for that [here](https://github.com/edgeandnode/project-nozzle/tree/main
 
 ### Telemetry
 
-Nozzle has an OpenTelemetry setup to track various metrics and traces. For local testing, a Grafana telemetry stack
+Amp has an OpenTelemetry setup to track various metrics and traces. For local testing, a Grafana telemetry stack
 is already configured and can be run through `docker-compose`:
 
 ```

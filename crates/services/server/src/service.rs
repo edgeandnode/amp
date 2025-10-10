@@ -453,7 +453,7 @@ impl FlightService for Service {
     ) -> Result<Response<FlightInfo>, Status> {
         let resume_watermark = request
             .metadata()
-            .get("nozzle-resume")
+            .get("amp-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
         let descriptor = request.into_inner();
         let info = self.get_flight_info(descriptor, resume_watermark).await?;

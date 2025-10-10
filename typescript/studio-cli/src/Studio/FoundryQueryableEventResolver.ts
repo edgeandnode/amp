@@ -24,7 +24,7 @@ type FoundryTomlConfig = typeof FoundryTomlConfig.Type
 const FoundryTomlConfigDecoder = Schema.decodeUnknownEither(FoundryTomlConfig)
 
 class FoundryOutputAbiFunction extends Schema.Class<FoundryOutputAbiFunction>(
-  "Nozzle/cli/studio/models/FoundryOutputAbiFunction",
+  "Amp/cli/studio/models/FoundryOutputAbiFunction",
 )({
   type: Schema.Literal("function"),
   name: Schema.NonEmptyTrimmedString,
@@ -45,7 +45,7 @@ class FoundryOutputAbiFunction extends Schema.Class<FoundryOutputAbiFunction>(
   stateMutability: Schema.String,
 }) {}
 class FoundryOutputAbiEvent extends Schema.Class<FoundryOutputAbiEvent>(
-  "Nozzle/cli/studio/models/FoundryOutputAbiEvent",
+  "Amp/cli/studio/models/FoundryOutputAbiEvent",
 )({
   type: Schema.Literal("event"),
   name: Schema.NonEmptyTrimmedString,
@@ -79,7 +79,7 @@ const FoundOuputAbiObject = Schema.Union(
   Schema.Record({ key: Schema.String, value: Schema.Any }),
 )
 class FoundryOutput extends Schema.Class<FoundryOutput>(
-  "Nozzle/cli/studio/models/FoundryOutput",
+  "Amp/cli/studio/models/FoundryOutput",
 )({
   abi: Schema.Array(FoundOuputAbiObject),
   // parse the metadata to get the contract source
@@ -126,7 +126,7 @@ function abiOutputIsEvent(item: any): item is FoundryOutputAbiEvent {
 }
 
 export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryableEventResolver>()(
-  "Nozzle/studio/services/FoundryQueryableEventResolver",
+  "Amp/studio/services/FoundryQueryableEventResolver",
   {
     dependencies: [NodeFileSystem.layer],
     effect: Effect.gen(function*() {

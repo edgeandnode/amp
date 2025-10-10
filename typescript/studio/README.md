@@ -1,7 +1,7 @@
-# Nozzle Dataset Studio
+# Amp Dataset Studio
 
-Visualization and validation tool for nozzle datasets.
-Lets users view the available tables to them for querying based off the events provided by their smart contract(s). With these tables, and nozzle User-Defined Functions (UDFs), lets user run raw sql queries to see data from their smart contracts and visualize it in a UI.
+Visualization and validation tool for amp datasets.
+Lets users view the available tables to them for querying based off the events provided by their smart contract(s). With these tables, and amp User-Defined Functions (UDFs), lets user run raw sql queries to see data from their smart contracts and visualize it in a UI.
 
 ## Getting Started
 
@@ -20,7 +20,7 @@ To build this application for production:
 pnpm build
 ```
 
-## Running nozzle locally to query anvil
+## Running amp locally to query anvil
 
 1. Install steps
 
@@ -35,13 +35,13 @@ pnpm install
 docker compose up -d
 ```
 
-3. Create required `config.toml` for `nozzle` binary to run. In repo root
+3. Create required `config.toml` for `ampd` binary to run. In repo root
 
 ```toml
 data_dir = "data/"
 providers_dir = "providers/"
 dataset_defs_dir = "dataset-def-schemas/"
-metadata_db_url = "postgresql://postgres:postgres@localhost:5432/nozzle"
+metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
 4. Create necessary directories, also in repo root
@@ -58,16 +58,16 @@ url = "http://localhost:8545"
 network = "anvil"
 ```
 
-6. Start nozzle worker. Will remain running, need terminal window
+6. Start amp worker. Will remain running, need terminal window
 
 ```bash
-NOZZLE_CONFIG=config.toml cargo run -p nozzle -- worker --node-id worker-1
+AMP_CONFIG=config.toml cargo run -p ampd -- worker --node-id worker-1
 ```
 
-7. Start nozzle server. Will remain running, create new terminal window
+7. Start amp server. Will remain running, create new terminal window
 
 ```bash
-NOZZLE_CONFIG=config.toml cargo run -p nozzle -- server
+AMP_CONFIG=config.toml cargo run -p ampd -- server
 ```
 
 8. Start anvil in `typescript/example` dir (or any that has foundry). Will remain running, create new terminal window
@@ -84,16 +84,16 @@ anvil
 forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-10. Use `nozzle` to generate a manifest. Run in repo root
+10. Use `ampd` to generate a manifest. Run in repo root
 
 ```bash
-NOZZLE_CONFIG=config.toml cargo run --bin nozzle -- generate-manifest --network anvil --kind evm-rpc --name anvil -o dataset-def-schemas/anvil.json
+AMP_CONFIG=config.toml cargo run --bin ampd -- generate-manifest --network anvil --kind evm-rpc --name anvil -o dataset-def-schemas/anvil.json
 ```
 
-11. Use `nozzle` to dump the dataset
+11. Use `ampd` to dump the dataset
 
 ```bash
-NOZZLE_CONFIG=config.toml cargo run --release --bin nozzle -- dump --dataset anvil
+AMP_CONFIG=config.toml cargo run --release --bin ampd -- dump --dataset anvil
 ```
 
 12. Check to make sure dataset exists:
@@ -108,7 +108,7 @@ curl localhost:1610/datasets
 # cd into typescript/example
 pnpm run studio --open
 # or
-bun nozzle studio --open
+bun amp studio --open
 ```
 
 14. (Optional, if building on studio and want HMR for changes). Run studio dev in `typescript/studio`

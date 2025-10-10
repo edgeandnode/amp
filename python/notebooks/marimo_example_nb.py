@@ -14,8 +14,8 @@ def _():
 
 @app.cell
 def _():
-    from nozzle.client import Client
-    from nozzle.util import to_hex
+    from amp.client import Client
+    from amp.util import to_hex
 
     return Client, to_hex
 

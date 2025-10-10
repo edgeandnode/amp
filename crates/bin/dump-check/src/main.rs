@@ -18,7 +18,7 @@ use monitoring::{
 #[command(name = "firehose-dump-check")]
 struct Args {
     /// Path to a config file. See README for details on the format.
-    #[arg(long, env = "NOZZLE_CONFIG")]
+    #[arg(long, env = "AMP_CONFIG")]
     config: String,
 
     /// The name of the dataset to dump. This will be looked up in the dataset directory.

@@ -1,4 +1,4 @@
-//! Rust client library for Nozzle
+//! Rust client library for Amp
 
 mod decode;
 
@@ -58,7 +58,7 @@ impl Stream for ResultStream {
     }
 }
 
-/// Arrow Flight client for connecting to nozzle server.
+/// Arrow Flight client for connecting to amp server.
 #[derive(Clone)]
 pub struct SqlClient {
     client: FlightSqlServiceClient<tonic::transport::Channel>,
@@ -83,7 +83,7 @@ impl SqlClient {
         resume_watermark: Option<&ResumeWatermark>,
     ) -> Result<ResultStream, Error> {
         self.client.set_header(
-            "nozzle-resume",
+            "amp-resume",
             resume_watermark
                 .map(|value| serde_json::to_string(value).unwrap())
                 .unwrap_or_default(),
@@ -91,9 +91,9 @@ impl SqlClient {
         let flight_info = match self.client.execute(sql.to_string(), transaction_id).await {
             Ok(flight_info) => flight_info,
             Err(err) => {
-                // Unset the nozzle-resume header after GetFlightInfo, since otherwise it gets
+                // Unset the amp-resume header after GetFlightInfo, since otherwise it gets
                 // retained for subsequent requests.
-                self.client.set_header("nozzle-resume", "");
+                self.client.set_header("amp-resume", "");
                 return Err(err.into());
             }
         };
@@ -157,10 +157,10 @@ impl From<BlockRange> for InvalidationRange {
 /// # Example
 ///
 /// ```rust,no_run
+/// use amp_client::{Error, ResponseBatchWithReorg, with_reorg};
 /// use futures::StreamExt;
-/// use nozzle_client::{Error, ResponseBatchWithReorg, with_reorg};
 ///
-/// # async fn example(stream: nozzle_client::ResultStream) -> Result<(), Error> {
+/// # async fn example(stream: amp_client::ResultStream) -> Result<(), Error> {
 /// let mut reorg_stream = with_reorg(stream);
 /// while let Some(result) = reorg_stream.next().await {
 ///     match result? {

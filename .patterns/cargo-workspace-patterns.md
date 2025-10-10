@@ -3,7 +3,7 @@
 
 ## 🎯 OVERVIEW
 
-Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Nozzle project.
+Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Amp project.
 
 ## 🚨 CRITICAL WORKSPACE REQUIREMENTS
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
@@ -20,7 +20,7 @@ Comprehensive workspace management strategies for Rust multi-crate projects, wit
 
 ## 📁 Workspace structure
 
-The Nozzle workspace follows a hierarchical organization under the `crates/` directory with four main categories: `core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct dependency patterns.
+The Amp workspace follows a hierarchical organization under the `crates/` directory with four main categories: `core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct dependency patterns.
 
 ### 🏗️ Top-Level Crate Categories
 
@@ -44,7 +44,7 @@ The Nozzle workspace follows a hierarchical organization under the `crates/` dir
 **Purpose**: Main entry points and command-line applications.
 
 **What belongs here:**
-- **`nozzle`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
+- **`ampd`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
 - **`generate-manifest`**: Utility for creating dataset manifest files
 - **`dump-check`**: Data validation and integrity checking tool
 
@@ -83,7 +83,7 @@ The Nozzle workspace follows a hierarchical organization under the `crates/` dir
 
 #### 📋 Additional Workspace Components
 
-**`crates/client/`**: Client libraries for connecting to Nozzle services
+**`crates/client/`**: Client libraries for connecting to Amp services
 - Language bindings and SDK functionality
 - Can depend on `core` for shared data structures
 

@@ -1,6 +1,6 @@
 /**
  * Mock UDF definitions for testing SQL intellisense features
- * Provides all 8 Nozzle UDF functions with realistic test data
+ * Provides all 8 Amp UDF functions with realistic test data
  */
 
 import type { UserDefinedFunction } from "../../../../src/services/sql/types"

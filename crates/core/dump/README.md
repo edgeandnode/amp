@@ -2,7 +2,7 @@
 
 A CLI to dump extractor interfaces to parquet files. Currently supports dumping EVM Firehose to a simplified schema and Substreams with schema inferred from the manifest.
 
-First, you will need to setup your config file and point `NOZZLE_CONFIG` to it. Please refer to [config.md](../../../docs/config.md) and [the sample config](../../../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../../extractors/firehose/example_config/) or [substreams](../../extractors/substreams/example_config/) datasets.
+First, you will need to setup your config file and point `AMP_CONFIG` to it. Please refer to [config.md](../../../docs/config.md) and [the sample config](../../../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../../extractors/firehose/example_config/) or [substreams](../../extractors/substreams/example_config/) datasets.
 
 Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as you can simply refer to the dataset by name. An example usage to dump first four million blocks of a dataset named `eth_firehose`, running two parallel jobs:
 
@@ -24,9 +24,9 @@ Dump needs some RAM, because the contents of each parquet row group, which usual
 
 All configuration can be set through env vars instead of the CLI.
 
-- **NOZZLE_CONFIG**
+- **AMP_CONFIG**
   - Description: Sets the path to a config file.
-  - Example: `NOZZLE_CONFIG=/path/to/config.toml`
+  - Example: `AMP_CONFIG=/path/to/config.toml`
 
 - **DUMP_DATASET**
   - Description: The name of the dataset to dump. This is the name of the dataset definition `.toml`,

@@ -1,0 +1,77 @@
+{
+  "name": "@edgeandnode/amp",
+  "version": "0.0.17",
+  "type": "module",
+  "license": "UNLICENSED",
+  "description": "Nothing to see here yet",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/edgeandnode/amp-private",
+    "directory": "typescript/amp"
+  },
+  "bin": {
+    "amp": "./src/cli/bun.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./cli/*": null,
+    "./internal/*": null,
+    "./*/index": null
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map"
+  ],
+  "scripts": {
+    "build": "tsc -b --force tsconfig.build.json",
+    "build:studio": "cd ../studio && pnpm run build",
+    "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
+    "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
+    "@edgeandnode/amp": "bun ./src/cli/bun.ts"
+  },
+  "publishConfig": {
+    "bin": {
+      "@edgeandnode/amp": "./dist/cli/main.js"
+    },
+    "exports": {
+      ".": "./dist/index.js",
+      "./*": "./dist/*.js",
+      "./cli/*": null,
+      "./internal/*": null,
+      "./*/index": null
+    }
+  },
+  "dependencies": {
+    "@effect/cli": "^0.70.0",
+    "abitype": "^1.1.1",
+    "jiti": "^2.6.0",
+    "viem": "^2.37.8"
+  },
+  "peerDependencies": {
+    "@bufbuild/protobuf": "2.6.3",
+    "@connectrpc/connect": "^2.1.0",
+    "@connectrpc/connect-node": "^2.1.0",
+    "@effect/experimental": "^0.55.0",
+    "@effect/platform": "^0.91.1",
+    "@effect/platform-node": "^0.97.1",
+    "apache-arrow": "^21.0.0",
+    "effect": "^3.17.14"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.57.0",
+    "@bufbuild/protoc-gen-es": "^2.7.0",
+    "@connectrpc/connect": "^2.1.0",
+    "@connectrpc/connect-node": "^2.1.0",
+    "@effect/platform": "^0.91.1",
+    "@effect/vitest": "^0.25.1",
+    "@types/node": "^24.5.2",
+    "apache-arrow": "^21.0.0",
+    "effect": "^3.17.14",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
