@@ -1,6 +1,6 @@
 use std::env;
 
-use ampup::DEFAULT_REPO_PRIVATE;
+use ampup::{DEFAULT_REPO, DEFAULT_REPO_PRIVATE};
 use anyhow::Result;
 use fs_err as fs;
 use tempfile::TempDir;
@@ -208,8 +208,7 @@ async fn install_specific_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // Install a specific version (use a known release)
-    // Note: This test will need to be updated with an actual release version
-    let version = "v0.0.9";
+    let version = "v0.0.14";
     ampup::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
@@ -235,7 +234,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
 
     let temp = TempInstallDir::new()?;
 
-    let version = "v0.0.9";
+    let version = "v0.0.14";
 
     // Install once
     ampup::commands::install::run(
@@ -273,7 +272,7 @@ async fn install_without_github_token() -> Result<()> {
     // This should work once the repo is public
     ampup::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
+        DEFAULT_REPO.to_string(),
         None, // No GitHub token
         None,
         None,
