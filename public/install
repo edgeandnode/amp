@@ -1,0 +1,105 @@
+#!/bin/sh
+
+# This is just a little script that can be downloaded from the internet to
+# install `ampup`. It just does platform detection, downloads the installer
+# and runs it.
+
+main() {
+    need uname
+    need curl
+    need mktemp
+    need chmod
+    need rm
+    need rmdir
+
+    local platform=$(get_platform)
+    local arch=$(get_architecture)
+    info "Downloading ampup"
+    detail "Platform: $platform, Architecture: $arch"
+
+    # Download
+    local artifact="ampup-${platform}-${arch}"
+    local tmpdir="$(ensure mktemp -d)"
+    local tmpbin="$tmpdir/ampup"
+    download_asset "$artifact" "$tmpbin"
+
+    # Initialize
+    ensure chmod +x "$tmpbin"
+    ensure "$tmpbin" init "$@"
+
+    # Cleanup
+    ignore rm "$tmpbin"
+    ignore rmdir "$tmpdir"
+}
+
+download_asset() {
+    local artifact=$1
+    local output=$2
+    local opts="--proto =https --tlsv1.2 --silent --show-error --fail --location"
+    local url="https://github.com/edgeandnode/amp/releases/latest/download/${artifact}"
+    ensure curl $opts "$url" --output "$output"
+}
+
+get_platform() {
+    local platform=$(ensure uname -s)
+    case $platform in
+        Linux)
+            echo "linux"
+            ;;
+        Darwin)
+            echo "darwin"
+            ;;
+        *)
+            error "Unsupported platform: $platform"
+            exit 1
+            ;;
+    esac
+}
+
+get_architecture() {
+    local arch=$(ensure uname -m)
+    case $arch in
+        x86_64|amd64)
+            echo "x86_64"
+            ;;
+        arm64|aarch64)
+            echo "aarch64"
+            ;;
+        *)
+            error "Unsupported architecture: $arch"
+            exit 1
+            ;;
+    esac
+}
+
+info() {
+    printf "\033[0;36m→\033[0m %s\n" "$1"
+}
+
+detail() {
+    printf "\033[0;2m  %s\033[0m\n" "$1"
+}
+
+error() {
+    printf "\033[0;31;1m✗\033[0m %s\n" "$1" >&2
+}
+
+need() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        error "Required command not found: $1"
+        exit 1
+    fi
+}
+
+ensure() {
+    if ! "$@"; then
+        error "Command failed: $*"
+        exit 1
+    fi
+}
+
+ignore() {
+    "$@"
+}
+
+main "$@"

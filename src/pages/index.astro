@@ -1,0 +1,64 @@
+---
+import '../styles/global.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content="Amp - Build and manage blockchain datasets" />
+		<title>Amp</title>
+	</head>
+	<body class="min-h-screen flex items-center justify-center p-8 bg-white text-neutral-900">
+		<div class="max-w-3xl text-center">
+			<h1 class="text-5xl sm:text-6xl font-bold mb-4">Amp</h1>
+			<p class="text-xl text-neutral-600 mb-12">Build and manage blockchain datasets</p>
+
+			<div class="my-12">
+				<div class="relative bg-neutral-100 border border-neutral-300 rounded-md p-6 pr-16 group">
+					<code class="font-mono text-sm sm:text-base text-neutral-900 break-all select-all">curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh</code>
+					<button
+						id="copy-button"
+						class="group/btn absolute top-1/2 -translate-y-1/2 right-3 p-2 rounded-md text-neutral-600 hover:bg-neutral-200 hover:text-neutral-900 transition-colors cursor-pointer disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-neutral-600"
+						title="Copy to clipboard"
+						type="button"
+					>
+						<span class="relative block w-5 h-5">
+							<svg id="copy-icon" class="absolute inset-0 transition-opacity opacity-100 group-disabled/btn:opacity-0" width="20" height="20" viewBox="0 0 24 25" fill="none" stroke="currentColor" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+								<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+								<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+							</svg>
+							<svg id="check-icon" class="absolute inset-0 transition-opacity opacity-0 group-disabled/btn:opacity-100" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+								<polyline points="20 6 9 17 4 12"></polyline>
+							</svg>
+						</span>
+					</button>
+				</div>
+			</div>
+
+			<div class="mt-8">
+				<a href="/docs" class="text-neutral-600 hover:text-neutral-900 underline">View Documentation</a>
+			</div>
+		</div>
+
+		<script>
+			const button = document.getElementById('copy-button');
+			const command = "curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh";
+
+			button.addEventListener('click', async () => {
+				if (button.disabled) return;
+
+				try {
+					await navigator.clipboard.writeText(command);
+					button.disabled = true;
+
+					setTimeout(() => {
+						button.disabled = false;
+					}, 2000);
+				} catch {}
+			});
+		</script>
+	</body>
+</html>
