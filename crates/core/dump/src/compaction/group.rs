@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use common::{
     ParquetFooterCache,
-    catalog::{physical::PhysicalTable, reader::NozzleReaderFactory},
+    catalog::{physical::PhysicalTable, reader::AmpReaderFactory},
     metadata::segments::{BlockRange, Segment},
     parquet::arrow::{
         ParquetRecordBatchStreamBuilder, arrow_reader::ArrowReaderMetadata,
@@ -35,7 +35,7 @@ pub struct CompactionFile {
 
 impl CompactionFile {
     pub async fn try_new(
-        reader_factory: Arc<NozzleReaderFactory>,
+        reader_factory: Arc<AmpReaderFactory>,
         partition_index: usize,
         segment: Segment,
     ) -> CompactionResult<Self> {
@@ -113,7 +113,7 @@ impl CompactionGroupGenerator<'_> {
         let remain = chain.0.len();
         tracing::info!("Scanning {remain} segments for compaction");
 
-        let reader_factory: Arc<NozzleReaderFactory> = Arc::new(NozzleReaderFactory {
+        let reader_factory: Arc<AmpReaderFactory> = Arc::new(AmpReaderFactory {
             location_id: table.location_id(),
             metadata_db: table.metadata_db().clone(),
             object_store: Arc::clone(&table.object_store()),

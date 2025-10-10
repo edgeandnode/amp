@@ -3,7 +3,7 @@ Development Patterns
 
 ## 🎯 PURPOSE
 
-This directory provides reusable solutions and best practices for Nozzle Core development, ensuring consistency and quality across the Nozzle project Rust codebase.
+This directory provides reusable solutions and best practices for Amp Core development, ensuring consistency and quality across the Amp project Rust codebase.
 
 ## 🔧 HOW TO USE
 
@@ -111,4 +111,4 @@ This directory provides reusable solutions and best practices for Nozzle Core de
 
 ------
 
-This `/.patterns` directory serves as the authoritative guide for Rust development in the Nozzle project, ensuring consistent, high-quality implementations across the entire codebase.
+This `/.patterns` directory serves as the authoritative guide for Rust development in the Amp project, ensuring consistent, high-quality implementations across the entire codebase.

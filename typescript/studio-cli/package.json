@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/edgeandnode/project-nozzle",
+    "url": "https://github.com/edgeandnode/amp-private",
     "directory": "typescript/studio-cli"
   },
   "bin": {
@@ -46,19 +46,19 @@
     "@effect/experimental": "^0.55.0",
     "apache-arrow": "^21.0.0",
     "effect": "^3.17.14",
-    "nozzl": "workspace:*"
+    "@edgeandnode/amp": "workspace:*"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.57.2",
     "@bufbuild/protoc-gen-es": "^2.9.0",
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
+    "@edgeandnode/amp": "workspace:*",
     "@effect/platform": "^0.91.1",
     "@effect/vitest": "^0.25.1",
     "@types/node": "^24.5.2",
     "apache-arrow": "^21.0.0",
     "effect": "^3.17.14",
-    "nozzl": "workspace:*",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

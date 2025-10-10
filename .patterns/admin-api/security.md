@@ -7,7 +7,7 @@
 
 **⛔ NEVER EXPOSE ADMIN-API TO PUBLIC NETWORKS**
 
-The `admin-api` crate provides **CRITICAL ADMINISTRATIVE CAPABILITIES** that can control and modify the entire Nozzle system. This API must NEVER be exposed directly to public networks or untrusted clients.
+The `admin-api` crate provides **CRITICAL ADMINISTRATIVE CAPABILITIES** that can control and modify the entire Amp system. This API must NEVER be exposed directly to public networks or untrusted clients.
 
 **🔐 Mandatory Network Isolation:**
 - [ ] **🔒 Internal Networks Only**: Admin-API MUST only be accessible from trusted internal networks
@@ -400,4 +400,4 @@ This security framework follows established industry standards:
 - [ ] **⏱️ Request Timeout Handling**: Implement reasonable request processing timeouts within handlers
 - [ ] **⏱️ Resource Usage Monitoring**: Monitor and log resource usage for expensive operations
 
-**🛡️ Remember: Security is not optional. These requirements protect administrative systems, maintain service availability, and prevent security vulnerabilities that could compromise the entire Nozzle infrastructure.**
+**🛡️ Remember: Security is not optional. These requirements protect administrative systems, maintain service availability, and prevent security vulnerabilities that could compromise the entire Amp infrastructure.**

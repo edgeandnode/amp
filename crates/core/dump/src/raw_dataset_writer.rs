@@ -8,7 +8,7 @@ use common::{
 use metadata_db::MetadataDb;
 
 use crate::{
-    compaction::{CompactionProperties, NozzleCompactor},
+    compaction::{AmpCompactor, CompactionProperties},
     metrics,
     parquet_writer::{
         ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
@@ -121,7 +121,7 @@ struct RawTableWriter {
 
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 
-    compactor: NozzleCompactor,
+    compactor: AmpCompactor,
 }
 
 impl RawTableWriter {
@@ -144,7 +144,7 @@ impl RawTableWriter {
             None => None,
         };
 
-        let nozzle_compactor = NozzleCompactor::start(table.clone(), compaction_opts.clone());
+        let amp_compactor = AmpCompactor::start(table.clone(), compaction_opts.clone());
 
         Ok(Self {
             table,
@@ -154,7 +154,7 @@ impl RawTableWriter {
             current_file,
             current_range: None,
             metrics,
-            compactor: nozzle_compactor,
+            compactor: amp_compactor,
         })
     }
 

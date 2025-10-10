@@ -10,7 +10,7 @@ use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
-        CompactionProperties, CompactionResult, CompactorError, NozzleCompactorTaskType,
+        AmpCompactorTaskType, CompactionProperties, CompactionResult, CompactorError,
         group::{CompactionFile, CompactionGroupGenerator},
     },
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
@@ -78,7 +78,7 @@ impl Compactor {
     }
 }
 
-impl NozzleCompactorTaskType for Compactor {
+impl AmpCompactorTaskType for Compactor {
     type Error = CompactorError;
 
     fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {

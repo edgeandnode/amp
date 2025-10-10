@@ -9,13 +9,13 @@ import pyarrow as pa
 import pytest
 
 try:
-    from src.nozzle.loaders.implementations.postgresql_loader import PostgreSQLLoader
-    from src.nozzle.loaders.implementations.redis_loader import RedisLoader
-    from src.nozzle.loaders.implementations.snowflake_loader import SnowflakeLoader
+    from src.amp.loaders.implementations.postgresql_loader import PostgreSQLLoader
+    from src.amp.loaders.implementations.redis_loader import RedisLoader
+    from src.amp.loaders.implementations.snowflake_loader import SnowflakeLoader
 
     from .benchmarks import record_benchmark
 except ImportError:
-    pytest.skip('nozzle modules not available', allow_module_level=True)
+    pytest.skip('amp modules not available', allow_module_level=True)
 
 
 @pytest.mark.performance
@@ -52,7 +52,7 @@ class TestPostgreSQLPerformance:
 
     def test_batch_performance_scaling(self, postgresql_config, performance_test_data):
         """Test performance scaling with different batch processing approaches"""
-        from src.nozzle.loaders.base import LoadMode
+        from src.amp.loaders.base import LoadMode
         
         batch_approaches = {
             'single_load': 50000,    # Load entire table at once
@@ -241,12 +241,12 @@ class TestDeltaLakePerformance:
     def test_large_file_write_performance(self, delta_basic_config, performance_test_data, memory_monitor):
         """Test Delta Lake write performance for large files"""
         try:
-            from src.nozzle.loaders.implementations.deltalake_loader import DELTALAKE_AVAILABLE, DeltaLakeLoader
+            from src.amp.loaders.implementations.deltalake_loader import DELTALAKE_AVAILABLE, DeltaLakeLoader
             # Skip all tests if deltalake is not available
             if not DELTALAKE_AVAILABLE:
                 pytest.skip('Delta Lake not available', allow_module_level=True)
         except ImportError:
-            pytest.skip('nozzle modules not available', allow_module_level=True)
+            pytest.skip('amp modules not available', allow_module_level=True)
 
         loader = DeltaLakeLoader(delta_basic_config)
 
@@ -267,7 +267,7 @@ class TestDeltaLakePerformance:
     def test_partitioned_write_performance(self, delta_partitioned_config, performance_test_data):
         """Test partitioned write performance"""
         try:
-            from src.nozzle.loaders.implementations.deltalake_loader import DeltaLakeLoader
+            from src.amp.loaders.implementations.deltalake_loader import DeltaLakeLoader
         except ImportError:
             pytest.skip('Delta Lake loader not available')
 
@@ -296,7 +296,7 @@ class TestLMDBPerformance:
     def test_large_table_loading_performance(self, lmdb_perf_config, performance_test_data, memory_monitor):
         """Test loading large datasets with performance monitoring"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
 
@@ -328,7 +328,7 @@ class TestLMDBPerformance:
     def test_key_generation_strategy_performance(self, lmdb_perf_config, performance_test_data):
         """Compare performance across different key generation strategies"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -383,7 +383,7 @@ class TestLMDBPerformance:
     def test_transaction_size_performance_scaling(self, lmdb_perf_config, performance_test_data):
         """Test performance scaling with different transaction sizes"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -427,7 +427,7 @@ class TestLMDBPerformance:
     def test_writemap_performance_comparison(self, lmdb_perf_config, performance_test_data):
         """Compare performance with and without writemap optimization"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -480,7 +480,7 @@ class TestLMDBPerformance:
     def test_memory_efficiency(self, lmdb_perf_config, performance_test_data, memory_monitor):
         """Test LMDB loader memory efficiency"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -536,7 +536,7 @@ class TestLMDBPerformance:
     def test_concurrent_read_performance(self, lmdb_perf_config, performance_test_data):
         """Test LMDB read performance under concurrent access"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -609,11 +609,11 @@ class TestLMDBPerformance:
     def test_batch_vs_single_row_performance(self, lmdb_perf_config, medium_test_table):
         """Compare batch loading vs single row loading performance"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
-        from src.nozzle.loaders.base import LoadMode
+        from src.amp.loaders.base import LoadMode
         
         results = {}
         
@@ -666,7 +666,7 @@ class TestLMDBPerformance:
     def test_large_value_performance(self, lmdb_perf_config):
         """Test performance with large values (serialized Arrow data)"""
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
         except ImportError:
             pytest.skip('LMDB loader not available')
             
@@ -868,7 +868,7 @@ class TestSnowflakePerformance:
     def test_concurrent_loading_performance(self, snowflake_config, medium_test_table):
         """Test performance with concurrent batch loading"""
         import concurrent.futures
-        from src.nozzle.loaders.base import LoadMode
+        from src.amp.loaders.base import LoadMode
 
         config = {**snowflake_config, 'use_stage': True, 'batch_size': 2000}
         table_name = 'perf_concurrent_test'
@@ -970,7 +970,7 @@ class TestCrossLoaderPerformance:
 
         # Test LMDB
         try:
-            from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+            from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
 
             lmdb_config_perf = {**lmdb_perf_config, 'key_column': 'id'}
             lmdb_loader = LMDBLoader(lmdb_config_perf)
@@ -1004,7 +1004,7 @@ class TestCrossLoaderPerformance:
 
         # Test Delta Lake
         try:
-            from src.nozzle.loaders.implementations.deltalake_loader import DeltaLakeLoader
+            from src.amp.loaders.implementations.deltalake_loader import DeltaLakeLoader
 
             delta_loader = DeltaLakeLoader(delta_basic_config)
             with delta_loader:
@@ -1109,12 +1109,12 @@ class TestIcebergPerformance:
     def test_large_file_write_performance(self, iceberg_basic_config, performance_test_data, memory_monitor):
         """Test Iceberg write performance for large files"""
         try:
-            from src.nozzle.loaders.implementations.iceberg_loader import ICEBERG_AVAILABLE, IcebergLoader
+            from src.amp.loaders.implementations.iceberg_loader import ICEBERG_AVAILABLE, IcebergLoader
             # Skip all tests if iceberg is not available
             if not ICEBERG_AVAILABLE:
                 pytest.skip('Apache Iceberg not available', allow_module_level=True)
         except ImportError:
-            pytest.skip('nozzle modules not available', allow_module_level=True)
+            pytest.skip('amp modules not available', allow_module_level=True)
 
         loader = IcebergLoader(iceberg_basic_config)
 

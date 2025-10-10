@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema"
 
 export const adminUrl = Options.text("admin-url").pipe(
   Options.withFallbackConfig(
-    Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
+    Config.string("AMP_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
   ),
   Options.withDescription("The url of the admin server"),
   Options.withSchema(Schema.URL),
@@ -12,7 +12,7 @@ export const adminUrl = Options.text("admin-url").pipe(
 
 export const flightUrl = Options.text("flight-url").pipe(
   Options.withFallbackConfig(
-    Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
+    Config.string("AMP_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
   ),
   Options.withDescription("The Arrow Flight URL to use for the proxy"),
   Options.withSchema(Schema.URL),

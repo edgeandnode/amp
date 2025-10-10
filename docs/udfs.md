@@ -1,6 +1,6 @@
-# Nozzle UDFs
+# Amp UDFs
 
-Nozzle provides a number of "built-in" SQL functions that the user can call to manipulate
+Amp provides a number of "built-in" SQL functions that the user can call to manipulate
 the data they are querying.
 
 ## `evm_decode_log`

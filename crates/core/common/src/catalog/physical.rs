@@ -26,9 +26,9 @@ use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, Dataset, LogicalCatalog, ParquetFooterCache, ResolvedTable,
-    catalog::reader::NozzleReaderFactory,
+    catalog::reader::AmpReaderFactory,
     metadata::{
-        FileMetadata, nozzle_metadata_from_parquet_file,
+        FileMetadata, amp_metadata_from_parquet_file,
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
@@ -129,7 +129,7 @@ impl CatalogSnapshot {
 #[derive(Debug, Clone)]
 pub struct TableSnapshot {
     physical_table: Arc<PhysicalTable>,
-    reader_factory: Arc<NozzleReaderFactory>,
+    reader_factory: Arc<AmpReaderFactory>,
     canonical_segments: Vec<Segment>,
 }
 
@@ -350,10 +350,10 @@ impl PhysicalTable {
         let mut file_stream = object_store.list(Some(&path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
-            let (file_name, nozzle_meta, footer) =
-                nozzle_metadata_from_parquet_file(&object_meta, object_store.clone()).await?;
+            let (file_name, amp_meta, footer) =
+                amp_metadata_from_parquet_file(&object_meta, object_store.clone()).await?;
 
-            let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
+            let parquet_meta_json = serde_json::to_value(amp_meta)?;
 
             let ObjectMeta {
                 size: object_size,
@@ -555,7 +555,7 @@ impl PhysicalTable {
         };
 
         // Create a reader factory with the cache
-        let reader_factory_with_cache = NozzleReaderFactory {
+        let reader_factory_with_cache = AmpReaderFactory {
             location_id: self.location_id,
             metadata_db: self.metadata_db.clone(),
             object_store: Arc::clone(&self.object_store),

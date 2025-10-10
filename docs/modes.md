@@ -4,7 +4,7 @@ This document describes the operational modes and deployment patterns of the sys
 
 ## Overview
 
-Nozzle provides several commands that can be combined into different deployment patterns:
+Amp provides several commands that can be combined into different deployment patterns:
 
 ### Core Commands
 
@@ -17,25 +17,25 @@ Nozzle provides several commands that can be combined into different deployment 
 
 ### Operational Modes
 
-Nozzle supports three primary operational modes:
+Amp supports three primary operational modes:
 
-1. **Serverless Mode**: Ephemeral, on-demand extraction using `nozzle dump` for cloud functions, scheduled jobs, or CI/CD pipelines
-2. **Single-Node Mode**: Combined controller, server and embedded worker using `nozzle dev` for local development and testing
-3. **Distributed Mode**: Separate `nozzle controller`, `nozzle server` and `nozzle worker` processes coordinating via metadata DB for production deployments
+1. **Serverless Mode**: Ephemeral, on-demand extraction using `ampd dump` for cloud functions, scheduled jobs, or CI/CD pipelines
+2. **Single-Node Mode**: Combined controller, server and embedded worker using `ampd dev` for local development and testing
+3. **Distributed Mode**: Separate `ampd controller`, `ampd server` and `ampd worker` processes coordinating via metadata DB for production deployments
 
 ### Common Deployment Patterns
 
-1. **Serverless Mode**: Direct extraction using `nozzle dump`
+1. **Serverless Mode**: Direct extraction using `ampd dump`
 2. **Server-Only Mode**: Query serving without extraction workers (distributed, read-only)
 3. **Controller-Only Mode**: Management interface without query server or workers
-4. **Development Mode**: Combined server + embedded worker `nozzle dev` (single-node)
+4. **Development Mode**: Combined server + embedded worker `ampd dev` (single-node)
 5. **Controller + Server + Workers**: Separate server and worker processes coordinating via metadata DB (distributed)
 
 ## Serverless Mode
 
 ### Purpose
 
-Serverless mode performs immediate, on-demand extraction of blockchain data from configured sources using the `nozzle dump` command. Extraction runs as an ephemeral process that exits upon completion. This is a synchronous operation that runs until completion (or the specified end block) and then exits.
+Serverless mode performs immediate, on-demand extraction of blockchain data from configured sources using the `ampd dump` command. Extraction runs as an ephemeral process that exits upon completion. This is a synchronous operation that runs until completion (or the specified end block) and then exits.
 
 ### When to Use
 
@@ -57,22 +57,22 @@ Serverless mode performs immediate, on-demand extraction of blockchain data from
 
 ```bash
 # Extract a single dataset
-nozzle dump --dataset eth_mainnet
+ampd dump --dataset eth_mainnet
 
 # Extract with parallel jobs up to block 4M
-nozzle dump --dataset eth_mainnet --end-block 4000000 --n-jobs 4
+ampd dump --dataset eth_mainnet --end-block 4000000 --n-jobs 4
 
 # Extract multiple datasets
-nozzle dump --dataset eth_mainnet,uniswap_v3
+ampd dump --dataset eth_mainnet,uniswap_v3
 
 # Extract from a manifest file
-nozzle dump --dataset ./datasets/production.json
+ampd dump --dataset ./datasets/production.json
 
 # Start fresh (discard existing progress)
-nozzle dump --dataset eth_mainnet --fresh
+ampd dump --dataset eth_mainnet --fresh
 
 # Run periodically (every 30 minutes)
-nozzle dump --dataset eth_mainnet --run-every-mins 30
+ampd dump --dataset eth_mainnet --run-every-mins 30
 ```
 
 ### Behavior
@@ -94,13 +94,13 @@ nozzle dump --dataset eth_mainnet --run-every-mins 30
 
 ## Distributed Mode
 
-**Distributed mode** separates Nozzle into distinct controller, server, and worker components that coordinate via a shared metadata database. This architecture enables production deployments with resource isolation, horizontal scaling, and high availability.
+**Distributed mode** separates Amp into distinct controller, server, and worker components that coordinate via a shared metadata database. This architecture enables production deployments with resource isolation, horizontal scaling, and high availability.
 
 ### Server Component
 
 #### Purpose
 
-The server component runs Nozzle as a long-lived query service. The server handles queries while separate worker processes handle extraction and the controller manages jobs. It provides interfaces for querying data but does not execute extraction jobs or provide management APIs.
+The server component runs Amp as a long-lived query service. The server handles queries while separate worker processes handle extraction and the controller manages jobs. It provides interfaces for querying data but does not execute extraction jobs or provide management APIs.
 
 #### When to Use
 
@@ -130,12 +130,12 @@ The server provides two query interfaces:
 
 ```bash
 # Start query servers (no worker)
-nozzle server
+ampd server
 
 # Start only specific query interfaces
-nozzle server --flight-server          # Arrow Flight only
-nozzle server --jsonl-server           # JSON Lines only
-nozzle server --flight-server --jsonl-server  # Both query interfaces
+ampd server --flight-server          # Arrow Flight only
+ampd server --jsonl-server           # JSON Lines only
+ampd server --flight-server --jsonl-server  # Both query interfaces
 ```
 
 #### Query Examples
@@ -168,9 +168,9 @@ Without specifying any flags, both query servers are enabled by default.
 
 > [!NOTE]
 > The server flags work as explicit selectors, not toggles. When you specify any flags, only those servers are enabled. There is currently no way to disable specific servers while keeping the "default all" behavior. For example:
-> - `nozzle server` → both query servers enabled (Flight + JSON Lines)
-> - `nozzle server --flight-server` → only Flight server enabled
-> - `nozzle server --jsonl-server` → only JSON Lines server enabled
+> - `ampd server` → both query servers enabled (Flight + JSON Lines)
+> - `ampd server --flight-server` → only Flight server enabled
+> - `ampd server --jsonl-server` → only JSON Lines server enabled
 >
 > To run without a specific server, explicitly list the servers you want.
 
@@ -202,16 +202,16 @@ The worker component runs a standalone worker process that executes scheduled du
 
 ```bash
 # Start a worker with unique node ID
-nozzle worker --node-id worker-01
+ampd worker --node-id worker-01
 
 # Multiple workers for distributed processing
-nozzle worker --node-id worker-01 &
-nozzle worker --node-id worker-02 &
-nozzle worker --node-id worker-03 &
+ampd worker --node-id worker-01 &
+ampd worker --node-id worker-02 &
+ampd worker --node-id worker-03 &
 
 # Workers can have descriptive IDs
-nozzle worker --node-id eu-west-1a-worker
-nozzle worker --node-id us-east-1b-worker
+ampd worker --node-id eu-west-1a-worker
+ampd worker --node-id us-east-1b-worker
 ```
 
 #### Worker Coordination
@@ -237,7 +237,7 @@ Multiple workers coordinate through the metadata DB:
 
 #### Purpose
 
-The controller component provides the Admin API for managing Nozzle operations. It runs as a standalone service separate from the query server, allowing for independent deployment and scaling of management operations.
+The controller component provides the Admin API for managing Amp operations. It runs as a standalone service separate from the query server, allowing for independent deployment and scaling of management operations.
 
 #### When to Use
 
@@ -258,12 +258,12 @@ The controller provides the **Admin API Server** (default port 1610):
 
 ```bash
 # Start the controller (Admin API)
-nozzle controller
+ampd controller
 ```
 
 #### Admin API Operations
 
-The Admin API provides full control over the Nozzle system:
+The Admin API provides full control over the Amp system:
 
 ##### Dataset Management
 ```bash
@@ -322,25 +322,25 @@ curl http://localhost:1610/files?dataset=eth_mainnet
 curl http://localhost:1610/files/512
 ```
 
-> **Note:** In development mode (`nozzle dev`), the controller (Admin API) is automatically included with the server for convenience, so you don't need to run it separately.
+> **Note:** In development mode (`ampd dev`), the controller (Admin API) is automatically included with the server for convenience, so you don't need to run it separately.
 
 ## Development Mode _(Single-Node)_
 
 ### Purpose
 
-Development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated with the `nozzle dev` command.
+Development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated with the `ampd dev` command.
 
 ### When to Use
 
 - **Local development**: Quick testing without separate worker processes
 - **CI/CD pipelines**: Simplified testing in automated environments
 - **Quick prototyping**: Rapid experimentation with datasets and queries
-- **Learning and exploration**: Understanding Nozzle behavior without complex setup
+- **Learning and exploration**: Understanding Amp behavior without complex setup
 - **❌ Not for production**: Lacks separation of concerns and fault isolation
 
 ### How It Works
 
-When running `nozzle dev`:
+When running `ampd dev`:
 1. Server starts both query interfaces (Arrow Flight, JSON Lines)
 2. Controller (Admin API) automatically starts in the same process
 3. Worker automatically spawns in the same process with node ID "worker"
@@ -352,7 +352,7 @@ When running `nozzle dev`:
 
 ```bash
 # Start development mode
-nozzle dev
+ampd dev
 
 # Schedule a job via Admin API (executed by embedded worker)
 curl -X POST http://localhost:1610/datasets/eth_mainnet/dump \
@@ -389,7 +389,7 @@ This section describes common deployment topologies and when to use each.
 
 ```
 ┌──────────────────────────────────────────┐
-│ nozzle dev                               │
+│ ampd dev                               │
 │ ┌──────────────┐ ┌────────────────────┐  │
 │ │Server        │ │ Controller         │  │
 │ │- Flight      │ │ - Admin API        │  │
@@ -415,14 +415,14 @@ This section describes common deployment topologies and when to use each.
 
 **Commands:**
 ```bash
-nozzle dev
+ampd dev
 ```
 
 ### Pattern 2: Query-Only Server _(Distributed, Read-Only)_
 
 ```
 ┌─────────────────────┐
-│ nozzle server       │
+│ ampd server       │
 │ ┌─────────────────┐ │
 │ │Server           │ │
 │ │- Flight         │ │
@@ -444,14 +444,14 @@ nozzle dev
 
 **Commands:**
 ```bash
-nozzle server
+ampd server
 ```
 
 ### Pattern 3: Server + Controller + Workers _(Distributed)_
 
 ```
 ┌────────────────────┐   ┌──────────────────┐
-│nozzle server       │   │nozzle controller │
+│ampd server       │   │ampd controller │
 │┌──────────────────┐│   │┌────────────────┐│
 ││Server            ││   ││Controller      ││
 ││- Flight          ││   ││- Admin API     ││
@@ -460,13 +460,13 @@ nozzle server
 └────────────────────┘            │
          │                        │
          │               ┌──────────────────┐
-         │               │nozzle worker     │
+         │               │ampd worker     │
          │               │┌────────────────┐│
          │               ││Worker-1        ││
          │               │└────────────────┘│
          │               └──────────────────┘
          │               ┌──────────────────┐
-         │               │nozzle worker     │
+         │               │ampd worker     │
          │               │┌────────────────┐│
          │               ││Worker-2        ││
          │               │└────────────────┘│
@@ -490,15 +490,15 @@ nozzle server
 **Commands:**
 ```bash
 # Server node
-nozzle server
+ampd server
 
 # Controller node
-nozzle controller
+ampd controller
 
 # Worker nodes (multiple)
-nozzle worker --node-id worker-01
-nozzle worker --node-id worker-02
-nozzle worker --node-id worker-03
+ampd worker --node-id worker-01
+ampd worker --node-id worker-02
+ampd worker --node-id worker-03
 ```
 
 ### Pattern 4: Distributed Multi-Region _(Distributed)_
@@ -506,7 +506,7 @@ nozzle worker --node-id worker-03
 ```
 Region A                      Region B
 ┌────────────────────┐        ┌────────────────────┐
-│nozzle server       │        │nozzle server       │
+│ampd server       │        │ampd server       │
 │┌──────────────────┐│        │┌──────────────────┐│
 ││Server            ││        ││Server            ││
 ││- Flight          ││        ││- Flight          ││
@@ -515,7 +515,7 @@ Region A                      Region B
 └────────────────────┘        └────────────────────┘
          │                             │
 ┌────────────────────┐        ┌────────────────────┐
-│nozzle controller   │        │nozzle worker       │
+│ampd controller   │        │ampd worker       │
 │┌──────────────────┐│        │┌──────────────────┐│
 ││Controller        ││        ││Worker            ││
 ││- Admin API       ││        ││Region-B          ││
@@ -523,7 +523,7 @@ Region A                      Region B
 └────────────────────┘        └────────────────────┘
          │                             │
 ┌────────────────────┐                 │
-│nozzle worker       │                 │
+│ampd worker       │                 │
 │┌──────────────────┐│                 │
 ││Worker            ││                 │
 ││Region-A          ││                 │
@@ -547,13 +547,13 @@ Region A                      Region B
 **Commands:**
 ```bash
 # Region A
-nozzle server
-nozzle controller
-nozzle worker --node-id us-east-1-worker
+ampd server
+ampd controller
+ampd worker --node-id us-east-1-worker
 
 # Region B
-nozzle server
-nozzle worker --node-id eu-west-1-worker
+ampd server
+ampd worker --node-id eu-west-1-worker
 ```
 
 ## Choosing Between Modes
@@ -573,7 +573,7 @@ nozzle worker --node-id eu-west-1-worker
 - Local development
 - Quick prototyping
 - Testing full workflow
-- Learning Nozzle capabilities
+- Learning Amp capabilities
 - ❌ **Not for production deployments**
 
 ### Use Distributed Mode When:
@@ -605,33 +605,33 @@ nozzle worker --node-id eu-west-1-worker
 
 ### Stage 1: Development & Testing
 - **Mode:** Serverless + Single-Node
-- Use `nozzle dump` for initial testing (serverless mode)
-- Use `nozzle dev` for local query testing (single-node mode)
+- Use `ampd dump` for initial testing (serverless mode)
+- Use `ampd dev` for local query testing (single-node mode)
 - Single machine, minimal setup
 - **Not for production use**
 
 ### Stage 2: Production Single-Region
 - **Mode:** Distributed
-- Deploy `nozzle controller` on management node
-- Deploy `nozzle server` on query node(s)
-- Deploy `nozzle worker --node-id <id>` on extraction node(s)
+- Deploy `ampd controller` on management node
+- Deploy `ampd server` on query node(s)
+- Deploy `ampd worker --node-id <id>` on extraction node(s)
 - Enable observability (OpenTelemetry)
 - Configure compaction
 - Production-ready with resource isolation
 
 ### Stage 3: Scaled Distributed Extraction
 - **Mode:** Distributed (scaled)
-- Deploy `nozzle controller` for centralized management
-- Deploy multiple `nozzle server` instances for query load balancing
-- Deploy multiple `nozzle worker` instances for parallel extraction
+- Deploy `ampd controller` for centralized management
+- Deploy multiple `ampd server` instances for query load balancing
+- Deploy multiple `ampd worker` instances for parallel extraction
 - Shared PostgreSQL and object store
 - Horizontal scaling for management, queries, and extraction
 
 ### Stage 4: Multi-Region Production
 - **Mode:** Distributed (global)
-- Deploy `nozzle controller` in primary region for centralized management
-- Deploy multiple `nozzle server` instances in different regions for low-latency queries
-- Deploy `nozzle worker` instances near data sources
+- Deploy `ampd controller` in primary region for centralized management
+- Deploy multiple `ampd server` instances in different regions for low-latency queries
+- Deploy `ampd worker` instances near data sources
 - Global shared metadata DB and object store
 - Full observability and monitoring
 
@@ -639,7 +639,7 @@ nozzle worker --node-id eu-west-1-worker
 
 Different operational modes can coexist in the same deployment:
 - Run **distributed mode** (controller + server + workers) for continuous ingestion and queries
-- Use **serverless mode** (`nozzle dump`) for ad-hoc extractions or manual backfills
+- Use **serverless mode** (`ampd dump`) for ad-hoc extractions or manual backfills
 - Deploy query-only servers (distributed, read-only) in regions without extraction needs
 - Deploy controller-only for management in secure/private networks
 
@@ -649,7 +649,7 @@ Understanding the security implications of each component is critical for produc
 
 ### Component Security Profiles
 
-Each Nozzle component has different security characteristics and requirements:
+Each Amp component has different security characteristics and requirements:
 
 #### Controller (Admin API - Port 1610)
 
@@ -727,7 +727,7 @@ Workers execute extraction jobs and have no network-facing interfaces:
 
 **Current State:**
 
-Nozzle components currently do **not include built-in authentication or authorization** mechanisms. All network-based security relies on:
+Amp components currently do **not include built-in authentication or authorization** mechanisms. All network-based security relies on:
 
 1. **Network isolation** (private networks, firewalls, VPCs)
 2. **Database authentication** (PostgreSQL user/password)
@@ -739,7 +739,7 @@ For production deployments requiring authentication:
 
 1. **API Gateway / Reverse Proxy**
    ```
-   Client → API Gateway (Auth) → Nozzle Server
+   Client → API Gateway (Auth) → Amp Server
    ```
    - Use Kong, Nginx, Traefik, or cloud API gateways
    - Implement API key authentication
@@ -748,7 +748,7 @@ For production deployments requiring authentication:
 
 2. **Mutual TLS (mTLS)**
    ```
-   Client (with cert) ←TLS→ mTLS Proxy → Nozzle Server
+   Client (with cert) ←TLS→ mTLS Proxy → Amp Server
    ```
    - Terminate TLS at proxy/load balancer
    - Client certificate validation
@@ -787,10 +787,10 @@ For production deployments requiring authentication:
 3. **Environment variables via secret injection:**
    ```bash
    # Bad - hardcoded in config
-   NOZZLE_CONFIG_METADATA_DB_URL=postgresql://user:password@host/db
+   AMP_CONFIG_METADATA_DB_URL=postgresql://user:password@host/db
 
    # Good - injected from secret manager
-   NOZZLE_CONFIG_METADATA_DB_URL=$(kubectl get secret db-creds -o jsonpath='{.data.url}' | base64 -d)
+   AMP_CONFIG_METADATA_DB_URL=$(kubectl get secret db-creds -o jsonpath='{.data.url}' | base64 -d)
    ```
 
 4. **Rotate credentials regularly**
@@ -808,7 +808,7 @@ For production deployments requiring authentication:
 ## See Also
 
 - [Configuration Guide](config.md) - Detailed configuration options
-- [Upgrading Guide](upgrading.md) - Upgrading Nozzle between versions
+- [Upgrading Guide](upgrading.md) - Upgrading Amp between versions
 - [Dataset Definitions](datasets.md) - How to define datasets
 - [Query Guide](queries.md) - Writing SQL queries with custom UDFs
 - [Deployment Guide](deployment.md) - Production deployment patterns

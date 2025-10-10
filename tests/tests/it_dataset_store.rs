@@ -17,8 +17,8 @@ async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
         .expect("should create test context");
 
     // Register the TypeScript dataset
-    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("nozzle.config.ts"));
-    let cli = ctx.new_nozzl_cli();
+    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("amp.config.ts"));
+    let cli = ctx.new_amp_cli();
     sql_over_anvil_1
         .register(&cli)
         .await
@@ -113,8 +113,8 @@ async fn all_datasets_returns_available_datasets_without_error() {
         .expect("should create test context");
 
     // Register the TypeScript dataset
-    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("nozzle.config.ts"));
-    let cli = ctx.new_nozzl_cli();
+    let sql_over_anvil_1 = DatasetPackage::new("sql_over_anvil_1", Some("amp.config.ts"));
+    let cli = ctx.new_amp_cli();
     sql_over_anvil_1
         .register(&cli)
         .await

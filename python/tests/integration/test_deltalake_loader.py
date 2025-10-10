@@ -13,17 +13,17 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
-from src.nozzle.loaders.base import LoadMode
+from src.amp.loaders.base import LoadMode
 
 try:
-    from src.nozzle.loaders.implementations.deltalake_loader import DELTALAKE_AVAILABLE, DeltaLakeLoader
+    from src.amp.loaders.implementations.deltalake_loader import DELTALAKE_AVAILABLE, DeltaLakeLoader
 
     # Skip all tests if deltalake is not available
     if not DELTALAKE_AVAILABLE:
         pytest.skip('Delta Lake not available', allow_module_level=True)
 
 except ImportError:
-    pytest.skip('nozzle modules not available', allow_module_level=True)
+    pytest.skip('amp modules not available', allow_module_level=True)
 
 
 @pytest.fixture(scope='session')

@@ -14,7 +14,7 @@ def _(mo):
 def _():
     import marimo as mo
 
-    from nozzle.client import Client
+    from amp.client import Client
     return Client, mo
 
 
@@ -201,7 +201,7 @@ def _(client):
                 'uri': 'sqlite:///./.data/iceberg/catalog.db',
                 'warehouse': './.data/iceberg/warehouse'
             },
-            'namespace': 'nozzle_test',
+            'namespace': 'amp_test',
             'create_namespace': True,
             'create_table': True,
             'schema_evolution': True,
@@ -244,7 +244,7 @@ def _():
         warehouse='./.data/iceberg/warehouse'
     )
 
-    iceberg_table = iceberg_catalog.load_table('nozzle_test.test_logs')
+    iceberg_table = iceberg_catalog.load_table('amp_test.test_logs')
     result_table = iceberg_table.scan().to_arrow()
 
     print(f"Rows: {len(result_table)}")

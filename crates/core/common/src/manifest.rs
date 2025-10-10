@@ -1,6 +1,6 @@
 //! Dataset manifest definitions and utilities.
 //!
-//! This module provides the manifest system for defining datasets in Nozzle.
+//! This module provides the manifest system for defining datasets in Amp.
 //!
 //! ## Modules
 //!

@@ -12,7 +12,7 @@ pub const DEFAULT_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 pub type Result = std::result::Result<(SdkMeterProvider, Meter), ExporterBuildError>;
 
-const NOZZLE_METER: &str = "nozzle-meter";
+const AMP_METER: &str = "amp-meter";
 
 /// Starts a periodic OpenTelemetry metrics exporter over binary HTTP transport.
 pub fn start(url: String, export_interval: Option<Duration>) -> Result {
@@ -31,7 +31,7 @@ pub fn start(url: String, export_interval: Option<Duration>) -> Result {
         .with_reader(reader)
         .build();
     opentelemetry::global::set_meter_provider(meter_provider.clone());
-    let meter = opentelemetry::global::meter(NOZZLE_METER);
+    let meter = opentelemetry::global::meter(AMP_METER);
 
     Ok((meter_provider, meter))
 }

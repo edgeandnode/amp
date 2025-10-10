@@ -1,8 +1,8 @@
 {
-  "name": "nozzle-test-basic-function",
+  "name": "amp-test-basic-function",
   "private": true,
   "type": "module",
   "dependencies": {
-    "nozzl": "workspace:*"
+    "@edgeandnode/amp": "workspace:*"
   }
 }

@@ -219,7 +219,7 @@ pub enum ConfigError {
 
 impl Config {
     ///
-    /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
+    /// `env_override` allows env vars prefixed with `AMP_CONFIG_` to override config values.
     pub async fn load(
         file: impl Into<PathBuf>,
         env_override: bool,
@@ -235,7 +235,7 @@ impl Config {
         let config_file: ConfigFile = {
             let mut config_builder = Figment::new().merge(Toml::string(&contents));
             if env_override {
-                config_builder = config_builder.merge(Env::prefixed("NOZZLE_CONFIG_"));
+                config_builder = config_builder.merge(Env::prefixed("AMP_CONFIG_"));
             }
             if let Some(config_override) = config_override {
                 config_builder = config_builder.merge(config_override);

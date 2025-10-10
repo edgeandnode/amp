@@ -1,6 +1,6 @@
 from rich import print
 
-from nozzle.client import Client
+from amp.client import Client
 
 client = Client('grpc://34.27.238.174:80')
 

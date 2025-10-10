@@ -6,7 +6,6 @@
 .envrc
 .direnv
 .env
-.nozzle
 /local
 /target
 uv.lock
@@ -17,7 +16,6 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
-*.ptau
 .idea
 .vscode/
 config.toml

@@ -2,19 +2,19 @@
 //!
 //! This fixture provides a convenient interface for managing dataset packages
 //! in test environments. It wraps dataset metadata and provides methods for
-//! installing dependencies, building, and registering datasets using the NozzlCli.
+//! installing dependencies, building, and registering datasets using the AmpCli.
 
 use std::{path::PathBuf, str::FromStr};
 
 use common::BoxError;
 
-use super::NozzlCli;
+use super::AmpCli;
 
 /// Dataset package fixture for managing dataset operations.
 ///
 /// This fixture represents a dataset package with its metadata and provides
 /// convenient methods for common dataset operations like installing dependencies,
-/// building, and registering. It delegates CLI operations to a NozzlCli instance.
+/// building, and registering. It delegates CLI operations to a AmpCli instance.
 #[derive(Clone, Debug)]
 pub struct DatasetPackage {
     pub name: String,
@@ -37,19 +37,19 @@ impl DatasetPackage {
         }
     }
 
-    /// Build the dataset manifest using nozzl build command.
+    /// Build the dataset manifest using amp build command.
     ///
-    /// Runs `pnpm nozzl build` in the dataset directory using the provided CLI.
+    /// Runs `pnpm amp build` in the dataset directory using the provided CLI.
     #[tracing::instrument(skip_all, err)]
-    pub async fn build(&self, cli: &NozzlCli) -> Result<(), BoxError> {
+    pub async fn build(&self, cli: &AmpCli) -> Result<(), BoxError> {
         cli.build(&self.path, self.config.as_deref()).await
     }
 
-    /// Register the dataset using nozzl register command.
+    /// Register the dataset using amp register command.
     ///
-    /// Runs `pnpm nozzl register` in the dataset directory using the provided CLI.
+    /// Runs `pnpm amp register` in the dataset directory using the provided CLI.
     #[tracing::instrument(skip_all, err)]
-    pub async fn register(&self, cli: &NozzlCli) -> Result<(), BoxError> {
+    pub async fn register(&self, cli: &AmpCli) -> Result<(), BoxError> {
         cli.register(&self.path, self.config.as_deref()).await
     }
 }

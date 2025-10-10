@@ -66,14 +66,14 @@ impl Display for CompactionProperties {
         )
     }
 }
-pub struct NozzleCompactor {
+pub struct AmpCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
 }
 
-impl NozzleCompactor {
+impl AmpCompactor {
     pub fn start(table: Arc<PhysicalTable>, opts: Arc<CompactionProperties>) -> Self {
-        NozzleCompactor {
+        AmpCompactor {
             compaction_task: Compactor::start(&table, &opts),
             deletion_task: Collector::start(&table, &opts),
         }
@@ -106,17 +106,17 @@ impl NozzleCompactor {
     }
 }
 
-pub type CompactionTask = NozzleCompactorTask<Compactor>;
-pub type DeletionTask = NozzleCompactorTask<Collector>;
+pub type CompactionTask = AmpCompactorTask<Compactor>;
+pub type DeletionTask = AmpCompactorTask<Collector>;
 
-pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
+pub struct AmpCompactorTask<T: AmpCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
     opts: Arc<CompactionProperties>,
     previous: Option<Timestamp>,
 }
 
-impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
+impl<T: AmpCompactorTaskType> AmpCompactorTask<T> {
     pub fn abort(&self) {
         self.task.abort();
     }
@@ -166,7 +166,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
     }
 }
 
-pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
+pub trait AmpCompactorTaskType: Debug + Display + Sized + Send + 'static {
     type Error: CompactionErrorExt;
 
     fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self;
@@ -186,7 +186,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn handle_error(
         table: &Arc<PhysicalTable>,
         opts: &mut Arc<CompactionProperties>,
-        err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
+        err: impl Into<<Self as AmpCompactorTaskType>::Error>,
     ) -> Self {
         let this = Self::new(table, opts);
         let err = err.into();
@@ -205,9 +205,9 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn start(
         table: &Arc<PhysicalTable>,
         opts: &Arc<CompactionProperties>,
-    ) -> NozzleCompactorTask<Self> {
+    ) -> AmpCompactorTask<Self> {
         let task = tokio::spawn(futures::future::ok(Self::new(table, opts)));
-        NozzleCompactorTask {
+        AmpCompactorTask {
             task,
             table: Arc::clone(table),
             opts: Arc::clone(opts),

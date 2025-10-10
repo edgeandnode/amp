@@ -3,7 +3,7 @@ from typing import List, Optional
 import typer
 from rich import print
 
-from nozzle.client import Client
+from amp.client import Client
 
 app = typer.Typer()
 

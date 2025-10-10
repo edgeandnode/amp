@@ -108,8 +108,8 @@ jobs:
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
           BEACON_ETH_MAINNET_URL: ${{ secrets.BEACON_ETH_MAINNET_URL }}
 
-  nozzleup-tests:
-    name: Test nozzleup
+  ampup-tests:
+    name: Test ampup
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -129,8 +129,8 @@ jobs:
           crate: cargo-nextest
           version: ^0.9
 
-      - name: Run nozzleup tests
-        run: just test-nozzleup --verbose
+      - name: Run ampup tests
+        run: just test-ampup --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

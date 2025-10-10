@@ -1,8 +1,8 @@
-# Project Nozzle - Technical Overview for Claude
+# Project Amp - Technical Overview for Claude
 
 ## Project Summary
 
-Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture for blockchain data services on The Graph. It focuses on extracting blockchain data from various sources, transforming it via SQL queries, and serving it through multiple query interfaces.
+Project Amp is a high-performance ETL (Extract, Transform, Load) architecture for blockchain data services on The Graph. It focuses on extracting blockchain data from various sources, transforming it via SQL queries, and serving it through multiple query interfaces.
 
 ## Architecture Overview
 
@@ -21,10 +21,11 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 
 ## Key Components
 
-### 1. Main Binary (`nozzle`)
+### 1. Main Binary (`ampd`)
 - Central command dispatcher
 - Commands:
   - `dump`: Extract data from sources to Parquet
+  - `dev`: Start development server
   - `server`: Start query servers
   - `worker`: Run distributed worker node
   - `generate-manifest`: Create dataset manifests
@@ -86,9 +87,9 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 ## Configuration
 
 ### Environment Variables
-- `NOZZLE_CONFIG`: Path to main config file
-- `NOZZLE_LOG`: Logging level (error/warn/info/debug/trace)
-- `NOZZLE_CONFIG_*`: Override config values
+- `AMP_CONFIG`: Path to main config file
+- `AMP_LOG`: Logging level (error/warn/info/debug/trace)
+- `AMP_CONFIG_*`: Override config values
 
 ### Key Directories
 1. **dataset_defs_dir**: Dataset definitions (input)
@@ -121,7 +122,7 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 ### Dump Command
 ```bash
 # Extract first 4 million blocks with 2 parallel jobs
-cargo run --release -p nozzle -- dump --dataset eth_firehose -e 4000000 -j 2
+cargo run --release -p ampd -- dump --dataset eth_firehose -e 4000000 -j 2
 ```
 
 ### Query via HTTP

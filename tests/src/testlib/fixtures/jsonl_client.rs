@@ -1,13 +1,13 @@
-//! JSONL client fixture for querying Nozzle's HTTP JSON Lines server.
+//! JSONL client fixture for querying Amp's HTTP JSON Lines server.
 //!
-//! This fixture provides a convenient interface for sending SQL queries to the Nozzle
+//! This fixture provides a convenient interface for sending SQL queries to the Amp
 //! JSON Lines server and parsing the responses. It handles the HTTP communication and
 //! JSON deserialization, making it easy to write tests that verify query results.
 
 use common::BoxError;
 use serde::de::DeserializeOwned;
 
-/// JSONL client fixture for querying the Nozzle JSON Lines server.
+/// JSONL client fixture for querying the Amp JSON Lines server.
 ///
 /// This fixture wraps an HTTP client and provides convenient methods for
 /// sending SQL queries to the JSON Lines server and parsing the responses.

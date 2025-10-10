@@ -1353,6 +1353,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "Query Metrics",
-  "uid": "nozzle-query-metrics",
+  "uid": "amp-query-metrics",
   "version": 1
 }
