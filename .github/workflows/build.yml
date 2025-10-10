@@ -206,6 +206,12 @@ jobs:
             org.opencontainers.image.vendor=Edge & Node
             org.opencontainers.image.title=Amp
             org.opencontainers.image.description=A tool for building and managing blockchain datasets
+          annotations: |
+            manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
+            manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
+            manifest:org.opencontainers.image.vendor=Edge & Node
+            manifest:org.opencontainers.image.title=Amp
+            manifest:org.opencontainers.image.description=A tool for building and managing blockchain datasets
 
       - name: Create multi-arch Dockerfile
         run: |
@@ -246,7 +252,7 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          annotations: ${{ steps.metadata.outputs.labels }}
+          annotations: ${{ steps.metadata.outputs.annotations }}
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
