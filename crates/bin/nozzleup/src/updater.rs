@@ -20,7 +20,7 @@ impl Updater {
 
     /// Get the current version
     pub fn get_current_version(&self) -> String {
-        env!("CARGO_PKG_VERSION").to_string()
+        env!("VERGEN_GIT_DESCRIBE").to_string()
     }
 
     /// Get the latest version

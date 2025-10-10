@@ -2,6 +2,7 @@
 name = "nozzleup"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [lib]
 name = "nozzleup"
@@ -28,6 +29,9 @@ url.workspace = true
 indicatif = "0.17"
 console = "0.15"
 dialoguer = "0.11"
+
+[build-dependencies]
+vergen-gitcl = { version = "1.0.8", features = ["build"] }
 
 [dev-dependencies]
 pretty_assertions.workspace = true

@@ -6,7 +6,7 @@ use nozzleup::{DEFAULT_REPO, commands};
 #[derive(Parser, Debug)]
 #[command(name = "nozzleup")]
 #[command(about = "The nozzle installer and version manager", long_about = None)]
-#[command(version)]
+#[command(version = env!("VERGEN_GIT_DESCRIBE"))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
