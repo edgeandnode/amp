@@ -3,7 +3,6 @@ name = "ampsync"
 description = "Syncing engine that listens to the stream changes from the nozzle-client streaming layer to store changes in a configured database."
 edition.workspace = true
 version.workspace = true
-build = "build.rs"
 
 [lib]
 name = "ampsync"
@@ -23,6 +22,7 @@ snmalloc = ["dep:snmalloc-rs"]
 admin-api = { path = "../../services/admin-api" }
 arrow-array = { version = "55.2.0", default-features = false }
 arrow-schema = { version = "55.2.0" }
+arrow-to-postgres = { path = "../../services/arrow-to-postgres" }
 backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
@@ -30,17 +30,12 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
-enum_dispatch = "0.3.13"
-flume = "0.11.1"
 futures.workspace = true
 lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
-notify = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
 nozzle-client = { path = "../../client" }
 phf = { version = "0.13.1", features = ["macros"] }
 reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 snmalloc-rs = { version = "0.3.8", optional = true }
 sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
@@ -54,11 +49,7 @@ tokio = { workspace = true, features = ["signal"] }
 tokio-util = "0.7.12"
 tracing.workspace = true
 
-[build-dependencies]
-vergen-gitcl = { version = "1.0.8", features = ["build"] }
-
 [dev-dependencies]
 alloy.workspace = true
 mockito = "1.7.0"
 pgtemp = "0.6.0"
-tempfile.workspace = true

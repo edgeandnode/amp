@@ -4,16 +4,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+use arrow_to_postgres::ArrowToPostgresBinaryEncoder;
 use backon::{ExponentialBuilder, Retryable};
-use bytes::BytesMut;
 use common::{BoxError, arrow::array::RecordBatch};
-use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use datasets_derived::manifest::{ArrowSchema, Field};
 use nozzle_client::InvalidationRange;
 use phf::phf_set;
 use sqlx::{Acquire, Pool, Postgres};
 
-use crate::{conn::DbConnPool, pgpq::ArrowToPostgresBinaryEncoder};
+use crate::conn::DbConnPool;
 
 /// Represents the existing schema of a table in the database
 #[derive(Debug)]
@@ -90,7 +89,12 @@ fn compare_schemas<'a>(
     for field in &expected.fields {
         if let Some(existing_col) = existing.columns.get(&field.name) {
             // Column exists - check if type matches
-            let expected_pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
+            let arrow_field = arrow_schema::Field::new(
+                field.name.clone(),
+                field.type_.as_arrow().clone(),
+                field.nullable,
+            );
+            let expected_pg_type = arrow_type_to_postgres_type(&arrow_field)?;
 
             // Normalize type names for comparison
             let normalized_existing = normalize_pg_type(&existing_col.data_type);
@@ -230,7 +234,14 @@ pub fn quote_column_name(name: &str) -> String {
 
 /// Convert a single Arrow field to PostgreSQL column definition
 fn arrow_field_to_postgres_column(field: &Field) -> Result<String, BoxError> {
-    let pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
+    // Convert the datasets Field to an arrow_schema::Field
+    let arrow_field = arrow_schema::Field::new(
+        field.name.clone(),
+        field.type_.as_arrow().clone(),
+        field.nullable,
+    );
+
+    let pg_type = arrow_type_to_postgres_type(&arrow_field)?;
     let nullable = if field.nullable { "" } else { " NOT NULL" };
 
     // wrap reserved keywords in quotes
@@ -239,70 +250,26 @@ fn arrow_field_to_postgres_column(field: &Field) -> Result<String, BoxError> {
     Ok(format!("{} {}{}", column_name, pg_type, nullable))
 }
 
-/// Map Arrow DataType to PostgreSQL type
-fn arrow_type_to_postgres_type(data_type: &ArrowDataType) -> Result<String, BoxError> {
-    let pg_type = match data_type {
-        // Integer types
-        ArrowDataType::Int8 => "SMALLINT",
-        ArrowDataType::Int16 => "SMALLINT",
-        ArrowDataType::Int32 => "INTEGER",
-        ArrowDataType::Int64 => "BIGINT",
-        ArrowDataType::UInt8 => "SMALLINT",
-        ArrowDataType::UInt16 => "INTEGER",
-        ArrowDataType::UInt32 => "BIGINT",
-        ArrowDataType::UInt64 => "NUMERIC(20)", // PostgreSQL doesn't have unsigned 64-bit
+/// Map Arrow DataType to PostgreSQL type using arrow-to-postgres library
+fn arrow_type_to_postgres_type(field: &arrow_schema::Field) -> Result<String, BoxError> {
+    use arrow_to_postgres::encoders::{BuildEncoder, EncoderBuilder};
 
-        // Floating point types
-        ArrowDataType::Float16 => "REAL",
-        ArrowDataType::Float32 => "REAL",
-        ArrowDataType::Float64 => "DOUBLE PRECISION",
+    // Create an encoder builder for this field to get the PostgreSQL type
+    let encoder_builder =
+        EncoderBuilder::try_new(std::sync::Arc::new(field.clone())).map_err(|e| {
+            format!(
+                "Failed to create encoder for field '{}': {:?}",
+                field.name(),
+                e
+            )
+        })?;
 
-        // String types
-        ArrowDataType::Utf8 => "TEXT",
-        ArrowDataType::LargeUtf8 => "TEXT",
-
-        // Binary types
-        ArrowDataType::Binary => "BYTEA",
-        ArrowDataType::LargeBinary => "BYTEA",
-        ArrowDataType::FixedSizeBinary(_) => "BYTEA",
-
-        // Boolean
-        ArrowDataType::Boolean => "BOOLEAN",
-
-        // Date and time types
-        ArrowDataType::Date32 => "DATE",
-        ArrowDataType::Date64 => "DATE",
-        ArrowDataType::Time32(_) => "TIME",
-        ArrowDataType::Time64(_) => "TIME",
-        ArrowDataType::Timestamp(_, timezone) => match timezone {
-            Some(_) => "TIMESTAMPTZ",
-            None => "TIMESTAMP",
-        },
-
-        // Decimal types
-        ArrowDataType::Decimal128(precision, scale) => {
-            return Ok(format!("NUMERIC({}, {})", precision, scale));
-        }
-
-        // List and struct types - map to JSONB for flexibility
-        ArrowDataType::List(_) => "JSONB",
-        ArrowDataType::LargeList(_) => "JSONB",
-        ArrowDataType::FixedSizeList(_, _) => "JSONB",
-        ArrowDataType::Struct(_) => "JSONB",
-        ArrowDataType::Map(_, _) => "JSONB",
-
-        // Other types
-        ArrowDataType::Null => "TEXT", // Fallback for null type
-        ArrowDataType::Dictionary(_, value_type) => {
-            // For dictionary encoding, use the value type
-            return arrow_type_to_postgres_type(value_type);
-        }
-
-        // Unsupported types - fall back to TEXT
-        _ => "TEXT",
-    };
-
-    Ok(pg_type.to_string())
+    // Get the PostgreSQL DDL string from the encoder's schema
+    // The arrow-to-postgres library now handles all type-specific formatting:
+    // - UInt64 → NUMERIC(20, 0)
+    // - Decimal128(p, s) → NUMERIC(p, s)
+    // - Timestamp(_, Some(tz)) → TIMESTAMPTZ
+    Ok(encoder_builder.schema().data_type.to_ddl_string())
 }
 
 /// Optimizes batch sizes based on processing performance.
@@ -483,6 +450,10 @@ pub struct AmpsyncDbEngine {
 }
 
 impl AmpsyncDbEngine {
+    /// Column name used for reorg handling.
+    /// All tables use the same system metadata column for tracking block ranges.
+    const REORG_BLOCK_COLUMN: &'static str = "_block_num_end";
+
     pub fn new(pool: &DbConnPool) -> Self {
         Self {
             pool: pool.deref().clone(),
@@ -922,14 +893,6 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
-    /// Get the block number column name for reorg handling.
-    ///
-    /// Always returns "_block_num_end" since all tables use the same system metadata columns.
-    /// This is used for conservative reorg handling (deletes entire batch if any block is invalidated).
-    async fn get_block_num_column(&self, _table_name: &str) -> Result<String, BoxError> {
-        Ok("_block_num_end".to_string())
-    }
-
     /// Returns true if the table exists.
     async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(
@@ -1111,7 +1074,12 @@ impl AmpsyncDbEngine {
         // 1. Existing rows will have NULL for the new column
         // 2. PostgreSQL doesn't allow adding NOT NULL columns to non-empty tables
         // 3. New data from the stream will populate these columns properly
-        let pg_type = arrow_type_to_postgres_type(field.type_.as_arrow())?;
+        let arrow_field = arrow_schema::Field::new(
+            field.name.clone(),
+            field.type_.as_arrow().clone(),
+            field.nullable,
+        );
+        let pg_type = arrow_type_to_postgres_type(&arrow_field)?;
         let column_name = if RESERVED_KEYWORDS.contains(field.name.as_str()) {
             format!("\"{}\"", field.name)
         } else {
@@ -1229,41 +1197,16 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
-    /// Returns true if table has a primary key or unique constraint on block_num.
-    async fn has_block_num_constraint(&self, table_name: &str) -> Result<bool, BoxError> {
-        let result: Option<(bool,)> = sqlx::query_as(
-            "SELECT EXISTS (
-                SELECT 1 FROM pg_constraint c
-                JOIN pg_class t ON c.conrelid = t.oid
-                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
-                WHERE t.relname = $1
-                AND a.attname IN ('block_num', '_block_num')
-                AND c.contype IN ('p', 'u')
-            )",
-        )
-        .bind(table_name)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| {
-            format!(
-                "Failed to check block_num constraint for table '{}': {}",
-                table_name, e
-            )
-        })?;
-
-        Ok(result.map(|(exists,)| exists).unwrap_or(false))
-    }
-
-    /// Helper to insert data using the temporary table approach for conflict handling.
+    /// Helper to insert data using the temporary table approach for deduplication.
     ///
-    /// This approach is used when the table has a PRIMARY KEY constraint on block_num.
+    /// All tables have `_id` as PRIMARY KEY for deduplication, so this approach is always used.
     /// Steps:
     /// 1. Create temporary table with same structure (no constraints)
     /// 2. COPY data into temp table (fast bulk load)
-    /// 3. INSERT from temp table into main table with ON CONFLICT DO NOTHING
+    /// 3. INSERT from temp table into main table with ON CONFLICT (_id) DO NOTHING
     /// 4. Drop temp table
     ///
-    /// Returns the number of rows inserted.
+    /// Returns the number of rows inserted (excludes duplicates).
     async fn insert_via_temp_table(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         table_name: &str,
@@ -1326,72 +1269,26 @@ impl AmpsyncDbEngine {
         Ok(rows_inserted)
     }
 
-    /// Helper to insert data using direct COPY (no conflict handling).
+    /// Insert a single batch chunk using high-performance bulk copy with deduplication
     ///
-    /// This approach is used when the table has no PRIMARY KEY constraint on block_num.
-    /// Simply performs a fast COPY operation directly into the target table.
-    ///
-    /// Returns the number of rows inserted.
-    async fn insert_via_direct_copy(
-        conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
-        table_name: &str,
-        columns_clause: &str,
-        buffer_data: &bytes::Bytes,
-        num_rows: usize,
-    ) -> Result<u64, sqlx::Error> {
-        let copy_query = format!(
-            "COPY {} ({}) FROM STDIN WITH (FORMAT BINARY)",
-            table_name, columns_clause
-        );
-        let mut copy_in = conn.copy_in_raw(&copy_query).await?;
-        copy_in.send(buffer_data.clone()).await?;
-        let rows_affected = copy_in.finish().await?;
-
-        tracing::trace!(
-            table = %table_name,
-            rows_affected = rows_affected,
-            input_rows = num_rows,
-            "copy_operation_complete"
-        );
-
-        Ok(rows_affected)
-    }
-
-    /// Insert a single batch chunk using high-performance bulk copy with conflict handling
-    ///
-    /// Uses a temporary table approach to handle conflicts on block_num primary key:
+    /// Uses a temporary table approach to handle conflicts on the `_id` PRIMARY KEY:
     /// 1. COPY data into a temporary table (fast bulk load)
-    /// 2. INSERT from temp table into main table with ON CONFLICT DO NOTHING
+    /// 2. INSERT from temp table into main table with ON CONFLICT (_id) DO NOTHING
     /// 3. Drop temporary table
+    ///
+    /// This ensures deduplication on reconnect - if the same batch is re-inserted, duplicates are silently ignored.
     async fn insert_batch_chunk(
         &self,
         table_name: &str,
         batch: &RecordBatch,
     ) -> Result<(), BoxError> {
-        // Create the pgpq encoder for this batch's schema
-        let mut encoder = ArrowToPostgresBinaryEncoder::try_new(batch.schema().as_ref())
-            .map_err(|e| format!("Failed to create pgpq encoder: {:?}", e))?;
+        // Encode to PostgreSQL COPY binary format
+        let encoder = ArrowToPostgresBinaryEncoder::try_new(batch.schema().as_ref())
+            .map_err(|e| format!("Failed to create arrow_to_pg encoder: {:?}", e))?;
 
-        // Calculate exact buffer size needed to avoid reallocations
-        let buffer_size = encoder
-            .calculate_buffer_size(batch)
-            .map_err(|e| format!("Failed to calculate buffer size: {:?}", e))?;
-
-        // Pre-allocate exact capacity - much better than arbitrary estimate
-        let mut buffer = BytesMut::with_capacity(buffer_size);
-
-        // Write header
-        encoder.write_header(&mut buffer);
-
-        // Write the batch data
-        encoder
-            .write_batch(batch, &mut buffer)
-            .map_err(|e| format!("Failed to encode batch with pgpq: {:?}", e))?;
-
-        // Write footer
-        encoder
-            .write_footer(&mut buffer)
-            .map_err(|e| format!("Failed to write pgpq footer: {:?}", e))?;
+        let (buffer, _finished) = encoder
+            .encode_batch(batch)
+            .map_err(|e| format!("Failed to encode batch to Postgres binary format: {:?}", e))?;
 
         // Get column names for the COPY command
         // IMPORTANT: Wrap reserved keywords in quotes (e.g., "to", "from")
@@ -1403,64 +1300,30 @@ impl AmpsyncDbEngine {
             .collect();
         let columns_clause = column_names.join(", ");
 
-        // Check if schema has block_num or _block_num column (primary key)
-        let block_num_col = schema_fields
-            .fields()
-            .iter()
-            .find(|f| f.name() == "block_num" || f.name() == "_block_num")
-            .map(|f| f.name().to_string());
-
-        // Check constraint ONCE before entering retry closure - critical for performance!
-        // This query result is cached and reused across all retry attempts.
-        let has_constraint = if block_num_col.is_some() {
-            self.has_block_num_constraint(table_name).await?
-        } else {
-            false
-        };
-
         let pool = &self.pool;
         let buffer_data = &buffer.freeze();
         let num_rows = batch.num_rows();
         let columns_clause_ref = &columns_clause;
-        let block_num_col_ref = block_num_col.as_deref();
 
         // Use retry logic for the entire operation
         (|| async move {
-            // Get a connection from the pool
+            // Get a connection from the pool and start a transaction
             let mut conn = pool.acquire().await?;
+            let mut tx = conn.begin().await?;
 
-            if has_constraint {
-                // Use temporary table approach for conflict handling
-                // Begin transaction to ensure temp table is properly scoped
-                let mut tx = conn.begin().await?;
+            // Always use temp table approach for deduplication on _id PRIMARY KEY
+            Self::insert_via_temp_table(
+                &mut tx,
+                table_name,
+                columns_clause_ref,
+                "_id", // PRIMARY KEY is always _id
+                buffer_data,
+                num_rows,
+            )
+            .await?;
 
-                // Use the correct block_num column name (block_num or _block_num)
-                let conflict_column = block_num_col_ref.unwrap_or("block_num");
-
-                // Insert via temp table with conflict handling
-                Self::insert_via_temp_table(
-                    &mut tx,
-                    table_name,
-                    columns_clause_ref,
-                    conflict_column,
-                    buffer_data,
-                    num_rows,
-                )
-                .await?;
-
-                // Commit the transaction
-                tx.commit().await?;
-            } else {
-                // No constraint - use direct COPY
-                Self::insert_via_direct_copy(
-                    &mut conn,
-                    table_name,
-                    columns_clause_ref,
-                    buffer_data,
-                    num_rows,
-                )
-                .await?;
-            }
+            // Commit the transaction
+            tx.commit().await?;
 
             Ok::<(), sqlx::Error>(())
         })
@@ -1485,9 +1348,6 @@ impl AmpsyncDbEngine {
             return Ok(());
         }
 
-        // Get the correct block number column name (block_num or _block_num)
-        let block_num_col = self.get_block_num_column(table_name).await?;
-
         // Build a WHERE clause that covers all invalidation ranges
         // Pre-allocate capacity to avoid reallocations: estimate ~50 chars per condition
         let estimated_capacity = invalidation_ranges.len() * 50;
@@ -1501,9 +1361,9 @@ impl AmpsyncDbEngine {
             write!(
                 &mut where_clause,
                 "({} >= {} AND {} <= {})",
-                block_num_col,
+                Self::REORG_BLOCK_COLUMN,
                 range.numbers.start(),
-                block_num_col,
+                Self::REORG_BLOCK_COLUMN,
                 range.numbers.end()
             )
             .unwrap(); // Writing to String never fails
@@ -1563,97 +1423,110 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_arrow_type_mappings() {
+    fn test_arrow_type_mappings_comprehensive() {
+        use arrow_schema::Field;
+        use datafusion::arrow::datatypes::TimeUnit;
+
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Int32).unwrap(),
-            "INTEGER"
-        );
-        assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Utf8).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Utf8, false)).unwrap(),
             "TEXT"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Boolean).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Boolean, false))
+                .unwrap(),
             "BOOLEAN"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Float64).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Float64, false))
+                .unwrap(),
             "DOUBLE PRECISION"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Binary).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Binary, false)).unwrap(),
             "BYTEA"
         );
-    }
-
-    #[test]
-    fn test_arrow_type_mappings_comprehensive() {
-        use datafusion::arrow::datatypes::TimeUnit;
 
         // Integer types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Int8).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Int32, false)).unwrap(),
+            "INTEGER"
+        );
+        assert_eq!(
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Int8, false)).unwrap(),
             "SMALLINT"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Int16).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Int16, false)).unwrap(),
             "SMALLINT"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Int64).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Int64, false)).unwrap(),
             "BIGINT"
         );
 
         // Unsigned integer types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::UInt8).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::UInt8, false)).unwrap(),
             "SMALLINT"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::UInt32).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::UInt32, false)).unwrap(),
             "BIGINT"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::UInt64).unwrap(),
-            "NUMERIC(20)"
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::UInt64, false)).unwrap(),
+            "NUMERIC(20, 0)"
         );
 
         // Float types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Float32).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Float32, false))
+                .unwrap(),
             "REAL"
         );
 
         // String types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::LargeUtf8).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::LargeUtf8, false))
+                .unwrap(),
             "TEXT"
         );
 
         // Binary types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::LargeBinary).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::LargeBinary, false))
+                .unwrap(),
             "BYTEA"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::FixedSizeBinary(32)).unwrap(),
+            arrow_type_to_postgres_type(&Field::new(
+                "test",
+                ArrowDataType::FixedSizeBinary(32),
+                false
+            ))
+            .unwrap(),
             "BYTEA"
         );
 
         // Date/Time types
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Date32).unwrap(),
+            arrow_type_to_postgres_type(&Field::new("test", ArrowDataType::Date32, false)).unwrap(),
             "DATE"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Timestamp(TimeUnit::Microsecond, None))
-                .unwrap(),
+            arrow_type_to_postgres_type(&Field::new(
+                "test",
+                ArrowDataType::Timestamp(TimeUnit::Microsecond, None),
+                false
+            ))
+            .unwrap(),
             "TIMESTAMP"
         );
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Timestamp(
-                TimeUnit::Microsecond,
-                Some("+00:00".into())
+            arrow_type_to_postgres_type(&Field::new(
+                "test",
+                ArrowDataType::Timestamp(TimeUnit::Microsecond, Some("+00:00".into())),
+                false
             ))
             .unwrap(),
             "TIMESTAMPTZ"
@@ -1661,17 +1534,28 @@ mod tests {
 
         // Decimal type
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::Decimal128(38, 10)).unwrap(),
+            arrow_type_to_postgres_type(&Field::new(
+                "test",
+                ArrowDataType::Decimal128(38, 10),
+                false
+            ))
+            .unwrap(),
             "NUMERIC(38, 10)"
         );
 
-        // Complex types
+        // Complex types - arrow-to-postgres library maps List to PostgreSQL native arrays
         assert_eq!(
-            arrow_type_to_postgres_type(&ArrowDataType::List(Arc::new(
-                datafusion::arrow::datatypes::Field::new("item", ArrowDataType::Int32, true)
-            )))
+            arrow_type_to_postgres_type(&Field::new(
+                "test",
+                ArrowDataType::List(Arc::new(datafusion::arrow::datatypes::Field::new(
+                    "item",
+                    ArrowDataType::Int32,
+                    true
+                ))),
+                false
+            ))
             .unwrap(),
-            "JSONB"
+            "INTEGER[]"
         );
     }
 
@@ -1769,7 +1653,7 @@ mod tests {
 
         // Verify the DDL structure
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS test_table"));
-        assert!(ddl.contains("id NUMERIC(20) NOT NULL"));
+        assert!(ddl.contains("id NUMERIC(20, 0) NOT NULL"));
         assert!(ddl.contains("name TEXT"));
         assert!(ddl.contains("balance NUMERIC(38, 18) NOT NULL"));
         assert!(ddl.contains("created_at TIMESTAMPTZ NOT NULL"));
@@ -1786,5 +1670,35 @@ mod tests {
 
         // Should still create a valid (though empty) table
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS empty_table"));
+    }
+
+    #[test]
+    fn test_ddl_always_includes_id_primary_key() {
+        // Verify that ALL tables get _id as PRIMARY KEY for deduplication
+        let schema = ArrowSchema {
+            fields: vec![Field {
+                name: "value".to_string(),
+                type_: DataType(ArrowDataType::Int64),
+                nullable: false,
+            }],
+        };
+
+        let ddl = arrow_schema_to_postgres_ddl("test_dedup", &schema).unwrap();
+
+        // Verify _id column is injected
+        assert!(
+            ddl.contains("_id BYTEA NOT NULL"),
+            "DDL must include _id column"
+        );
+
+        // Verify _id is the PRIMARY KEY
+        assert!(
+            ddl.contains("PRIMARY KEY (_id)"),
+            "DDL must have PRIMARY KEY on _id for deduplication"
+        );
+
+        // Verify system columns for reorg handling
+        assert!(ddl.contains("_block_num_start BIGINT NOT NULL"));
+        assert!(ddl.contains("_block_num_end BIGINT NOT NULL"));
     }
 }

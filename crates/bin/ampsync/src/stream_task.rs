@@ -263,7 +263,7 @@ impl StreamTask {
             }
         };
 
-        // High-performance bulk insert using pgpq
+        // High-performance bulk insert using arrow_to_pg
         if let Err(e) = db_engine
             .insert_record_batch(&self.table_name, &batch_with_metadata)
             .await

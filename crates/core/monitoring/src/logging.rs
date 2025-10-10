@@ -58,6 +58,7 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
 const NOZZLE_CRATES: &[&str] = &[
     "admin_api",
     "ampsync",
+    "arrow_to_postgres",
     "common",
     "controller",
     "dataset_store",

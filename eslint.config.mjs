@@ -8,7 +8,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["crates", "**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md", "target", "**/target"],
+    ignores: ["crates", "**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md", "target"],
   },
   eslint.configs.recommended,
   tseslint.configs.strict,

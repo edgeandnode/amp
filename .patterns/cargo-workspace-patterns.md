@@ -3,105 +3,134 @@
 
 ## 🎯 OVERVIEW
 
-Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Nozzle project.
+Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency
+management, cross-crate interactions, and workspace-level operations in the Nozzle project.
 
 ## 🚨 CRITICAL WORKSPACE REQUIREMENTS
+
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
 
 ### Mandatory Workspace Operations
-- **Workspace root execution**: ALL `cargo` commands MUST be issued from the root of the workspace (where the workspace `Cargo.toml` file lives)
+
+- **Workspace root execution**: ALL `cargo` commands MUST be issued from the root of the workspace (where the workspace
+  `Cargo.toml` file lives)
 - **Immediate formatting**: `just fmt-rs` for entire workspace or `just fmt-file <rust_file>.rs` for individual files
 - **Compilation validation**: `just check-rs` and `just check-crate <crate-name>` MUST pass
 
 ### Mandatory Cargo.toml Ordering
+
 - **Workspace members**: Root `Cargo.toml` `members` array MUST be ordered alphabetically
 - **Dependencies**: All `Cargo.toml` dependencies sections MUST be ordered alphabetically
 - **Rationale**: Ensures consistent merge conflict resolution and maintainable dependency management
 
 ## 📁 Workspace structure
 
-The Nozzle workspace follows a hierarchical organization under the `crates/` directory with four main categories: `core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct dependency patterns.
+The Nozzle workspace follows a hierarchical organization under the `crates/` directory with four main categories:
+`core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct
+dependency patterns.
 
 ### 🏗️ Top-Level Crate Categories
 
 #### 📦 `crates/core/` - Foundation Libraries
+
 **Purpose**: Shared functionality and domain logic used across the entire workspace.
 
 **What belongs here:**
+
 - **`common`**: Shared utilities, error types, configuration, EVM functions
-- **`metadata-db`**: PostgreSQL database operations and worker coordination  
+- **`metadata-db`**: PostgreSQL database operations and worker coordination
 - **`dataset-store`**: Dataset management, manifest parsing, SQL dataset support
 - **`js-runtime`**: JavaScript UDF execution runtime
 - **`dump`**: Core data extraction logic and parallel processing
 - **`monitoring`**: Observability, metrics, and telemetry
 
 **Dependency Rules:**
+
 - ✅ Core crates can depend on other core crates
 - ❌ Core crates NEVER depend on `bin`, `extractors`, or `services`
 - ✅ Should be the most stable and well-tested crates
 
 #### 🚀 `crates/bin/` - Executable Applications
+
 **Purpose**: Main entry points and command-line applications.
 
 **What belongs here:**
+
 - **`nozzle`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
 - **`generate-manifest`**: Utility for creating dataset manifest files
 - **`dump-check`**: Data validation and integrity checking tool
+- **`ampsync`**: Syncing crate that streams data from Apache Arrow `RecordBatch` and inserts into a configured postgres
+  database
 
 **Dependency Rules:**
+
 - ✅ Can depend on `core`, `extractors`, and `services` crates
 - ❌ Other categories should NOT depend on `bin` crates
 - ✅ Entry points that orchestrate functionality from other layers
 
 #### 🔌 `crates/extractors/` - Data Source Connectors
+
 **Purpose**: Specialized connectors for different blockchain data sources.
 
 **What belongs here:**
+
 - **`evm-rpc`**: Ethereum JSON-RPC data extraction (blocks, transactions, logs)
-- **`firehose`**: StreamingFast Firehose protocol implementation  
+- **`firehose`**: StreamingFast Firehose protocol implementation
 - **`substreams`**: Substreams package processing and entity extraction
 
 **Dependency Rules:**
+
 - ✅ Can depend on `core` crates for shared functionality
 - ❌ Should NOT depend on other `extractors` (maintain independence)
 - ❌ Should NOT depend on `services` or `bin` crates
 - ✅ Each extractor should be self-contained for its data source
 
 #### 🌐 `crates/services/` - Server Components
+
 **Purpose**: HTTP/gRPC services and server-side functionality.
 
 **What belongs here:**
+
 - **`server`**: Arrow Flight gRPC server and JSON Lines HTTP server
 - **`admin-api`**: Administrative HTTP API for management
+- **`arrow-to-postgres`**: Arrow `RecordBatch` to postgres binary insert library for fast streaming of data from Apache
+  to postgres
 - **`http-common`**: Shared HTTP utilities and middleware
 
 **Dependency Rules:**
+
 - ✅ Can depend on `core` crates for business logic
 - ✅ `http-common` can be shared among other service crates
+- ✅ `arrow-to-postgres` can be shared among other service crates
 - ❌ Should NOT depend on `extractors` or `bin` crates directly
 - ✅ Services orchestrate core functionality for external interfaces
 
 #### 📋 Additional Workspace Components
 
 **`crates/client/`**: Client libraries for connecting to Nozzle services
+
 - Language bindings and SDK functionality
 - Can depend on `core` for shared data structures
 
 **`tests/`**: Workspace-level integration tests
+
 - End-to-end testing across multiple crates
 - Cross-crate integration scenarios
 
 ## 🛠️ Cargo workspace management
 
 ### 🚨 MANDATORY WORKSPACE MANAGEMENT RULES
+
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
 
 #### Rule #1: ALWAYS Execute Commands from Workspace Root
+
 - ✅ **REQUIRED**: All `cargo` commands MUST be executed from the PROJECT ROOT DIRECTORY
 - ❌ **FORBIDDEN**: Never `cd` into crate directories to run cargo commands
 - ✅ **REQUIRED**: Always use `--package <crate-name>` (or `-p <crate-name>`) to target specific crates
 
 #### Rule #2: NEVER Manually Edit Cargo.toml Dependencies
+
 - ❌ **FORBIDDEN**: Manually editing `[dependencies]`, `[dev-dependencies]`, or `[build-dependencies]` sections
 - ✅ **REQUIRED**: Always use `cargo add` and `cargo remove` commands from workspace root
 
@@ -138,7 +167,7 @@ cargo add <local-crate-name> --package <target-crate-name> --path crates/<catego
 cargo add <dependency-name> --package <crate-name> --optional
 ```
 
-#### Real Examples 
+#### Real Examples
 
 ```bash
 # Add tokio to metadata-db crate (from workspace root)
@@ -182,7 +211,7 @@ cargo remove <dependency-name> --package <crate-name> --dev
 cargo remove <dependency-name> --package <crate-name> --build
 ```
 
-### 🏗️ Creating new crates 
+### 🏗️ Creating new crates
 
 #### 📋 New Crate Creation Procedure
 
@@ -191,27 +220,28 @@ cargo remove <dependency-name> --package <crate-name> --build
 Before creating any new crate, answer these questions:
 
 1. **🎯 What is the primary purpose of this crate?**
-   - What specific functionality will it provide?
-   - Is it shared library code, a data connector, a service, or an executable?
+    - What specific functionality will it provide?
+    - Is it shared library code, a data connector, a service, or an executable?
 
 2. **📂 Which workspace category does it belong in?**
-   - `core/`: Shared functionality used across the workspace?
-   - `extractors/`: Data source connector for blockchain data?
-   - `services/`: HTTP/gRPC server or network service?
-   - `bin/`: Executable application or CLI tool?
+    - `core/`: Shared functionality used across the workspace?
+    - `extractors/`: Data source connector for blockchain data?
+    - `services/`: HTTP/gRPC server or network service?
+    - `bin/`: Executable application or CLI tool?
 
 3. **🏷️ What should the crate name be?**
-   - Does the name clearly describe its function?
-   - Follow kebab-case naming (e.g., `data-validator`, `metrics-api`)
-   - **💡 RECOMMENDED**: Consider namespace patterns: `<namespace>-<specific>` (e.g., `dataset-common`, `dataset-derived`)
-     + Namespace is more generic than the specific name part
-     + Groups related crates under a common prefix
-   - Is it specific enough to avoid confusion with other crates?
+    - Does the name clearly describe its function?
+    - Follow kebab-case naming (e.g., `data-validator`, `metrics-api`)
+    - **💡 RECOMMENDED**: Consider namespace patterns: `<namespace>-<specific>` (e.g., `dataset-common`,
+      `dataset-derived`)
+        + Namespace is more generic than the specific name part
+        + Groups related crates under a common prefix
+    - Is it specific enough to avoid confusion with other crates?
 
 4. **🔗 What are its expected dependencies?**
-   - Will it depend only on `core` crates (recommended)?
-   - Does it need to depend on other categories (check dependency rules)?
-   - Will other crates depend on this one?
+    - Will it depend only on `core` crates (recommended)?
+    - Does it need to depend on other categories (check dependency rules)?
+    - Will other crates depend on this one?
 
 **Step 2: Create the Crate (from workspace root)**
 
@@ -238,6 +268,7 @@ just check-crate <crate-name>
 ```
 
 #### Command Format
+
 ```bash
 # Create library crate (from workspace root)
 cargo new --lib <destination-path> --name <crate-name>
@@ -249,6 +280,7 @@ cargo new --bin <destination-path> --name <binary-name>
 #### Location-Specific Examples
 
 **Core Crates:**
+
 ```bash
 # New core library (from workspace root)
 cargo new --lib crates/core/analytics --name analytics
@@ -258,6 +290,7 @@ cargo new --lib crates/core/cache --name cache
 ```
 
 **Extractor Crates:**
+
 ```bash
 # New blockchain extractor (from workspace root)
 cargo new --lib crates/extractors/polygon --name polygon-extractor
@@ -267,6 +300,7 @@ cargo new --lib crates/extractors/cosmos --name cosmos-extractor
 ```
 
 **Service Crates:**
+
 ```bash
 # New HTTP API service (from workspace root)
 cargo new --lib crates/services/metrics-api --name metrics-api
@@ -276,6 +310,7 @@ cargo new --lib crates/services/websocket --name websocket-server
 ```
 
 **Binary Crates:**
+
 ```bash
 # New CLI tool (from workspace root)
 cargo new --bin crates/bin/validator --name data-validator
@@ -319,6 +354,7 @@ prost-build = "0.12"
 ```
 
 #### 🚨 MANDATORY SECTION ORDERING
+
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
 
 Sections MUST appear in this exact order:
@@ -326,7 +362,7 @@ Sections MUST appear in this exact order:
 1. **`[package]`** - Crate metadata (name, version, edition, etc.)
 2. **`[features]`** - Feature flags and their dependencies (see detailed requirements below)
 3. **`[dependencies]`** - Runtime dependencies (alphabetically ordered)
-4. **`[dev-dependencies]`** - Development/test dependencies (alphabetically ordered) 
+4. **`[dev-dependencies]`** - Development/test dependencies (alphabetically ordered)
 5. **`[build-dependencies]`** - Build-time dependencies (alphabetically ordered)
 
 #### Section Requirements
@@ -340,9 +376,11 @@ Sections MUST appear in this exact order:
 
 #### 🚨 MANDATORY FEATURE REQUIREMENTS
 
-**🚨 IMPORTANT: Features sections are OPTIONAL. Do NOT add a `[features]` section if the crate doesn't already have one. The `default` feature is implicit and optional when empty.**
+**🚨 IMPORTANT: Features sections are OPTIONAL. Do NOT add a `[features]` section if the crate doesn't already have one.
+The `default` feature is implicit and optional when empty.**
 
 When a `[features]` section exists, follow these rules:
+
 - **Alphabetical ordering**: All features in `[features]` section MUST be ordered alphabetically
 - **🚨 EXCEPTION**: The `default` feature MUST be listed FIRST - THIS IS THE ONLY EXCEPTION to alphabetical ordering
 - **Documentation**: Each feature MUST have a `#` comment above it explaining its purpose
@@ -353,6 +391,7 @@ When a `[features]` section exists, follow these rules:
 Feature names MUST use kebab-case with lowercase letters and hyphens only for consistency.
 
 **✅ RECOMMENDED FEATURE NAMES**
+
 - `postgres-support` (database type + purpose)
 - `admin-api` (component + interface type)
 - `tls-support` (protocol + purpose)
@@ -361,6 +400,7 @@ Feature names MUST use kebab-case with lowercase letters and hyphens only for co
 - `json-serialization` (format + function)
 
 **⚠️ LESS IDEAL FEATURE NAMES** (but not violations)
+
 - `postgres` (too abbreviated, unclear scope)
 - `admin` (too vague, what kind of admin?)
 - `tls` (unclear what TLS functionality)

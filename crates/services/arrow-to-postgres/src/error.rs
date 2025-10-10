@@ -1,11 +1,10 @@
 use arrow_schema::DataType;
 use thiserror::Error;
 
-use crate::pgpq::pg_schema::PostgresType;
+use crate::pg_schema_mapper::PostgresType;
 
 #[derive(Debug, Error)]
-#[allow(dead_code)]
-pub enum ErrorKind {
+pub enum Error {
     #[error("Type mismatch for column {field}: expected {expected} but got {actual:?}")]
     ColumnTypeMismatch {
         field: String,
@@ -41,19 +40,25 @@ pub enum ErrorKind {
     EncoderMissing { field: String },
     #[error("No fields match supplied encoder fields: {fields:?}")]
     UnknownFields { fields: Vec<String> },
+    #[error("Column count mismatch: expected {expected} columns but got {actual}")]
+    ColumnCountMismatch { expected: usize, actual: usize },
+    #[error("Invalid JSON in field {field}: {reason}")]
+    InvalidJson { field: String, reason: String },
 }
 
-#[allow(dead_code)]
-impl ErrorKind {
-    pub(crate) fn field_too_large(field: &str, size: usize) -> ErrorKind {
-        ErrorKind::FieldTooLarge {
+// Note: InvalidState error variant removed because the type-state pattern
+// makes invalid state transitions impossible at compile time
+
+impl Error {
+    pub(crate) fn field_too_large(field: &str, size: usize) -> Error {
+        Error::FieldTooLarge {
             field: field.to_string(),
             size,
         }
     }
 
-    pub(crate) fn type_unsupported(field: &str, tp: &DataType, msg: &str) -> ErrorKind {
-        ErrorKind::TypeNotSupported {
+    pub(crate) fn type_unsupported(field: &str, tp: &DataType, msg: &str) -> Error {
+        Error::TypeNotSupported {
             field: field.to_string(),
             tp: tp.clone(),
             msg: msg.to_string(),
@@ -64,23 +69,30 @@ impl ErrorKind {
         field: &str,
         tp: &PostgresType,
         allowed: &[PostgresType],
-    ) -> ErrorKind {
-        ErrorKind::EncodingNotSupported {
+    ) -> Error {
+        Error::EncodingNotSupported {
             field: field.to_string(),
             tp: tp.clone(),
             allowed: allowed.to_owned(),
         }
     }
 
-    pub(crate) fn mismatched_column_type(
-        field: &str,
-        expected: &str,
-        actual: &DataType,
-    ) -> ErrorKind {
-        ErrorKind::ColumnTypeMismatch {
+    pub(crate) fn mismatched_column_type(field: &str, expected: &str, actual: &DataType) -> Error {
+        Error::ColumnTypeMismatch {
             field: field.to_string(),
             expected: expected.to_string(),
             actual: actual.clone(),
+        }
+    }
+
+    pub(crate) fn column_count_mismatch(expected: usize, actual: usize) -> Error {
+        Error::ColumnCountMismatch { expected, actual }
+    }
+
+    pub(crate) fn invalid_json(field: &str, reason: &str) -> Error {
+        Error::InvalidJson {
+            field: field.to_string(),
+            reason: reason.to_string(),
         }
     }
 }

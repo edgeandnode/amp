@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{
-    BinaryArray, Decimal128Array, FixedSizeBinaryArray, RecordBatch, TimestampMicrosecondArray,
-    UInt64Array,
+    BinaryArray, Decimal128Array, FixedSizeBinaryArray, Int64Array, RecordBatch,
+    TimestampMicrosecondArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use pgtemp::PgTempDB;
@@ -36,6 +36,9 @@ async fn test_anvil_blocks_insert() {
 
     sqlx::query(
         "CREATE TABLE blocks (
+            _id BYTEA NOT NULL,
+            _block_num_start BIGINT NOT NULL,
+            _block_num_end BIGINT NOT NULL,
             timestamp TIMESTAMPTZ NOT NULL,
             mix_hash BYTEA NOT NULL,
             base_fee_per_gas NUMERIC(38, 0) NOT NULL,
@@ -56,7 +59,8 @@ async fn test_anvil_blocks_insert() {
             extra_data BYTEA NOT NULL,
             gas_used NUMERIC(20, 0) NOT NULL,
             logs_bloom BYTEA NOT NULL,
-            gas_limit NUMERIC(20, 0) NOT NULL
+            gas_limit NUMERIC(20, 0) NOT NULL,
+            PRIMARY KEY (_id)
         )",
     )
     .execute(&pool)
@@ -66,6 +70,11 @@ async fn test_anvil_blocks_insert() {
     // Create test Arrow data matching the anvil.blocks schema
     // Note: Using Microsecond instead of Nanosecond because PostgreSQL only supports microsecond precision
     let schema = Arc::new(Schema::new(vec![
+        // System columns (always first three columns)
+        Field::new("_id", DataType::Binary, false), // Variable-length binary (xxh3_128 = 16 bytes)
+        Field::new("_block_num_start", DataType::Int64, false), // BIGINT = signed Int64
+        Field::new("_block_num_end", DataType::Int64, false), // BIGINT = signed Int64
+        // Data columns
         Field::new(
             "timestamp",
             DataType::Timestamp(TimeUnit::Microsecond, Some("+00:00".into())),
@@ -98,6 +107,12 @@ async fn test_anvil_blocks_insert() {
     let num_blocks = 100;
     let base_timestamp = 1727914811000000i64;
 
+    // System column vectors
+    let mut ids = Vec::with_capacity(num_blocks);
+    let mut block_num_starts = Vec::with_capacity(num_blocks);
+    let mut block_num_ends = Vec::with_capacity(num_blocks);
+
+    // Data column vectors
     let mut timestamps = Vec::with_capacity(num_blocks);
     let mut mix_hashes = Vec::with_capacity(num_blocks);
     let mut base_fees = Vec::with_capacity(num_blocks);
@@ -121,6 +136,18 @@ async fn test_anvil_blocks_insert() {
     let mut gas_limits = Vec::with_capacity(num_blocks);
 
     for i in 0..num_blocks {
+        // Generate system columns
+        // _id: Create a synthetic 16-byte deterministic ID based on block number
+        let mut id = vec![0u8; 16];
+        id[0..8].copy_from_slice(&(i as u64).to_le_bytes()); // Use block index as unique ID
+        ids.push(id);
+
+        // _block_num_start and _block_num_end: Use actual block numbers
+        let block_number = (i + 1) as u64; // Blocks 1-100
+        block_num_starts.push(block_number);
+        block_num_ends.push(block_number);
+
+        // Generate data columns
         timestamps.push(base_timestamp + (i as i64 * 12_000_000)); // 12 second block time
         mix_hashes.push(vec![0u8; 32]);
         base_fees.push(1000000000i128 + (i as i128 * 1000)); // Increasing base fee
@@ -144,6 +171,18 @@ async fn test_anvil_blocks_insert() {
         gas_limits.push(30000000u64);
     }
 
+    // Create system column arrays
+    let id_array = BinaryArray::from(ids.iter().map(|v| v.as_slice()).collect::<Vec<_>>());
+    let block_num_start_array = Int64Array::from(
+        block_num_starts
+            .iter()
+            .map(|&x| x as i64)
+            .collect::<Vec<_>>(),
+    );
+    let block_num_end_array =
+        Int64Array::from(block_num_ends.iter().map(|&x| x as i64).collect::<Vec<_>>());
+
+    // Create data column arrays
     let timestamp = TimestampMicrosecondArray::from(timestamps).with_timezone("+00:00");
     let mix_hash = FixedSizeBinaryArray::try_from_iter(mix_hashes.into_iter()).unwrap();
     let base_fee_per_gas = Decimal128Array::from(base_fees)
@@ -178,6 +217,11 @@ async fn test_anvil_blocks_insert() {
     let batch = RecordBatch::try_new(
         schema,
         vec![
+            // System columns (must match schema order)
+            Arc::new(id_array),
+            Arc::new(block_num_start_array),
+            Arc::new(block_num_end_array),
+            // Data columns
             Arc::new(timestamp),
             Arc::new(mix_hash),
             Arc::new(base_fee_per_gas),
@@ -212,7 +256,7 @@ async fn test_anvil_blocks_insert() {
 
     let db_engine = AmpsyncDbEngine::new(&db_pool);
 
-    // This should use our pgpq encoder
+    // This should use our arrow_to_pg encoder
     match db_engine.insert_record_batch("blocks", &batch).await {
         Ok(()) => {
             println!("Successfully inserted batch!");

@@ -34,21 +34,29 @@ async fn test_insert_with_reserved_word_columns() {
         .await
         .expect("Failed to drop test table");
 
+    // Create table with system columns that AmpsyncDbEngine expects
     sqlx::query(
         r#"CREATE TABLE transfers (
+            _id BYTEA NOT NULL,
+            _block_num_start BIGINT NOT NULL,
+            _block_num_end BIGINT NOT NULL,
             "from" TEXT NOT NULL,
             "to" TEXT NOT NULL,
             "select" TEXT NOT NULL,
             amount BIGINT NOT NULL,
-            block_num BIGINT NOT NULL PRIMARY KEY
+            block_num BIGINT NOT NULL,
+            PRIMARY KEY (_id)
         )"#,
     )
     .execute(&pool)
     .await
     .expect("Failed to create test table");
 
-    // Create Arrow schema matching the table
+    // Create Arrow schema matching the table (including system columns)
     let schema = Arc::new(Schema::new(vec![
+        Field::new("_id", DataType::Binary, false),
+        Field::new("_block_num_start", DataType::Int64, false),
+        Field::new("_block_num_end", DataType::Int64, false),
         Field::new("from", DataType::Utf8, false),
         Field::new("to", DataType::Utf8, false),
         Field::new("select", DataType::Utf8, false),
@@ -58,6 +66,9 @@ async fn test_insert_with_reserved_word_columns() {
 
     // Create test data with realistic batch size (50 transfers across multiple blocks)
     let num_transfers = 50;
+    let mut ids = Vec::with_capacity(num_transfers);
+    let mut block_num_starts = Vec::with_capacity(num_transfers);
+    let mut block_num_ends = Vec::with_capacity(num_transfers);
     let mut from_addrs = Vec::with_capacity(num_transfers);
     let mut to_addrs = Vec::with_capacity(num_transfers);
     let mut select_values = Vec::with_capacity(num_transfers);
@@ -65,6 +76,13 @@ async fn test_insert_with_reserved_word_columns() {
     let mut block_nums = Vec::with_capacity(num_transfers);
 
     for i in 0..num_transfers {
+        // Generate synthetic _id
+        let mut id = vec![0u8; 16];
+        id[0..8].copy_from_slice(&(i as u64).to_le_bytes());
+        ids.push(id);
+
+        block_num_starts.push((i + 1) as i64);
+        block_num_ends.push((i + 1) as i64);
         from_addrs.push(format!("0x{:040x}", i + 1000)); // Unique addresses
         to_addrs.push(format!("0x{:040x}", i + 2000));
         select_values.push(format!("transfer{}", i + 1));
@@ -72,6 +90,10 @@ async fn test_insert_with_reserved_word_columns() {
         block_nums.push((i + 1) as i64); // Blocks 1-50
     }
 
+    use arrow_array::BinaryArray;
+    let id_array = BinaryArray::from(ids.iter().map(|v| v.as_slice()).collect::<Vec<_>>());
+    let block_num_start_array = Int64Array::from(block_num_starts);
+    let block_num_end_array = Int64Array::from(block_num_ends);
     let from_array = StringArray::from(from_addrs);
     let to_array = StringArray::from(to_addrs);
     let select_array = StringArray::from(select_values);
@@ -81,6 +103,9 @@ async fn test_insert_with_reserved_word_columns() {
     let batch = RecordBatch::try_new(
         schema,
         vec![
+            Arc::new(id_array),
+            Arc::new(block_num_start_array),
+            Arc::new(block_num_end_array),
             Arc::new(from_array),
             Arc::new(to_array),
             Arc::new(select_array),
@@ -143,16 +168,24 @@ async fn test_insert_with_reserved_word_columns() {
         }
     }
 
-    // Test duplicate insert (should handle conflict on block_num primary key)
+    // Test duplicate insert (should handle conflict on _id primary key)
     println!("Testing duplicate insert with conflict handling...");
+
+    // Create duplicate with same _id as first row
+    let mut duplicate_id = vec![0u8; 16];
+    duplicate_id[0..8].copy_from_slice(&(0u64).to_le_bytes()); // Same ID as first row
+
     let duplicate_batch = RecordBatch::try_new(
         batch.schema(),
         vec![
+            Arc::new(BinaryArray::from(vec![duplicate_id.as_slice()])),
+            Arc::new(Int64Array::from(vec![1])),
+            Arc::new(Int64Array::from(vec![1])),
             Arc::new(StringArray::from(vec!["0xaaa"])),
             Arc::new(StringArray::from(vec!["0xccc"])),
-            Arc::new(StringArray::from(vec!["transfer1"])),
-            Arc::new(Int64Array::from(vec![100])),
-            Arc::new(Int64Array::from(vec![1])), // Same block_num as first row
+            Arc::new(StringArray::from(vec!["transfer_duplicate"])),
+            Arc::new(Int64Array::from(vec![999])),
+            Arc::new(Int64Array::from(vec![1])),
         ],
     )
     .expect("Failed to create duplicate batch");
@@ -162,13 +195,16 @@ async fn test_insert_with_reserved_word_columns() {
         .await
         .expect("Failed to insert duplicate batch");
 
-    // Verify still only 2 rows (duplicate was skipped)
+    // Verify still only 50 rows (duplicate was skipped due to _id conflict)
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transfers")
         .fetch_one(&pool)
         .await
         .expect("Failed to count rows");
 
-    assert_eq!(count.0, 50, "Duplicate should have been skipped");
+    assert_eq!(
+        count.0, 50,
+        "Duplicate should have been skipped due to _id conflict"
+    );
     println!("Duplicate handling test passed!");
 
     // Cleanup

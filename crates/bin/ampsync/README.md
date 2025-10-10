@@ -1,8 +1,13 @@
-# Ampsync
+# Ampsync | Nozzle syncing crate
 
 A high-performance synchronization service that streams dataset changes from a Nozzle server and syncs them to a
 PostgreSQL database. Designed for production deployments with features like hot-reloading, adaptive batching, and
 automatic schema evolution.
+
+There are many powerful, battle-tested, well-documented, already existing tools in the application development ecosystem
+that have years of usage and examples; that interact with relational database management systems.
+Running this crate alongside Nozzle unlocks these tools, and developer potential by streaming data from datasets into
+postgres.
 
 ## Overview
 
@@ -16,15 +21,15 @@ and handling blockchain reorganizations automatically.
 - **Automatic SQL Generation**: Generates SQL queries from schema - no config files needed
 - **Version Polling**: Automatically detects and loads new dataset versions (when not pinned to specific version)
 - **Automatic Schema Inference**: Fetches table schemas from Nozzle Admin API automatically
-- **Schema Evolution**: Supports adding new columns to existing tables seamlessly
+- **Schema Evolution**: Supports adding new columns to existing tables. As well as adding newly added tables.
+    - **Note** removing columns is _NOT_ supported as it will result in data loss.
 - **Progress Checkpointing**: Resumes from last processed block on restart (no reprocessing)
 - **Blockchain Reorg Handling**: Automatically detects and handles chain reorganizations
 - **High Performance**: PostgreSQL COPY protocol with binary format for maximum throughput
+    - See the `arrow-to-postgres` library for the Apache Arrow to postgres `RecordBatch` transformation/handling.
 - **Adaptive Batching**: Dynamic batch size optimization based on performance metrics
 - **Connection Pooling**: Efficient database connection management with exponential backoff retry
 - **Circuit Breakers**: Configurable retry timeouts prevent indefinite hangs on connection/operation failures
-- **SQL Reserved Word Handling**: Automatically quotes column names that are SQL reserved keywords
-- **Graceful Shutdown**: Docker-compatible signal handling (SIGTERM/SIGINT)
 - **Concurrent Processing**: Per-table async tasks for parallel data processing
 
 ## Configuration
@@ -75,15 +80,17 @@ Option 2: Individual components (all required except password)
 
 - **`DATASET_VERSION`** - Specific dataset version to sync
     - **Type**: Version string (simple version like `0.1.0`)
-    - **Example**: `0.1.0`, `1.2.3`
+    - **Example**: `0.1.0`, `1.2.3`, `0.1.1-Ltx123...`
     - **Default**: None (uses latest version)
-    - **Notes**: If specified, syncs this exact version. If not specified, automatically uses latest version and polls for updates.
+    - **Notes**: If specified, syncs this exact version. If not specified, automatically uses latest version and polls
+      for updates.
 
 - **`VERSION_POLL_INTERVAL_SECS`** - How often to check for new dataset versions
     - **Type**: Integer (seconds)
     - **Default**: `5`
     - **Range**: `1-3600` (recommended)
-    - **Notes**: Only used when `DATASET_VERSION` is NOT specified. Controls how frequently ampsync checks for new versions.
+    - **Notes**: Only used when `DATASET_VERSION` is NOT specified. Controls how frequently ampsync checks for new
+      versions.
 
 #### Nozzle Connection
 
@@ -112,13 +119,15 @@ Option 2: Individual components (all required except password)
     - **Type**: Integer
     - **Default**: `300` (5 minutes)
     - **Range**: `30-3600` (recommended)
-    - **Notes**: Prevents indefinite retry loops when database is unavailable. Stops retrying after this duration to avoid resource exhaustion. Logs "db_connection_circuit_breaker_triggered" when activated.
+    - **Notes**: Prevents indefinite retry loops when database is unavailable. Stops retrying after this duration to
+      avoid resource exhaustion. Logs "db_connection_circuit_breaker_triggered" when activated.
 
 - **`DB_OPERATION_MAX_RETRY_DURATION_SECS`** - Maximum duration for database operation retries (circuit breaker)
     - **Type**: Integer
     - **Default**: `60` (1 minute)
     - **Range**: `10-300` (recommended)
-    - **Notes**: Prevents indefinite retries for database operations (inserts, checkpoints, etc.). Protects against prolonged database performance issues. Uses exponential backoff.
+    - **Notes**: Prevents indefinite retries for database operations (inserts, checkpoints, etc.). Protects against
+      prolonged database performance issues. Uses exponential backoff.
 
 #### Logging
 
@@ -134,19 +143,17 @@ Option 2: Individual components (all required except password)
 ### How It Works
 
 **Automatic SQL Generation**:
+
 1. Ampsync fetches the complete dataset schema from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/schema`)
-2. Automatically generates SQL queries for each table: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
-3. Quotes SQL reserved keywords automatically (e.g., "to", "from", "select")
-4. Creates PostgreSQL tables with the fetched Arrow schema
-5. Starts streaming data using the generated SQL queries
+2. Automatically generates SQL queries for each table:
+   `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+3. Creates PostgreSQL tables with the fetched Arrow schema
+4. Starts streaming data using the generated SQL queries.
+5. When data is received, it is encoded by the `arrow-to-postgres` library and inserted into the postgres database.
 
-This means you don't need to maintain any config files - everything is driven by the dataset schema in Nozzle.
+**First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `nozzle dump` run), ampsync
+will wait:
 
-**Version Management**:
-- **Auto-Update Mode** (default): When `DATASET_VERSION` is NOT set, ampsync uses the latest version and polls for updates every 5 seconds
-- **Fixed Version Mode**: When `DATASET_VERSION` is set, ampsync uses that specific version and never auto-updates
-
-**First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `nozzle dump` run), ampsync will wait patiently:
 - Polls the Admin API every 2-30 seconds (exponential backoff)
 - Logs helpful messages: "Have you run 'nozzle dump --dataset <name>'?"
 - Continues polling indefinitely until the dataset becomes available
@@ -158,7 +165,7 @@ This means you don't need to maintain any config files - everything is driven by
 
 ```yaml
 services:
-  postgres:
+  db:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: myapp
@@ -166,6 +173,28 @@ services:
       POSTGRES_PASSWORD: mypassword
     ports:
       - "5432:5432"
+
+  amp:
+    image: ghcr.io/edgeandnode/nozzle:latest
+    command: [ "--config", "/var/lib/amp/config.toml", "dev" ]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./infra/amp/config.toml:/var/lib/amp/config.toml
+      - ./infra/amp/providers:/var/lib/amp/providers
+      - ./infra/amp/datasets:/var/lib/amp/datasets
+      - ./infra/amp/data:/var/lib/amp/data
+    ports:
+      - "1610:1610" # Admin API
+      - "1603:1603" # JSON Lines
+      - "1602:1602" # Arrow Flight
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry
+    entrypoint: [ "anvil", "--host", "0.0.0.0" ]
+    ports:
+      - "8545:8545"
 
   ampsync:
     image: ghcr.io/edgeandnode/ampsync:latest
@@ -184,7 +213,12 @@ services:
       # Logging
       RUST_LOG: info,ampsync=debug
     depends_on:
-      - postgres
+      db:
+        condition: service_healthy
+      amp:
+        condition: service_started
+      anvil:
+        condition: service_started
     restart: unless-stopped
 ```
 
@@ -203,52 +237,14 @@ export RUST_LOG=info,ampsync=debug
 cargo run --release -p ampsync
 ```
 
-### Running with Docker Build
-
-```bash
-# Build the Docker image (from repository root)
-docker build -t ampsync:local -f crates/bin/ampsync/Dockerfile .
-
-# Run the container (auto-update mode)
-docker run --rm \
-  -e DATASET_NAME=my_dataset \
-  -e DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/mydb \
-  -e AMP_FLIGHT_ADDR=http://host.docker.internal:1602 \
-  -e AMP_ADMIN_API_ADDR=http://host.docker.internal:1610 \
-  ampsync:local
-
-# Run the container (fixed version mode)
-docker run --rm \
-  -e DATASET_NAME=my_dataset \
-  -e DATASET_VERSION=0.1.0 \
-  -e DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/mydb \
-  -e AMP_FLIGHT_ADDR=http://host.docker.internal:1602 \
-  -e AMP_ADMIN_API_ADDR=http://host.docker.internal:1610 \
-  ampsync:local
-```
-
-### Complete Example with ElectricSQL
-
-See [examples/with-electricsql](examples/with-electricsql) for a complete working example that includes:
-
-- Anvil (local Ethereum node)
-- Nozzle server
-- PostgreSQL database
-- Ampsync service
-- ElectricSQL for reactive queries
-
-```bash
-cd crates/bin/ampsync/examples/with-electricsql
-docker compose up
-```
-
 ## Architecture
 
 ### Data Flow
 
 1. **Configuration**: Loads dataset name and optional version from environment variables
 2. **Schema Fetching**: Fetches Arrow schemas from Admin API for the dataset
-3. **SQL Generation**: Automatically generates SQL queries from schema: `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
+3. **SQL Generation**: Automatically generates SQL queries from schema:
+   `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
 4. **Schema Setup**: Creates PostgreSQL tables based on fetched Arrow schemas
 5. **Checkpoint Recovery**: Determines resumption strategy:
     - **Watermark available**: Hash-verified resumption (server-side, via `query()` parameter)
@@ -288,17 +284,17 @@ Created automatically from your nozzle config with schemas fetched from Admin AP
 **System Metadata Columns** (automatically injected into ALL tables):
 
 - **`_id` (BYTEA)**: PRIMARY KEY - Deterministic hash for deduplication
-  - Computed from: row content + block range + row index
-  - Uses xxh3_128 (high-performance 128-bit hash)
-  - Prevents duplicate inserts on reconnect
-  - Hash collisions fail loudly (PRIMARY KEY constraint)
+    - Computed from: row content + block range + row index
+    - Uses xxh3_128 (high-performance 128-bit hash)
+    - Prevents duplicate inserts on reconnect
+    - Hash collisions fail loudly (PRIMARY KEY constraint)
 
 - **`_block_num_start` (BIGINT)**: First block number in batch range
-  - Used for batch boundary tracking
+    - Used for batch boundary tracking
 
 - **`_block_num_end` (BIGINT)**: Last block number in batch range
-  - Used for blockchain reorganization handling
-  - Reorg deletes: `DELETE WHERE _block_num_end >= reorg_block`
+    - Used for blockchain reorganization handling
+    - Reorg deletes: `DELETE WHERE _block_num_end >= reorg_block`
 
 **User Schema Columns**:
 
@@ -311,26 +307,28 @@ Created automatically from your nozzle config with schemas fetched from Admin AP
 
 ```sql
 -- Table WITH block_num in user's query
-CREATE TABLE blocks (
-  _id BYTEA NOT NULL,              -- System: PRIMARY KEY
-  _block_num_start BIGINT NOT NULL, -- System: Batch start
-  _block_num_end BIGINT NOT NULL,   -- System: Batch end
-  block_num NUMERIC(20) NOT NULL,   -- User: From query
-  timestamp TIMESTAMPTZ NOT NULL,   -- User: From query
-  hash BYTEA NOT NULL,              -- User: From query
-  PRIMARY KEY (_id)
+CREATE TABLE blocks
+(
+    _id BYTEA               NOT NULL, -- System: PRIMARY KEY
+    _block_num_start BIGINT NOT NULL, -- System: Batch start
+    _block_num_end BIGINT   NOT NULL, -- System: Batch end
+    block_num NUMERIC(20)   NOT NULL, -- User: From query
+    timestamp TIMESTAMPTZ   NOT NULL, -- User: From query
+    hash      BYTEA         NOT NULL, -- User: From query
+    PRIMARY KEY (_id)
 );
 CREATE INDEX blocks_block_num_idx ON blocks (block_num);
 
 -- Table WITHOUT block_num in user's query
-CREATE TABLE transfers (
-  _id BYTEA NOT NULL,               -- System: PRIMARY KEY
-  _block_num_start BIGINT NOT NULL, -- System: Batch start
-  _block_num_end BIGINT NOT NULL,   -- System: Batch end
-  from_addr TEXT NOT NULL,          -- User: From query
-  to_addr TEXT NOT NULL,            -- User: From query
-  value NUMERIC(38, 0) NOT NULL,    -- User: From query
-  PRIMARY KEY (_id)
+CREATE TABLE transfers
+(
+    _id BYTEA                NOT NULL, -- System: PRIMARY KEY
+    _block_num_start BIGINT  NOT NULL, -- System: Batch start
+    _block_num_end BIGINT    NOT NULL, -- System: Batch end
+    from_addr TEXT           NOT NULL, -- User: From query
+    to_addr   TEXT           NOT NULL, -- User: From query
+    value     NUMERIC(38, 0) NOT NULL, -- User: From query
+    PRIMARY KEY (_id)
 );
 ```
 
@@ -341,100 +339,40 @@ CREATE TABLE transfers (
 - **Consistency**: All tables use identical PRIMARY KEY strategy
 - **Performance**: Fast hashing (30-50 GB/s) with reusable buffers
 
-#### Internal Tables
-
-- **`_ampsync_checkpoints`**: Hybrid checkpoint tracking for resumable streaming
-    - **Schema**:
-        - `table_name` (TEXT): Table identifier
-        - `network` (TEXT): Network name (mainnet, sepolia, etc.)
-        - `incremental_block_num` (BIGINT): Best-effort progress tracking (updated per batch)
-        - `incremental_updated_at` (TIMESTAMPTZ): Last incremental checkpoint time
-        - `watermark_block_num` (BIGINT): Canonical checkpoint with hash verification
-        - `watermark_block_hash` (BYTEA): Block hash for fork detection
-        - `watermark_updated_at` (TIMESTAMPTZ): Last watermark checkpoint time
-        - `updated_at` (TIMESTAMPTZ): Last modification time
-    - **Primary Key**: `(table_name, network)`
-    - **Checkpoint Strategy**:
-        - **Incremental checkpoints**: Updated after each batch insertion for progress tracking between watermarks
-        - **Watermark checkpoints**: Updated on `Watermark` events from server (hash-verified, canonical)
-        - **Resumption**: Prefers watermark (hash-verified), falls back to incremental, starts from beginning if neither exists
-    - **Benefits**:
-        - Minimizes reprocessing on reconnection (typically < 1 batch)
-        - Hash-verified resumption detects blockchain forks
-        - Multi-network support for cross-chain datasets
-
-### Error Handling
-
-Ampsync handles errors at multiple levels:
-
-1. **Stream Errors**: Automatic reconnection with exponential backoff (max 5 retries)
-2. **Database Errors**: Retry logic for transient failures (deadlocks, connection timeouts)
-3. **Batch Failures**: Reduces batch size and retries
-4. **Critical Errors**: Logs error, stops stream for that table to prevent data loss
-5. **Reorg Errors**: Halts stream to ensure data consistency
-
 ### Version Polling
 
 When `DATASET_VERSION` is NOT specified, ampsync automatically detects and loads new dataset versions:
 
 **Polling Mechanism**:
+
 1. Background task polls Admin API every 5 seconds (configurable via `VERSION_POLL_INTERVAL_SECS`)
 2. Fetches latest version and compares with current version
 3. When new version detected:
-   - All active streams are gracefully stopped via cancellation token
-   - New manifest fetched from Admin API with the new version
-   - Tables are migrated if needed (adds new columns)
-   - SQL queries regenerated from new schema
-   - Streams are restarted with new configuration
+    - All active streams are gracefully stopped via cancellation token
+    - New manifest fetched from Admin API with the new version
+    - Tables are migrated if needed (adds new columns)
+    - SQL queries regenerated from new schema
+    - Streams are restarted with new configuration
 
 **Version Management Modes**:
+
 - **Auto-Update Mode** (DATASET_VERSION not set): Automatically detects and loads new versions
 - **Fixed Version Mode** (DATASET_VERSION set): Uses specified version, never auto-updates
 
 **What Can Change**:
+
 - Dataset version (automatic detection and reload)
 - Table schemas (adding new columns)
 - SQL queries (regenerated from new schema)
 
 **What Cannot Change**:
+
 - Column type changes (rejected with error to prevent data corruption)
 - Dropping columns (rejected with error to prevent data loss)
 - Dataset name (requires restart)
 - To remove columns or change types, manually alter the database and restart ampsync
 
 ## Development
-
-### Building
-
-```bash
-# Build release binary
-cargo build --release -p ampsync
-
-# Build Docker image
-docker build -t ampsync:latest -f crates/bin/ampsync/Dockerfile .
-```
-
-### Testing
-
-```bash
-# Run all tests
-cargo test -p ampsync
-
-# Run specific test
-cargo test -p ampsync --test checkpoint_test
-
-# Run with logging
-RUST_LOG=debug cargo test -p ampsync -- --nocapture
-```
-
-**Integration Tests** (28 tests total):
-- `checkpoint_test.rs`: Checkpoint tracking and recovery (9 tests)
-- `circuit_breaker_test.rs`: Database retry circuit breaker functionality (3 tests)
-- `decimal_insert_test.rs`: Decimal type handling (1 test)
-- `injected_block_num_test.rs`: System metadata injection and reorg handling (2 tests)
-- `reserved_words_test.rs`: SQL reserved keyword column handling (1 test)
-- `schema_evolution_test.rs`: Schema migration scenarios (7 tests)
-- `version_polling_test.rs`: Version polling and automatic schema reload (5 tests)
 
 ### Project Structure
 
@@ -452,15 +390,7 @@ crates/bin/ampsync/
 │   ├── manifest.rs          # Schema fetching, Admin API client, SQL generation
 │   ├── sql_validator.rs     # SQL query validation/sanitization
 │   ├── batch_utils.rs       # RecordBatch utilities, system metadata injection
-│   └── pgpq/                # PostgreSQL COPY protocol encoder
-│       ├── mod.rs
-│       ├── encoders.rs      # Arrow to PostgreSQL binary encoding
-│       ├── pg_schema.rs     # Schema mapping
-│       └── error.rs
 ├── tests/                   # Integration tests
-├── examples/
-│   └── with-electricsql/    # Complete example setup
-├── Dockerfile               # Multi-stage Docker build
 └── README.md
 ```
 
@@ -478,9 +408,9 @@ crates/bin/ampsync/
 **"Failed to fetch schema from admin-api: HTTP 404"**
 
 - If this error persists after running `nozzle dump`, check:
-  - Dataset name and version match between config and published dataset
-  - `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
-  - Dataset was successfully published (check Nozzle server logs)
+    - Dataset name and version match between config and published dataset
+    - `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
+    - Dataset was successfully published (check Nozzle server logs)
 
 **"Database connection failed"**
 
@@ -529,48 +459,9 @@ crates/bin/ampsync/
 
 - Version update attempted to drop columns (not supported for data safety)
 - To remove a column:
-  1. Manually drop the column from PostgreSQL: `ALTER TABLE blocks DROP COLUMN column_name;`
-  2. Publish new dataset version with column removed
-  3. Restart ampsync (automatic reload won't work for this case)
-
-### Debug Logging
-
-Enable detailed logging to troubleshoot issues:
-
-```bash
-# Maximum detail
-RUST_LOG=trace,ampsync=trace cargo run -p ampsync
-
-# Debug ampsync, info for dependencies
-RUST_LOG=info,ampsync=debug cargo run -p ampsync
-
-# Only show warnings and errors
-RUST_LOG=warn,ampsync=warn cargo run -p ampsync
-```
-
-### Health Monitoring
-
-Monitor these log messages for health:
-
-**Normal Operation**:
-- `"Successfully bulk inserted N rows into table 'X'"` - Batch processed successfully
-- `"incremental_checkpoint_updated"` (debug) - Progress tracking between watermarks
-- `"watermark_saved"` (info) - Canonical checkpoint established
-- `"Batch performance: Nms for N rows, new batch size: N"` - Adaptive batching working
-
-**Resumption**:
-- `"resuming_from_watermark"` - Best case: hash-verified resumption (minimal reprocessing)
-- `"resuming_from_incremental_checkpoint"` - Fallback: best-effort resumption (some reprocessing)
-- `"starting_from_beginning"` - No checkpoint available (full sync)
-
-**Blockchain Events**:
-- `"Reorg detected for table 'X'"` - Blockchain reorganization detected
-- `"Successfully handled reorg for table 'X'"` - Reorg processing complete
-
-**Warnings to Monitor**:
-- `"incremental_checkpoint_update_failed"` - Non-critical, may reprocess data on restart
-- `"watermark_save_failed"` - Critical, stream will reconnect to retry
-- `"invalid_watermark_hash_size"` - Data corruption, watermark skipped
+    1. Manually drop the column from PostgreSQL: `ALTER TABLE blocks DROP COLUMN column_name;`
+    2. Publish new dataset version with column removed
+    3. Restart ampsync (automatic reload won't work for this case)
 
 ## Performance Tuning
 
@@ -589,23 +480,3 @@ Default pool size: 5 connections per table. For many tables:
 - Monitor `"Pool timeout"` errors in logs
 - Consider running fewer tables per ampsync instance
 - Scale horizontally with multiple ampsync instances (different configs)
-
-### Network Optimization
-
-For remote Nozzle servers:
-
-- Use compression if available
-- Deploy ampsync close to Nozzle server (same region/datacenter)
-- Monitor stream reconnection frequency
-
-## Security Considerations
-
-- **Passwords in Logs**: Database passwords are automatically redacted in logs
-- **File Permissions**: Ensure nozzle config file has appropriate permissions (readable by ampsync user)
-- **Docker Security**: Runs as non-root user (uid 1001) with minimal attack surface
-- **Network Security**: Use HTTPS for Nozzle endpoints in production (`AMP_FLIGHT_ADDR`, `AMP_ADMIN_API_ADDR`)
-- **Database Access**: Use least-privilege database credentials (CREATE, INSERT, DELETE, SELECT on target tables)
-
-## License
-
-See repository root for license information.

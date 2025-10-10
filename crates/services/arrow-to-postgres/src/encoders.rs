@@ -7,16 +7,28 @@ use arrow_schema::{DataType, Field, TimeUnit};
 use bytes::{BufMut, BytesMut};
 use enum_dispatch::enum_dispatch;
 
-use crate::pgpq::{
-    error::ErrorKind,
-    pg_schema::{Column, PostgresType, TypeSize},
+use crate::{
+    error::Error,
+    pg_schema_mapper::{Column, PostgresType, TypeSize},
 };
 
+// PostgreSQL NUMERIC format constants
+const NUMERIC_BASE: u64 = 10_000; // PostgreSQL uses base-10000 for NUMERIC type
+const NUMERIC_BASE_I128: i128 = 10_000; // Same as NUMERIC_BASE but for i128 arithmetic
+const NUMERIC_POS: i16 = 0x0000; // Sign value for positive NUMERIC
+const NUMERIC_NEG: i16 = 0x4000; // Sign value for negative NUMERIC
+const NUMERIC_HEADER_SIZE: usize = 8; // 4 i16 fields: ndigits, weight, sign, dscale
+const MAX_U64_BASE10000_DIGITS: usize = 5; // u64::MAX requires at most 5 base-10000 digits
+const MAX_I128_BASE10000_DIGITS: usize = 10; // i128::MAX requires at most 10 base-10000 digits
+
+// JSONB format constants
+const JSONB_VERSION: u8 = 1; // JSONB format version byte
+
 #[inline]
-fn downcast_checked<'a, T: 'static>(arr: &'a dyn Array, field: &str) -> Result<&'a T, ErrorKind> {
+fn downcast_checked<'a, T: 'static>(arr: &'a dyn Array, field: &str) -> Result<&'a T, Error> {
     match arr.as_any().downcast_ref::<T>() {
         Some(v) => Ok(v),
-        None => Err(ErrorKind::mismatched_column_type(
+        None => Err(Error::mismatched_column_type(
             field,
             type_name::<T>(),
             arr.data_type(),
@@ -26,8 +38,8 @@ fn downcast_checked<'a, T: 'static>(arr: &'a dyn Array, field: &str) -> Result<&
 
 #[enum_dispatch]
 pub trait Encode: std::fmt::Debug {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind>;
-    fn size_hint(&self) -> Result<usize, ErrorKind>;
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error>;
+    fn size_hint(&self) -> Result<usize, Error>;
 }
 
 #[enum_dispatch(Encode)]
@@ -76,7 +88,7 @@ const fn type_size_fixed(size: TypeSize) -> usize {
 macro_rules! impl_encode {
     ($struct_name:ident, $field_size:expr, $transform:expr, $write:expr) => {
         impl<'a> Encode for $struct_name<'a> {
-            fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+            fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
                 if self.arr.is_null(row) {
                     buf.put_i32(-1)
                 } else {
@@ -87,7 +99,7 @@ macro_rules! impl_encode {
                 }
                 Ok(())
             }
-            fn size_hint(&self) -> Result<usize, ErrorKind> {
+            fn size_hint(&self) -> Result<usize, Error> {
                 let null_count = self.arr.null_count();
                 let item_count = self.arr.len();
                 Ok((item_count - null_count) * $field_size + item_count)
@@ -99,7 +111,7 @@ macro_rules! impl_encode {
 macro_rules! impl_encode_fallible {
     ($struct_name:ident, $field_size:expr, $transform:expr, $write:expr) => {
         impl<'a> Encode for $struct_name<'a> {
-            fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+            fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
                 if self.arr.is_null(row) {
                     buf.put_i32(-1)
                 } else {
@@ -110,7 +122,7 @@ macro_rules! impl_encode_fallible {
                 }
                 Ok(())
             }
-            fn size_hint(&self) -> Result<usize, ErrorKind> {
+            fn size_hint(&self) -> Result<usize, Error> {
                 let null_count = self.arr.null_count();
                 let item_count = self.arr.len();
                 Ok((item_count - null_count) * $field_size + item_count)
@@ -176,11 +188,11 @@ fn count_base10000_digits(value: u64) -> usize {
     }
 
     // Fast path using comparison instead of repeated division
-    // 10000^1 = 10,000
-    // 10000^2 = 100,000,000
-    // 10000^3 = 1,000,000,000,000
-    // 10000^4 = 10,000,000,000,000,000
-    // 10000^5 = 100,000,000,000,000,000,000 (exceeds u64::MAX)
+    // NUMERIC_BASE^1 = 10,000
+    // NUMERIC_BASE^2 = 100,000,000
+    // NUMERIC_BASE^3 = 1,000,000,000,000
+    // NUMERIC_BASE^4 = 10,000,000,000,000,000
+    // NUMERIC_BASE^5 = 100,000,000,000,000,000,000 (exceeds u64::MAX)
     if value < 10_000 {
         return 1;
     }
@@ -193,7 +205,7 @@ fn count_base10000_digits(value: u64) -> usize {
     if value < 10_000_000_000_000_000 {
         return 4;
     }
-    5
+    MAX_U64_BASE10000_DIGITS
 }
 
 /// Efficiently count base-10000 digits for i128 (used by Decimal128).
@@ -235,17 +247,17 @@ fn count_base10000_digits_i128(value: i128) -> usize {
     }
 
     // Fall back to division for very large numbers (rare)
-    let mut ndigits = 10;
+    let mut ndigits = MAX_I128_BASE10000_DIGITS;
     let mut remaining = abs_value / 1_000_000_000_000_000_000_000_000_000_000_000_000;
     while remaining > 0 {
         ndigits += 1;
-        remaining /= 10000;
+        remaining /= NUMERIC_BASE_I128 as u128;
     }
     ndigits
 }
 
 impl<'a> Encode for UInt64Encoder<'a> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1)
         } else {
@@ -253,18 +265,15 @@ impl<'a> Encode for UInt64Encoder<'a> {
 
             // PostgreSQL NUMERIC binary format (all fields as i16):
             // - ndigits (i16): number of base-10000 digits
-            // - weight (i16): weight of first digit (10000^weight)
+            // - weight (i16): weight of first digit (NUMERIC_BASE^weight)
             // - sign (i16): NUMERIC_POS = 0x0000, NUMERIC_NEG = 0x4000, NUMERIC_NAN = 0xC000
             // - dscale (i16): display scale
             // - digits (i16[]): base-10000 digits
 
-            const NUMERIC_POS: i16 = 0x0000;
-
             // Handle zero as a special case
             if value == 0 {
                 // Zero is encoded with ndigits=0, weight=0, sign=NUMERIC_POS, dscale=0
-                let size = 8; // Just the header, no digits
-                buf.put_i32(size as i32);
+                buf.put_i32(NUMERIC_HEADER_SIZE as i32);
                 buf.put_i16(0); // ndigits
                 buf.put_i16(0); // weight
                 buf.put_i16(NUMERIC_POS); // sign
@@ -272,39 +281,37 @@ impl<'a> Encode for UInt64Encoder<'a> {
                 return Ok(());
             }
 
-            // Convert to base-10000 digits
-            let mut digits = Vec::new();
+            // Convert to base-10000 digits using stack array instead of Vec
+            let mut digits = [0i16; MAX_U64_BASE10000_DIGITS];
+            let mut ndigits = 0usize;
             let mut remaining = value;
             while remaining > 0 {
-                digits.push((remaining % 10000) as i16);
-                remaining /= 10000;
+                digits[ndigits] = (remaining % NUMERIC_BASE) as i16;
+                ndigits += 1;
+                remaining /= NUMERIC_BASE;
             }
 
-            // Reverse to get most significant digit first
-            digits.reverse();
-
-            let ndigits = digits.len() as i16;
             let weight = (ndigits - 1) as i16; // Weight is position of first digit
             let dscale = 0i16; // Scale is 0 for integers
 
-            // Calculate total size: 4 header i16s + (ndigits * 2 bytes)
-            let size = 8 + (ndigits as usize * 2);
+            // Calculate total size: header + (ndigits * 2 bytes)
+            let size = NUMERIC_HEADER_SIZE + (ndigits * 2);
             buf.put_i32(size as i32);
 
             // Write header (all as i16)
-            buf.put_i16(ndigits);
+            buf.put_i16(ndigits as i16);
             buf.put_i16(weight);
             buf.put_i16(NUMERIC_POS);
             buf.put_i16(dscale);
 
-            // Write digits
-            for digit in digits {
-                buf.put_i16(digit);
+            // Write digits in reverse order (most significant first)
+            for i in (0..ndigits).rev() {
+                buf.put_i16(digits[i]);
             }
         }
         Ok(())
     }
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
         // Calculate size for binary NUMERIC format
         let mut total = 0;
         for row in 0..self.arr.len() {
@@ -314,8 +321,8 @@ impl<'a> Encode for UInt64Encoder<'a> {
                 // Count base-10000 digits efficiently
                 let ndigits = count_base10000_digits(value);
 
-                // Size: length(4) + header(8) + digits(ndigits * 2)
-                total += 4 + 8 + (ndigits * 2);
+                // Size: length(4) + header + digits(ndigits * 2)
+                total += 4 + NUMERIC_HEADER_SIZE + (ndigits * 2);
             } else {
                 // Null value
                 total += 4;
@@ -405,12 +412,13 @@ impl_encode!(
 #[derive(Debug)]
 pub struct Decimal128Encoder<'a> {
     arr: &'a arrow_array::Decimal128Array,
+    /// Field name - included for consistency with other encoders but not currently used
     #[allow(dead_code)]
     field: String,
 }
 
 impl<'a> Encode for Decimal128Encoder<'a> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1);
         } else {
@@ -419,19 +427,15 @@ impl<'a> Encode for Decimal128Encoder<'a> {
 
             // PostgreSQL NUMERIC binary format (all fields as i16):
             // - ndigits (i16): number of base-10000 digits
-            // - weight (i16): weight of first digit (10000^weight)
+            // - weight (i16): weight of first digit (NUMERIC_BASE^weight)
             // - sign (i16): NUMERIC_POS = 0x0000, NUMERIC_NEG = 0x4000, NUMERIC_NAN = 0xC000
             // - dscale (i16): display scale
             // - digits (i16[]): base-10000 digits
 
-            const NUMERIC_POS: i16 = 0x0000;
-            const NUMERIC_NEG: i16 = 0x4000;
-
             // Handle zero as a special case
             if value == 0 {
                 // Zero is encoded with ndigits=0, weight=0, sign=NUMERIC_POS, dscale=0
-                let size = 8; // Just the header, no digits
-                buf.put_i32(size as i32);
+                buf.put_i32(NUMERIC_HEADER_SIZE as i32);
                 buf.put_i16(0); // ndigits
                 buf.put_i16(0); // weight
                 buf.put_i16(NUMERIC_POS); // sign
@@ -446,40 +450,38 @@ impl<'a> Encode for Decimal128Encoder<'a> {
                 (value, NUMERIC_POS)
             };
 
-            // Convert to base-10000 digits
-            let mut digits = Vec::new();
+            // Convert to base-10000 digits using stack array instead of Vec
+            let mut digits = [0i16; MAX_I128_BASE10000_DIGITS];
+            let mut ndigits = 0usize;
             let mut remaining = abs_value;
             while remaining > 0 {
-                digits.push((remaining % 10000) as i16);
-                remaining /= 10000;
+                digits[ndigits] = (remaining % NUMERIC_BASE_I128) as i16;
+                ndigits += 1;
+                remaining /= NUMERIC_BASE_I128;
             }
 
-            // Reverse to get most significant digit first
-            digits.reverse();
-
-            let ndigits = digits.len() as i16;
             let weight = (ndigits - 1) as i16; // Weight is position of first digit
             let dscale = scale;
 
-            // Calculate total size: 4 header i16s + (ndigits * 2 bytes)
-            let size = 8 + (ndigits as usize * 2);
+            // Calculate total size: header + (ndigits * 2 bytes)
+            let size = NUMERIC_HEADER_SIZE + (ndigits * 2);
             buf.put_i32(size as i32);
 
             // Write header (all as i16)
-            buf.put_i16(ndigits);
+            buf.put_i16(ndigits as i16);
             buf.put_i16(weight);
             buf.put_i16(sign);
             buf.put_i16(dscale);
 
-            // Write digits
-            for digit in digits {
-                buf.put_i16(digit);
+            // Write digits in reverse order (most significant first)
+            for i in (0..ndigits).rev() {
+                buf.put_i16(digits[i]);
             }
         }
         Ok(())
     }
 
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
         // Calculate size for binary NUMERIC format
         let mut total = 0;
         for row in 0..self.arr.len() {
@@ -489,8 +491,8 @@ impl<'a> Encode for Decimal128Encoder<'a> {
                 // Count base-10000 digits efficiently
                 let ndigits = count_base10000_digits_i128(value);
 
-                // Size = 4 (length prefix) + 8 (4 x i16 header) + (ndigits * 2)
-                total += 4 + 8 + (ndigits * 2);
+                // Size = 4 (length prefix) + header + (ndigits * 2)
+                total += 4 + NUMERIC_HEADER_SIZE + (ndigits * 2);
             } else {
                 total += 4; // 4 bytes for -1 (null indicator)
             }
@@ -507,11 +509,11 @@ const PG_BASE_TIMESTAMP_OFFSET_S: i64 = 946_684_800; // seconds between 2000-01-
 fn convert_arrow_timestamp_microseconds_to_pg_timestamp(
     _field: &str,
     timestamp_us: i64,
-) -> Result<i64, ErrorKind> {
+) -> Result<i64, Error> {
     // adjust the timestamp from microseconds since 1970-01-01 to microseconds since 2000-01-01 checking for overflows and underflow
     timestamp_us
         .checked_sub(PG_BASE_TIMESTAMP_OFFSET_US)
-        .ok_or_else(|| ErrorKind::Encode {
+        .ok_or_else(|| Error::Encode {
             reason: "Underflow converting microseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
         })
 }
@@ -521,14 +523,14 @@ fn convert_arrow_timestamp_microseconds_to_pg_timestamp(
 fn convert_arrow_timestamp_milliseconds_to_pg_timestamp(
     _field: &str,
     timestamp_ms: i64,
-) -> Result<i64, ErrorKind> {
-    let timestamp_ms = timestamp_ms.checked_sub(PG_BASE_TIMESTAMP_OFFSET_MS).ok_or_else(|| ErrorKind::Encode {
+) -> Result<i64, Error> {
+    let timestamp_ms = timestamp_ms.checked_sub(PG_BASE_TIMESTAMP_OFFSET_MS).ok_or_else(|| Error::Encode {
         reason: "Underflow converting milliseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
     })?;
     // convert to microseconds, checking for overflows
     timestamp_ms
         .checked_mul(1_000)
-        .ok_or_else(|| ErrorKind::Encode {
+        .ok_or_else(|| Error::Encode {
             reason: "Overflow converting milliseconds to microseconds".to_string(),
         })
 }
@@ -537,14 +539,14 @@ fn convert_arrow_timestamp_milliseconds_to_pg_timestamp(
 fn convert_arrow_timestamp_seconds_to_pg_timestamp(
     _field: &str,
     timestamp_s: i64,
-) -> Result<i64, ErrorKind> {
-    let timestamp_s = timestamp_s.checked_sub(PG_BASE_TIMESTAMP_OFFSET_S).ok_or_else(|| ErrorKind::Encode {
+) -> Result<i64, Error> {
+    let timestamp_s = timestamp_s.checked_sub(PG_BASE_TIMESTAMP_OFFSET_S).ok_or_else(|| Error::Encode {
         reason: "Underflow converting seconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
     })?;
     // convert to microseconds, checking for overflows
     timestamp_s
         .checked_mul(1_000_000)
-        .ok_or_else(|| ErrorKind::Encode {
+        .ok_or_else(|| Error::Encode {
             reason: "Overflow converting seconds to microseconds".to_string(),
         })
 }
@@ -556,7 +558,7 @@ pub struct TimestampMicrosecondEncoder<'a> {
 }
 impl_encode_fallible!(
     TimestampMicrosecondEncoder,
-    type_size_fixed(PostgresType::Timestamp.size()),
+    8, // Timestamp is always 8 bytes (i64)
     convert_arrow_timestamp_microseconds_to_pg_timestamp,
     BufMut::put_i64
 );
@@ -568,7 +570,7 @@ pub struct TimestampMillisecondEncoder<'a> {
 }
 impl_encode_fallible!(
     TimestampMillisecondEncoder,
-    type_size_fixed(PostgresType::Timestamp.size()),
+    8, // Timestamp is always 8 bytes (i64)
     convert_arrow_timestamp_milliseconds_to_pg_timestamp,
     BufMut::put_i64
 );
@@ -580,7 +582,7 @@ pub struct TimestampSecondEncoder<'a> {
 }
 impl_encode_fallible!(
     TimestampSecondEncoder,
-    type_size_fixed(PostgresType::Timestamp.size()),
+    8, // Timestamp is always 8 bytes (i64)
     convert_arrow_timestamp_seconds_to_pg_timestamp,
     BufMut::put_i64
 );
@@ -588,9 +590,9 @@ impl_encode_fallible!(
 const PG_BASE_DATE_OFFSET: i32 = 10_957; // Number of days between PostgreSQL's epoch (2000-01-01) and Arrow's / UNIX epoch (1970-01-01)
 
 #[inline(always)]
-fn convert_arrow_date32_to_postgres_date(_field: &str, date: i32) -> Result<i32, ErrorKind> {
+fn convert_arrow_date32_to_postgres_date(_field: &str, date: i32) -> Result<i32, Error> {
     // adjust the date from days since 1970-01-01 to days since 2000-01-01 checking for overflows and underflow
-    date.checked_sub(PG_BASE_DATE_OFFSET).ok_or_else(|| ErrorKind::Encode {
+    date.checked_sub(PG_BASE_DATE_OFFSET).ok_or_else(|| Error::Encode {
         reason: "Underflow converting days since 1970-01-01 (Arrow) to days since 2000-01-01 (Postgres)".to_string(),
     })
 }
@@ -607,26 +609,21 @@ impl_encode_fallible!(
     BufMut::put_i32
 );
 
-fn convert_arrow_time_seconds_to_postgres_time(
-    _field: &str,
-    time_s: i32,
-) -> Result<i64, ErrorKind> {
+fn convert_arrow_time_seconds_to_postgres_time(_field: &str, time_s: i32) -> Result<i64, Error> {
     // convert to microseconds, checking for overflows
     let time_s = time_s as i64;
-    time_s
-        .checked_mul(1_000_000)
-        .ok_or_else(|| ErrorKind::Encode {
-            reason: "Overflow converting seconds to microseconds".to_string(),
-        })
+    time_s.checked_mul(1_000_000).ok_or_else(|| Error::Encode {
+        reason: "Overflow converting seconds to microseconds".to_string(),
+    })
 }
 
 fn convert_arrow_time_milliseconds_to_postgres_time(
     _field: &str,
     time_ms: i32,
-) -> Result<i64, ErrorKind> {
+) -> Result<i64, Error> {
     // convert to microseconds, checking for overflows
     let time_ms = time_ms as i64;
-    time_ms.checked_mul(1_000).ok_or_else(|| ErrorKind::Encode {
+    time_ms.checked_mul(1_000).ok_or_else(|| Error::Encode {
         reason: "Overflow converting milliseconds to microseconds".to_string(),
     })
 }
@@ -686,7 +683,7 @@ impl_encode_fallible!(
     DurationMillisecondEncoder,
     type_size_fixed(PostgresType::Interval.size()),
     |_: &str, v: i64| v.mul_checked(NUM_US_PER_MS).map_err(|_| {
-        ErrorKind::Encode {
+        Error::Encode {
             reason: "Overflow encoding millisecond duration as microseconds".to_string(),
         }
     }),
@@ -703,7 +700,7 @@ impl_encode_fallible!(
     DurationSecondEncoder,
     type_size_fixed(PostgresType::Interval.size()),
     |_: &str, v: i64| v.mul_checked(NUM_US_PER_S).map_err(|_| {
-        ErrorKind::Encode {
+        Error::Encode {
             reason: "Overflow encoding seconds duration as microseconds".to_string(),
         }
     }),
@@ -717,7 +714,7 @@ pub struct GenericBinaryEncoder<'a, T: OffsetSizeTrait> {
 }
 
 impl<'a, T: OffsetSizeTrait> Encode for GenericBinaryEncoder<'a, T> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1);
         } else {
@@ -725,16 +722,17 @@ impl<'a, T: OffsetSizeTrait> Encode for GenericBinaryEncoder<'a, T> {
             let len = v.len();
             match i32::try_from(len) {
                 Ok(l) => buf.put_i32(l),
-                Err(_) => return Err(ErrorKind::field_too_large(&self.field, len)),
+                Err(_) => return Err(Error::field_too_large(&self.field, len)),
             }
             buf.extend_from_slice(v);
         }
         Ok(())
     }
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
         let mut total = 0;
         for row in 0..self.arr.len() {
-            total += self.arr.value(row).len();
+            // Each row: 4 bytes for length prefix + actual data length
+            total += 4 + self.arr.value(row).len();
         }
         Ok(total)
     }
@@ -750,7 +748,7 @@ pub struct FixedSizeBinaryEncoder<'a> {
 }
 
 impl<'a> Encode for FixedSizeBinaryEncoder<'a> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1);
         } else {
@@ -758,13 +756,13 @@ impl<'a> Encode for FixedSizeBinaryEncoder<'a> {
             let len = v.len();
             match i32::try_from(len) {
                 Ok(l) => buf.put_i32(l),
-                Err(_) => return Err(ErrorKind::field_too_large(&self.field, len)),
+                Err(_) => return Err(Error::field_too_large(&self.field, len)),
             }
             buf.extend_from_slice(v);
         }
         Ok(())
     }
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
         let value_len = self.arr.value_length() as usize;
         let null_count = self.arr.null_count();
         let item_count = self.arr.len();
@@ -780,33 +778,43 @@ pub struct GenericStringEncoder<'a, T: OffsetSizeTrait> {
 }
 
 impl<'a, T: OffsetSizeTrait> Encode for GenericStringEncoder<'a, T> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1);
         } else {
             let v = self.arr.value(row).as_bytes();
+
+            // Validate JSON when encoding as JSONB
+            if matches!(self.output, StringOutputType::Jsonb)
+                && let Err(e) = serde_json::from_slice::<serde_json::Value>(v)
+            {
+                return Err(Error::invalid_json(&self.field, &e.to_string()));
+            }
+
             let mut len = v.len();
             if matches!(self.output, StringOutputType::Jsonb) {
                 len += 1;
             }
             match i32::try_from(len) {
                 Ok(l) => buf.put_i32(l),
-                Err(_) => return Err(ErrorKind::field_too_large(&self.field, len)),
+                Err(_) => return Err(Error::field_too_large(&self.field, len)),
             }
             if matches!(self.output, StringOutputType::Jsonb) {
-                buf.put_u8(1) // JSONB format version
+                buf.put_u8(JSONB_VERSION)
             }
             buf.extend_from_slice(v);
         }
         Ok(())
     }
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
         let mut total = 0;
+        let is_jsonb = matches!(self.output, StringOutputType::Jsonb);
         for row in 0..self.arr.len() {
-            total += self.arr.value(row).len();
-        }
-        if matches!(self.output, StringOutputType::Jsonb) {
-            total += self.arr.len() // For JSONB format version
+            // Each row: 4 bytes for length prefix + actual string length + (1 byte for JSONB version if applicable)
+            total += 4 + self.arr.value(row).len();
+            if is_jsonb {
+                total += 1; // JSONB format version byte
+            }
         }
         Ok(total)
     }
@@ -823,7 +831,7 @@ pub struct GenericListEncoder<'a, T: OffsetSizeTrait> {
 }
 
 impl<'a, T: OffsetSizeTrait> Encode for GenericListEncoder<'a, T> {
-    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), ErrorKind> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
         if self.arr.is_null(row) {
             buf.put_i32(-1);
         } else {
@@ -855,19 +863,33 @@ impl<'a, T: OffsetSizeTrait> Encode for GenericListEncoder<'a, T> {
 
             match i32::try_from(total_len) {
                 Ok(v) => buf[base_idx..base_idx + 4].copy_from_slice(&v.to_be_bytes()),
-                Err(_) => return Err(ErrorKind::field_too_large(&self.field, total_len)),
+                Err(_) => return Err(Error::field_too_large(&self.field, total_len)),
             };
         }
         Ok(())
     }
-    fn size_hint(&self) -> Result<usize, ErrorKind> {
+    fn size_hint(&self) -> Result<usize, Error> {
+        // PostgreSQL array format overhead per non-null array:
+        // - 4 bytes: total length (included in element size but written separately)
+        // - 4 bytes: number of dimensions
+        // - 4 bytes: nulls flag
+        // - 4 bytes: element type OID
+        // - 4 bytes: dimension length
+        // - 4 bytes: dimension lower bound
+        // = 24 bytes metadata per array
+        const ARRAY_METADATA_SIZE: usize = 24;
+
         let mut total = 0;
         for row in 0..self.arr.len() {
             if !self.arr.is_null(row) {
                 let val = self.arr.value(row);
                 let inner_encoder = self.inner_encoder_builder.deref().try_new(val.as_ref())?;
-                let size = inner_encoder.size_hint()?;
-                total += size;
+                let inner_size = inner_encoder.size_hint()?;
+                // Total: metadata + inner elements size
+                total += ARRAY_METADATA_SIZE + inner_size;
+            } else {
+                // Null arrays: 4 bytes for -1
+                total += 4;
             }
         }
         Ok(total)
@@ -879,19 +901,17 @@ type LargeListEncoder<'a> = GenericListEncoder<'a, i64>;
 
 #[enum_dispatch]
 pub trait BuildEncoder: std::fmt::Debug + PartialEq {
-    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind>;
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error>;
     fn schema(&self) -> Column;
-    #[allow(dead_code)]
     fn field(&self) -> Arc<Field>;
 }
 
 macro_rules! impl_encoder_builder_stateless {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident, $pg_data_type:expr, $check_data_type:expr) => {
-        #[allow(dead_code)]
         impl $struct_name {
-            pub fn new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+            pub fn new(field: Arc<Field>) -> Result<Self, Error> {
                 if !$check_data_type(field.data_type()) {
-                    return Err(ErrorKind::FieldTypeNotSupported {
+                    return Err(Error::FieldTypeNotSupported {
                         encoder: stringify!($struct_name).to_string(),
                         tp: field.data_type().clone(),
                         field: field.name().clone(),
@@ -901,7 +921,7 @@ macro_rules! impl_encoder_builder_stateless {
             }
         }
         impl BuildEncoder for $struct_name {
-            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind> {
+            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
                 Ok($enum_name($encoder_name {
                     arr: downcast_checked(arr, &self.field.name())?,
                 }))
@@ -921,11 +941,10 @@ macro_rules! impl_encoder_builder_stateless {
 
 macro_rules! impl_encoder_builder_stateless_with_field {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident, $pg_data_type:expr, $check_data_type:expr) => {
-        #[allow(dead_code)]
         impl $struct_name {
-            pub fn new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+            pub fn new(field: Arc<Field>) -> Result<Self, Error> {
                 if !$check_data_type(field.data_type()) {
-                    return Err(ErrorKind::FieldTypeNotSupported {
+                    return Err(Error::FieldTypeNotSupported {
                         encoder: stringify!($struct_name).to_string(),
                         tp: field.data_type().clone(),
                         field: field.name().clone(),
@@ -935,7 +954,7 @@ macro_rules! impl_encoder_builder_stateless_with_field {
             }
         }
         impl BuildEncoder for $struct_name {
-            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind> {
+            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
                 let field = self.field.name();
                 let arr = downcast_checked(arr, &field)?;
                 Ok($enum_name($encoder_name {
@@ -958,11 +977,10 @@ macro_rules! impl_encoder_builder_stateless_with_field {
 
 macro_rules! impl_encoder_builder_stateless_with_variable_output {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident, $pg_data_type:expr, $allowed_pg_data_types:expr, $check_data_type:expr) => {
-        #[allow(dead_code)]
         impl $struct_name {
-            pub fn new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+            pub fn new(field: Arc<Field>) -> Result<Self, Error> {
                 if !$check_data_type(field.data_type()) {
-                    return Err(ErrorKind::FieldTypeNotSupported {
+                    return Err(Error::FieldTypeNotSupported {
                         encoder: stringify!($struct_name).to_string(),
                         tp: field.data_type().clone(),
                         field: field.name().clone(),
@@ -973,12 +991,9 @@ macro_rules! impl_encoder_builder_stateless_with_variable_output {
                     output: $pg_data_type,
                 })
             }
-            pub fn new_with_output(
-                field: Arc<Field>,
-                output: PostgresType,
-            ) -> Result<Self, ErrorKind> {
+            pub fn new_with_output(field: Arc<Field>, output: PostgresType) -> Result<Self, Error> {
                 if !$allowed_pg_data_types.contains(&output) {
-                    return Err(ErrorKind::unsupported_encoding(
+                    return Err(Error::unsupported_encoding(
                         &field.name(),
                         &output,
                         &[PostgresType::Char, PostgresType::Int2],
@@ -988,7 +1003,7 @@ macro_rules! impl_encoder_builder_stateless_with_variable_output {
             }
         }
         impl BuildEncoder for $struct_name {
-            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind> {
+            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
                 let field = self.field.name();
                 let arr = downcast_checked(arr, &field)?;
                 Ok($enum_name($encoder_name { arr }))
@@ -1058,13 +1073,41 @@ impl_encoder_builder_stateless!(
 pub struct UInt64EncoderBuilder {
     field: Arc<Field>,
 }
-impl_encoder_builder_stateless!(
-    UInt64EncoderBuilder,
-    Encoder::UInt64,
-    UInt64Encoder,
-    PostgresType::Numeric,
-    |dt: &DataType| matches!(dt, DataType::UInt64)
-);
+
+impl UInt64EncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(field.data_type(), DataType::UInt64) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "UInt64EncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for UInt64EncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        Ok(Encoder::UInt64(UInt64Encoder {
+            arr: downcast_checked(arr, self.field.name())?,
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        Column {
+            data_type: PostgresType::Numeric {
+                precision: Some(20), // UInt64 max value ~1.8e19, needs precision of 20
+                scale: Some(0),      // Integers have scale 0
+            },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Int8EncoderBuilder {
@@ -1156,49 +1199,200 @@ impl_encoder_builder_stateless!(
 pub struct Decimal128EncoderBuilder {
     field: Arc<Field>,
 }
-impl_encoder_builder_stateless_with_field!(
-    Decimal128EncoderBuilder,
-    Encoder::Decimal128,
-    Decimal128Encoder,
-    PostgresType::Numeric,
-    |dt: &DataType| matches!(dt, DataType::Decimal128(_, _))
-);
+
+impl Decimal128EncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(field.data_type(), DataType::Decimal128(_, _)) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "Decimal128EncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for Decimal128EncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        let field_name = self.field.name();
+        let arr = downcast_checked(arr, field_name)?;
+        Ok(Encoder::Decimal128(Decimal128Encoder {
+            arr,
+            field: field_name.to_string(),
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        // Extract precision and scale from the Arrow DataType
+        let (precision, scale) = match self.field.data_type() {
+            DataType::Decimal128(p, s) => (*p, *s),
+            _ => {
+                unreachable!("Decimal128EncoderBuilder should only be created for Decimal128 types")
+            }
+        };
+
+        Column {
+            data_type: PostgresType::Numeric {
+                precision: Some(precision),
+                scale: Some(scale),
+            },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimestampMicrosecondEncoderBuilder {
     field: Arc<Field>,
 }
-impl_encoder_builder_stateless_with_field!(
-    TimestampMicrosecondEncoderBuilder,
-    Encoder::TimestampMicrosecond,
-    TimestampMicrosecondEncoder,
-    PostgresType::Timestamp,
-    |dt: &DataType| matches!(dt, DataType::Timestamp(TimeUnit::Microsecond, _))
-);
+
+impl TimestampMicrosecondEncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(
+            field.data_type(),
+            DataType::Timestamp(TimeUnit::Microsecond, _)
+        ) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "TimestampMicrosecondEncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for TimestampMicrosecondEncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        let field_name = self.field.name();
+        let arr = downcast_checked(arr, field_name)?;
+        Ok(Encoder::TimestampMicrosecond(TimestampMicrosecondEncoder {
+            arr,
+            field: field_name.to_string(),
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        // Extract timezone from the Arrow DataType and convert Arc<str> to String
+        let timezone = match self.field.data_type() {
+            DataType::Timestamp(_, tz) => tz.as_ref().map(|s| s.to_string()),
+            _ => unreachable!(
+                "TimestampMicrosecondEncoderBuilder should only be created for Timestamp types"
+            ),
+        };
+
+        Column {
+            data_type: PostgresType::Timestamp { timezone },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimestampMillisecondEncoderBuilder {
     field: Arc<Field>,
 }
-impl_encoder_builder_stateless_with_field!(
-    TimestampMillisecondEncoderBuilder,
-    Encoder::TimestampMillisecond,
-    TimestampMillisecondEncoder,
-    PostgresType::Timestamp,
-    |dt: &DataType| matches!(dt, DataType::Timestamp(TimeUnit::Millisecond, _))
-);
+
+impl TimestampMillisecondEncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(
+            field.data_type(),
+            DataType::Timestamp(TimeUnit::Millisecond, _)
+        ) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "TimestampMillisecondEncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for TimestampMillisecondEncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        let field_name = self.field.name();
+        let arr = downcast_checked(arr, field_name)?;
+        Ok(Encoder::TimestampMillisecond(TimestampMillisecondEncoder {
+            arr,
+            field: field_name.to_string(),
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        let timezone = match self.field.data_type() {
+            DataType::Timestamp(_, tz) => tz.as_ref().map(|s| s.to_string()),
+            _ => unreachable!(
+                "TimestampMillisecondEncoderBuilder should only be created for Timestamp types"
+            ),
+        };
+
+        Column {
+            data_type: PostgresType::Timestamp { timezone },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimestampSecondEncoderBuilder {
     field: Arc<Field>,
 }
-impl_encoder_builder_stateless_with_field!(
-    TimestampSecondEncoderBuilder,
-    Encoder::TimestampSecond,
-    TimestampSecondEncoder,
-    PostgresType::Timestamp,
-    |dt: &DataType| matches!(dt, DataType::Timestamp(TimeUnit::Second, _))
-);
+
+impl TimestampSecondEncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(field.data_type(), DataType::Timestamp(TimeUnit::Second, _)) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "TimestampSecondEncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for TimestampSecondEncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        let field_name = self.field.name();
+        let arr = downcast_checked(arr, field_name)?;
+        Ok(Encoder::TimestampSecond(TimestampSecondEncoder {
+            arr,
+            field: field_name.to_string(),
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        let timezone = match self.field.data_type() {
+            DataType::Timestamp(_, tz) => tz.as_ref().map(|s| s.to_string()),
+            _ => unreachable!(
+                "TimestampSecondEncoderBuilder should only be created for Timestamp types"
+            ),
+        };
+
+        Column {
+            data_type: PostgresType::Timestamp { timezone },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Date32EncoderBuilder {
@@ -1285,21 +1479,19 @@ impl_encoder_builder_stateless_with_field!(
 );
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 enum StringOutputType {
     Text,
     Json,
     Jsonb,
 }
 
-#[allow(dead_code)]
 impl StringOutputType {
-    pub fn from_postgres_type(tp: PostgresType, field: &Field) -> Result<Self, ErrorKind> {
+    pub fn from_postgres_type(tp: PostgresType, field: &Field) -> Result<Self, Error> {
         match tp {
             PostgresType::Text => Ok(StringOutputType::Text),
             PostgresType::Json => Ok(StringOutputType::Json),
             PostgresType::Jsonb => Ok(StringOutputType::Jsonb),
-            other => Err(ErrorKind::EncodingNotSupported {
+            other => Err(Error::EncodingNotSupported {
                 field: field.name().clone(),
                 tp: other,
                 allowed: vec![PostgresType::Text, PostgresType::Json, PostgresType::Jsonb],
@@ -1317,11 +1509,10 @@ impl StringOutputType {
 
 macro_rules! impl_encoder_builder_with_variable_output {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident, $check_data_type:expr) => {
-        #[allow(dead_code)]
         impl $struct_name {
-            pub fn new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+            pub fn new(field: Arc<Field>) -> Result<Self, Error> {
                 if !$check_data_type(field.data_type()) {
-                    return Err(ErrorKind::FieldTypeNotSupported {
+                    return Err(Error::FieldTypeNotSupported {
                         encoder: stringify!($struct_name).to_string(),
                         tp: field.data_type().clone(),
                         field: field.name().clone(),
@@ -1332,16 +1523,13 @@ macro_rules! impl_encoder_builder_with_variable_output {
                     output: StringOutputType::Text,
                 })
             }
-            pub fn new_with_output(
-                field: Arc<Field>,
-                output: PostgresType,
-            ) -> Result<Self, ErrorKind> {
+            pub fn new_with_output(field: Arc<Field>, output: PostgresType) -> Result<Self, Error> {
                 let output = StringOutputType::from_postgres_type(output, &field)?;
                 Ok(Self { field, output })
             }
         }
         impl BuildEncoder for $struct_name {
-            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind> {
+            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
                 let field = self.field.name();
                 let arr = downcast_checked(arr, &field)?;
                 Ok($enum_name($encoder_name {
@@ -1426,9 +1614,8 @@ impl_encoder_builder_stateless_with_field!(
 
 macro_rules! impl_list_encoder_builder {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident) => {
-        #[allow(dead_code)]
         impl $struct_name {
-            pub fn new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+            pub fn new(field: Arc<Field>) -> Result<Self, Error> {
                 match &field.data_type() {
                     DataType::List(inner) => {
                         let inner_encoder_builder = EncoderBuilder::try_new(inner.clone())?;
@@ -1437,7 +1624,7 @@ macro_rules! impl_list_encoder_builder {
                             inner_encoder_builder: Arc::new(inner_encoder_builder),
                         })
                     }
-                    _ => Err(ErrorKind::type_unsupported(
+                    _ => Err(Error::type_unsupported(
                         &field.name(),
                         field.data_type(),
                         format!("{:?} is not a list type", field.data_type()).as_str(),
@@ -1447,7 +1634,7 @@ macro_rules! impl_list_encoder_builder {
             pub fn new_with_inner(
                 field: Arc<Field>,
                 inner_encoder_builder: EncoderBuilder,
-            ) -> Result<Self, ErrorKind> {
+            ) -> Result<Self, Error> {
                 Ok(Self {
                     field,
                     inner_encoder_builder: Arc::new(inner_encoder_builder),
@@ -1455,7 +1642,7 @@ macro_rules! impl_list_encoder_builder {
             }
         }
         impl BuildEncoder for $struct_name {
-            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, ErrorKind> {
+            fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
                 let field = self.field.name().clone();
                 let arr = downcast_checked(arr, &field)?;
                 let inner_encoder_builder = self.inner_encoder_builder.clone();
@@ -1478,7 +1665,6 @@ macro_rules! impl_list_encoder_builder {
             }
         }
 
-        #[allow(dead_code)]
         impl $struct_name {
             pub fn inner_encoder_builder(&self) -> EncoderBuilder {
                 (*self.inner_encoder_builder).clone()
@@ -1542,7 +1728,7 @@ pub enum EncoderBuilder {
 }
 
 impl EncoderBuilder {
-    pub fn try_new(field: Arc<Field>) -> Result<Self, ErrorKind> {
+    pub fn try_new(field: Arc<Field>) -> Result<Self, Error> {
         let data_type = field.data_type();
         let res = match data_type {
             DataType::Boolean => Self::Boolean(BooleanEncoderBuilder { field }),
@@ -1564,7 +1750,7 @@ impl EncoderBuilder {
             DataType::Decimal128(_, _) => Self::Decimal128(Decimal128EncoderBuilder { field }),
             DataType::Timestamp(unit, _) => match unit {
                 TimeUnit::Nanosecond => {
-                    return Err(ErrorKind::type_unsupported(
+                    return Err(Error::type_unsupported(
                         field.name(),
                         data_type,
                         "Postgres does not support ns precision; convert to us",
@@ -1588,7 +1774,7 @@ impl EncoderBuilder {
             },
             DataType::Time64(unit) => match unit {
                 TimeUnit::Nanosecond => {
-                    return Err(ErrorKind::type_unsupported(
+                    return Err(Error::type_unsupported(
                         field.name(),
                         data_type,
                         "Postgres does not support ns precision; convert to us",
@@ -1601,7 +1787,7 @@ impl EncoderBuilder {
             },
             DataType::Duration(unit) => match unit {
                 TimeUnit::Nanosecond => {
-                    return Err(ErrorKind::type_unsupported(
+                    return Err(Error::type_unsupported(
                         field.name(),
                         data_type,
                         "Postgres does not support ns precision; convert to us",
@@ -1633,7 +1819,7 @@ impl EncoderBuilder {
                     inner.data_type(),
                     DataType::List(_) | DataType::LargeList(_)
                 ) {
-                    return Err(ErrorKind::type_unsupported(
+                    return Err(Error::type_unsupported(
                         field.name(),
                         data_type,
                         "nested lists are not supported",
@@ -1650,7 +1836,7 @@ impl EncoderBuilder {
                     inner.data_type(),
                     DataType::List(_) | DataType::LargeList(_)
                 ) {
-                    return Err(ErrorKind::type_unsupported(
+                    return Err(Error::type_unsupported(
                         field.name(),
                         data_type,
                         "nested lists are not supported",
@@ -1663,7 +1849,7 @@ impl EncoderBuilder {
                 })
             }
             _ => {
-                return Err(ErrorKind::type_unsupported(
+                return Err(Error::type_unsupported(
                     field.name(),
                     data_type,
                     "unknown type",
@@ -1787,5 +1973,74 @@ mod tests {
         // Row 2 (Some(200)): 4-byte length + 8-byte header + 2-byte digit = 14 bytes
         // Total: 32 bytes
         assert_eq!(buf.len(), 32);
+    }
+
+    #[test]
+    fn test_jsonb_validation_valid_json() {
+        use arrow_array::StringArray;
+
+        // Test various valid JSON values
+        let array = StringArray::from(vec![
+            r#"{"key": "value"}"#,
+            r#"[1, 2, 3]"#,
+            r#"null"#,
+            r#"true"#,
+            r#"123"#,
+            r#""string""#,
+        ]);
+        let field = Arc::new(Field::new("json_field", DataType::Utf8, false));
+        let builder = StringEncoderBuilder::new_with_output(field, PostgresType::Jsonb).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // All valid JSON should encode successfully
+        for row in 0..array.len() {
+            encoder.encode(row, &mut buf).unwrap();
+        }
+
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_jsonb_validation_invalid_json() {
+        use arrow_array::StringArray;
+
+        // Test invalid JSON
+        let array = StringArray::from(vec![r#"{"unclosed": true"#]);
+        let field = Arc::new(Field::new("json_field", DataType::Utf8, false));
+        let builder = StringEncoderBuilder::new_with_output(field, PostgresType::Jsonb).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // Should fail with InvalidJson error
+        let result = encoder.encode(0, &mut buf);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            Error::InvalidJson { field, reason } => {
+                assert_eq!(field, "json_field");
+                assert!(reason.contains("EOF") || reason.contains("expected"));
+            }
+            _ => panic!("Expected InvalidJson error"),
+        }
+    }
+
+    #[test]
+    fn test_text_encoding_no_validation() {
+        use arrow_array::StringArray;
+
+        // Test that TEXT encoding doesn't validate JSON (allows invalid JSON)
+        let array = StringArray::from(vec![r#"{"unclosed": true"#]);
+        let field = Arc::new(Field::new("text_field", DataType::Utf8, false));
+        let builder = StringEncoderBuilder::new(field).unwrap(); // Defaults to TEXT
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // Should succeed - TEXT doesn't validate
+        encoder.encode(0, &mut buf).unwrap();
+        assert!(!buf.is_empty());
     }
 }

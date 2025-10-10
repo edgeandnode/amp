@@ -2,7 +2,6 @@ mod batch_utils;
 mod config;
 mod conn;
 mod manifest;
-mod pgpq;
 mod sql_validator;
 mod stream_manager;
 mod stream_task;
