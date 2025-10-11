@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{
@@ -250,11 +250,12 @@ async fn test_anvil_blocks_insert() {
     println!("Created test batch with {} rows", batch.num_rows());
 
     // Connect using the DbConnPool wrapper
-    let db_pool = ampsync::conn::DbConnPool::connect(&connection_string, 1)
-        .await
-        .expect("Failed to create DbConnPool");
+    let db_pool =
+        ampsync::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
+            .await
+            .expect("Failed to create DbConnPool");
 
-    let db_engine = AmpsyncDbEngine::new(&db_pool);
+    let db_engine = AmpsyncDbEngine::new(&db_pool, Duration::from_secs(60));
 
     // This should use our arrow_to_pg encoder
     match db_engine.insert_record_batch("blocks", &batch).await {

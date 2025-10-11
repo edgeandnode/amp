@@ -1,8 +1,11 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 use common::metadata::segments::ResumeWatermark;
 use pgtemp::PgTempDB;
+
+const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
+const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);
 
 /// Helper to create a test database pool
 /// Returns (DbConnPool, sqlx::PgPool, PgTempDB) - the PgTempDB must be kept alive
@@ -15,7 +18,7 @@ async fn create_test_pool() -> (DbConnPool, sqlx::PgPool, PgTempDB) {
     let pg_temp = PgTempDB::new();
     let connection_string = pg_temp.connection_uri();
 
-    let db_pool = DbConnPool::connect(&connection_string, 1)
+    let db_pool = DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
         .await
         .expect("Failed to create DbConnPool");
 
@@ -45,7 +48,7 @@ fn create_test_watermark(network: &str, block_num: u64) -> ResumeWatermark {
 #[tokio::test]
 async fn test_init_checkpoint_table() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initialize checkpoint table
     engine
@@ -108,7 +111,7 @@ async fn test_init_checkpoint_table() {
 #[tokio::test]
 async fn test_load_watermark_none() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -127,7 +130,7 @@ async fn test_load_watermark_none() {
 #[tokio::test]
 async fn test_save_and_load_watermark() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -153,7 +156,7 @@ async fn test_save_and_load_watermark() {
 #[tokio::test]
 async fn test_save_watermark_upsert() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -186,7 +189,7 @@ async fn test_save_watermark_upsert() {
 #[tokio::test]
 async fn test_multiple_tables_separate_watermarks() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -242,10 +245,11 @@ async fn test_watermark_survives_reconnection() {
 
     // First connection - save watermark
     {
-        let db_pool = DbConnPool::connect(&connection_string, 1)
-            .await
-            .expect("Failed to create DbConnPool");
-        let engine = AmpsyncDbEngine::new(&db_pool);
+        let db_pool =
+            DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
+                .await
+                .expect("Failed to create DbConnPool");
+        let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
         engine
             .init_checkpoint_table()
@@ -261,10 +265,11 @@ async fn test_watermark_survives_reconnection() {
 
     // Second connection - verify watermark persisted
     {
-        let db_pool = DbConnPool::connect(&connection_string, 1)
-            .await
-            .expect("Failed to create DbConnPool");
-        let engine = AmpsyncDbEngine::new(&db_pool);
+        let db_pool =
+            DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
+                .await
+                .expect("Failed to create DbConnPool");
+        let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
         let loaded_watermark = engine
             .load_watermark("test_table")
@@ -280,7 +285,7 @@ async fn test_incremental_checkpoint_between_watermarks() {
     use ampsync::sync_engine::ResumePoint;
 
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -346,7 +351,7 @@ async fn test_multi_network_watermark() {
     use std::collections::BTreeMap;
 
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()
@@ -390,7 +395,7 @@ async fn test_multi_network_watermark() {
 #[tokio::test]
 async fn test_batch_with_empty_ranges() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     engine
         .init_checkpoint_table()

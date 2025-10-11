@@ -3,6 +3,7 @@ name = "ampsync"
 description = "Syncing engine that listens to the stream changes from the nozzle-client streaming layer to store changes in a configured database."
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "ampsync"

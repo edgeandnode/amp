@@ -447,6 +447,7 @@ impl AdaptiveBatchManager {
 pub struct AmpsyncDbEngine {
     pool: Pool<Postgres>,
     batch_manager: AdaptiveBatchManager,
+    db_operation_max_retry_duration_secs: Duration,
 }
 
 impl AmpsyncDbEngine {
@@ -454,10 +455,11 @@ impl AmpsyncDbEngine {
     /// All tables use the same system metadata column for tracking block ranges.
     const REORG_BLOCK_COLUMN: &'static str = "_block_num_end";
 
-    pub fn new(pool: &DbConnPool) -> Self {
+    pub fn new(pool: &DbConnPool, db_operation_max_retry_duration_secs: Duration) -> Self {
         Self {
             pool: pool.deref().clone(),
             batch_manager: AdaptiveBatchManager::default(),
+            db_operation_max_retry_duration_secs,
         }
     }
 
@@ -467,17 +469,6 @@ impl AmpsyncDbEngine {
             .with_min_delay(Duration::from_millis(50))
             .with_max_delay(Duration::from_secs(5))
             .with_max_times(50) // High limit, circuit breaker will stop us first
-    }
-
-    /// Maximum duration for database operation retries (60 seconds by default).
-    ///
-    /// Can be configured via `DB_OPERATION_MAX_RETRY_DURATION_SECS` environment variable.
-    fn db_max_retry_duration() -> Duration {
-        let secs = std::env::var("DB_OPERATION_MAX_RETRY_DURATION_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(60);
-        Duration::from_secs(secs)
     }
 
     /// Returns true if the database error is retryable.
@@ -926,7 +917,7 @@ impl AmpsyncDbEngine {
         (|| async move { sqlx::query(ddl_query).execute(pool).await })
             .retry(Self::db_retry_policy())
             .when(Self::create_retryable_with_circuit_breaker(
-                Self::db_max_retry_duration(),
+                self.db_operation_max_retry_duration_secs,
             ))
             .notify(Self::notify_db_retry)
             .await
@@ -951,7 +942,7 @@ impl AmpsyncDbEngine {
             (|| async move { sqlx::query(create_index_query).execute(pool).await })
                 .retry(Self::db_retry_policy())
                 .when(Self::create_retryable_with_circuit_breaker(
-                    Self::db_max_retry_duration(),
+                    self.db_operation_max_retry_duration_secs,
                 ))
                 .notify(Self::notify_db_retry)
                 .await
@@ -1103,7 +1094,7 @@ impl AmpsyncDbEngine {
         (|| async move { sqlx::query(stmt).execute(pool).await })
             .retry(Self::db_retry_policy())
             .when(Self::create_retryable_with_circuit_breaker(
-                Self::db_max_retry_duration(),
+                self.db_operation_max_retry_duration_secs,
             ))
             .notify(Self::notify_db_retry)
             .await
@@ -1208,7 +1199,7 @@ impl AmpsyncDbEngine {
     ///
     /// Returns the number of rows inserted (excludes duplicates).
     async fn insert_via_temp_table(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
         table_name: &str,
         columns_clause: &str,
         conflict_column: &str,
@@ -1329,7 +1320,7 @@ impl AmpsyncDbEngine {
         })
         .retry(Self::db_retry_policy())
         .when(Self::create_retryable_with_circuit_breaker(
-            Self::db_max_retry_duration(),
+            self.db_operation_max_retry_duration_secs,
         ))
         .notify(Self::notify_db_retry)
         .await
@@ -1384,7 +1375,7 @@ impl AmpsyncDbEngine {
         let result = (|| async move { sqlx::query(query).execute(pool).await })
             .retry(Self::db_retry_policy())
             .when(Self::create_retryable_with_circuit_breaker(
-                Self::db_max_retry_duration(),
+                self.db_operation_max_retry_duration_secs,
             ))
             .notify(Self::notify_db_retry)
             .await

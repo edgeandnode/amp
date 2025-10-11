@@ -3,7 +3,7 @@
 //! This module handles loading configuration from environment variables,
 //! fetching dataset manifests, and managing database connection strings.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use common::BoxError;
 use datasets_common::{name::Name, version::Version};
@@ -25,6 +25,14 @@ pub struct AmpsyncConfig {
     pub dataset_version: Option<Version>,
     /// Interval in seconds for polling new versions (only when dataset_version is None).
     pub version_poll_interval_secs: u64,
+    /// Database pool size
+    pub db_pool_size: u32,
+    /// Maximum duration for database operation retries.
+    pub db_operation_max_retry_duration_secs: Duration,
+    /// Maximum duration for connection retries
+    pub db_max_retry_duration_secs: Duration,
+    /// Max number of concurrent stream batches
+    pub stream_max_concurrent_batches: usize,
     /// Parsed dataset manifest.
     pub manifest: Arc<Manifest>,
 }
@@ -50,6 +58,10 @@ impl AmpsyncConfig {
         database_user: Option<String>,
         database_password: Option<String>,
         database_name: Option<String>,
+        db_pool_size: u32,
+        db_operation_max_retry_duration_secs: u64,
+        db_max_retry_duration_secs: u64,
+        stream_max_concurrent_batches: usize,
     ) -> Result<Self, BoxError> {
         // Fetch manifest from admin API (polls indefinitely until dataset is published)
         let manifest = Arc::new(
@@ -70,6 +82,14 @@ impl AmpsyncConfig {
                 dataset_version,
                 version_poll_interval_secs,
                 manifest,
+                db_pool_size,
+                db_operation_max_retry_duration_secs: Duration::from_secs(
+                    db_operation_max_retry_duration_secs,
+                ),
+                db_max_retry_duration_secs: Duration::from_secs(
+                    db_operation_max_retry_duration_secs,
+                ),
+                stream_max_concurrent_batches,
             });
         }
 
@@ -110,6 +130,12 @@ impl AmpsyncConfig {
             dataset_version,
             version_poll_interval_secs,
             manifest,
+            db_pool_size,
+            db_operation_max_retry_duration_secs: Duration::from_secs(
+                db_operation_max_retry_duration_secs,
+            ),
+            db_max_retry_duration_secs: Duration::from_secs(db_max_retry_duration_secs),
+            stream_max_concurrent_batches,
         })
     }
 }

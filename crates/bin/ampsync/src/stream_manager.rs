@@ -3,7 +3,7 @@
 //! This module handles spawning and coordinating stream tasks for all tables
 //! in a dataset, including schema setup, checkpoint recovery, and graceful shutdown.
 
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use amp_client::SqlClient;
 use common::BoxError;
@@ -16,9 +16,6 @@ use crate::{
     stream_task::StreamTask,
     sync_engine::AmpsyncDbEngine,
 };
-
-/// Default maximum number of concurrent batch operations across all tables
-const DEFAULT_MAX_CONCURRENT_BATCHES: usize = 10;
 
 /// Graceful shutdown timeout - maximum time to wait for in-flight operations (in seconds)
 const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
@@ -35,12 +32,9 @@ pub async fn spawn_stream_tasks(
     ampsync_db_engine: &AmpsyncDbEngine,
     shutdown_token: tokio_util::sync::CancellationToken,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, BoxError> {
-    // Create a semaphore to limit concurrent batch processing across all tables
-    let max_concurrent_batches = env::var("MAX_CONCURRENT_BATCHES")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_MAX_CONCURRENT_BATCHES);
-    let batch_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_batches));
+    let batch_semaphore = Arc::new(tokio::sync::Semaphore::new(
+        config.stream_max_concurrent_batches,
+    ));
 
     let mut task_handles = Vec::new();
 

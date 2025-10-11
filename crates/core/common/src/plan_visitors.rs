@@ -135,7 +135,7 @@ pub fn constrain_by_block_num(
 }
 
 /// Reasons why a logical plan cannot be materialized incrementally
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum NonIncrementalOp {
     /// Limit requires counting rows across batches
     Limit,

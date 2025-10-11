@@ -41,8 +41,7 @@ async fn test_connection_circuit_breaker() {
     let start = std::time::Instant::now();
 
     // Try to connect - should fail after ~2 seconds due to circuit breaker
-    let result =
-        DbConnPool::connect_with_max_duration(&connection_string, 1, Some(max_duration)).await;
+    let result = DbConnPool::connect(&connection_string, 1, max_duration).await;
 
     let elapsed = start.elapsed();
 
@@ -71,11 +70,6 @@ async fn test_operation_circuit_breaker() {
         std::env::set_var("LANG", "C");
     }
 
-    // Set operation max retry duration to 2 seconds
-    unsafe {
-        std::env::set_var("DB_OPERATION_MAX_RETRY_DURATION_SECS", "2");
-    }
-
     // Create a temporary PostgreSQL database
     let pg_temp = PgTempDB::new();
     let connection_string = pg_temp.connection_uri();
@@ -83,7 +77,7 @@ async fn test_operation_circuit_breaker() {
     println!("PostgreSQL temp database created: {}", connection_string);
 
     // Connect to the database
-    let db_pool = DbConnPool::connect(&connection_string, 1)
+    let db_pool = DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
         .await
         .expect("Failed to create DbConnPool");
 
@@ -114,11 +108,6 @@ async fn test_operation_circuit_breaker() {
         "Circuit breaker correctly configured: normal operations succeed, \
          circuit breaker will trigger on prolonged failures"
     );
-
-    // Cleanup
-    unsafe {
-        std::env::remove_var("DB_OPERATION_MAX_RETRY_DURATION_SECS");
-    }
 }
 
 /// Test that circuit breaker uses default values when env vars not set

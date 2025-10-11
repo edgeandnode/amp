@@ -11,7 +11,7 @@ mod version_polling;
 use amp_client::SqlClient;
 use clap::Parser as _;
 use common::BoxError;
-use conn::{DEFAULT_POOL_SIZE, DbConnPool};
+use conn::DbConnPool;
 use datasets_common::{name::Name, version::Version};
 use tracing::{error, info};
 
@@ -33,7 +33,7 @@ enum Command {
         #[arg(long, required = true, env = "DATASET_NAME")]
         dataset_name: Name,
 
-        /// (Optional) The specific dataset version to pull the schema for.
+        /// The specific dataset version to pull the schema for.
         /// If provided, the version is validated to be found from the admin-api;
         /// if not found, an error is thrown.
         ///
@@ -45,17 +45,11 @@ enum Command {
 
         /// Address of the amp arrow flight url.
         /// Used to stream the arrow queries to fetch data and insert into the configured database.
-        ///
-        /// # default
-        /// http://localhost:1602
         #[arg(long, default_value = "http://localhost:1602", env = "AMP_FLIGHT_ADDR")]
         amp_flight_addr: String,
 
         /// Address of the amp admin-api.
         /// Used to fetch the dataset versions and schema information.
-        ///
-        /// # default
-        /// http://localhost:1610
         #[arg(
             long,
             default_value = "http://localhost:1610",
@@ -83,7 +77,7 @@ enum Command {
         #[arg(long, short = 'u', env = "DATABASE_USER")]
         database_user: Option<String>,
 
-        /// (Optional) Postgres database user password.
+        /// Postgres database user password.
         #[arg(long, short = 'p', env = "DATABASE_PASSWORD")]
         database_password: Option<String>,
 
@@ -94,9 +88,6 @@ enum Command {
         database_host: Option<String>,
 
         /// Postgres database port.
-        ///
-        /// # default
-        /// 5432
         #[arg(long, env = "DATABASE_PORT", default_value = "5432")]
         database_port: u16,
 
@@ -105,6 +96,26 @@ enum Command {
         /// OR, the database_url is required.
         #[arg(long, env = "DATABASE_NAME")]
         database_name: Option<String>,
+
+        /// Postgres database pool size
+        #[arg(long, env = "DB_POOL_SIZE", default_value = "10")]
+        db_pool_size: u32,
+
+        /// Maximum duration for database operation retries.
+        #[arg(
+            long,
+            default_value = "60",
+            env = "DB_OPERATION_MAX_RETRY_DURATION_SECS"
+        )]
+        db_operation_max_retry_duration_secs: u64,
+
+        /// Maximum duration for connection retries
+        #[arg(long, default_value = "300", env = "DB_MAX_RETRY_DURATION_SECS")]
+        db_max_retry_duration_secs: u64,
+
+        /// Max number of concurrent stream batches
+        #[arg(long, default_value = "10", env = "MAX_CONCURRENT_BATCHES")]
+        stream_max_concurrent_batches: usize,
     },
 }
 
@@ -113,17 +124,6 @@ enum Command {
 struct Args {
     #[command(subcommand)]
     command: Command,
-}
-
-#[tokio::main]
-async fn main() {
-    match ampsync_runner().await {
-        Ok(()) => {}
-        Err(e) => {
-            eprintln!("Exiting with error: {e}");
-            std::process::exit(1);
-        }
-    }
 }
 
 /// Main ampsync orchestrator.
@@ -137,7 +137,8 @@ async fn main() {
 ///
 /// Supports version polling: when DATASET_VERSION is not specified, polls for new versions
 /// and gracefully reloads when a new version is detected.
-async fn ampsync_runner() -> Result<(), BoxError> {
+#[tokio::main]
+async fn main() -> Result<(), BoxError> {
     monitoring::logging::init();
 
     let Args { command } = Args::parse();
@@ -155,6 +156,10 @@ async fn ampsync_runner() -> Result<(), BoxError> {
             database_user,
             database_password,
             database_name,
+            db_pool_size,
+            db_operation_max_retry_duration_secs,
+            db_max_retry_duration_secs,
+            stream_max_concurrent_batches,
         } => {
             let mut config = AmpsyncConfig::from_cmd(
                 dataset_name,
@@ -168,6 +173,10 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                 database_user,
                 database_password,
                 database_name,
+                db_pool_size,
+                db_operation_max_retry_duration_secs,
+                db_max_retry_duration_secs,
+                stream_max_concurrent_batches,
             )
             .await?;
             let version_polling_enabled = config.dataset_version.is_none();
@@ -187,7 +196,12 @@ async fn ampsync_runner() -> Result<(), BoxError> {
             );
 
             // Connect to target database (reused across reloads)
-            let db_pool = DbConnPool::connect(&config.database_url, DEFAULT_POOL_SIZE).await?;
+            let db_pool = DbConnPool::connect(
+                &config.database_url,
+                config.db_pool_size,
+                config.db_max_retry_duration_secs,
+            )
+            .await?;
 
             // Connect to Nozzle server (reused across reloads)
             let sql_client = SqlClient::new(&config.amp_flight_addr).await?;
@@ -196,7 +210,8 @@ async fn ampsync_runner() -> Result<(), BoxError> {
                 "nozzle_server_connected"
             );
 
-            let ampsync_db_engine = AmpsyncDbEngine::new(&db_pool);
+            let ampsync_db_engine =
+                AmpsyncDbEngine::new(&db_pool, config.db_operation_max_retry_duration_secs);
 
             // Initialize checkpoint tracking table
             ampsync_db_engine.init_checkpoint_table().await?;

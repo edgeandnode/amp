@@ -6,10 +6,6 @@ use backon::{ExponentialBuilder, Retryable};
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
 use tracing::{error, instrument, warn};
 
-pub const DEFAULT_POOL_SIZE: u32 = 10;
-/// Default maximum duration for connection retries (5 minutes)
-pub const DEFAULT_MAX_RETRY_DURATION_SECS: u64 = 300;
-
 /// Errors that can occur when connecting to the syncing layer DB.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnError {
@@ -28,24 +24,11 @@ impl DbConnPool {
     /// Respects `DB_MAX_RETRY_DURATION_SECS` environment variable (default: 300 seconds).
     /// Stops retrying after this duration to prevent indefinite hangs.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, ConnError> {
-        Self::connect_with_max_duration(url, pool_size, None).await
-    }
-
-    /// Connects with explicit max retry duration for testing.
-    pub async fn connect_with_max_duration(
+    pub async fn connect(
         url: &str,
         pool_size: u32,
-        max_duration: Option<Duration>,
+        max_retry_duration: Duration,
     ) -> Result<Self, ConnError> {
-        let max_retry_duration = max_duration.unwrap_or_else(|| {
-            let secs = std::env::var("DB_MAX_RETRY_DURATION_SECS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(DEFAULT_MAX_RETRY_DURATION_SECS);
-            Duration::from_secs(secs)
-        });
-
         let retry_policy = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(100))
             .with_max_delay(Duration::from_secs(30))

@@ -1,8 +1,13 @@
+use std::time::Duration;
+
 use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 use arrow_schema::DataType;
 use datasets_common::manifest::DataType as ManifestDataType;
 use datasets_derived::manifest::{ArrowSchema, Field as ManifestField};
 use pgtemp::PgTempDB;
+
+const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
+const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);
 
 /// Helper to create a test database pool
 /// Returns (DbConnPool, sqlx::PgPool, PgTempDB) - the PgTempDB must be kept alive
@@ -15,7 +20,7 @@ async fn create_test_pool() -> (DbConnPool, sqlx::PgPool, PgTempDB) {
     let pg_temp = PgTempDB::new();
     let connection_string = pg_temp.connection_uri();
 
-    let db_pool = DbConnPool::connect(&connection_string, 1)
+    let db_pool = DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
         .await
         .expect("Failed to create DbConnPool");
 
@@ -46,7 +51,7 @@ fn create_test_schema(fields: Vec<(&str, DataType, bool)>) -> ArrowSchema {
 #[tokio::test]
 async fn test_create_new_table() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     let schema = create_test_schema(vec![
         ("id", DataType::UInt64, false),
@@ -98,7 +103,7 @@ async fn test_create_new_table() {
 #[tokio::test]
 async fn test_restart_with_same_schema() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     let schema = create_test_schema(vec![
         ("id", DataType::UInt64, false),
@@ -137,7 +142,7 @@ async fn test_restart_with_same_schema() {
 #[tokio::test]
 async fn test_add_new_column() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initial schema
     let schema_v1 = create_test_schema(vec![
@@ -185,7 +190,7 @@ async fn test_add_new_column() {
 #[tokio::test]
 async fn test_add_multiple_columns() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initial schema
     let schema_v1 = create_test_schema(vec![("id", DataType::UInt64, false)]);
@@ -230,7 +235,7 @@ async fn test_add_multiple_columns() {
 #[tokio::test]
 async fn test_type_change_fails() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initial schema with name as TEXT
     let schema_v1 = create_test_schema(vec![
@@ -262,7 +267,7 @@ async fn test_type_change_fails() {
 #[tokio::test]
 async fn test_dropped_column_fails() {
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initial schema with 3 columns
     let schema_v1 = create_test_schema(vec![
@@ -296,7 +301,7 @@ async fn test_dropped_column_fails() {
 #[tokio::test]
 async fn test_add_block_num_with_primary_key() {
     let (db_pool, pool, _pg_temp) = create_test_pool().await;
-    let engine = AmpsyncDbEngine::new(&db_pool);
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Initial schema without block_num
     let schema_v1 = create_test_schema(vec![

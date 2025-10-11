@@ -1,4 +1,4 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc, time::Duration};
 
 use alloy::primitives::BlockHash;
 use amp_client::InvalidationRange;
@@ -9,6 +9,9 @@ use common::metadata::segments::BlockRange;
 use datasets_common::manifest::DataType as ManifestDataType;
 use datasets_derived::manifest::{ArrowSchema, Field as ManifestField};
 use pgtemp::PgTempDB;
+
+const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
+const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);
 
 /// Test multi-row batch insert with `_block_num` injection.
 ///
@@ -39,11 +42,15 @@ async fn test_multi_row_batch_without_block_num() {
         .expect("Failed to connect to test database");
 
     // Connect using the DbConnPool wrapper
-    let db_pool = ampsync::conn::DbConnPool::connect(&connection_string, 1)
-        .await
-        .expect("Failed to create DbConnPool");
+    let db_pool = ampsync::conn::DbConnPool::connect(
+        &connection_string,
+        1,
+        DEFAULT_DB_MAX_RETRY_DURATION_SECS,
+    )
+    .await
+    .expect("Failed to create DbConnPool");
 
-    let db_engine = AmpsyncDbEngine::new(&db_pool);
+    let db_engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Create Arrow schema WITHOUT block_num column
     // This is what happens when user's query doesn't SELECT block_num
@@ -225,11 +232,15 @@ async fn test_reorg_with_injected_block_num() {
         .expect("Failed to connect to test database");
 
     // Connect using the DbConnPool wrapper
-    let db_pool = ampsync::conn::DbConnPool::connect(&connection_string, 1)
-        .await
-        .expect("Failed to create DbConnPool");
+    let db_pool = ampsync::conn::DbConnPool::connect(
+        &connection_string,
+        1,
+        DEFAULT_DB_MAX_RETRY_DURATION_SECS,
+    )
+    .await
+    .expect("Failed to create DbConnPool");
 
-    let db_engine = AmpsyncDbEngine::new(&db_pool);
+    let db_engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
     // Create Arrow schema WITHOUT block_num column
     let manifest_schema = ArrowSchema {

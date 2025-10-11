@@ -3,6 +3,7 @@ name = "arrow-to-postgres"
 description = "Provides a binary encoder for converting Apache Arrow RecordBatch and stream them into Postgres using the Postgres binary format"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [dependencies]
 arrow-array = { version = "55.2.0", default-features = false }

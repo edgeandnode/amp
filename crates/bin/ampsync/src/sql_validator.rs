@@ -6,38 +6,11 @@
 //! - Remove ORDER BY and LIMIT clauses (non-incremental, but safe to remove)
 //! - Extract column names from SELECT statements for schema filtering
 
-use common::BoxError;
+use common::{BoxError, plan_visitors::NonIncrementalOp};
 use datafusion::sql::{
     parser::{DFParser, Statement as DFStatement},
     sqlparser::ast::{Expr, Function, Query, Select, SelectItem, SetExpr, Statement, TableFactor},
 };
-
-/// Non-incremental operations that cannot be used in streaming queries
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NonIncrementalOp {
-    /// Aggregations need state management (COUNT, SUM, AVG, etc.)
-    Aggregate,
-    /// Distinct operations need global deduplication
-    Distinct,
-    /// Joins need to maintain state between batches
-    Join,
-    /// Window functions often require sorting and state
-    Window,
-    /// Recursive queries are inherently stateful
-    RecursiveQuery,
-}
-
-impl std::fmt::Display for NonIncrementalOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NonIncrementalOp::Aggregate => write!(f, "Aggregate (COUNT, SUM, AVG, etc.)"),
-            NonIncrementalOp::Distinct => write!(f, "DISTINCT"),
-            NonIncrementalOp::Join => write!(f, "JOIN"),
-            NonIncrementalOp::Window => write!(f, "Window functions (OVER, PARTITION BY)"),
-            NonIncrementalOp::RecursiveQuery => write!(f, "Recursive query (WITH RECURSIVE)"),
-        }
-    }
-}
 
 /// Validate that a SQL query only uses incremental operations suitable for streaming
 ///
@@ -357,7 +330,7 @@ mod tests {
         let result = validate_incremental_query(sql);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("DISTINCT"));
+        assert!(err.contains("Distinct"));
     }
 
     #[test]
@@ -366,7 +339,7 @@ mod tests {
         let result = validate_incremental_query(sql);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("JOIN"));
+        assert!(err.contains("Join"));
     }
 
     #[test]
@@ -395,7 +368,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         // Should contain multiple violations
-        assert!(err.contains("Aggregate") || err.contains("DISTINCT") || err.contains("JOIN"));
+        assert!(err.contains("Aggregate") || err.contains("Distinct") || err.contains("Join"));
     }
 
     // Column extraction tests
