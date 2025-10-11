@@ -159,6 +159,7 @@ struct Release {
 struct Asset {
     id: u64,
     name: String,
+    #[serde(rename = "browser_download_url")]
     url: String,
 }
 
