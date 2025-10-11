@@ -1,6 +1,8 @@
 [package]
 name = "datasets-common-gen"
 edition.workspace = true
+version.workspace = true
+license-file.workspace = true
 publish = false
 
 # Schema generation dependencies (see README.md "JSON Schema Generation" section)

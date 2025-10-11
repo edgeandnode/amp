@@ -2,6 +2,7 @@
 name = "common"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [features]
 schemars = ["dep:schemars", "datasets-common/schemars"]

@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "admin-api-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "admin-api",
  "serde_json",
@@ -3211,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "datasets-common-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "datasets-common",
  "schemars 1.0.4",
@@ -3232,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "datasets-derived-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "datasets-derived",
  "schemars 1.0.4",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "datasets-evm-rpc-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "evm-rpc-datasets",
  "schemars 1.0.4",
@@ -3250,7 +3250,7 @@ dependencies = [
 
 [[package]]
 name = "datasets-firehose-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "firehose-datasets",
  "schemars 1.0.4",
@@ -3259,7 +3259,7 @@ dependencies = [
 
 [[package]]
 name = "datasets-substreams-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "schemars 1.0.4",
  "serde_json",

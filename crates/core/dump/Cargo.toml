@@ -2,6 +2,7 @@
 name = "dump"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [dependencies]
 metadata-db = { path = "../metadata-db" }
