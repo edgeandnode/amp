@@ -1,21 +1,22 @@
-use std::{
-    future::Future,
-    net::{SocketAddr, TcpListener},
-    sync::Arc,
-};
+use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
-use axum::response::IntoResponse;
+use axum::{
+    response::IntoResponse,
+    serve::{Listener as _, ListenerExt as _},
+};
 use common::{
     BoxError, BoxResult, arrow, config::Config, query_context::parse_sql,
-    stream_helpers::is_streaming,
+    stream_helpers::is_streaming, utils::shutdown_signal,
 };
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
 use metadata_db::MetadataDb;
 use server::service::Service;
+use tokio::net::TcpListener;
 use tonic::transport::{Server, server::TcpIncoming};
+use tower_http::cors::CorsLayer;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Copy)]
@@ -52,16 +53,14 @@ pub async fn run(
 
     // Start Arrow Flight Server if enabled
     if enable_flight {
-        let flight_tcp_listener = TcpListener::bind(config.addrs.flight_addr)?;
-        let flight_addr = flight_tcp_listener.local_addr()?;
-        flight_tcp_listener.set_nonblocking(true)?;
+        let listener = TcpListener::bind(config.addrs.flight_addr).await?;
+        let flight_addr = listener.local_addr()?;
         let flight_server = Server::builder()
             .add_service(FlightServiceServer::new(service.clone()))
-            .serve_with_incoming(TcpIncoming::from_listener(
-                tokio::net::TcpListener::from_std(flight_tcp_listener)?,
-                true,
-                None,
-            )?)
+            .serve_with_incoming_shutdown(
+                TcpIncoming::from_listener(listener, true, None)?,
+                shutdown_signal(),
+            )
             .map_err(|e| {
                 tracing::error!("Flight server error: {}", e);
                 e.into()
@@ -111,7 +110,18 @@ async fn run_jsonl_server(
             axum::routing::post(handle_jsonl_request).with_state(service),
         )
         .layer(tower_http::compression::CompressionLayer::new().gzip(true));
-    http_common::serve_at(addr, app).await
+    let listener = TcpListener::bind(addr)
+        .await?
+        .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
+    let addr = listener.local_addr()?;
+    let router = app.layer(CorsLayer::permissive());
+    let server = async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            .map_err(Into::into)
+    };
+    Ok((addr, server))
 }
 
 #[instrument(skip(service))]
@@ -120,7 +130,6 @@ async fn handle_jsonl_request(
     request: String,
 ) -> axum::response::Response {
     fn error_payload(message: impl std::fmt::Display) -> String {
-        // Use http-common error format
         serde_json::json!({
             "error_code": "QUERY_ERROR",
             "error_message": message.to_string(),

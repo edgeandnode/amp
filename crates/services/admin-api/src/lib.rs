@@ -7,10 +7,8 @@ use axum::{
     routing::{get, post, put},
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxResult, config::Config};
+use common::{BoxResult, config::Config, utils::shutdown_signal};
 use dataset_store::DatasetStore;
-use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
 
 mod ctx;
 pub mod handlers;
@@ -20,6 +18,8 @@ use ctx::Ctx;
 use dataset_store::{manifests::DatasetManifestsStore, providers::ProviderConfigsStore};
 use handlers::{datasets, files, jobs, locations, providers, schema};
 use scheduler::Scheduler;
+use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 pub async fn serve(
     at: SocketAddr,
@@ -111,15 +111,18 @@ pub async fn serve(
         app = app.layer(metrics_layer);
     }
 
-    let app = app;
-
     let listener = TcpListener::bind(at)
         .await?
         .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
     let addr = listener.local_addr()?;
 
-    let app = app.layer(CorsLayer::permissive());
-    let server = async move { axum::serve(listener, app).await.map_err(Into::into) };
+    let router = app.layer(CorsLayer::permissive());
+    let server = async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            .map_err(Into::into)
+    };
     Ok((addr, server))
 }
 
