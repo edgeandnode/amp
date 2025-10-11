@@ -218,8 +218,10 @@ async fn main() -> Result<(), BoxError> {
             info!("checkpoint_tracking_initialized");
 
             // Set up version polling (only if DATASET_VERSION not specified)
+            // Using watch channel - if multiple versions update before consumer processes,
+            // only the latest version is retained (no need to process intermediate versions)
             let (version_change_tx, mut version_change_rx) =
-                tokio::sync::mpsc::channel::<Version>(1);
+                tokio::sync::watch::channel::<Version>(config.manifest.version.clone());
             let version_poll_handle = if version_polling_enabled {
                 let admin_api_addr = config.amp_admin_api_addr.clone();
                 let dataset_name = config.dataset_name.clone();
@@ -274,7 +276,8 @@ async fn main() -> Result<(), BoxError> {
                 // Wait for version change, or shutdown signal
                 tokio::select! {
                     // New version detected - reload configuration
-                    Some(new_version) = version_change_rx.recv() => {
+                    Ok(()) = version_change_rx.changed() => {
+                        let new_version = version_change_rx.borrow_and_update().clone();
                         info!(
                             old_version = %config.manifest.version,
                             new_version = %new_version,

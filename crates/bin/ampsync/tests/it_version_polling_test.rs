@@ -7,7 +7,7 @@
 
 use datasets_common::{name::Name, version::Version};
 use mockito::Server;
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 
 /// Test that fetch_latest_version only calls the versions endpoint.
 ///
@@ -71,8 +71,8 @@ async fn test_version_polling_detects_changes() {
     let dataset_name: Name = "test_dataset".parse().unwrap();
     let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
-    // Create channel for version notifications
-    let (tx, mut rx) = mpsc::channel::<Version>(10);
+    // Create watch channel for version notifications
+    let (tx, mut rx) = watch::channel::<Version>(initial_version.clone());
 
     // Mock versions endpoint - returns old version first, then new version
     // Use expect_at_least since the polling task will continue running
@@ -122,11 +122,12 @@ async fn test_version_polling_detects_changes() {
         .await;
 
     // Verify we received the new version notification
-    let new_version = tokio::time::timeout(tokio::time::Duration::from_secs(3), rx.recv())
+    tokio::time::timeout(tokio::time::Duration::from_secs(3), rx.changed())
         .await
         .expect("Timeout waiting for version notification")
         .expect("Channel closed unexpectedly");
 
+    let new_version = rx.borrow_and_update().clone();
     assert_eq!(new_version.to_string(), "0.2.0-LTcyNjgzMjc1NA");
 
     // Cleanup - abort task immediately after verification
@@ -143,7 +144,7 @@ async fn test_version_polling_handles_api_errors() {
     let dataset_name: Name = "test_dataset".parse().unwrap();
     let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
-    let (tx, mut rx) = mpsc::channel::<Version>(10);
+    let (tx, mut rx) = watch::channel::<Version>(initial_version.clone());
 
     // First poll: API error (500) - should be retried at least once
     let _error_mock = server
@@ -186,11 +187,12 @@ async fn test_version_polling_handles_api_errors() {
         .await;
 
     // Verify we still received the new version notification after error
-    let new_version = tokio::time::timeout(tokio::time::Duration::from_secs(3), rx.recv())
+    tokio::time::timeout(tokio::time::Duration::from_secs(3), rx.changed())
         .await
         .expect("Timeout waiting for version notification")
         .expect("Channel closed unexpectedly");
 
+    let new_version = rx.borrow_and_update().clone();
     assert_eq!(new_version.to_string(), "0.2.0-LTcyNjgzMjc1NA");
 
     // Cleanup - abort task immediately after verification
