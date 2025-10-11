@@ -28,24 +28,24 @@ pub async fn serve(
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
-    let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store = DatasetManifestsStore::new(
-            metadata_db.clone(),
-            config.dataset_defs_store.prefixed_store(),
-        );
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
-    };
+    let provider_configs_store = ProviderConfigsStore::new(config.providers_store.prefixed_store());
+    let dataset_manifests_store = DatasetManifestsStore::new(
+        metadata_db.clone(),
+        config.dataset_defs_store.prefixed_store(),
+    );
+
+    let dataset_store = DatasetStore::new(
+        metadata_db.clone(),
+        provider_configs_store,
+        dataset_manifests_store.clone(),
+    );
+
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     let ctx = Ctx {
         metadata_db,
         dataset_store,
+        dataset_manifests_store,
         scheduler,
     };
 
@@ -67,6 +67,10 @@ pub async fn serve(
         .route(
             "/datasets/{name}/versions/{version}/schema",
             get(datasets::get_version_schema::handler_with_version),
+        )
+        .route(
+            "/datasets/{name}/versions/{version}/manifest",
+            get(datasets::get_version_manifest::handler),
         )
         .route("/datasets/{name}/dump", post(datasets::dump::handler))
         .route(
@@ -141,6 +145,7 @@ pub async fn serve(
         handlers::datasets::get_by_id::handler_with_version,
         handlers::datasets::get_versions::handler,
         handlers::datasets::get_version_schema::handler_with_version,
+        handlers::datasets::get_version_manifest::handler,
         handlers::datasets::register::handler,
         handlers::datasets::dump::handler,
         handlers::datasets::dump::handler_with_version,
