@@ -70,7 +70,6 @@ const AMP_CRATES: &[&str] = &[
     "evm_rpc_datasets",
     "firehose_datasets",
     "generate_manifest",
-    "http_common",
     "js_runtime",
     "metadata_db",
     "monitoring",

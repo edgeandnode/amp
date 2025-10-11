@@ -25,7 +25,6 @@ datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 generate-manifest = { path = "../generate-manifest" }
-http-common = { path = "../../services/http-common" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde_json.workspace = true
