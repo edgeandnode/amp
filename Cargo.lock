@@ -833,6 +833,7 @@ dependencies = [
  "arrow-to-postgres",
  "backon",
  "bytes",
+ "clap",
  "common",
  "datafusion",
  "datasets-common",
