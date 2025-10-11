@@ -411,3 +411,153 @@ async fn test_batch_with_empty_ranges() {
     // Verify updating incremental checkpoint with None doesn't panic
     // (It just won't update anything)
 }
+
+#[tokio::test]
+async fn test_invalidate_batches_after_watermark() {
+    use std::{ops::RangeInclusive, sync::Arc};
+
+    use alloy::primitives::BlockHash;
+    use arrow_array::{Int64Array, RecordBatch};
+    use arrow_schema::{DataType, Field as ArrowField, Schema as ArrowSchema};
+    use common::metadata::segments::BlockRange;
+    use datasets_common::manifest::DataType as ManifestDataType;
+    use datasets_derived::manifest::{ArrowSchema as ManifestSchema, Field as ManifestField};
+
+    let (db_pool, pool, _pg_temp) = create_test_pool().await;
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
+
+    // Initialize checkpoint table
+    engine
+        .init_checkpoint_table()
+        .await
+        .expect("Failed to initialize checkpoint table");
+
+    // Create a simple test table with a value column
+    let manifest_schema = ManifestSchema {
+        fields: vec![ManifestField {
+            name: "value".to_string(),
+            type_: ManifestDataType(DataType::Int64),
+            nullable: false,
+        }],
+    };
+
+    engine
+        .create_table_from_schema("test_table", &manifest_schema)
+        .await
+        .expect("Failed to create test table");
+
+    // Helper to create a batch with block range metadata
+    let create_batch = |value: i64, block_start: u64, block_end: u64| -> RecordBatch {
+        let schema = Arc::new(ArrowSchema::new(vec![ArrowField::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![value]))])
+            .expect("Failed to create RecordBatch");
+
+        let ranges = vec![BlockRange {
+            numbers: RangeInclusive::new(block_start, block_end),
+            network: "mainnet".to_string(),
+            hash: BlockHash::ZERO,
+            prev_hash: None,
+        }];
+
+        ampsync::batch_utils::inject_system_metadata(batch, &ranges)
+            .expect("Failed to inject metadata")
+    };
+
+    // Insert batches before watermark (blocks 100-199)
+    let batch1 = create_batch(1, 100, 199);
+    engine
+        .insert_record_batch("test_table", &batch1)
+        .await
+        .expect("Failed to insert batch 1");
+
+    // Insert batches at watermark (blocks 200-299)
+    let batch2 = create_batch(2, 200, 299);
+    engine
+        .insert_record_batch("test_table", &batch2)
+        .await
+        .expect("Failed to insert batch 2");
+
+    // Save watermark at block 300
+    let watermark = create_test_watermark("mainnet", 300);
+    engine
+        .save_watermark("test_table", &watermark)
+        .await
+        .expect("Failed to save watermark");
+
+    // Insert batches after watermark (blocks 301-399 and 400-499)
+    let batch3 = create_batch(3, 301, 399);
+    engine
+        .insert_record_batch("test_table", &batch3)
+        .await
+        .expect("Failed to insert batch 3");
+
+    let batch4 = create_batch(4, 400, 499);
+    engine
+        .insert_record_batch("test_table", &batch4)
+        .await
+        .expect("Failed to insert batch 4");
+
+    // Verify all 4 batches exist
+    let count_before: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM test_table")
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to count rows");
+    assert_eq!(count_before.0, 4);
+
+    // Invalidate batches after watermark
+    engine
+        .invalidate_batches_after_watermark("test_table", &watermark)
+        .await
+        .expect("Failed to invalidate batches");
+
+    // Verify only batches after watermark were deleted
+    let count_after: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM test_table")
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to count rows");
+    assert_eq!(
+        count_after.0, 2,
+        "Should have 2 batches left (before and at watermark)"
+    );
+
+    // Verify the correct batches remain
+    let remaining_values: Vec<(i64,)> =
+        sqlx::query_as("SELECT value FROM test_table ORDER BY value")
+            .fetch_all(&pool)
+            .await
+            .expect("Failed to query remaining values");
+
+    assert_eq!(remaining_values.len(), 2);
+    assert_eq!(
+        remaining_values[0].0, 1,
+        "Batch 1 (blocks 100-199) should remain"
+    );
+    assert_eq!(
+        remaining_values[1].0, 2,
+        "Batch 2 (blocks 200-299) should remain"
+    );
+}
+
+#[tokio::test]
+async fn test_invalidate_batches_with_no_watermark() {
+    let (db_pool, _pool, _pg_temp) = create_test_pool().await;
+    let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
+
+    engine
+        .init_checkpoint_table()
+        .await
+        .expect("Failed to initialize checkpoint table");
+
+    // Try to invalidate with empty watermark - should not error
+    let empty_watermark = ResumeWatermark::from(BTreeMap::new());
+    let result = engine
+        .invalidate_batches_after_watermark("test_table", &empty_watermark)
+        .await;
+
+    assert!(result.is_ok(), "Should handle empty watermark gracefully");
+}

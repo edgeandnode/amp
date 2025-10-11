@@ -143,6 +143,42 @@ impl StreamTask {
                 table = %self.table_name,
                 "stream_ended"
             );
+
+            // Before reconnecting, invalidate any batches consumed since the most recent watermark.
+            // When we reconnect, the server will replay from the watermark, so we need to delete
+            // any data we've inserted since then to avoid duplicates.
+            match db_engine.load_watermark(&self.table_name).await {
+                Ok(Some(watermark)) => {
+                    info!(
+                        table = %self.table_name,
+                        "invalidating_batches_before_reconnect"
+                    );
+                    if let Err(e) = db_engine
+                        .invalidate_batches_after_watermark(&self.table_name, &watermark)
+                        .await
+                    {
+                        error!(
+                            table = %self.table_name,
+                            error = %e,
+                            "failed_to_invalidate_batches"
+                        );
+                        // Continue anyway - the PRIMARY KEY constraint will prevent actual duplicates
+                    }
+                }
+                Ok(None) => {
+                    debug!(
+                        table = %self.table_name,
+                        "no_watermark_to_invalidate_from"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        table = %self.table_name,
+                        error = %e,
+                        "failed_to_load_watermark_for_invalidation"
+                    );
+                }
+            }
         }
     }
 

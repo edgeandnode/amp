@@ -884,6 +884,85 @@ impl AmpsyncDbEngine {
         Ok(())
     }
 
+    /// Invalidate batches that were consumed after the most recent watermark.
+    ///
+    /// When reconnecting after a stream error, the server will replay from the watermark.
+    /// We need to delete any batches we've inserted since then to avoid reprocessing them.
+    /// While the `_id` PRIMARY KEY would prevent actual duplicates, proactively deleting
+    /// these batches is cleaner and keeps incremental checkpoints consistent.
+    ///
+    /// For each network in the watermark, deletes rows where `_block_num_start` > watermark block.
+    pub async fn invalidate_batches_after_watermark(
+        &self,
+        table_name: &str,
+        watermark: &common::metadata::segments::ResumeWatermark,
+    ) -> Result<(), BoxError> {
+        use std::collections::BTreeMap;
+
+        // Convert watermark to map
+        let watermark_map: BTreeMap<String, (common::BlockNum, [u8; 32])> =
+            watermark.clone().into();
+
+        if watermark_map.is_empty() {
+            return Ok(());
+        }
+
+        // Build WHERE clause to delete batches after watermark
+        // For simplicity, we delete ALL rows with _block_num_start greater than
+        // the minimum watermark block across all networks. This is conservative
+        // and ensures we don't have any stale data before reconnecting.
+        let min_watermark_block = watermark_map
+            .values()
+            .map(|(block_num, _)| *block_num)
+            .min()
+            .unwrap_or(0);
+
+        let delete_query = format!(
+            "DELETE FROM {} WHERE _block_num_start > {}",
+            table_name, min_watermark_block
+        );
+
+        tracing::info!(
+            table = %table_name,
+            watermark_networks = watermark_map.len(),
+            query = %delete_query,
+            "invalidating_batches_after_watermark"
+        );
+
+        let pool = &self.pool;
+        let query = &delete_query;
+
+        let result = (|| async move { sqlx::query(query).execute(pool).await })
+            .retry(Self::db_retry_policy())
+            .when(Self::create_retryable_with_circuit_breaker(
+                self.db_operation_max_retry_duration_secs,
+            ))
+            .notify(Self::notify_db_retry)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to invalidate batches after watermark for table '{}': {}",
+                    table_name, e
+                )
+            })?;
+
+        let rows_deleted = result.rows_affected();
+        if rows_deleted > 0 {
+            tracing::warn!(
+                table = %table_name,
+                rows_deleted = rows_deleted,
+                "batches_invalidated_for_reconnect"
+            );
+        } else {
+            tracing::debug!(
+                table = %table_name,
+                "no_batches_to_invalidate"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Returns true if the table exists.
     async fn table_exists(&self, table_name: &str) -> Result<bool, BoxError> {
         let result: Option<(bool,)> = sqlx::query_as(
