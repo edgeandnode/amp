@@ -126,7 +126,7 @@ impl Default for CompactorConfig {
 #[serde(default)]
 pub struct CompactionAlgorithmConfig {
     #[serde(deserialize_with = "deserialize_duration")]
-    pub base_cooldown_duration: Option<Duration>,
+    pub cooldown_duration: Option<Duration>,
     #[serde(
         flatten,
         default = "SizeLimitConfig::default_eager_limit",
@@ -138,7 +138,7 @@ pub struct CompactionAlgorithmConfig {
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
-            base_cooldown_duration: Duration::from_secs(2).into(),
+            cooldown_duration: Duration::from_secs(2).into(),
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }
@@ -149,6 +149,7 @@ pub struct SizeLimitConfig {
     pub file_count: u32,
     pub generation: u64,
     pub overflow: Overflow,
+    #[serde(skip)]
     pub blocks: u64,
     pub bytes: u64,
     pub rows: u64,
@@ -159,12 +160,19 @@ impl Default for SizeLimitConfig {
         Self {
             file_count: 0,
             generation: 0,
-            overflow: Overflow::new(4, 3),
-            blocks: 100_000,
+            overflow: Overflow::default(),
+            blocks: 0,
             bytes: 2 * 1024 * 1024 * 1024, // 2GB
             rows: 0,
         }
     }
+}
+
+#[derive(Deserialize)]
+struct SizeLimitHelper {
+    pub overflow: Option<Overflow>,
+    pub bytes: Option<u64>,
+    pub rows: Option<u64>,
 }
 
 impl SizeLimitConfig {
@@ -180,33 +188,15 @@ impl SizeLimitConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct EagerLimitHelper {
-            pub overflow: Option<Overflow>,
-            pub blocks: Option<u64>,
-            pub bytes: Option<u64>,
-            pub rows: Option<u64>,
-        }
-
-        let helper = EagerLimitHelper::deserialize(deserializer)?;
+        let helper = SizeLimitHelper::deserialize(deserializer)?;
 
         let mut this = Self::default_eager_limit();
 
-        if let Some(overflow) = helper.overflow {
-            this.overflow = overflow;
-        }
-
-        if let Some(blocks) = helper.blocks {
-            this.blocks = blocks;
-        }
-
-        if let Some(bytes) = helper.bytes {
-            this.bytes = bytes;
-        }
-
-        if let Some(rows) = helper.rows {
-            this.rows = rows;
-        }
+        helper
+            .overflow
+            .inspect(|overflow| this.overflow = *overflow);
+        helper.bytes.inspect(|bytes| this.bytes = *bytes);
+        helper.rows.inspect(|rows| this.rows = *rows);
 
         Ok(this)
     }
@@ -221,33 +211,15 @@ impl SizeLimitConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct UpperLimitHelper {
-            pub overflow: Option<Overflow>,
-            pub blocks: Option<u64>,
-            pub bytes: Option<u64>,
-            pub rows: Option<u64>,
-        }
-
-        let helper = UpperLimitHelper::deserialize(deserializer)?;
+        let helper = SizeLimitHelper::deserialize(deserializer)?;
 
         let mut this = Self::default_upper_limit();
 
-        if let Some(overflow) = helper.overflow {
-            this.overflow = overflow;
-        }
-
-        if let Some(blocks) = helper.blocks {
-            this.blocks = blocks;
-        }
-
-        if let Some(bytes) = helper.bytes {
-            this.bytes = bytes;
-        }
-
-        if let Some(rows) = helper.rows {
-            this.rows = rows;
-        }
+        helper
+            .overflow
+            .inspect(|overflow| this.overflow = *overflow);
+        helper.bytes.inspect(|bytes| this.bytes = *bytes);
+        helper.rows.inspect(|rows| this.rows = *rows);
 
         Ok(this)
     }

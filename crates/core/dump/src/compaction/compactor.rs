@@ -1,5 +1,6 @@
 use std::{
     fmt::{Debug, Display, Formatter},
+    ops::RangeInclusive,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -226,9 +227,8 @@ impl CompactionGroup {
             .map_err(|err| CompactorError::FileWriteError { err })
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip_all, fields(files = self.len(), start = self.range().start(), end = self.range().end()))]
     pub async fn compact(self) -> CompactionResult<BlockNum> {
-        let number_of_files = self.streams.len();
         let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.collector.file_lock_duration;
 
@@ -246,13 +246,29 @@ impl CompactionGroup {
             .await
             .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
-        tracing::info!(
-            "Compacted {} files into new file {}",
-            number_of_files,
-            output.object_meta.location,
-        );
+        tracing::info!("Compaction Success: {}", output.object_meta.location,);
 
         Ok(start)
+    }
+
+    pub fn len(&self) -> usize {
+        self.streams.len()
+    }
+
+    pub fn range(&self) -> RangeInclusive<BlockNum> {
+        let start = self
+            .streams
+            .first()
+            .expect("At least one file in group")
+            .range
+            .start();
+        let end = self
+            .streams
+            .last()
+            .expect("At least one file in group")
+            .range
+            .end();
+        start..=end
     }
 }
 

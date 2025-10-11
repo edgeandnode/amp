@@ -6,6 +6,7 @@ use std::{
 
 use common::{
     Timestamp,
+    arrow::array::ArrowNativeTypeOp,
     config::{ParquetConfig, SizeLimitConfig},
     metadata::{Generation, Overflow, SegmentSize},
 };
@@ -93,7 +94,7 @@ impl CompactionAlgorithm {
             .max(self.file_state(&candidate.size));
 
         // Check if combining sizes exceeds upper bound.
-        let (size_exceeded, length_exceeded, _) = self
+        let (size_exceeded, _, _) = self
             .target_partition_size
             .is_exceeded(&(candidate.size + group.size));
 
@@ -101,7 +102,7 @@ impl CompactionAlgorithm {
             // For live files, only compact if size limit is not exceeded.
             // If it's the tail file, also require length limit to be exceeded
             // (for cases where a minimum number of segments is desired before compaction).
-            *size_exceeded && (!candidate.is_tail || *length_exceeded)
+            *size_exceeded
         } else if state == FileState::Hot {
             // For hot files, only compact if size limit is not exceeded,
             // and both files share the same generation.
@@ -162,7 +163,7 @@ impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
             cooldown_duration: config
                 .compactor
                 .algorithm
-                .base_cooldown_duration
+                .cooldown_duration
                 .unwrap_or(Duration::from_secs(2)),
             target_partition_size: SegmentSizeLimit::from(&config.target_size),
             eager_compaction_limit: SegmentSizeLimit::from(
@@ -286,9 +287,9 @@ pub struct SegmentSizeLimit(
 // Interface methods
 impl SegmentSizeLimit {
     pub fn new(
-        blocks: i64,
-        bytes: i64,
-        rows: i64,
+        blocks: u64,
+        bytes: u64,
+        rows: u64,
         length: usize,
         generation: impl Into<Generation>,
         overflow: impl Into<Overflow>,
@@ -343,21 +344,24 @@ impl SegmentSizeLimit {
         let blocks_ge: TestResult = self
             .0
             .blocks
-            .is_positive()
+            .is_zero()
+            .not()
             .then_some(segment.blocks.ge(&self.1.soft_limit(self.0.blocks)))
             .into();
 
         let bytes_ge: TestResult = self
             .0
             .bytes
-            .is_positive()
+            .is_zero()
+            .not()
             .then_some(segment.bytes.ge(&self.1.soft_limit(self.0.bytes)))
             .into();
 
         let rows_ge: TestResult = self
             .0
             .rows
-            .is_positive()
+            .is_zero()
+            .not()
             .then_some(segment.rows.ge(&self.1.soft_limit(self.0.rows)))
             .into();
 
@@ -381,7 +385,9 @@ impl SegmentSizeLimit {
     pub fn is_live(&self, segment: &SegmentSize) -> TestResult {
         let (size_exceeded, length_exceeded, generation_exceeded) =
             Self::is_exceeded(self, segment);
-
+        println!(
+            "Size Check: {size_exceeded:?}, Length Check: {length_exceeded:?}, Generation Check: {generation_exceeded:?}"
+        );
         // A segment is considered live if it does not exceed size limits,
         // length limits, and generation limits (if any are set).
         size_exceeded
@@ -412,9 +418,9 @@ impl Display for SegmentSizeLimit {
 impl<'a> From<&'a SizeLimitConfig> for SegmentSizeLimit {
     fn from(value: &'a SizeLimitConfig) -> Self {
         Self::new(
-            value.blocks as i64,
-            value.bytes as i64,
-            value.rows as i64,
+            value.blocks,
+            value.bytes,
+            value.rows,
             value.file_count as usize,
             value.generation,
             value.overflow,
@@ -563,32 +569,32 @@ mod tests {
 
     #[test]
     fn segment_size_limit_display() {
-        let limit = super::SegmentSizeLimit::new(100, 1000, -1, 2, 2, 1.5);
+        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 2, 1.5);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000, generation: 2, overflow: 3/2 }",
-            "We are testing if the overflow of 1.5 is correctly represented as 3/2 and if the rows limit is omitted because it is -1"
+            "We are testing if the overflow of 1.5 is correctly represented as 3/2 and if the rows limit is omitted because it is 0"
         );
 
-        let limit = super::SegmentSizeLimit::new(100, 1000, -1, 2, 0, 1u64);
+        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 0, 1u64);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000 }",
-            "We are testing if the overflow, rows, and generation limits are omitted because they are 1, -1, and 0 respectively"
+            "We are testing if the overflow, rows, and generation limits are omitted because they are 1, 0, and 0 respectively"
         );
 
-        let limit = super::SegmentSizeLimit::new(-1, -1, -1, 0, 0, 3u64);
+        let limit = super::SegmentSizeLimit::new(0, 0, 0, 0, 0, 3u64);
         assert_eq!(
             format!("{limit}"),
             "{ unbounded }",
             "We are testing if the limit is correctly represented as unbounded which means the overflow is omitted even though it is 3"
         );
 
-        let limit = super::SegmentSizeLimit::new(100, 1000, -1, 2, 0, 4u64);
+        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 0, 4u64);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000, overflow: 4 }",
-            "We are testing if the generation and rows limits are omitted because they are 0 and -1 respectively, overflow is shown as 4"
+            "We are testing if the generation and rows limits are omitted because they are both 0, overflow is shown as 4"
         );
 
         let limit = super::SegmentSizeLimit::default();

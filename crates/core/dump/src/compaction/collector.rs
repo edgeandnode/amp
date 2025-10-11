@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use common::{Timestamp, catalog::physical::PhysicalTable, config::ParquetConfig};
+use common::{catalog::physical::PhysicalTable, config::ParquetConfig};
 use futures::{
     FutureExt, StreamExt, TryStreamExt, future,
     stream::{self, BoxStream},
@@ -64,13 +64,9 @@ impl Collector {
 
         let location_id = self.table.location_id();
 
-        let now = Timestamp::now();
-        let secs = now.0.as_secs() as i64;
-        let nsecs = now.0.subsec_nanos();
+        let expired_stream = metadata_db.stream_expired_files(location_id);
 
-        let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
-
-        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream, now)
+        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream)
             .await
         {
             Ok(output) if output.len() > 0 => {
@@ -80,11 +76,12 @@ impl Collector {
                     output.update_metrics(metrics, dataset, table_name);
                 }
 
-                output.update_manifest(metadata_db).await.map_err(
-                    CollectorError::manifest_update_error(
+                output.update_manifest(metadata_db).await.map_err(|err| {
+                    CollectorError::file_metadata_delete(
                         [output.successes, output.not_found].concat(),
-                    ),
-                )?;
+                        err,
+                    )
+                })?;
 
                 if let Err(error) = consistency_check(&self.table)
                     .await
@@ -177,7 +174,6 @@ impl DeletionOutput {
     pub async fn try_from_manifest_stream<'a>(
         table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
-        now: Timestamp,
     ) -> CollectionResult<Self> {
         let (file_ids, file_paths) = expired_stream
             .map_err(CollectorError::file_stream_error)
@@ -187,21 +183,15 @@ impl DeletionOutput {
                        GcManifestRow {
                            file_id,
                            file_path: file_name,
-                           expiration,
                            ..
                        }| {
-                    if Duration::from_micros(expiration.and_utc().timestamp_micros() as u64)
-                        .saturating_sub(now.0)
-                        .is_zero()
-                    {
-                        let url = table
-                            .url()
-                            .join(&file_name)
-                            .map_err(CollectorError::parse_error(file_id))?;
+                    let url = table
+                        .url()
+                        .join(&file_name)
+                        .map_err(CollectorError::parse_error(file_id))?;
 
-                        file_ids.push(file_id);
-                        file_paths.push(Ok(Path::from(url.path())));
-                    }
+                    file_ids.push(file_id);
+                    file_paths.push(Ok(Path::from(url.path())));
 
                     Ok((file_ids, file_paths))
                 },

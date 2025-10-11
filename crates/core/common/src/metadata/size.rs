@@ -533,11 +533,11 @@ pub struct SegmentSize {
     /// Total number of files in the segment
     pub length: usize,
     /// Number of distinct blocks in the file
-    pub blocks: i64,
+    pub blocks: u64,
     /// Size of the data in the file in bytes (does not include metadata, indexes, etc.)
-    pub bytes: i64,
+    pub bytes: u64,
     /// Number of rows in the file
-    pub rows: i64,
+    pub rows: u64,
     /// The generation of the file (for tracking compaction iterations)
     pub generation: Generation,
     /// The timestamp when the segment was created (for cooldown calculations).
@@ -578,12 +578,10 @@ impl AddAssign for SegmentSize {
         self.rows += other.rows;
         self.length += other.length;
         self.generation = self.generation.max(other.generation);
-        self.created_at = if self.created_at == 0 {
-            other.created_at
-        } else if other.created_at == 0 {
-            self.created_at
-        } else {
-            self.created_at.min(other.created_at)
+        self.created_at = match (self.created_at, other.created_at) {
+            (0, _) => other.created_at,
+            (_, 0) => self.created_at,
+            _ => self.created_at.min(other.created_at),
         };
     }
 }
@@ -606,9 +604,9 @@ impl Display for SegmentSize {
         let mut size_string = (0..6)
             .filter_map(|i| match i {
                 0 if self.length != 0 => Some(format!("length: {}, ", self.length)),
-                1 if self.blocks.is_positive() => Some(format!("blocks: {}, ", self.blocks)),
-                2 if self.bytes.is_positive() => Some(format!("bytes: {}, ", self.bytes)),
-                3 if self.rows.is_positive() => Some(format!("rows: {}, ", self.rows)),
+                1 if self.blocks.is_zero() => Some(format!("blocks: {}, ", self.blocks)),
+                2 if self.bytes.is_zero() => Some(format!("bytes: {}, ", self.bytes)),
+                3 if self.rows.is_zero() => Some(format!("rows: {}, ", self.rows)),
                 4 if self.generation.is_compacted() => {
                     Some(format!("generation: {}, ", self.generation))
                 }
@@ -635,7 +633,7 @@ impl Display for SegmentSize {
 impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
     fn from(value: &'a ArrowReaderMetadata) -> Self {
         let file_metadata = value.metadata().file_metadata();
-        let rows = file_metadata.num_rows();
+        let rows = file_metadata.num_rows() as u64;
 
         let generation = file_metadata
             .key_value_metadata()
@@ -668,8 +666,8 @@ impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
             .row_groups()
             .iter()
             .map(|rg| {
-                let bytes = rg.total_byte_size();
-                let blocks = get_block_count(rg, &mut pmax);
+                let bytes = rg.total_byte_size() as u64;
+                let blocks = get_block_count(rg, &mut pmax) as u64;
                 (bytes, blocks)
             })
             .reduce(|(acc_bytes, acc_blocks), (bytes, blocks)| {
@@ -700,11 +698,11 @@ impl Mul<i32> for SegmentSize {
 
     fn mul(self, rhs: i32) -> Self::Output {
         Self {
-            blocks: self.blocks * rhs as i64,
-            bytes: self.bytes * rhs as i64,
-            rows: self.rows * rhs as i64,
+            blocks: self.blocks * rhs.unsigned_abs() as u64,
+            bytes: self.bytes * rhs.unsigned_abs() as u64,
+            rows: self.rows * rhs.unsigned_abs() as u64,
             length: self.length,
-            generation: self.generation + rhs as u64,
+            generation: self.generation,
             created_at: self.created_at,
         }
     }
@@ -712,8 +710,9 @@ impl Mul<i32> for SegmentSize {
 
 /// Counts the number of distinct blocks in a Parquet row group while avoiding double-counting.
 ///
-/// This function extracts block statistics from a row group's metadata and adjusts the count
-/// to prevent blocks from being counted multiple times across row group boundaries.
+/// This function extracts block statistics from a row group's column index, falling back to
+/// its own metadata, adjusting the total to prevent blocks from being counted multiple times
+/// across row group or page boundaries.
 ///
 /// # Arguments
 ///
@@ -721,22 +720,33 @@ impl Mul<i32> for SegmentSize {
 /// * `pmax` - A mutable reference to the previous maximum block number seen. This is used
 ///           to detect when consecutive row groups share a boundary block that shouldn't
 ///           be counted twice.
+/// * `index` - The Parquet column index metadata
 ///
 /// # Returns
 ///
 /// The number of distinct blocks in this row group, adjusted for boundary overlaps.
 /// Returns 0 if:
 /// - No block number column is found
-/// - Statistics are missing or invalid
+/// - Page and row group statistics are missing or invalid
 /// - Block numbers are zero (invalid block numbers)
 ///
 /// # Algorithm
+/// 1. Attempt to extract block statistics from the column index for the block number column.
+///   - If found, aggregate the min, max, and distinct count across all pages.
+///   - If not found, fall back to the row group column statistics.
+///   - If neither is available, return 0.
+/// 2. Check if the minimum block number of this row group equals the previous maximum (`pmax`).
+///   - If they are equal, it indicates an overlap at the boundary, so subtract 1 from the distinct count.
+/// 3. Update `pmax` to the maximum block number of this row group for future comparisons.
+/// 4. Return the adjusted distinct block count.
 ///
-/// 1. Finds the block number column (either BLOCK_NUM or SPECIAL_BLOCK_NUM)
-/// 2. Extracts min/max block numbers and distinct count from column statistics
-/// 3. If the minimum block equals the previous maximum, decrements the count by 1
-///    (this block was already counted in the previous row group)
-/// 4. Updates `pmax` to the current maximum for the next iteration
+/// # Edge Cases
+/// - If the distinct count is less than or equal to 0 after adjustment, it returns 0.
+/// - If block numbers are zero (invalid), it returns 0.
+/// - If the row group has no rows, it returns 0.
+///
+/// # Panics
+/// This function does not panic. It handles all error cases by returning 0.
 ///
 /// # Examples
 ///
@@ -761,15 +771,10 @@ impl Mul<i32> for SegmentSize {
 /// // Total distinct blocks: 3 + 2 = 5 (not 6)
 /// ```
 pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
-    if let Some(column) = rg
-        .columns()
-        .iter()
-        .filter(|c| {
-            let name = c.column_descr().name();
-            name == BLOCK_NUM || name == SPECIAL_BLOCK_NUM
-        })
-        .next()
-        && let Some(statistics) = column.statistics()
+    if let Some(column) = rg.columns().iter().find(|c| {
+        let name = c.column_descr().name();
+        name == BLOCK_NUM || name == SPECIAL_BLOCK_NUM
+    }) && let Some(statistics) = column.statistics()
         && let Some(Ok(Some(max))) = statistics.max_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
         && let Some(Ok(Some(min))) = statistics.min_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
         && let Some(mut blocks) = statistics.distinct_count_opt()
@@ -786,15 +791,19 @@ pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
         *pmax = max;
 
         blocks as i64
+    // No valid block number column or statistics found so return 0
     } else {
-        0
+        return 0;
     }
 }
 
 /// Converts a little-endian byte slice to an optional NonZeroI64.
 ///
-/// This function is used to parse block number statistics from Parquet metadata,
-/// where block numbers are stored as little-endian i64 values. The function:
+/// This function is used to parse block number statistics from Parquet Row Group metadata.
+/// All statistics are stored as optional bytes, regardless of the physical type. For our purposes,
+/// block num statististics are stored as little-endian i64 values.
+///
+/// The function:
 ///
 /// 1. Attempts to convert the byte slice to exactly 8 bytes
 /// 2. Interprets those bytes as a little-endian i64
@@ -848,15 +857,10 @@ pub fn le_bytes_to_nonzero_i64_opt(bytes: &[u8]) -> Result<Option<NonZeroI64>, T
 pub mod test {
     use std::sync::Arc;
 
-    #[allow(unused_imports)]
-    use chrono::{DateTime, Utc};
-
-    #[allow(unused_imports)]
     use crate::{
         BLOCK_NUM, Timestamp,
         metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         parquet::{
-            arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
             basic::{Repetition, Type as PhysicalType},
             file::{
                 metadata::{
@@ -1200,6 +1204,8 @@ pub mod test {
 
     #[test]
     fn segment_size_calc() {
+        use crate::metadata::{ArrowReaderOptions, size::ArrowReaderMetadata};
+
         let options = ArrowReaderOptions::new().with_page_index(true);
         let now = Timestamp::now();
         let metadata = ArrowReaderMetadata::try_new(
@@ -1221,7 +1227,8 @@ pub mod test {
     fn segment_size_display() {
         let now = Timestamp::now();
         let created_at = now.0.as_micros();
-        let created_at_dt = DateTime::<Utc>::from_timestamp_micros(created_at as i64).unwrap();
+        let created_at_dt =
+            chrono::DateTime::<chrono::Utc>::from_timestamp_micros(created_at as i64).unwrap();
         let now_str = format!("{}", created_at_dt);
 
         let size = super::SegmentSize {

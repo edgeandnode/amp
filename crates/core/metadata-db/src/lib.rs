@@ -5,10 +5,7 @@ use futures::{
     future::BoxFuture,
     stream::{BoxStream, Stream},
 };
-use sqlx::{
-    postgres::types::PgInterval,
-    types::chrono::{DateTime, NaiveDateTime, Utc},
-};
+use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
@@ -942,13 +939,27 @@ pub struct GcManifestRow {
 
 // Garbage Collection API
 impl MetadataDb {
-    pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
+    pub async fn delete_file_id(&self, file_id: FileId) -> Result<(), Error> {
         let sql = "
-        DELETE FROM gc_manifest
-         WHERE file_id = ANY($1);
+        DELETE FROM file_metadata
+         WHERE id = $1;
         ";
 
-        sqlx::query(sql).bind(file_ids).execute(&*self.pool).await?;
+        sqlx::query(sql).bind(file_id).execute(&*self.pool).await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
+        let sql = "
+        DELETE FROM file_metadata
+         WHERE id = ANY($1);
+        ";
+
+        sqlx::query(sql)
+            .bind(file_ids.into_iter().map(|id| **id).collect::<Vec<_>>())
+            .execute(&*self.pool)
+            .await?;
 
         Ok(())
     }
@@ -972,14 +983,12 @@ impl MetadataDb {
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
-                  , locations.url || file_metadata.file_name
-                  , NOW() + $3
+                  , file_metadata.file_name
+                  , CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id
-         INNER JOIN locations ON file_metadata.location_id = locations.id
         ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration;
         ";
-
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_ids.as_ref())
@@ -993,8 +1002,6 @@ impl MetadataDb {
     pub fn stream_expired_files<'a>(
         &'a self,
         location_id: LocationId,
-        secs: i64,
-        nsecs: u32,
     ) -> BoxStream<'a, Result<GcManifestRow, Error>> {
         let sql = "
         SELECT location_id
@@ -1003,14 +1010,11 @@ impl MetadataDb {
              , expiration
           FROM gc_manifest
          WHERE location_id = $1
-               AND expiration <= $2;
+               AND expiration <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC';
         ";
-
-        let expiration = DateTime::<Utc>::from_timestamp(secs, nsecs);
 
         sqlx::query_as(sql)
             .bind(location_id)
-            .bind(expiration)
             .fetch(&*self.pool)
             .map_err(Error::DbError)
             .boxed()

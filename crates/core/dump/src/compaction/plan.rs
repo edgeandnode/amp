@@ -17,7 +17,8 @@ use common::{
         segments::{BlockRange, Segment},
     },
     parquet::arrow::{
-        ParquetRecordBatchStreamBuilder, arrow_reader::ArrowReaderMetadata,
+        ParquetRecordBatchStreamBuilder,
+        arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
         async_reader::AsyncFileReader,
     },
 };
@@ -68,7 +69,7 @@ impl CompactionFile {
         )?;
 
         let reader_metadata =
-            ArrowReaderMetadata::load_async(&mut input, Default::default()).await?;
+            ArrowReaderMetadata::load_async(&mut input, ArrowReaderOptions::new()).await?;
         let schema = Arc::clone(reader_metadata.schema());
         let size = SegmentSize::from(&reader_metadata);
 
@@ -121,6 +122,8 @@ pub struct CompactionPlan<'a> {
     current_candidate: Option<CompactionFile>,
     /// Indicates whether the stream has been fully processed.
     done: bool,
+    /// The number of groups yielded so far. For logging purposes.
+    group_count: usize,
 }
 
 impl<'a> CompactionPlan<'a> {
@@ -148,7 +151,7 @@ impl<'a> CompactionPlan<'a> {
                 CompactionFile::try_new(reader_factory, partition_index, segment, is_tail)
                     .map_err(CompactorError::from)
             })
-            .buffered(10)
+            .buffered(opts.compactor.metadata_concurrency)
             .boxed();
         let current_group = CompactionGroup::new_empty(&opts, table.physical_table());
 
@@ -160,13 +163,14 @@ impl<'a> CompactionPlan<'a> {
             current_file: None,
             current_candidate: None,
             done: false,
+            group_count: 0,
         })
     }
 
     pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<BlockNum>> {
         let write_concurrency = self.opts.compactor.write_concurrency;
         self.map(CompactionGroup::compact)
-            .buffer_unordered(write_concurrency)
+            .buffered(write_concurrency)
             .boxed()
     }
 }
@@ -174,6 +178,7 @@ impl<'a> CompactionPlan<'a> {
 impl<'a> Stream for CompactionPlan<'a> {
     type Item = CompactionGroup;
 
+    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref(), group_count = self.group_count))]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
@@ -207,6 +212,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                             &mut this.current_group,
                             CompactionGroup::new_empty(&this.opts, &this.table),
                         );
+                        this.group_count += 1;
+                        tracing::info!(
+                            "Created compaction group (files: {}, range: {:?})",
+                            group.len(),
+                            group.range()
+                        );
                         break Some(group);
                     }
                 // If we have no current file or candidate, poll the next file from the stream.
@@ -237,6 +248,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                                 CompactionGroup::new_empty(&this.opts, &this.table),
                             );
                             this.done = true;
+                            this.group_count += 1;
+                            tracing::info!(
+                                "Created compaction group (files: {}, range: {:?})",
+                                group.len(),
+                                group.range()
+                            );
                             break Some(group);
                         }
                     }
