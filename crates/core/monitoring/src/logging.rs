@@ -66,7 +66,6 @@ const AMP_CRATES: &[&str] = &[
     "datasets_common",
     "datasets_derived",
     "dump",
-    "dump_check",
     "eth_beacon_datasets",
     "evm_rpc_datasets",
     "firehose_datasets",

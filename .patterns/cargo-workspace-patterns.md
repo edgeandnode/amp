@@ -46,7 +46,6 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 **What belongs here:**
 - **`ampd`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
 - **`generate-manifest`**: Utility for creating dataset manifest files
-- **`dump-check`**: Data validation and integrity checking tool
 
 **Dependency Rules:**
 - ✅ Can depend on `core`, `extractors`, and `services` crates

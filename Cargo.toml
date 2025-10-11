@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "crates/bin/dump-check",
     "crates/bin/generate-manifest",
     "crates/bin/ampd",
     "crates/bin/ampup",
