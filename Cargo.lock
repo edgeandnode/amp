@@ -875,6 +875,7 @@ dependencies = [
  "admin-api",
  "alloy",
  "amp-client",
+ "anyhow",
  "arrow-array",
  "arrow-schema",
  "arrow-to-postgres",

@@ -1,15 +1,13 @@
 use std::time::Duration;
 
-use admin_api::handlers::datasets::{
-    get_version_schema::DatasetSchemaResponse, get_versions::DatasetVersionsResponse,
-};
+use admin_api::handlers::datasets::get_versions::DatasetVersionsResponse;
 use datasets_common::{name::Name, version::Version};
-use datasets_derived::{DerivedDatasetKind, Manifest, manifest::Table};
+use datasets_derived::Manifest;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
 /// Errors that can occur when fetching dataset manifests from admin-api.
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum ManifestError {
     #[error("Dataset '{dataset}' version '{version}' not found in admin-api")]
     DatasetNotFound { dataset: String, version: String },
@@ -26,6 +24,9 @@ pub enum ManifestError {
         url: String,
         message: String,
     },
+
+    #[error("Invalid manifest")]
+    InvalidManifest(#[source] anyhow::Error),
 }
 
 impl ManifestError {
@@ -41,53 +42,10 @@ impl ManifestError {
             ManifestError::DatasetNotFound { .. }
             | ManifestError::NoVersionsAvailable { .. }
             | ManifestError::NetworkError { .. } => true,
+            ManifestError::InvalidManifest { .. } => false,
             ManifestError::HttpError { status, .. } => *status >= 500,
         }
     }
-}
-
-/// Generate a SQL query from table schema.
-///
-/// Builds a SELECT statement with all fields from the schema, quoting reserved keywords.
-/// Format: `SELECT field1, field2, ... FROM network.table SETTINGS stream = true`
-///
-/// # Arguments
-/// * `table_name` - Name of the table (e.g., "blocks")
-/// * `network` - Network name (e.g., "anvil") - becomes the schema in SQL
-/// * `fields` - List of fields from the Arrow schema
-///
-/// # Returns
-/// SQL query string ready for streaming
-///
-/// # Example
-/// ```ignore
-/// let query = generate_query_from_schema(
-///     "blocks",
-///     "anvil",
-///     &[
-///         Field { name: "block_num", ... },
-///         Field { name: "timestamp", ... },
-///         Field { name: "to", ... },  // Reserved word - will be quoted
-///     ]
-/// );
-/// // Result: "SELECT block_num, timestamp, \"to\" FROM anvil.blocks SETTINGS stream = true"
-/// ```
-fn generate_query_from_schema(
-    table_name: &str,
-    network: &str,
-    fields: &[datasets_derived::manifest::Field],
-) -> String {
-    use crate::sync_engine::quote_column_name;
-
-    // Build comma-separated list of column names (with reserved words quoted)
-    let column_names: Vec<String> = fields.iter().map(|f| quote_column_name(&f.name)).collect();
-    let columns_clause = column_names.join(", ");
-
-    // Build query: SELECT col1, col2, ... FROM network.table SETTINGS stream = true
-    format!(
-        "SELECT {} FROM {}.{} SETTINGS stream = true",
-        columns_clause, network, table_name
-    )
 }
 
 /// Maximum number of dataset versions to fetch from admin-api when resolving version
@@ -310,8 +268,7 @@ pub async fn fetch_manifest_with_startup_poll(
 ///
 /// This function performs the following steps:
 /// 1. Resolves the version (if provided) to a fully qualified version
-/// 2. Fetches the schema information from the admin-api endpoint
-/// 3. Generates SQL queries from the schema for each table
+/// 2. Fetches the raw manifest from the admin-api /datasets/{name}/versions/{version}/manifest endpoint
 ///
 /// # Arguments
 /// * `admin_api_addr` - Base URL of the admin-api service (e.g., "http://localhost:1610")
@@ -350,185 +307,29 @@ pub async fn fetch_manifest(
         "fetching_schema"
     );
 
-    // Fetch schema from admin-api using the qualified version
-    let schema_url = format!(
-        "{}/datasets/{}/versions/{}/schema",
+    let manifest_url = format!(
+        "{}/datasets/{}/versions/{}/manifest",
         admin_api_addr, name, qualified_version
     );
-
-    let schema_resp = ADMIN_API_CLIENT
-        .get(&schema_url)
+    let manifest_resp = ADMIN_API_CLIENT
+        .get(&manifest_url)
         .send()
         .await
         .map_err(|e| ManifestError::NetworkError {
-            url: schema_url.clone(),
+            url: manifest_url.clone(),
             message: e.to_string(),
         })?;
-
-    // Check for HTTP errors
-    let status = schema_resp.status();
+    let status = manifest_resp.status();
     if !status.is_success() {
-        let body = schema_resp.text().await.unwrap_or_default();
+        let body = manifest_resp.text().await.unwrap_or_default();
         return Err(ManifestError::HttpError {
             status: status.as_u16(),
-            url: schema_url.clone(),
+            url: manifest_url.clone(),
             message: body,
         });
     }
-
-    let schema_response: DatasetSchemaResponse =
-        schema_resp
-            .json()
-            .await
-            .map_err(|e| ManifestError::NetworkError {
-                url: schema_url,
-                message: e.to_string(),
-            })?;
-
-    // Extract network from first table (all tables should have same top-level network)
-    let network = schema_response
-        .tables
-        .first()
-        .map(|t| t.network.clone())
-        .unwrap_or_else(|| "mainnet".to_string());
-
-    // Generate SQL queries and build table map from schema
-    let mut tables = std::collections::BTreeMap::<String, Table>::new();
-
-    for table_info in schema_response.tables {
-        // Generate SQL query from schema: SELECT col1, col2, ... FROM network.table SETTINGS stream = true
-        let sql = generate_query_from_schema(
-            &table_info.name,
-            &table_info.network,
-            &table_info.schema.arrow.fields,
-        );
-
-        tracing::debug!(
-            table = %table_info.name,
-            network = %table_info.network,
-            field_count = table_info.schema.arrow.fields.len(),
-            sql = %sql,
-            "generated_sql_from_schema"
-        );
-
-        tables.insert(
-            table_info.name.clone(),
-            Table {
-                input: datasets_derived::manifest::TableInput::View(
-                    datasets_derived::manifest::View { sql },
-                ),
-                schema: table_info.schema,
-                network: table_info.network,
-            },
-        );
-    }
-
-    Ok(Manifest {
-        name: name.clone(),
-        version: qualified_version,
-        kind: DerivedDatasetKind,
-        network,
-        functions: std::collections::BTreeMap::new(),
-        dependencies: std::collections::BTreeMap::new(),
-        tables,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use datasets_derived::manifest::Field;
-
-    use super::*;
-
-    /// Helper to create a Field with just a name (for testing)
-    fn make_field(name: &str) -> Field {
-        Field {
-            name: name.to_string(),
-            type_: datasets_common::manifest::DataType(arrow_schema::DataType::Int64),
-            nullable: false,
-        }
-    }
-
-    #[test]
-    fn test_generate_query_basic() {
-        let fields = vec![
-            make_field("block_num"),
-            make_field("timestamp"),
-            make_field("hash"),
-        ];
-
-        let query = generate_query_from_schema("blocks", "mainnet", &fields);
-
-        assert_eq!(
-            query,
-            "SELECT block_num, timestamp, hash FROM mainnet.blocks SETTINGS stream = true"
-        );
-    }
-
-    #[test]
-    fn test_generate_query_with_reserved_keywords() {
-        let fields = vec![
-            make_field("from"),   // Reserved keyword
-            make_field("to"),     // Reserved keyword
-            make_field("select"), // Reserved keyword
-            make_field("value"),
-        ];
-
-        let query = generate_query_from_schema("transfers", "ethereum", &fields);
-
-        assert_eq!(
-            query,
-            "SELECT \"from\", \"to\", \"select\", value FROM ethereum.transfers SETTINGS stream = true"
-        );
-    }
-
-    #[test]
-    fn test_generate_query_mixed_reserved_and_normal() {
-        let fields = vec![
-            make_field("block_num"),
-            make_field("from"), // Reserved keyword
-            make_field("timestamp"),
-            make_field("to"), // Reserved keyword
-        ];
-
-        let query = generate_query_from_schema("logs", "sepolia", &fields);
-
-        assert_eq!(
-            query,
-            "SELECT block_num, \"from\", timestamp, \"to\" FROM sepolia.logs SETTINGS stream = true"
-        );
-    }
-
-    #[test]
-    fn test_generate_query_single_field() {
-        let fields = vec![make_field("id")];
-
-        let query = generate_query_from_schema("simple", "testnet", &fields);
-
-        assert_eq!(
-            query,
-            "SELECT id FROM testnet.simple SETTINGS stream = true"
-        );
-    }
-
-    #[test]
-    fn test_generate_query_single_reserved_field() {
-        let fields = vec![make_field("table")]; // Reserved keyword
-
-        let query = generate_query_from_schema("metadata", "anvil", &fields);
-
-        assert_eq!(
-            query,
-            "SELECT \"table\" FROM anvil.metadata SETTINGS stream = true"
-        );
-    }
-
-    #[test]
-    fn test_generate_query_empty_fields() {
-        let fields: Vec<Field> = vec![];
-
-        let query = generate_query_from_schema("empty", "network", &fields);
-
-        assert_eq!(query, "SELECT  FROM network.empty SETTINGS stream = true");
-    }
+    manifest_resp
+        .json::<Manifest>()
+        .await
+        .map_err(|e| ManifestError::InvalidManifest(e.into()))
 }

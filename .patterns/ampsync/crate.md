@@ -579,7 +579,7 @@ pub async fn insert_with_retry(
 ```rust
 /// Automatic SQL generation from Arrow schema
 ///
-/// - Fetches schema from Admin API
+/// - Fetches manifest from Admin API (includes schemas)
 /// - Generates SELECT queries with SETTINGS stream = true
 /// - Automatically quotes SQL reserved keywords
 /// - Validates queries for streaming compatibility
@@ -1051,7 +1051,7 @@ async fn test_hybrid_checkpoint_strategy() -> Result<()> {
 /// Test version polling with mockito HTTP server
 ///
 /// Verifies that:
-/// 1. Only versions endpoint is called (not schema endpoint - efficient!)
+/// 1. Only versions endpoint is called (not manifest endpoint - efficient!)
 /// 2. Version changes are detected correctly
 /// 3. Error handling works (non-fatal, continues polling)
 #[tokio::test]
@@ -1070,9 +1070,9 @@ async fn test_version_polling_efficiency() {
         .create_async()
         .await;
 
-    // Mock schema endpoint (should NOT be called during polling)
-    let schema_mock = server
-        .mock("GET", "/datasets/test_dataset/versions/0.2.0/schema")
+    // Mock manifest endpoint (should NOT be called during polling)
+    let manifest_mock = server
+        .mock("GET", "/datasets/test_dataset/versions/0.2.0/manifest")
         .expect(0) // NEVER called during polling
         .create_async()
         .await;
@@ -1111,7 +1111,7 @@ async fn test_version_polling_efficiency() {
     poll_handle.await.ok();
 
     versions_mock.assert_async().await; // Called as expected
-    schema_mock.assert_async().await;   // Never called (efficient!)
+    manifest_mock.assert_async().await;   // Never called (efficient!)
 }
 ```
 

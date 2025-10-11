@@ -1,7 +1,7 @@
 //! Integration tests for version polling functionality.
 //!
 //! Tests verify that:
-//! - Version polling only fetches version numbers (not schemas)
+//! - Version polling only fetches version numbers (not manifests)
 //! - Version changes trigger manifest reload
 //! - Polling uses efficient endpoints
 
@@ -11,7 +11,7 @@ use tokio::sync::watch;
 
 /// Test that fetch_latest_version only calls the versions endpoint.
 ///
-/// This is critical for efficiency - we should NOT be fetching the full schema
+/// This is critical for efficiency - we should NOT be fetching the full manifest
 /// on every poll interval (default: 5 seconds).
 #[tokio::test]
 async fn test_fetch_latest_version_uses_versions_endpoint_only() {
@@ -36,11 +36,11 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
         .create_async()
         .await;
 
-    // Mock the schema endpoint - this should NOT be called
-    let schema_mock = server
+    // Mock the manifest endpoint - this should NOT be called
+    let manifest_mock = server
         .mock(
             "GET",
-            "/datasets/test_dataset/versions/0.2.0-LTcyNjgzMjc1NA/schema",
+            "/datasets/test_dataset/versions/0.2.0-LTcyNjgzMjc1NA/manifest",
         )
         .with_status(200)
         .expect(0) // Should NOT be called
@@ -57,13 +57,13 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
 
     // Verify mocks were called as expected
     versions_mock.assert_async().await;
-    schema_mock.assert_async().await; // Asserts it was NOT called (expect(0))
+    manifest_mock.assert_async().await; // Asserts it was NOT called (expect(0))
 }
 
 /// Test that version polling detects version changes.
 ///
 /// Verifies that when a new version appears, the polling task sends a notification
-/// through the channel without fetching the schema.
+/// through the channel without fetching the manifest.
 #[tokio::test]
 async fn test_version_polling_detects_changes() {
     let mut server = Server::new_async().await;

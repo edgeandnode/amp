@@ -144,10 +144,10 @@ Option 2: Individual components (all required except password)
 
 **Automatic SQL Generation**:
 
-1. Ampsync fetches the complete dataset schema from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/schema`)
+1. Ampsync fetches the complete dataset manifest from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/manifest`)
 2. Automatically generates SQL queries for each table:
    `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
-3. Creates PostgreSQL tables with the fetched Arrow schema
+3. Creates PostgreSQL tables with the Arrow schema from the manifest
 4. Starts streaming data using the generated SQL queries.
 5. When data is received, it is encoded by the `arrow-to-postgres` library and inserted into the postgres database.
 
@@ -242,10 +242,10 @@ cargo run --release -p ampsync
 ### Data Flow
 
 1. **Configuration**: Loads dataset name and optional version from environment variables
-2. **Schema Fetching**: Fetches Arrow schemas from Admin API for the dataset
-3. **SQL Generation**: Automatically generates SQL queries from schema:
+2. **Manifest Fetching**: Fetches complete dataset manifest from Admin API (includes schemas and metadata)
+3. **SQL Generation**: Automatically generates SQL queries from manifest schemas:
    `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
-4. **Schema Setup**: Creates PostgreSQL tables based on fetched Arrow schemas
+4. **Schema Setup**: Creates PostgreSQL tables based on Arrow schemas from manifest
 5. **Checkpoint Recovery**: Determines resumption strategy:
     - **Watermark available**: Hash-verified resumption (server-side, via `query()` parameter)
     - **Incremental only**: Best-effort resumption (client-side, adds `WHERE block_num > X`)
@@ -405,7 +405,7 @@ crates/bin/ampsync/
 - Ampsync will automatically detect when the dataset becomes available and start streaming
 - No restart needed - it polls the Admin API automatically
 
-**"Failed to fetch schema from admin-api: HTTP 404"**
+**"Failed to fetch manifest from admin-api: HTTP 404"**
 
 - If this error persists after running `nozzle dump`, check:
     - Dataset name and version match between config and published dataset
