@@ -4,11 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use amp_client::InvalidationRange;
 use arrow_to_postgres::ArrowToPostgresBinaryEncoder;
 use backon::{ExponentialBuilder, Retryable};
 use common::{BoxError, arrow::array::RecordBatch};
 use datasets_derived::manifest::{ArrowSchema, Field};
-use nozzle_client::InvalidationRange;
 use phf::phf_set;
 use sqlx::{Acquire, Pool, Postgres};
 

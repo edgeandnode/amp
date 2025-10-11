@@ -8,11 +8,11 @@ mod stream_task;
 mod sync_engine;
 mod version_polling;
 
+use amp_client::SqlClient;
 use clap::Parser as _;
 use common::BoxError;
 use conn::{DEFAULT_POOL_SIZE, DbConnPool};
 use datasets_common::{name::Name, version::Version};
-use nozzle_client::SqlClient;
 use tracing::{error, info};
 
 use crate::{

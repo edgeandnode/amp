@@ -20,6 +20,7 @@ snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 admin-api = { path = "../../services/admin-api" }
+amp-client = { path = "../../client" }
 arrow-array = { version = "55.2.0", default-features = false }
 arrow-schema = { version = "55.2.0" }
 arrow-to-postgres = { path = "../../services/arrow-to-postgres" }
@@ -34,7 +35,6 @@ datasets-derived = { path = "../../core/datasets-derived" }
 futures.workspace = true
 lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
-nozzle-client = { path = "../../client" }
 phf = { version = "0.13.1", features = ["macros"] }
 reqwest.workspace = true
 snmalloc-rs = { version = "0.3.8", optional = true }

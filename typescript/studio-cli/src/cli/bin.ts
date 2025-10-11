@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 import { createGrpcTransport } from "@connectrpc/connect-node"
+import { Arrow, ArrowFlight } from "@edgeandnode/amp"
+import * as Admin from "@edgeandnode/amp/api/Admin"
+import * as ConfigLoader from "@edgeandnode/amp/ConfigLoader"
+import * as ManifestContext from "@edgeandnode/amp/ManifestContext"
 import { Command, Options, ValidationError } from "@effect/cli"
 import {
   FileSystem,
@@ -39,10 +43,6 @@ import {
 } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
-import { Arrow, ArrowFlight } from "nozzl"
-import * as Admin from "nozzl/api/Admin"
-import * as ConfigLoader from "nozzl/ConfigLoader"
-import * as ManifestContext from "nozzl/ManifestContext"
 import open, { type AppName, apps } from "open"
 
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../Studio/index.ts"
@@ -132,7 +132,7 @@ WHERE topic0 = evm_topic('Count(uint256 count)');`,
           title: "Default query",
           version: "v1",
           description:
-            "Builds a default query to hydrate in the initial tab on the playground. Derived in order of: 1. parsed nozzle config, 2. parsed contract artifacts, 3. dataset sources",
+            "Builds a default query to hydrate in the initial tab on the playground. Derived in order of: 1. parsed amp config, 2. parsed contract artifacts, 3. dataset sources",
         }),
       ),
   )
@@ -186,10 +186,10 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                       }),
                     )
                   },
-                  onSome(nozzleConfigPath) {
-                    return loader.watch<HttpApiError.InternalServerError, never>(nozzleConfigPath, {
+                  onSome(ampConfigPath) {
+                    return loader.watch<HttpApiError.InternalServerError, never>(ampConfigPath, {
                       onError(cause) {
-                        console.error("Failure while watching the nozzle config", nozzleConfigPath, cause)
+                        console.error("Failure while watching the amp config", ampConfigPath, cause)
                         return new HttpApiError.InternalServerError()
                       },
                     }).pipe(
@@ -234,11 +234,11 @@ const AmpStudioApiLive = HttpApiBuilder.group(
         .handle("Sources", () => resolver.sources())
         .handle("DefaultQuery", () =>
           Effect.gen(function*() {
-            // 1. Check for nozzle.config existence
+            // 1. Check for amp.config existence
             const configPath = yield* loader.find()
 
             if (Option.isSome(configPath)) {
-              // Found nozzle.config, try to build it
+              // Found amp.config, try to build it
               const manifest = yield* loader.build(configPath.value).pipe(
                 Effect.mapError(() => new HttpApiError.InternalServerError()),
               )
@@ -469,7 +469,7 @@ const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)
 const studio = Command.make("studio", {
   args: {
     logs: Options.choice("logs", levels).pipe(
-      Options.withFallbackConfig(Config.string("NOZZLE_LOG_LEVEL").pipe(Config.withDefault("info"))),
+      Options.withFallbackConfig(Config.string("AMP_LOG_LEVEL").pipe(Config.withDefault("info"))),
       Options.withDescription("The log level to use"),
       Options.map((value) => LogLevel.fromLiteral(String.capitalize(value) as LogLevel.Literal)),
     ),
@@ -477,12 +477,12 @@ const studio = Command.make("studio", {
       Options.withAlias("p"),
       Options.withDefault(1615),
       Options.withDescription(
-        "The port to run the nozzle dataset studio server on. Default 1615",
+        "The port to run the amp dataset studio server on. Default 1615",
       ),
     ),
     open: Options.boolean("open").pipe(
       Options.withDescription(
-        "If true, opens the nozzle dataset studio in your browser",
+        "If true, opens the amp dataset studio in your browser",
       ),
       Options.withDefault(true),
     ),
@@ -506,7 +506,7 @@ const studio = Command.make("studio", {
     adminUrl,
   },
 }).pipe(
-  Command.withDescription("Opens the nozzle dataset studio visualization tool"),
+  Command.withDescription("Opens the amp dataset studio visualization tool"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
       yield* Server.pipe(
@@ -621,7 +621,7 @@ const openBrowser = (
   })
 
 export class OpenBrowserError extends Data.TaggedError(
-  "Nozzle/cli/studio/errors/OpenBrowserError",
+  "Amp/cli/studio/errors/OpenBrowserError",
 )<{
   readonly cause: unknown
 }> {}

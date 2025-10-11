@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use ampd::dump_cmd::dump;
 use common::{
     BoxError, LogicalCatalog,
     arrow::array::RecordBatch,
@@ -17,7 +18,6 @@ use common::{
 use dataset_store::DatasetStore;
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
-use nozzle::dump_cmd::dump;
 
 use super::fixtures::SnapshotContext;
 

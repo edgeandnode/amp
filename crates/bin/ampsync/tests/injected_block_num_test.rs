@@ -1,13 +1,13 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::primitives::BlockHash;
+use amp_client::InvalidationRange;
 use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use common::metadata::segments::BlockRange;
 use datasets_common::manifest::DataType as ManifestDataType;
 use datasets_derived::manifest::{ArrowSchema, Field as ManifestField};
-use nozzle_client::InvalidationRange;
 use pgtemp::PgTempDB;
 
 /// Test multi-row batch insert with `_block_num` injection.

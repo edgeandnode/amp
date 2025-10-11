@@ -4,7 +4,7 @@ use common::{BoxError, catalog::physical::PhysicalTable};
 use dataset_store::DatasetStore;
 use dump::{
     compaction::{
-        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+        AmpCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
     },
     compaction_opts, parquet_opts,
 };
@@ -98,8 +98,8 @@ impl TestCtx {
             .expect("Failed to create test context");
 
         // Deploy the TypeScript dataset
-        let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("nozzle.config.ts"));
-        let cli = ctx.new_nozzl_cli();
+        let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("amp.config.ts"));
+        let cli = ctx.new_amp_cli();
         sql_stream_ds
             .register(&cli)
             .await

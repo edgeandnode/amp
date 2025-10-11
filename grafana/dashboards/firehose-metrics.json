@@ -970,6 +970,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "Firehose Metrics",
-  "uid": "nozzle-firehose-metrics",
+  "uid": "amp-firehose-metrics",
   "version": 1
 }

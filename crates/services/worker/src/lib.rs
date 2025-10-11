@@ -1,7 +1,7 @@
 //! Distributed worker service for executing scheduled dump jobs.
 //!
 //! This crate provides the standalone worker component that executes extraction jobs in distributed
-//! Nozzle deployments. Workers coordinate with the server via a shared metadata database, enabling
+//! Amp deployments. Workers coordinate with the server via a shared metadata database, enabling
 //! distributed extraction architectures with resource isolation and horizontal scaling.
 //!
 //! The worker service handles registration and heartbeat management, listens for job notifications

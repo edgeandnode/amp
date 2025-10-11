@@ -1,6 +1,6 @@
+use ampd::dump_cmd::dump;
 use dump::EndBlock;
 use monitoring::logging;
-use nozzle::dump_cmd::dump;
 use tests::testlib::{ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers};
 
 #[tokio::test]

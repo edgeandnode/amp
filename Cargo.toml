@@ -1,10 +1,9 @@
 [workspace]
 members = [
+    "crates/bin/ampd",
     "crates/bin/ampsync",
-    "crates/bin/dump-check",
+    "crates/bin/ampup",
     "crates/bin/generate-manifest",
-    "crates/bin/nozzle",
-    "crates/bin/nozzleup",
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
@@ -38,6 +37,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 alloy = { version = "1.0.9", default-features = false, features = [

@@ -17,7 +17,7 @@ test-integration:
 # All tests with coverage
 test-all:
 	@echo "🎯 Running all tests with coverage..."
-	$(PYTHON) pytest --cov=src/nozzle --cov-report=html --cov-report=term-missing
+	$(PYTHON) pytest --cov=src/amp --cov-report=html --cov-report=term-missing
 
 # Specific loader tests
 test-postgresql:

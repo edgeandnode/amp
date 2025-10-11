@@ -206,7 +206,7 @@ config/
 
 ### Simplified Chaining Interface
 ```python
-from nozzle.client import Client
+from amp.client import Client
 
 # Initialize client - auto-discovery handles loader registration
 client = Client(url="grpc://localhost:8080")

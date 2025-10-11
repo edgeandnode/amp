@@ -1,8 +1,8 @@
 {
-  "name": "nozzle-test-non-incremental",
+  "name": "amp-test-non-incremental",
   "private": true,
   "type": "module",
   "dependencies": {
-    "nozzl": "workspace:*"
+    "@edgeandnode/amp": "workspace:*"
   }
 }

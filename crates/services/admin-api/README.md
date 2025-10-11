@@ -2,9 +2,9 @@
 
 ## Summary
 
-The Admin API provides a RESTful HTTP interface for managing Nozzle's ETL operations. This crate implements an Axum-based web server that exposes endpoints for dataset management, job control, storage location administration, file management, and provider configuration.
+The Admin API provides a RESTful HTTP interface for managing Amp's ETL operations. This crate implements an Axum-based web server that exposes endpoints for dataset management, job control, storage location administration, file management, and provider configuration.
 
-The API serves as the primary administrative interface for monitoring and controlling the Nozzle data pipeline, allowing operators to:
+The API serves as the primary administrative interface for monitoring and controlling the Amp data pipeline, allowing operators to:
 - Deploy and manage datasets with versioning support
 - Trigger and monitor data extraction jobs
 - Manage distributed storage locations

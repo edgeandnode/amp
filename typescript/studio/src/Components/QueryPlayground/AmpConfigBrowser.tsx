@@ -2,9 +2,9 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
+import type { Table } from "@edgeandnode/amp/Model"
 import { PlusIcon, TableIcon } from "@graphprotocol/gds-react/icons"
 import { String } from "effect"
-import type { Table } from "nozzl/Model"
 
 import { useAmpConfigStreamQuery } from "@/hooks/useAmpConfigStream"
 

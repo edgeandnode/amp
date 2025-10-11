@@ -1,6 +1,6 @@
 //! Flight client fixture for test environments.
 //!
-//! This fixture provides a FlightClient for connecting to and querying Nozzle servers
+//! This fixture provides a FlightClient for connecting to and querying Amp servers
 //! via the Arrow Flight SQL protocol. It handles streaming responses and provides
 //! convenient methods for running SQL queries and managing query streams.
 
@@ -21,7 +21,7 @@ use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tonic::transport::Channel;
 
-/// Flight client fixture for connecting to Nozzle servers via Arrow Flight SQL.
+/// Flight client fixture for connecting to Amp servers via Arrow Flight SQL.
 ///
 /// This fixture wraps a FlightSqlServiceClient and provides convenient methods for
 /// running SQL queries and managing streaming responses. It connects to the Flight

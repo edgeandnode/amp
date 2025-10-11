@@ -1,6 +1,6 @@
-//! Nozzle Controller Service
+//! Amp Controller Service
 //!
-//! The controller service provides the admin API for managing Nozzle operations.
+//! The controller service provides the admin API for managing Amp operations.
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 

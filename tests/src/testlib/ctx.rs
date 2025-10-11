@@ -38,8 +38,8 @@ use common::{BoxError, config::Config};
 use worker::NodeId;
 
 use super::fixtures::{
-    Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer, DaemonStateDir,
-    DaemonWorker, FlightClient, JsonlClient, NozzlCli, TempMetadataDb as MetadataDbFixture,
+    AmpCli, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
+    DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, TempMetadataDb as MetadataDbFixture,
     builder as daemon_state_dir_builder,
 };
 use crate::testlib::env_dir::TestEnvDir;
@@ -396,7 +396,7 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
-        // Start nozzle server using the fixture (only query servers)
+        // Start amp server using the fixture (only query servers)
         let server = DaemonServer::new(
             config.clone(),
             temp_db.metadata_db().clone(),
@@ -522,13 +522,13 @@ impl TestCtx {
         JsonlClient::new(self.daemon_server_fixture.jsonl_server_url())
     }
 
-    /// Create a new `nozzl` CLI fixture connected to this test environment's controller.
+    /// Create a new `amp` CLI fixture connected to this test environment's controller.
     ///
-    /// This convenience method creates a new [`NozzlCli`] instance connected to the
-    /// daemon controller's admin API endpoint for executing `nozzl` CLI commands in tests.
+    /// This convenience method creates a new [`AmpCli`] instance connected to the
+    /// daemon controller's admin API endpoint for executing `amp` CLI commands in tests.
     ///
-    /// Returns a new [`NozzlCli`] instance ready to execute CLI commands.
-    pub fn new_nozzl_cli(&self) -> NozzlCli {
-        NozzlCli::new(self.daemon_controller_fixture.admin_api_url())
+    /// Returns a new [`AmpCli`] instance ready to execute CLI commands.
+    pub fn new_amp_cli(&self) -> AmpCli {
+        AmpCli::new(self.daemon_controller_fixture.admin_api_url())
     }
 }

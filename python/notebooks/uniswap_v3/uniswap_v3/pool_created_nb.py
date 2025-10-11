@@ -22,10 +22,10 @@ def _():
 
     import marimo as mo
 
-    from nozzle.client import Client
-    from nozzle.util import process_query, to_hex
+    from amp.client import Client
+    from amp.util import process_query, to_hex
 
-    client_url = os.getenv('NOZZLE_URL', 'grpc://127.0.0.1:1602')
+    client_url = os.getenv('AMP_URL', 'grpc://127.0.0.1:1602')
     client = Client('grpc://34.27.238.174:80')
 
     # The address of the Uniswap factory contract
@@ -63,7 +63,7 @@ def _(client):
 
 @app.cell
 def _(factory_path, uniswap_factory):
-    from nozzle.util import Abi
+    from amp.util import Abi
 
     # Load a JSON ABI and get the 'PoolCreated' event
     factory = Abi(factory_path)

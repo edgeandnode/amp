@@ -17,7 +17,7 @@ import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "studio-cli/Studio/Model"
 
-import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
+import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import { SqlValidation } from "./SqlValidation.ts"
 import type { CompletionConfig, UserDefinedFunction } from "./types.ts"
@@ -54,7 +54,7 @@ export interface ISQLProvider {
  * - UDF snippets
  */
 export class UnifiedSQLProvider implements ISQLProvider {
-  private completionProvider: NozzleCompletionProvider | undefined
+  private completionProvider: AmpCompletionProvider | undefined
   private contextAnalyzer: QueryContextAnalyzer | undefined
   private snippetGenerator: UdfSnippetGenerator | undefined
   private validator: SqlValidation | undefined
@@ -180,7 +180,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
     }
 
     this.contextAnalyzer = new QueryContextAnalyzer(completionConfig)
-    this.completionProvider = new NozzleCompletionProvider(
+    this.completionProvider = new AmpCompletionProvider(
       [...this.sources],
       [...this.udfs],
       this.contextAnalyzer,
@@ -250,7 +250,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
           endLineNumber: error.endLineNumber,
           endColumn: error.endColumn,
           code: error.code,
-          source: "nozzle-sql-validator",
+          source: "amp-sql-validator",
         }))
 
         monaco.editor.setModelMarkers(model, "sql-validator", markers)

@@ -1,18 +1,18 @@
 version: '3.8'
 services:
-  # Runs postgres at URL postgresql://postgres:postgres@localhost:5432/nozzle
+  # Runs postgres at URL postgresql://postgres:postgres@localhost:5432/amp
   db:
     image: postgres:alpine
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - PGUSER=postgres
-      - POSTGRES_DB=nozzle
+      - POSTGRES_DB=amp
     ports:
       - '5432:5432'
 
   # DB explorer right in your web browser at
-  # http://localhost:7402/?pgsql=db&username=postgres&db=nozzle&ns=public
+  # http://localhost:7402/?pgsql=db&username=postgres&db=amp&ns=public
   # Password: postgres
   adminer:
     image: adminer
@@ -21,7 +21,7 @@ services:
       - 7402:8080
 
   # All-in-one observability stack (Grafana + OTEL + Loki + Tempo + Prometheus + Pyroscope).
-  # To get started with telemetry in Nozzle, add an `[opentelemetry]` section in the `config.toml` file.
+  # To get started with telemetry in Amp, add an `[opentelemetry]` section in the `config.toml` file.
   #
   # To export OpenTelemtry traces add `trace_url = "http://localhost:4317/v1/traces"` to the [opentelemetry] section of the config file.
   # To export OpenTelemtry metrics add `metrics_url = "http://localhost:4318/v1/metrics"` to the [opentelemetry] section of the config file.

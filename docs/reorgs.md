@@ -17,7 +17,7 @@ orphaned blocks: 101, 102
 reorg depth: 2
 ```
 
-For each parquet file and streaming query microbatch, Nozzle tracks metadata for the block range the data is associated with, so that when a reorg occurs any data associated with orphaned blocks is invalidated.
+For each parquet file and streaming query microbatch, Amp tracks metadata for the block range the data is associated with, so that when a reorg occurs any data associated with orphaned blocks is invalidated.
 
 ## Client Side
 
@@ -56,16 +56,16 @@ Clients should track block ranges from consecutive batches to handle reorgs. The
 2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch is not equal to the prior range and starts at or before a previous batch's end block, a reorg has occurred.
 3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed.
 
-For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit three types of events:
+For a reference implementation in Rust, see `amp_client::with_reorg` which automatically wraps query result streams to emit three types of events:
 - `ResponseBatchWithReorg::Batch` - Normal data batches with metadata
 - `ResponseBatchWithReorg::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
 - `ResponseBatchWithReorg::Reorg` - Reorg detection events with invalidation ranges
 
 #### Resuming Streams
 
-Nozzle supports resuming streaming queries by adding a `nozzle-resume` header to the `GetFlightInfo` request to the Nozzle server. The header value, "resume watermark" can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the resume watermark from the ranges known to be fully processed.
+Amp supports resuming streaming queries by adding a `amp-resume` header to the `GetFlightInfo` request to the Amp server. The header value, "resume watermark" can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the resume watermark from the ranges known to be fully processed.
 
-The `nozzle-resume` header value is expected to be JSON-serialized data with the following structure:
+The `amp-resume` header value is expected to be JSON-serialized data with the following structure:
 
 ```json
 {

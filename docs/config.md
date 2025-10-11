@@ -2,7 +2,7 @@
 
 The main configuration, used for both writing and serving datasets, is specified in a toml file which
 is exemplified and documented in the [sample config](config.sample.toml). Its path should be passed
-in as the `NOZZLE_CONFIG` environment variable.
+in as the `AMP_CONFIG` environment variable.
 
 Configuring datasets to be extracted and served requires three different object storage directories:
 
@@ -16,9 +16,9 @@ flexible configuration.
 
 # Using env vars
 
-Note that the values in the `NOZZLE_CONFIG` file can be overridden from the environment, by prefixing
-the env var name with `NOZZLE_CONFIG_`. For example, to override the `data_dir` value, you can set a
-`NOZZLE_CONFIG_DATA_DIR` env var to the desired path.
+Note that the values in the `AMP_CONFIG` file can be overridden from the environment, by prefixing
+the env var name with `AMP_CONFIG_`. For example, to override the `data_dir` value, you can set a
+`AMP_CONFIG_DATA_DIR` env var to the desired path.
 
 # Service addresses
 
@@ -30,7 +30,7 @@ The following optional configuration keys allow you to control the hostname and 
 
 ## Logging
 
-Simplified control of the logging verbosity level is offered by the `NOZZLE_LOG` env var. It accepts
+Simplified control of the logging verbosity level is offered by the `AMP_LOG` env var. It accepts
 the values `error`, `warn`, `info`, `debug` or `trace`. The default value is `debug`. The standard
 `RUST_LOG` env var can be used for finer-grained log filtering.
 
@@ -90,17 +90,17 @@ The `generate-manifest` command provides a convenient way to generate manifest J
 
 ```bash
 # Generate manifest for EVM RPC dataset
-nozzle generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet
+ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet
 
 # Generate manifest for Firehose dataset
-nozzle generate-manifest --network mainnet --kind firehose --name eth_firehose
+ampd generate-manifest --network mainnet --kind firehose --name eth_firehose
 
 # Generate manifest for Substreams dataset
-nozzle generate-manifest --network mainnet --kind substreams --name uniswap_v3 \
+ampd generate-manifest --network mainnet --kind substreams --name uniswap_v3 \
   --manifest https://example.com/substreams.yaml --module map_pools
 
 # Output to file
-nozzle generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
+ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
   -o ./dataset_defs_dir/eth_mainnet.json
 ```
 

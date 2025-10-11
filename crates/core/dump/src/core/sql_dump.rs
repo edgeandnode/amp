@@ -110,7 +110,7 @@ use tracing::instrument;
 
 use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
-    compaction::{CompactionProperties, NozzleCompactor},
+    compaction::{AmpCompactor, CompactionProperties},
     metrics,
     parquet_writer::{
         ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
@@ -312,7 +312,7 @@ async fn dump_sql_query(
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
-    let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
+    let mut compactor = AmpCompactor::start(physical_table.clone(), compaction_opts.clone());
 
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.

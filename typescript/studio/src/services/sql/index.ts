@@ -1,8 +1,8 @@
 /**
- * Nozzle SQL Intellisense Services
+ * Amp SQL Intellisense Services
  *
  * This module provides the main public API for setting up SQL intellisense
- * in the Nozzle Studio query playground. It handles provider registration,
+ * in the Amp Studio query playground. It handles provider registration,
  * lifecycle management, and integration with Monaco Editor.
  *
  * Key Features:
@@ -14,9 +14,9 @@
  *
  * Usage:
  * ```typescript
- * import { setupNozzleSQLProviders } from './services/sql'
+ * import { setupAmpSQLProviders } from './services/sql'
  *
- * const disposable = setupNozzleSQLProviders(metadata, udfs)
+ * const disposable = setupAmpSQLProviders(metadata, udfs)
  * // ... later
  * disposable.dispose()
  * ```
@@ -29,7 +29,7 @@ import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "studio-cli/Studio/Model"
 
-import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
+import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import { SqlValidation } from "./SqlValidation.ts"
 import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types.ts"
@@ -44,7 +44,7 @@ import { UdfSnippetGenerator } from "./UDFSnippetGenerator.ts"
  * hover providers, and other language features.
  */
 class SqlProviderManager {
-  private completionProvider?: NozzleCompletionProvider | undefined
+  private completionProvider?: AmpCompletionProvider | undefined
   private contextAnalyzer?: QueryContextAnalyzer | undefined
   private snippetGenerator?: UdfSnippetGenerator | undefined
   private validator?: SqlValidation | undefined
@@ -99,7 +99,7 @@ class SqlProviderManager {
     try {
       // Initialize core components
       this.contextAnalyzer = new QueryContextAnalyzer(this.config)
-      this.completionProvider = new NozzleCompletionProvider(
+      this.completionProvider = new AmpCompletionProvider(
         this.metadata,
         this.udfs,
         this.contextAnalyzer,
@@ -126,7 +126,7 @@ class SqlProviderManager {
         provideSignatureHelp: this.handleSignatureHelpRequest.bind(this),
       })
 
-      this.logDebug("Nozzle SQL providers setup completed successfully")
+      this.logDebug("Amp SQL providers setup completed successfully")
 
       // Return disposable handle
       return {
@@ -212,7 +212,7 @@ class SqlProviderManager {
     }
 
     try {
-      this.logDebug("Disposing Nozzle SQL providers")
+      this.logDebug("Disposing Amp SQL providers")
 
       // Dispose Monaco providers
       if (this.completionDisposable) {
@@ -249,7 +249,7 @@ class SqlProviderManager {
       this.snippetGenerator = undefined
       this.isDisposed = true
 
-      this.logDebug("Nozzle SQL providers disposed successfully")
+      this.logDebug("Amp SQL providers disposed successfully")
     } catch (error) {
       this.logError("Error disposing SQL providers", error)
     }
@@ -431,7 +431,7 @@ class SqlProviderManager {
 let activeProviderManager: SqlProviderManager | null = null
 
 /**
- * Setup Nozzle SQL Providers
+ * Setup Amp SQL Providers
  *
  * Main public API function for setting up SQL intellisense providers.
  * This is the primary entry point for integrating with Monaco Editor.
@@ -441,7 +441,7 @@ let activeProviderManager: SqlProviderManager | null = null
  * @param config - Optional provider configuration
  * @returns Disposable handle for cleanup
  */
-export function setupNozzleSQLProviders(
+export function setupAmpSQLProviders(
   metadata: ReadonlyArray<DatasetSource>,
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
@@ -539,7 +539,7 @@ export function getActiveValidator(): SqlValidation | null {
 export { type ISQLProvider, type SQLProviderConfig, UnifiedSQLProvider } from "./UnifiedSQLProvider"
 
 // Export all types and classes for advanced usage
-export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
+export { AmpCompletionProvider } from "./AmpCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
 export { SqlValidation } from "./SqlValidation.ts"
 export * from "./types"

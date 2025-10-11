@@ -1,6 +1,6 @@
-# Python Nozzle Client
+# Python Amp Client
 
-Client for issuing queries to a nozzle server and working with the returned data.
+Client for issuing queries to a amp server and working with the returned data.
 
 ## Installation
  
@@ -29,14 +29,14 @@ browse existing notebooks in the workspace.
 ### Apps
 
 You can execute python apps and scripts using `uv run <path>` which will give them access to the dependencies 
-and the `nozzle` package. For example, you can run the `execute_query` app with the following command.
+and the `amp` package. For example, you can run the `execute_query` app with the following command.
 ```bash
 uv run apps/execute_query.py
 ```
 
-# Self-hosted nozzle server
+# Self-hosted amp server
 
-In order to operate a local nozzle server you will need to have the files 
+In order to operate a local amp server you will need to have the files 
 that [`dump`](../dump) produces available locally, and run the [server](../server) 
 You can then use it in your python scripts, apps or notebooks.
 

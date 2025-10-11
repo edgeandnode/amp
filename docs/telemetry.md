@@ -1,6 +1,6 @@
 ### Telemetry
 
-Nozzle has an OpenTelemetry setup to track various metrics and traces. For local testing, a Grafana telemetry stack
+Amp has an OpenTelemetry setup to track various metrics and traces. For local testing, a Grafana telemetry stack
 is already configured and can be run through `docker-compose`:
 
 ```
@@ -11,7 +11,7 @@ This will (among other things) run the `grafana/otel-lgmt` image. More info abou
 
 #### Connecting to the telemetry stack
 
-In order to connect to the telemetry stack when running Nozzle, you need to add the following to your config file:
+In order to connect to the telemetry stack when running Amp, you need to add the following to your config file:
 
 ```toml
 [opentelemetry]

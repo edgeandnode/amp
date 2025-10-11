@@ -11,10 +11,10 @@ import pyarrow as pa
 import pytest
 
 try:
-    from src.nozzle.loaders.base import LoadMode
-    from src.nozzle.loaders.implementations.snowflake_loader import SnowflakeLoader
+    from src.amp.loaders.base import LoadMode
+    from src.amp.loaders.implementations.snowflake_loader import SnowflakeLoader
 except ImportError:
-    pytest.skip('nozzle modules not available', allow_module_level=True)
+    pytest.skip('amp modules not available', allow_module_level=True)
 
 
 @pytest.fixture

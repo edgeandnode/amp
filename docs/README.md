@@ -1,31 +1,31 @@
-# Nozzle Documentation
+# Amp Documentation
 
-Welcome to the Nozzle documentation. Nozzle is a high-performance ETL (Extract, Transform, Load) system for blockchain data that extracts data from various blockchain sources, transforms it via SQL queries, and serves it through multiple query interfaces.
+Welcome to the Amp documentation. Amp is a high-performance ETL (Extract, Transform, Load) system for blockchain data that extracts data from various blockchain sources, transforms it via SQL queries, and serves it through multiple query interfaces.
 
 ## Quick Start
 
-New to Nozzle? Start here:
+New to Amp? Start here:
 
-1. **[Operational Modes](modes.md)** - Understand the different ways to run Nozzle (serverless, single-node, distributed)
-2. **[Configuration Guide](config.md)** - Learn how to configure Nozzle for your deployment
-3. **[Upgrading Guide](upgrading.md)** - Upgrade Nozzle between versions
+1. **[Operational Modes](modes.md)** - Understand the different ways to run Amp (serverless, single-node, distributed)
+2. **[Configuration Guide](config.md)** - Learn how to configure Amp for your deployment
+3. **[Upgrading Guide](upgrading.md)** - Upgrade Amp between versions
 
 ## Documentation Index
 
 ### Core Concepts
 
 #### [Operational Modes](modes.md)
-Complete guide to Nozzle's operational modes and deployment patterns:
-- **Serverless Mode**: On-demand extraction using `nozzle dump`
+Complete guide to Amp's operational modes and deployment patterns:
+- **Serverless Mode**: On-demand extraction using `ampd dump`
 - **Distributed Mode**: Separate server and worker components for production
 - **Development Mode**: Combined server + worker for local testing
 - Deployment patterns and architecture diagrams
 
 #### [Configuration Guide](config.md)
-Detailed configuration reference for all Nozzle components and settings.
+Detailed configuration reference for all Amp components and settings.
 
 #### [Upgrading Guide](upgrading.md)
-Process for upgrading Nozzle between versions:
+Process for upgrading Amp between versions:
 - Database migration workflows
 - Upgrade procedures for different deployment types
 - Troubleshooting and best practices
@@ -47,7 +47,7 @@ JSON schemas for defining datasets:
 - **[Ethereum Beacon Chain Schema](schemas/eth-beacon.md)** - Schema for Ethereum consensus layer data
 
 #### [User-Defined Functions (UDFs)](udfs.md)
-Custom SQL functions available in Nozzle queries:
+Custom SQL functions available in Amp queries:
 - EVM decoding functions
 - RPC call functions
 - Attestation functions
@@ -63,14 +63,14 @@ Observability and monitoring:
 
 #### [Reorgs](reorgs.md)
 Understanding and handling blockchain reorganizations:
-- How Nozzle detects and handles reorgs
+- How Amp detects and handles reorgs
 - Impact on data consistency
 - Best practices
 
 ### Reference
 
 #### [Glossary](glossary.md)
-Definitions of key terms and concepts used throughout Nozzle.
+Definitions of key terms and concepts used throughout Amp.
 
 ## See Also
 

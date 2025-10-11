@@ -1,11 +1,11 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
+use ampd::dump_cmd::dump as amp_dump;
 use arrow_flight::FlightData;
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
 use dump::EndBlock;
 use monitoring::logging;
-use nozzle::dump_cmd::dump as nozzle_dump;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
 use tests::testlib::{
@@ -120,7 +120,7 @@ async fn dump_finalized() {
         let config = test.ctx.daemon_server().config().clone();
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
-            nozzle_dump(
+            amp_dump(
                 config,
                 metadata_db,
                 vec!["anvil_rpc".to_string()],
@@ -418,9 +418,9 @@ impl ReorgTestCtx {
             .expect("Failed to create test context");
 
         // Register derived (TypeScript) datasets
-        let cli = ctx.new_nozzl_cli();
+        let cli = ctx.new_amp_cli();
         for dataset_name in derived_datasets {
-            let dataset = DatasetPackage::new(dataset_name, Some("nozzle.config.ts"));
+            let dataset = DatasetPackage::new(dataset_name, Some("amp.config.ts"));
             dataset
                 .register(&cli)
                 .await

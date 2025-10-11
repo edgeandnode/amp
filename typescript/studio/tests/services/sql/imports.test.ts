@@ -7,10 +7,10 @@ import { describe, expect, test } from "vitest"
 import {
   areProvidersActive,
   getProviderMetrics,
-  setupNozzleSQLProviders,
+  setupAmpSQLProviders,
   updateProviderData,
 } from "../../../src/services/sql"
-import { NozzleCompletionProvider } from "../../../src/services/sql/NozzleCompletionProvider"
+import { AmpCompletionProvider } from "../../../src/services/sql/AmpCompletionProvider"
 import { QueryContextAnalyzer } from "../../../src/services/sql/QueryContextAnalyzer"
 import { UdfSnippetGenerator } from "../../../src/services/sql/UDFSnippetGenerator"
 
@@ -19,12 +19,12 @@ import { mockMetadata, mockUDFs } from "./fixtures"
 describe("SQL Intellisense Imports", () => {
   test("should import all core classes", () => {
     expect(QueryContextAnalyzer).toBeDefined()
-    expect(NozzleCompletionProvider).toBeDefined()
+    expect(AmpCompletionProvider).toBeDefined()
     expect(UdfSnippetGenerator).toBeDefined()
   })
 
   test("should import main API functions", () => {
-    expect(setupNozzleSQLProviders).toBeDefined()
+    expect(setupAmpSQLProviders).toBeDefined()
     expect(updateProviderData).toBeDefined()
     expect(getProviderMetrics).toBeDefined()
     expect(areProvidersActive).toBeDefined()
@@ -44,8 +44,8 @@ describe("SQL Intellisense Imports", () => {
 
   test("should create completion provider instance", () => {
     const analyzer = new QueryContextAnalyzer()
-    const provider = new NozzleCompletionProvider(mockMetadata, mockUDFs, analyzer)
-    expect(provider).toBeInstanceOf(NozzleCompletionProvider)
+    const provider = new AmpCompletionProvider(mockMetadata, mockUDFs, analyzer)
+    expect(provider).toBeInstanceOf(AmpCompletionProvider)
   })
 
   test("should create UDF snippet generator instance", () => {

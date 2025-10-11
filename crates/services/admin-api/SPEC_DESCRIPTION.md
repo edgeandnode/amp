@@ -1,8 +1,8 @@
-Administration API for Nozzle, a high-performance ETL system for blockchain data services on The Graph.
+Administration API for Amp, a high-performance ETL system for blockchain data services on The Graph.
 
 ## About
 
-The Admin API provides a RESTful HTTP interface for managing Nozzle's ETL operations. This API serves as the primary administrative interface for monitoring and controlling the Nozzle data pipeline, allowing you to deploy datasets, trigger data extraction jobs, monitor job progress, manage distributed worker locations, configure external data providers, and perform operations on Parquet files and their metadata.
+The Admin API provides a RESTful HTTP interface for managing Amp's ETL operations. This API serves as the primary administrative interface for monitoring and controlling the Amp data pipeline, allowing you to deploy datasets, trigger data extraction jobs, monitor job progress, manage distributed worker locations, configure external data providers, and perform operations on Parquet files and their metadata.
 
 ## Key Capabilities
 

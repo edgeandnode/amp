@@ -1,8 +1,8 @@
 {
-  "name": "nozzle-test-intra-deps",
+  "name": "amp-test-intra-deps",
   "private": true,
   "type": "module",
   "dependencies": {
-    "nozzl": "workspace:*"
+    "@edgeandnode/amp": "workspace:*"
   }
 }

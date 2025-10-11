@@ -17,14 +17,14 @@ use tokio::task::JoinError;
 
 use crate::{
     ConsistencyCheckError,
-    compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor},
+    compaction::{AmpCompactorTaskType, Collector, compactor::Compactor},
 };
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
 
 pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
-    type Task: NozzleCompactorTaskType<Error = Self>;
+    type Task: AmpCompactorTaskType<Error = Self>;
 
     /// Whether the error is recoverable and the task can be retried
     /// Default implementation returns true for all errors

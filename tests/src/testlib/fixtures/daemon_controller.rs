@@ -1,6 +1,6 @@
 //! Daemon controller fixture for isolated test environments.
 //!
-//! This fixture module provides the `DaemonController` type for managing Nozzle controller
+//! This fixture module provides the `DaemonController` type for managing Amp controller
 //! instances in test environments. It handles controller lifecycle, task management, and provides
 //! convenient access to the Admin API endpoint.
 
@@ -9,9 +9,9 @@ use std::{net::SocketAddr, sync::Arc};
 use common::{BoxError, BoxResult, config::Config};
 use tokio::task::JoinHandle;
 
-/// Fixture for managing Nozzle daemon controller instances in tests.
+/// Fixture for managing Amp daemon controller instances in tests.
 ///
-/// This fixture wraps a running Nozzle controller instance and provides convenient access
+/// This fixture wraps a running Amp controller instance and provides convenient access
 /// to the Admin API endpoint. The fixture automatically handles controller lifecycle
 /// and cleanup by aborting the controller task when dropped.
 pub struct DaemonController {
@@ -21,9 +21,9 @@ pub struct DaemonController {
 }
 
 impl DaemonController {
-    /// Create and start a new Nozzle controller for testing.
+    /// Create and start a new Amp controller for testing.
     ///
-    /// Starts a Nozzle controller with the provided configuration and metadata database.
+    /// Starts a Amp controller with the provided configuration and metadata database.
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<Config>,

@@ -2,6 +2,7 @@
 name = "tests"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "tests"
@@ -24,7 +25,6 @@ datasets-common = { path = "../crates/core/datasets-common" }
 datasets-derived = { path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true
 dump = { path = "../crates/core/dump" }
-dump-check = { path = "../crates/bin/dump-check" }
 evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
 figment.workspace = true
 firehose-datasets = { path = "../crates/extractors/firehose" }
@@ -35,10 +35,10 @@ hex.workspace = true
 indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
-nozzle = { path = "../crates/bin/nozzle" }
+ampd = { path = "../crates/bin/ampd" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-nozzle-client = { path = "../crates/client" }
+amp-client = { path = "../crates/client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true

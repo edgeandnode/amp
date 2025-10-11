@@ -1,5 +1,5 @@
 # tests/test_util.py
-from nozzle.util import to_hex
+from amp.util import to_hex
 
 
 def test_to_hex():

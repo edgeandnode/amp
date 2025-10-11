@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 @pytest.fixture(scope='session')
 def postgresql_config():
     """PostgreSQL configuration from environment or defaults"""
-    return {'host': os.getenv('POSTGRES_HOST', 'localhost'), 'port': int(os.getenv('POSTGRES_PORT', '5432')), 'database': os.getenv('POSTGRES_DB', 'test_nozzle'), 'user': os.getenv('POSTGRES_USER', 'postgres'), 'password': os.getenv('POSTGRES_PASSWORD'), 'max_connections': 10, 'batch_size': 10000}
+    return {'host': os.getenv('POSTGRES_HOST', 'localhost'), 'port': int(os.getenv('POSTGRES_PORT', '5432')), 'database': os.getenv('POSTGRES_DB', 'test_amp'), 'user': os.getenv('POSTGRES_USER', 'postgres'), 'password': os.getenv('POSTGRES_PASSWORD'), 'max_connections': 10, 'batch_size': 10000}
 
 
 @pytest.fixture(scope='session')

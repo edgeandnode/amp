@@ -5,9 +5,9 @@
 
 use std::{sync::Arc, time::Duration};
 
+use amp_client::{ResponseBatchWithReorg, SqlClient};
 use common::metadata::segments::ResumeWatermark;
 use futures::StreamExt;
-use nozzle_client::{ResponseBatchWithReorg, SqlClient};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -115,7 +115,7 @@ impl StreamTask {
                 }
             };
 
-            let mut reorg_stream = nozzle_client::with_reorg(result_stream);
+            let mut reorg_stream = amp_client::with_reorg(result_stream);
             info!(
                 table = %self.table_name,
                 "stream_started"
@@ -157,7 +157,7 @@ impl StreamTask {
         shutdown_token: &tokio_util::sync::CancellationToken,
     ) -> bool
     where
-        S: futures::Stream<Item = Result<ResponseBatchWithReorg, nozzle_client::Error>> + Unpin,
+        S: futures::Stream<Item = Result<ResponseBatchWithReorg, amp_client::Error>> + Unpin,
     {
         while let Some(result) = reorg_stream.next().await {
             match result {
@@ -214,7 +214,7 @@ impl StreamTask {
     async fn handle_batch(
         &self,
         data: common::arrow::array::RecordBatch,
-        metadata: nozzle_client::Metadata,
+        metadata: amp_client::Metadata,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
     ) -> bool {
@@ -317,7 +317,7 @@ impl StreamTask {
     /// Returns true on success, false if an error occurred (triggers reconnect).
     async fn handle_reorg(
         &self,
-        invalidation: Vec<nozzle_client::InvalidationRange>,
+        invalidation: Vec<amp_client::InvalidationRange>,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
     ) -> bool {

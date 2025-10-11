@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 
 export class QueryableEvent extends Schema.Class<QueryableEvent>(
-  "Nozzle/studio/models/QueryableEvent",
+  "Amp/studio/models/QueryableEvent",
 )({
   name: Schema.NonEmptyTrimmedString.annotations({
     identifier: "QueryableEvent.name",
@@ -67,12 +67,12 @@ export class QueryableEvent extends Schema.Class<QueryableEvent>(
   ),
 }) {}
 export class QueryableEventStream extends Schema.Class<QueryableEventStream>(
-  "Nozzle/studio/models/QueryableEventStream",
+  "Amp/studio/models/QueryableEventStream",
 )({
   events: Schema.Array(QueryableEvent),
 }) {}
 
-export class DatasetSource extends Schema.Class<DatasetSource>("Nozzle/studio/models/DatasetSource")({
+export class DatasetSource extends Schema.Class<DatasetSource>("Amp/studio/models/DatasetSource")({
   metadata_columns: Schema.Array(Schema.Struct({
     name: Schema.NonEmptyTrimmedString,
     datatype: Schema.Literal(
@@ -105,7 +105,7 @@ export class DatasetSource extends Schema.Class<DatasetSource>("Nozzle/studio/mo
   }),
 }) {}
 
-export class DefaultQuery extends Schema.Class<DefaultQuery>("Nozzle/studio/models/DefaultQuery")({
+export class DefaultQuery extends Schema.Class<DefaultQuery>("Amp/studio/models/DefaultQuery")({
   title: Schema.NonEmptyTrimmedString.annotations({
     identifier: "DefaultQuery.title",
   }),

@@ -1,7 +1,7 @@
 # tests/fixtures/mock_clients.py
 """
 Mock clients and components for testing the data loader framework.
-Fixed import paths for nozzle project structure.
+Fixed import paths for amp project structure.
 """
 
 from typing import Any, Dict, Optional
@@ -11,7 +11,7 @@ import pyarrow as pa
 
 # Import with proper error handling
 try:
-    from src.nozzle.loaders.base import DataLoader, LoadResult
+    from src.amp.loaders.base import DataLoader, LoadResult
 except ImportError:
     # Provide fallback implementations for when modules aren't available
     from abc import ABC, abstractmethod

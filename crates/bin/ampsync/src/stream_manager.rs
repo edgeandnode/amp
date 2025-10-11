@@ -5,9 +5,9 @@
 
 use std::{env, sync::Arc, time::Duration};
 
+use amp_client::SqlClient;
 use common::BoxError;
 use datasets_derived::manifest::TableInput;
-use nozzle_client::SqlClient;
 use tracing::{debug, info, warn};
 
 use crate::{

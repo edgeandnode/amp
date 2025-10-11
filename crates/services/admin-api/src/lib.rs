@@ -1,4 +1,4 @@
-//! Nozzle Admin API
+//! Amp Admin API
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
@@ -127,7 +127,7 @@ pub async fn serve(
 #[derive(utoipa::OpenApi)]
 #[openapi(
     info(
-        title = "Nozzle Admin API",
+        title = "Amp Admin API",
         version = "1.0.0",
         description = include_str!("../SPEC_DESCRIPTION.md")
     ),

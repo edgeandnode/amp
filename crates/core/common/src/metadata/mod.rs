@@ -79,7 +79,7 @@ pub async fn extract_footer_bytes_from_file(
     Ok(footer_bytes)
 }
 
-pub async fn nozzle_metadata_from_parquet_file(
+pub async fn amp_metadata_from_parquet_file(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
 ) -> Result<(String, ParquetMeta, FooterBytes), BoxError> {

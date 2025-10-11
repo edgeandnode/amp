@@ -1,6 +1,6 @@
 /**
  * Mock metadata for testing SQL intellisense features
- * Provides realistic test data representing Nozzle dataset metadata
+ * Provides realistic test data representing Amp dataset metadata
  */
 
 import type { DatasetSource } from "studio-cli/Studio/Model"

@@ -2,6 +2,7 @@
 name = "datasets-derived"
 edition = "2024"
 version.workspace = true
+license-file.workspace = true
 
 [features]
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]

@@ -6,9 +6,9 @@ The goal is safe, coordinated distributed processing with strong consistency gua
 
 ## Overview
 
-The `metadata-db` crate is a PostgreSQL-based metadata management system for Project Nozzle.
+The `metadata-db` crate is a PostgreSQL-based metadata management system for Project Amp.
 It serves as the central coordination layer for distributed data processing jobs,
-location tracking, and worker node management in the Nozzle ETL pipeline.
+location tracking, and worker node management in the Amp ETL pipeline.
 
 ## Context and Purpose
 
@@ -36,7 +36,7 @@ This crate exists solely to **safely persist and retrieve metadata**. All higher
 
 **🏗️ Architectural Context:**
 
-In Nozzle's distributed architecture, metadata-db serves as the **shared data persistence layer** that consuming crates use to:
+In Amp's distributed architecture, metadata-db serves as the **shared data persistence layer** that consuming crates use to:
 - Store and retrieve job states (consuming crates implement job scheduling)
 - Persist location information (consuming crates implement location selection)
 - Track worker registrations (consuming crates implement worker orchestration)
@@ -53,7 +53,7 @@ This clear separation ensures that business logic remains in appropriate applica
 - **Resource isolation**: Clear boundaries between different metadata domains
 - **Observability**: Comprehensive tracing and error reporting for debugging distributed issues
 
-This crate is foundational to Nozzle's reliability,
+This crate is foundational to Amp's reliability,
 ensuring that distributed blockchain data processing can scale safely
 while maintaining the consistency guarantees required for financial and analytical workloads.
 

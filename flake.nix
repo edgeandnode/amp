@@ -46,7 +46,7 @@
 
           # Extract version from workspace Cargo.toml
           workspaceCargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-          nozzleVersion = workspaceCargoToml.workspace.package.version;
+          ampVersion = workspaceCargoToml.workspace.package.version;
 
           # Build dependencies
           nativeBuildInputs = with pkgs; [
@@ -75,10 +75,10 @@
               else "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
           };
 
-          # Build the nozzle package
-          nozzle = craneLib.buildPackage {
-            pname = "nozzle";
-            version = nozzleVersion;
+          # Build the ampd package
+          ampd = craneLib.buildPackage {
+            pname = "ampd";
+            version = ampVersion;
             src = craneLib.cleanCargoSource ./.;
             strictDeps = true;
 
@@ -87,28 +87,28 @@
             # Point v8 build to pre-fetched library
             RUSTY_V8_ARCHIVE = rustyV8Lib;
 
-            # Build only the nozzle binary
-            cargoExtraArgs = "-p nozzle";
+            # Build only the ampd binary
+            cargoExtraArgs = "-p ampd";
           };
         in
-          f {inherit pkgs toolchain nozzle;}
+          f {inherit pkgs toolchain ampd;}
       );
   in {
     formatter = forAllSystems ({pkgs, ...}: pkgs.alejandra);
 
-    packages = forAllSystems ({nozzle, ...}: {
-      inherit nozzle;
-      default = nozzle;
+    packages = forAllSystems ({ampd, ...}: {
+      inherit ampd;
+      default = ampd;
     });
 
-    apps = forAllSystems ({nozzle, ...}: {
-      nozzle = {
+    apps = forAllSystems ({ampd, ...}: {
+      ampd = {
         type = "app";
-        program = "${nozzle}/bin/nozzle";
+        program = "${ampd}/bin/ampd";
       };
       default = {
         type = "app";
-        program = "${nozzle}/bin/nozzle";
+        program = "${ampd}/bin/ampd";
       };
     });
 

@@ -15,10 +15,10 @@ import pytest
 
 try:
     import lmdb
-    from src.nozzle.loaders.base import LoadMode
-    from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
+    from src.amp.loaders.base import LoadMode
+    from src.amp.loaders.implementations.lmdb_loader import LMDBLoader
 except ImportError:
-    pytest.skip('LMDB or nozzle modules not available', allow_module_level=True)
+    pytest.skip('LMDB or amp modules not available', allow_module_level=True)
 
 
 @pytest.fixture

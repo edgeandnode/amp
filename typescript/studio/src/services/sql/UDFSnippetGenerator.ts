@@ -2,7 +2,7 @@
  * UDF Snippet Generator
  *
  * This module provides specialized functionality for generating Monaco Editor
- * snippets for Nozzle User-Defined Functions (UDFs). It creates intelligent
+ * snippets for Amp User-Defined Functions (UDFs). It creates intelligent
  * parameter placeholders with proper tab navigation and type hints.
  *
  * Key Features:
@@ -253,7 +253,7 @@ export class UdfSnippetGenerator {
     const parameterSection = parameterHints ? `\n\n${parameterHints}` : ""
 
     const documentation: IMarkdownString = {
-      value: `**${displayName}** - Nozzle User-Defined Function
+      value: `**${displayName}** - Amp User-Defined Function
 
 ${udf.description}
 
@@ -305,10 +305,10 @@ ${udf.sql.trim()}
     const paramText = paramCount === 1 ? "parameter" : "parameters"
 
     if (udf.returnType) {
-      return `Nozzle UDF → ${udf.returnType} (${paramCount} ${paramText})`
+      return `Amp UDF → ${udf.returnType} (${paramCount} ${paramText})`
     }
 
-    return `Nozzle UDF (${paramCount} ${paramText})`
+    return `Amp UDF (${paramCount} ${paramText})`
   }
 
   /**
