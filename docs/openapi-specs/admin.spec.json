@@ -401,6 +401,78 @@
         }
       }
     },
+    "/datasets/{name}/versions/{version}/manifest": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{name}/versions/{version}/manifest` endpoint",
+        "description": "Retrieves the raw manifest JSON for a specific version of a dataset.\n\n## Path Parameters\n- `name`: Dataset name (validated identifier)\n- `version`: Dataset version using semantic versioning (e.g., \"1.0.0\")\n\n## Response\n- **200 OK**: Returns the raw manifest JSON\n- **400 Bad Request**: Invalid dataset name or version format\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `MANIFEST_NOT_FOUND`: No manifest exists with the given name/version\n- `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store\n\nThis handler:\n- Validates and extracts the dataset name and version from the URL path\n- Retrieves the raw manifest JSON directly from the dataset manifests store\n- Returns the manifest as a JSON response with proper Content-Type header",
+        "operationId": "datasets_get_manifest",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Dataset version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved manifest JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dataset name or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Manifest not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{name}/versions/{version}/schema": {
       "get": {
         "tags": [
