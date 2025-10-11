@@ -10,10 +10,7 @@ use arrow_flight::{
     sql::{Any, CommandStatementQuery},
 };
 use async_stream::stream;
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response as AxumResponse},
-};
+use axum::{http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     DetachedLogicalPlan, PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
@@ -46,7 +43,6 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use serde_json::json;
@@ -92,20 +88,7 @@ pub enum Error {
     StreamingExecutionError(String),
 }
 
-impl From<prost::DecodeError> for Error {
-    fn from(e: prost::DecodeError) -> Self {
-        Error::PbDecodeError(e.to_string())
-    }
-}
-
-fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
-    match e {
-        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
-        _ => Status::internal(outer.to_string()),
-    }
-}
-
-impl RequestError for Error {
+impl Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::PbDecodeError(_) => "PB_DECODE_ERROR",
@@ -130,9 +113,24 @@ impl RequestError for Error {
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
         }
     }
+}
 
-    fn status_code(&self) -> StatusCode {
-        match self {
+impl From<prost::DecodeError> for Error {
+    fn from(e: prost::DecodeError) -> Self {
+        Error::PbDecodeError(e.to_string())
+    }
+}
+
+fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
+    match e {
+        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
+        _ => Status::internal(outer.to_string()),
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let status_code = match self {
             Error::CoreError(
                 CoreError::InvalidPlan(_)
                 | CoreError::SqlParseError(_)
@@ -157,13 +155,13 @@ impl RequestError for Error {
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
             Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
-        }
-    }
-}
+        };
+        let res = json!({
+            "error_code": self.error_code(),
+            "error_message": self.to_string(),
+        });
 
-impl IntoResponse for Error {
-    fn into_response(self) -> AxumResponse {
-        BoxRequestError::from(self).into_response()
+        (status_code, res.to_string()).into_response()
     }
 }
 

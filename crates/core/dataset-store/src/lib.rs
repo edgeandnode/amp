@@ -175,12 +175,12 @@ impl DatasetStore {
                 .dataset_manifests_store
                 .get_latest_version(name)
                 .await
-                .map_err(|GetLatestVersionError::MetadataDbError(source)| {
-                    GetDatasetError::GetLatestVersion {
+                .map_err(
+                    |GetLatestVersionError(source)| GetDatasetError::GetLatestVersion {
                         name: name.to_string(),
                         source,
-                    }
-                })?
+                    },
+                )?
                 .unwrap_or_default(),
         };
 

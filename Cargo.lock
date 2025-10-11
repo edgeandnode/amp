@@ -854,7 +854,6 @@ dependencies = [
  "dump",
  "futures",
  "generate-manifest",
- "http-common",
  "metadata-db",
  "monitoring",
  "serde_json",
@@ -4426,17 +4425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "http-common"
-version = "0.1.0"
-dependencies = [
- "axum 0.8.4",
- "common",
- "serde_json",
- "tokio",
- "tower-http",
-]
-
-[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7151,7 +7139,6 @@ dependencies = [
  "dataset-store",
  "dump",
  "futures",
- "http-common",
  "metadata-db",
  "monitoring",
  "prost 0.13.3",

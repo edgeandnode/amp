@@ -81,11 +81,9 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 **What belongs here:**
 - **`server`**: Arrow Flight gRPC server and JSON Lines HTTP server
 - **`admin-api`**: Administrative HTTP API for management
-- **`http-common`**: Shared HTTP utilities and middleware
 
 **Dependency Rules:**
 - ✅ Can depend on `core` crates for business logic
-- ✅ `http-common` can be shared among other service crates
 - ❌ Should NOT depend on `extractors` or `bin` crates directly
 - ✅ Services orchestrate core functionality for external interfaces
 
@@ -384,8 +382,6 @@ Each feature must follow this exact format:
 [features]
 # Default features (enabled by default)
 default = ["basic-logging"]
-# Enable admin API endpoints and management interface
-admin-api = ["dep:axum", "dep:tower", "http-common/admin"]
 # Basic logging functionality with structured output
 basic-logging = ["dep:tracing", "dep:tracing-subscriber"]
 # PostgreSQL database support with connection pooling
