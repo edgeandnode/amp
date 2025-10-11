@@ -2,6 +2,7 @@
 name = "amp-client"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [dependencies]
 arrow-flight.workspace = true

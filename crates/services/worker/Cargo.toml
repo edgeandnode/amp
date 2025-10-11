@@ -2,6 +2,7 @@
 name = "worker"
 edition = "2024"
 version.workspace = true
+license-file.workspace = true
 
 [dependencies]
 backon.workspace = true

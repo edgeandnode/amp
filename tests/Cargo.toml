@@ -2,6 +2,7 @@
 name = "tests"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "tests"
