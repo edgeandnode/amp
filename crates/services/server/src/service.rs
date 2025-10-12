@@ -3,7 +3,7 @@ use std::{pin::Pin, sync::Arc};
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
     HandshakeResponse, PutResult, SchemaAsIpc, Ticket,
-    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES},
+    encode::GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES,
     error::FlightError,
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
@@ -30,7 +30,6 @@ use common::{
 use datafusion::{
     common::{DFSchema, tree_node::TreeNodeRecursion},
     error::DataFusionError,
-    execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
     physical_plan::stream::RecordBatchStreamAdapter,
 };
@@ -49,6 +48,8 @@ use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
+
+use crate::non_empty_record_batch_stream::NonEmptyRecordBatchStream;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -201,7 +202,7 @@ impl From<Error> for Status {
 }
 
 pub enum QueryResultStream {
-    NonIncremental(SendableRecordBatchStream),
+    NonIncremental(BoxStream<'static, Result<RecordBatch, DataFusionError>>),
     Incremental(BoxStream<'static, Result<QueryMessage, Error>>),
 }
 
@@ -338,8 +339,10 @@ impl Service {
             };
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
-            let record_baches = ctx.execute_plan(plan, true).await?;
-            let stream = QueryResultStream::NonIncremental(record_baches);
+            let record_batches = ctx.execute_plan(plan, true).await?;
+            let stream = QueryResultStream::NonIncremental(
+                NonEmptyRecordBatchStream::new(record_batches).boxed(),
+            );
 
             if let Some(metrics) = &self.metrics {
                 Ok(track_query_metrics(stream, metrics, query_start_time))
@@ -624,7 +627,6 @@ fn track_query_metrics(
 
     match stream {
         QueryResultStream::NonIncremental(record_batch_stream) => {
-            let schema = record_batch_stream.schema();
             let wrapped_stream = stream! {
                 let mut total_rows = 0u64;
                 let mut total_bytes = 0u64;
@@ -659,10 +661,7 @@ fn track_query_metrics(
                 metrics.record_query_execution(duration, total_rows, total_bytes);
             };
 
-            let wrapped: SendableRecordBatchStream =
-                Box::pin(RecordBatchStreamAdapter::new(schema, wrapped_stream));
-
-            QueryResultStream::NonIncremental(wrapped)
+            QueryResultStream::NonIncremental(wrapped_stream.boxed())
         }
         QueryResultStream::Incremental(message_stream) => {
             // Increment active streaming query counter
@@ -726,22 +725,45 @@ fn flight_data_stream(
     query_result_stream: QueryResultStream,
     schema: SchemaRef,
 ) -> TonicStream<FlightData> {
-    let mut incremental_stream = match query_result_stream {
-        QueryResultStream::Incremental(incremental_stream) => incremental_stream,
+    match query_result_stream {
         QueryResultStream::NonIncremental(non_incremental_stream) => {
-            return FlightDataEncoderBuilder::new()
-                .with_schema(schema)
-                .build(
-                    non_incremental_stream
-                        .map_err(Error::ExecutionError)
-                        .map_err(Status::from)
-                        .err_into(),
-                )
-                .map_err(Status::from)
-                .boxed();
+            // Use manual encoding for NonIncremental streams to preserve empty batches
+            // (arrow-flight's FlightDataEncoderBuilder filters them out)
+            stream! {
+                let mut dictionary_tracker = DictionaryTracker::new(true);
+
+                // Send schema first
+                let schema_message = FlightData::from(SchemaAsIpc::new(&schema, &IpcWriteOptions::default()));
+                yield Ok(schema_message);
+
+                // Encode each batch
+                let mut non_incremental_stream = non_incremental_stream;
+                while let Some(result) = non_incremental_stream.next().await {
+                    match result {
+                        Ok(batch) => {
+                            match encode_record_batch(batch, None, &mut dictionary_tracker) {
+                                Ok(encoded) => {
+                                    for message in encoded {
+                                        yield Ok(message);
+                                    }
+                                }
+                                Err(err) => {
+                                    yield Err(err);
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            yield Err(Error::ExecutionError(err).into());
+                            return;
+                        }
+                    }
+                }
+            }
+            .boxed()
         }
-    };
-    stream! {
+        QueryResultStream::Incremental(mut incremental_stream) => {
+            stream! {
         let mut dictionary_tracker = DictionaryTracker::new(true);
         let mut ranges: Vec<BlockRange> = Default::default();
         let mut first_message = true;
@@ -768,7 +790,7 @@ fn flight_data_stream(
                             "ranges": &ranges,
                             "ranges_complete": false,
                         });
-                        match encode_record_batch(batch, &app_metadata, &mut dictionary_tracker) {
+                        match encode_record_batch(batch, Some(&app_metadata), &mut dictionary_tracker) {
                             Ok(encoded) => {
                                 for message in encoded {
                                     yield Ok(message);
@@ -788,7 +810,7 @@ fn flight_data_stream(
                             "ranges": &ranges,
                             "ranges_complete": true,
                         });
-                        match encode_record_batch(empty_batch, &app_metadata, &mut dictionary_tracker) {
+                        match encode_record_batch(empty_batch, Some(&app_metadata), &mut dictionary_tracker) {
                             Ok(encoded) => {
                                 for message in encoded {
                                     yield Ok(message);
@@ -806,17 +828,20 @@ fn flight_data_stream(
         }
     }
     .boxed()
+        }
+    }
 }
 
 pub fn encode_record_batch(
     batch: RecordBatch,
-    app_metadata: &serde_json::Value,
+    app_metadata: Option<&serde_json::Value>,
     dictionary_tracker: &mut DictionaryTracker,
 ) -> Result<Vec<FlightData>, Status> {
     let ipc = IpcDataGenerator::default();
     let options = IpcWriteOptions::default();
     let mut encoded: Vec<FlightData> = Default::default();
-    let app_metadata = serde_json::to_string(app_metadata).unwrap();
+    let app_metadata_string = app_metadata.map(|m| serde_json::to_string(m).unwrap());
+
     for batch in split_batch_for_grpc_response(batch, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES) {
         let (encoded_dictionaries, encoded_batch) = ipc
             .encoded_batch(&batch, dictionary_tracker, &options)
@@ -824,7 +849,12 @@ pub fn encode_record_batch(
         for encoded_dictionary in encoded_dictionaries {
             encoded.push(encoded_dictionary.into());
         }
-        encoded.push(FlightData::from(encoded_batch).with_app_metadata(app_metadata.clone()));
+
+        let mut flight_data = FlightData::from(encoded_batch);
+        if let Some(ref metadata) = app_metadata_string {
+            flight_data = flight_data.with_app_metadata(metadata.clone());
+        }
+        encoded.push(flight_data);
     }
     Ok(encoded)
 }

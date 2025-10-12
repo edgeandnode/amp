@@ -43,12 +43,12 @@ impl FlightClient {
         })
     }
 
-    /// Execute a SQL query and return the results as JSON.
+    /// Execute a SQL query and return the results as JSON along with batch count.
     pub async fn run_query(
         &mut self,
         query: &str,
         take: impl Into<Option<usize>>,
-    ) -> Result<serde_json::Value, BoxError> {
+    ) -> Result<(serde_json::Value, usize), BoxError> {
         let take = take.into();
 
         tracing::debug!("Running query: {query}, take: {take:?}");
@@ -67,10 +67,12 @@ impl FlightClient {
         let mut writer = ArrayWriter::new(&mut buf);
 
         let mut remaining = take.unwrap_or(usize::MAX);
+        let mut batch_count = 0;
 
         while let Some(batch_result) = batches.next().await {
             let batch = batch_result?;
             let row_count = batch.num_rows();
+            batch_count += 1;
 
             if remaining >= row_count {
                 writer.write(&batch)?;
@@ -88,7 +90,7 @@ impl FlightClient {
 
         writer.finish()?;
 
-        Ok(serde_json::from_slice(&buf)?)
+        Ok((serde_json::from_slice(&buf)?, batch_count))
     }
 
     /// Register a streaming query with the given name.
@@ -113,21 +115,22 @@ impl FlightClient {
     }
 
     /// Take a specified number of rows from a registered stream.
+    /// Returns the JSON result and the number of batches consumed.
     pub async fn take_from_stream(
         &mut self,
         name: &str,
         n: usize,
-    ) -> Result<serde_json::Value, BoxError> {
+    ) -> Result<(serde_json::Value, usize), BoxError> {
         let Some(stream) = self.streams.get_mut(name) else {
             return Err(Box::from(format!("Stream \"{name}\" not found")));
         };
 
         let mut buf = Vec::new();
         let mut writer = ArrayWriter::new(&mut buf);
-        let batch = stream.take(n).await?;
+        let (batch, batch_count) = stream.take(n).await?;
         writer.write(&batch)?;
         writer.finish()?;
-        Ok(serde_json::from_slice(&buf)?)
+        Ok((serde_json::from_slice(&buf)?, batch_count))
     }
 
     /// Execute a query and return a channel of raw FlightData messages for metadata extraction.
@@ -194,18 +197,21 @@ impl ResponseStream {
     }
 
     /// Take the first `n` rows from the stream, advancing the cursor.
-    pub async fn take(&mut self, mut n: usize) -> Result<RecordBatch, BoxError> {
+    /// Returns the concatenated batch and the number of batches consumed.
+    pub async fn take(&mut self, mut n: usize) -> Result<(RecordBatch, usize), BoxError> {
         let schema = self.current_batch.schema();
         let mut out_batches = Vec::new();
+        let mut batch_count = 0;
 
         // Drain from the buffer we already hold
         if self.current_batch.num_rows() > 0 {
+            batch_count += 1;
             if self.current_batch.num_rows() >= n {
                 let slice = self.current_batch.slice(0, n);
                 self.current_batch = self
                     .current_batch
                     .slice(n, self.current_batch.num_rows() - n);
-                return Ok(slice);
+                return Ok((slice, batch_count));
             }
             n -= self.current_batch.num_rows();
             out_batches.push(self.current_batch.clone());
@@ -216,6 +222,7 @@ impl ResponseStream {
         while n > 0 {
             match self.stream.next().await {
                 Some(Ok(batch)) => {
+                    batch_count += 1;
                     if batch.num_rows() > n {
                         // keep remainder for future calls
                         out_batches.push(batch.slice(0, n));
@@ -231,10 +238,12 @@ impl ResponseStream {
         }
 
         // Stitch together what we collected
-        Ok(match out_batches.len() {
+        let result_batch = match out_batches.len() {
             0 => RecordBatch::new_empty(schema),
             1 => out_batches.remove(0),
             _ => concat_batches(&schema, &out_batches)?,
-        })
+        };
+
+        Ok((result_batch, batch_count))
     }
 }
