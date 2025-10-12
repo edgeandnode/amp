@@ -22,14 +22,18 @@ dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
+eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
-generate-manifest = { path = "../generate-manifest" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde_json.workspace = true
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
+substreams-datasets = { path = "../../extractors/substreams" }
+thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"] }
