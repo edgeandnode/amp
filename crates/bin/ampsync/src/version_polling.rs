@@ -12,7 +12,7 @@ use crate::manifest;
 
 /// Background task that polls for new dataset versions.
 ///
-/// Runs only when DATASET_VERSION is not specified. Polls the admin-api versions endpoint
+/// Runs only when AMP_DATASET_VERSION is not specified. Polls the admin-api versions endpoint
 /// at regular intervals to check if a new version is available. When a new version is detected,
 /// sends it through the watch channel to trigger a schema reload and stream restart.
 ///

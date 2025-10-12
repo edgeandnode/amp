@@ -40,7 +40,7 @@ The service is configured through environment variables:
 
 #### Dataset Configuration
 
-- **`DATASET_NAME`** - Name of the dataset to sync
+- **`AMP_DATASET_NAME`** - Name of the dataset to sync
     - **Type**: Dataset name (string, must be valid `datasets_common::name::Name`)
     - **Example**: `my_dataset`, `ethereum_blocks`
     - **Notes**: Must match a published dataset in Amp Admin API
@@ -78,7 +78,7 @@ Option 2: Individual components (all required except password)
 
 #### Dataset Configuration
 
-- **`DATASET_VERSION`** - Specific dataset version to sync
+- **`AMP_DATASET_VERSION`** - Specific dataset version to sync
     - **Type**: Version string (simple version like `0.1.0`)
     - **Example**: `0.1.0`, `1.2.3`, `0.1.1-Ltx123...`
     - **Default**: None (uses latest version)
@@ -201,8 +201,8 @@ services:
     command: ["sync"]
     environment:
       # Dataset configuration
-      DATASET_NAME: my_dataset
-      # DATASET_VERSION: 0.1.0  # Optional: pin to specific version
+      AMP_DATASET_NAME: my_dataset
+      # AMP_DATASET_VERSION: 0.1.0  # Optional: pin to specific version
 
       # Amp server endpoints
       AMP_FLIGHT_ADDR: http://amp:1602
@@ -227,8 +227,8 @@ services:
 
 ```bash
 # Set environment variables
-export DATASET_NAME=my_dataset
-# export DATASET_VERSION=0.1.0  # Optional: pin to specific version
+export AMP_DATASET_NAME=my_dataset
+# export AMP_DATASET_VERSION=0.1.0  # Optional: pin to specific version
 export DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
 export AMP_FLIGHT_ADDR=http://localhost:1602
 export AMP_ADMIN_API_ADDR=http://localhost:1610
@@ -452,7 +452,7 @@ crates/bin/ampsync/
 
 - Version polling encountered an error while checking for new versions
 - Check admin-api availability and network connectivity
-- Verify `DATASET_NAME` spelling and that dataset exists in admin-api
+- Verify `AMP_DATASET_NAME` spelling and that dataset exists in admin-api
 - Non-fatal - polling will continue with exponential backoff
 - If persistent, check `AMP_ADMIN_API_ADDR` configuration
 

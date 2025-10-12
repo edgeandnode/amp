@@ -19,9 +19,9 @@ pub struct AmpsyncConfig {
     pub amp_flight_addr: String,
     /// Amp Admin API endpoint for schema resolution.
     pub amp_admin_api_addr: String,
-    /// Dataset name (from DATASET_NAME env var).
+    /// Dataset name (from AMP_DATASET_NAME env var).
     pub dataset_name: Name,
-    /// Optional dataset version (from DATASET_VERSION env var). If None, uses latest version.
+    /// Optional dataset version (from AMP_DATASET_VERSION env var). If None, uses latest version.
     pub dataset_version: Option<Version>,
     /// Interval in seconds for polling new versions (only when dataset_version is None).
     pub version_poll_interval_secs: u64,
