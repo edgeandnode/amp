@@ -15,6 +15,7 @@ axum.workspace = true
 backon.workspace = true
 bincode.workspace = true
 bytes.workspace = true
+chrono.workspace = true
 datafusion.workspace = true
 datafusion-proto.workspace = true
 datafusion-tracing.workspace = true

@@ -66,8 +66,8 @@ enum Command {
         /// The size of each partition in MB. Once the size is reached, a new part file is created. This
         /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
         /// but will correlate with this value. Defaults to 4 GB.
-        #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
-        partition_size_mb: u64,
+        #[arg(long, env = "DUMP_PARTITION_SIZE_MB")]
+        partition_size_mb: Option<u64>,
 
         /// How often to run the dump job in minutes. By default will run once and exit.
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
@@ -186,6 +186,7 @@ async fn main_inner() -> Result<(), BoxError> {
             let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
+            let config = Arc::new(config);
             // Spawn worker
             let worker = Worker::new(
                 config.clone(),
@@ -217,7 +218,7 @@ async fn main_inner() -> Result<(), BoxError> {
             // Spawn server only if at least one query server is enabled
             let server_fut = if flight_server || jsonl_server {
                 let (addrs, future) = ampd::server::run(
-                    config,
+                    config.clone(),
                     metadata_db,
                     flight_server,
                     jsonl_server,
@@ -265,8 +266,12 @@ async fn main_inner() -> Result<(), BoxError> {
             fresh,
             only_finalized_blocks,
         } => {
-            let (config, metadata_db) =
+            let (mut config, metadata_db) =
                 load_config_and_metadata_db(config_path.as_ref(), false).await?;
+
+            if let Some(size_mb) = partition_size_mb {
+                config.parquet.target_size.bytes = size_mb * 1024 * 1024;
+            }
 
             let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
@@ -323,13 +328,12 @@ async fn main_inner() -> Result<(), BoxError> {
             }
 
             let result = dump_cmd::dump(
-                config,
+                config.into(),
                 metadata_db,
                 datasets_to_dump,
                 ignore_deps,
                 end_block,
                 n_jobs,
-                partition_size_mb,
                 run_every_mins,
                 None,
                 location,
@@ -360,7 +364,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let (addrs, server) = ampd::server::run(
-                config,
+                config.into(),
                 metadata_db,
                 flight_server,
                 jsonl_server,
@@ -386,7 +390,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let worker = Worker::new(
-                config.clone(),
+                config.into(),
                 metadata_db,
                 node_id.parse()?,
                 telemetry_metrics_meter.clone(),
@@ -405,7 +409,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
             let (addr, server) = controller::serve(
                 config.addrs.admin_api_addr,
-                config,
+                config.into(),
                 telemetry_metrics_meter.as_ref(),
             )
             .await?;
@@ -468,12 +472,12 @@ async fn main_inner() -> Result<(), BoxError> {
 async fn load_config_and_metadata_db(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<(Arc<Config>, MetadataDb), BoxError> {
+) -> Result<(Config, MetadataDb), BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
 
-    let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
+    let config = Config::load(config, true, None, allow_temp_db).await?;
     let metadata_db = config.metadata_db().await?.into();
     Ok((config, metadata_db))
 }

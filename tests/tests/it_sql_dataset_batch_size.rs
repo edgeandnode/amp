@@ -1,12 +1,17 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
-use common::{BoxError, catalog::physical::PhysicalTable};
+use common::{
+    BoxError, ParquetFooterCache, catalog::physical::PhysicalTable, metadata::Generation,
+};
 use dataset_store::DatasetStore;
 use dump::{
     compaction::{
         AmpCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
     },
-    compaction_opts, parquet_opts,
+    parquet_opts,
 };
 use futures::StreamExt;
 use monitoring::logging;
@@ -83,6 +88,7 @@ async fn sql_dataset_input_batch_size() {
 /// and collection workflows with specific batch size configurations.
 struct TestCtx {
     ctx: testlib::ctx::TestCtx,
+    cache: ParquetFooterCache,
 }
 
 impl TestCtx {
@@ -97,6 +103,11 @@ impl TestCtx {
             .await
             .expect("Failed to create test context");
 
+        let cache = ParquetFooterCache::builder(
+            (ctx.daemon_server().config().parquet.cache_size_mb * 1024 * 1024) as usize,
+        )
+        .build();
+
         // Deploy the TypeScript dataset
         let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("amp.config.ts"));
         let cli = ctx.new_amp_cli();
@@ -105,7 +116,7 @@ impl TestCtx {
             .await
             .expect("Failed to register sql_stream_ds dataset");
 
-        Self { ctx }
+        Self { ctx, cache }
     }
 
     /// Get reference to the dataset store.
@@ -155,18 +166,18 @@ impl TestCtx {
     async fn spawn_compaction_and_await_completion(&self, table: &Arc<PhysicalTable>) {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
-        let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props, None);
-        opts.compactor_active = true;
-        opts.collector_active = false;
-        opts.file_lock_duration = Duration::from_millis(25);
-        opts.collector_interval = Duration::ZERO;
-        opts.compactor_interval = Duration::ZERO;
-        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-        let mut task = Compactor::start(table, &Arc::new(opts));
+        let mut opts = parquet_opts(&config.parquet);
+        opts.compactor.active.swap(true, Ordering::SeqCst);
+        opts.collector.active.swap(false, Ordering::SeqCst);
+        let opts_mut = Arc::make_mut(&mut opts);
+        opts_mut.collector.file_lock_duration = Duration::from_millis(25);
+        opts_mut.collector.interval = Duration::ZERO;
+        opts_mut.compactor.interval = Duration::ZERO;
+        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        let mut task = Compactor::start(table, &self.cache, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
         }
     }
 
@@ -174,15 +185,15 @@ impl TestCtx {
     async fn spawn_collection_and_await_completion(&self, table: &Arc<PhysicalTable>) {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
-        let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props, None);
-        opts.compactor_active = false;
-        opts.collector_active = true;
-        opts.file_lock_duration = Duration::ZERO;
-        opts.collector_interval = Duration::ZERO;
-        opts.compactor_interval = Duration::ZERO;
-        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-        let mut task = Collector::start(table, &Arc::new(opts));
+        let mut opts = parquet_opts(&config.parquet);
+        opts.compactor.active.swap(true, Ordering::SeqCst);
+        opts.collector.active.swap(false, Ordering::SeqCst);
+        let opts_mut = Arc::make_mut(&mut opts);
+        opts_mut.collector.file_lock_duration = Duration::ZERO;
+        opts_mut.collector.interval = Duration::ZERO;
+        opts_mut.compactor.interval = Duration::ZERO;
+        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        let mut task = Collector::start(table, &self.cache, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(100)).await;

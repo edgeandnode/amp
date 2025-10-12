@@ -1,81 +1,50 @@
+pub mod algorithm;
 pub mod collector;
 pub mod compactor;
 pub mod error;
-pub mod group;
-pub mod size;
+pub mod plan;
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     sync::Arc,
     time::Duration,
 };
 
-use common::{
-    Timestamp, catalog::physical::PhysicalTable,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
+use common::{ParquetFooterCache, Timestamp, catalog::physical::PhysicalTable};
+use futures::{
+    FutureExt, TryFutureExt,
+    future::{BoxFuture, ok as ready_ok},
 };
-use futures::{FutureExt, TryFutureExt, future::BoxFuture};
 use tokio::task::JoinHandle;
 
-use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
 pub use crate::compaction::{
+    algorithm::{CompactionAlgorithm, SegmentSizeLimit},
     error::{CollectionResult, CollectorError, CompactionResult, CompactorError},
-    size::{SegmentSize, SegmentSizeLimit},
+};
+use crate::{
+    WriterProperties,
+    compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt},
+    metrics::MetricsRegistry,
 };
 
 /// Duration collector must wait prior to deleting files
 pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
-#[derive(Clone, Debug)]
-pub struct CompactionProperties {
-    pub compactor_active: bool,
-    pub collector_active: bool,
-    pub compactor_interval: Duration,
-    pub collector_interval: Duration,
-    pub file_lock_duration: Duration,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub parquet_writer_props: ParquetWriterProperties,
-    pub size_limit: SegmentSizeLimit,
-    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
-}
-
-impl Display for CompactionProperties {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let active = format!(
-            "active: {}",
-            if self.compactor_active && self.collector_active {
-                "[ compactor, collector ]"
-            } else if self.compactor_active {
-                "compactor"
-            } else if self.collector_active {
-                "collector"
-            } else {
-                "false"
-            }
-        );
-        write!(
-            f,
-            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
-            compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
-            collector_interval = format!("collector_interval: {:?}", self.collector_interval),
-            file_lock_duration = format!("file_lock_duration: {:?}", self.file_lock_duration),
-            metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
-            write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
-            size_limit = format!("size_limit: {}", self.size_limit),
-        )
-    }
-}
 pub struct AmpCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
 }
 
 impl AmpCompactor {
-    pub fn start(table: Arc<PhysicalTable>, opts: Arc<CompactionProperties>) -> Self {
+    pub fn start(
+        table: Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        opts: Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
         AmpCompactor {
-            compaction_task: Compactor::start(&table, &opts),
-            deletion_task: Collector::start(&table, &opts),
+            compaction_task: Compactor::start(&table, &cache, &opts, &metrics),
+            deletion_task: Collector::start(&table, &cache, &opts, &metrics),
         }
     }
 
@@ -112,7 +81,9 @@ pub type DeletionTask = AmpCompactorTask<Collector>;
 pub struct AmpCompactorTask<T: AmpCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
-    opts: Arc<CompactionProperties>,
+    cache: ParquetFooterCache,
+    opts: Arc<WriterProperties>,
+    metrics: Option<Arc<MetricsRegistry>>,
     previous: Option<Timestamp>,
 }
 
@@ -137,7 +108,7 @@ impl<T: AmpCompactorTaskType> AmpCompactorTask<T> {
             && self
                 .elapsed_since_previous()
                 // if None, consider it ready
-                .map_or(true, |elapsed| elapsed >= T::interval(&self.opts))
+                .is_none_or(|elapsed| elapsed >= T::interval(&self.opts))
             && T::active(&self.opts)
     }
 
@@ -145,14 +116,24 @@ impl<T: AmpCompactorTaskType> AmpCompactorTask<T> {
         let task = &mut self.task;
 
         let inner = match task
-            .map_err(|join_err| T::handle_error(&self.table, &mut self.opts, join_err))
+            .map_err(|join_err| {
+                T::handle_error(
+                    &self.table,
+                    &self.cache,
+                    &mut self.opts,
+                    &self.metrics,
+                    join_err,
+                )
+            })
             .await
         {
             Ok(Ok(inner)) | Err(inner) => {
                 self.previous = Some(Timestamp::now());
                 inner
             }
-            Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, err),
+            Ok(Err(err)) => {
+                T::handle_error(&self.table, &self.cache, &mut self.opts, &self.metrics, err)
+            }
         };
         self.task = tokio::spawn(inner.run());
     }
@@ -169,31 +150,45 @@ impl<T: AmpCompactorTaskType> AmpCompactorTask<T> {
 pub trait AmpCompactorTaskType: Debug + Display + Sized + Send + 'static {
     type Error: CompactionErrorExt;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self;
+    fn new(
+        table: &Arc<PhysicalTable>,
+        cache: &ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self;
 
     /// Run the task
     fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
 
-    fn interval(opts: &Arc<CompactionProperties>) -> Duration;
+    fn interval(opts: &Arc<WriterProperties>) -> Duration;
 
-    fn active(opts: &Arc<CompactionProperties>) -> bool;
+    fn active(opts: &Arc<WriterProperties>) -> bool;
 
-    fn deactivate(opts: &mut Arc<CompactionProperties>);
+    fn deactivate(opts: &mut Arc<WriterProperties>);
 
     /// Handle errors from the previous run
     ///
     /// If the error is recoverable, return `self` to retry
+    #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn handle_error(
         table: &Arc<PhysicalTable>,
-        opts: &mut Arc<CompactionProperties>,
+        cache: &ParquetFooterCache,
+        opts: &mut Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
         err: impl Into<<Self as AmpCompactorTaskType>::Error>,
     ) -> Self {
-        let this = Self::new(table, opts);
+        let this = Self::new(table, cache, opts, metrics);
         let err = err.into();
         if err.is_cancellation() {
             Self::deactivate(opts);
-            tracing::warn!("{this:?} was cancelled");
-            return this;
+            tracing::info!("{this:?} was cancelled");
+            this
+        } else if err.is_debug() {
+            tracing::debug!("{err}");
+            this
+        } else if err.is_informational() {
+            tracing::info!("Informational error occurred in {this}: {err}");
+            this
         } else if err.is_recoverable() {
             tracing::warn!("Recoverable error occurred in {this}: {err}");
             this
@@ -202,16 +197,26 @@ pub trait AmpCompactorTaskType: Debug + Display + Sized + Send + 'static {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(table = table.table_name()))]
     fn start(
         table: &Arc<PhysicalTable>,
-        opts: &Arc<CompactionProperties>,
+        cache: &ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
     ) -> AmpCompactorTask<Self> {
-        let task = tokio::spawn(futures::future::ok(Self::new(table, opts)));
-        AmpCompactorTask {
+        let task = tokio::spawn(ready_ok(Self::new(table, cache, opts, metrics)));
+
+        let mut this = AmpCompactorTask {
             task,
             table: Arc::clone(table),
+            cache: cache.clone(),
             opts: Arc::clone(opts),
             previous: None,
-        }
+            metrics: metrics.clone(),
+        };
+
+        this.try_run();
+
+        this
     }
 }

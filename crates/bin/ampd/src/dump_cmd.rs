@@ -27,7 +27,6 @@ pub async fn dump(
     ignore_deps: bool,
     end_block: EndBlock,
     n_jobs: u16,
-    partition_size_mb: u64,
     run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
@@ -60,7 +59,6 @@ pub async fn dump(
             dataset_manifests_store,
         )
     };
-    let partition_size = partition_size_mb * 1024 * 1024;
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     if !ignore_deps {
@@ -145,7 +143,6 @@ pub async fn dump(
                     ctx.clone(),
                     tables,
                     n_jobs,
-                    partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
@@ -163,7 +160,6 @@ pub async fn dump(
                     ctx.clone(),
                     tables,
                     n_jobs,
-                    partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),

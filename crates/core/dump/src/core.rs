@@ -31,7 +31,6 @@ pub async fn dump_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
-    partition_size: u64,
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -51,7 +50,6 @@ pub async fn dump_tables(
             ctx,
             tables,
             n_jobs,
-            partition_size,
             end,
             metrics,
             meter,
@@ -68,7 +66,6 @@ pub async fn dump_raw_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
-    partition_size: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
@@ -79,8 +76,6 @@ pub async fn dump_raw_tables(
     }
 
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
-    let compaction_opts =
-        crate::compaction_opts(&ctx.config.compaction, &parquet_opts, metrics.clone()).into();
 
     // Check that all tables belong to the same dataset.
     let dataset = {
@@ -112,9 +107,7 @@ pub async fn dump_raw_tables(
                 n_jobs,
                 catalog,
                 tables,
-                partition_size,
-                &parquet_opts,
-                compaction_opts,
+                parquet_opts,
                 end,
                 &dataset.name,
                 metrics,
@@ -149,10 +142,8 @@ pub async fn dump_user_tables(
         tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
     }
 
-    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+    let opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env()?;
-    let compaction_opts =
-        crate::compaction_opts(&ctx.config.compaction, &parquet_opts, metrics.clone()).into();
 
     for table in tables {
         consistency_check(table).await?;
@@ -189,8 +180,7 @@ pub async fn dump_user_tables(
             manifest,
             &env,
             table.clone(),
-            &parquet_opts,
-            &compaction_opts,
+            &opts,
             microbatch_max_interval,
             end,
             metrics.clone(),

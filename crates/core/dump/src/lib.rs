@@ -1,6 +1,6 @@
 //! # Dump
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
@@ -15,13 +15,20 @@ pub use core::*;
 
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
-use crate::compaction::{CompactionProperties, FILE_LOCK_DURATION, SegmentSizeLimit};
+use crate::compaction::{
+    SegmentSizeLimit, collector::CollectorProperties, compactor::CompactorProperties,
+};
 
-pub fn default_partition_size() -> u64 {
-    4096 * 1024 * 1024 // 4 GB
+#[derive(Debug, Clone)]
+pub struct WriterProperties {
+    pub parquet: ParquetWriterProperties,
+    pub compactor: CompactorProperties,
+    pub collector: CollectorProperties,
+    pub partition: SegmentSizeLimit,
+    pub cache_size_mb: usize,
 }
 
-pub fn parquet_opts(config: &common::config::ParquetConfig) -> ParquetWriterProperties {
+pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterProperties> {
     // We have not done our own benchmarking, but the default 1_000_000 value for this adds about a
     // megabyte of storage per column, per row group. This analysis by InfluxData suggests that
     // smaller NDV values may be equally effective:
@@ -34,39 +41,23 @@ pub fn parquet_opts(config: &common::config::ParquetConfig) -> ParquetWriterProp
     // Note: We could set `sorting_columns` for columns like `block_num` and `ordinal`. However,
     // Datafusion doesn't actually read that metadata info anywhere and just reiles on the
     // `file_sort_order` set on the reader configuration.
-    ParquetWriterProperties::builder()
+    let parquet = ParquetWriterProperties::builder()
         .set_compression(config.compression)
         .set_bloom_filter_ndv(bloom_filter_ndv)
         .set_bloom_filter_enabled(config.bloom_filters)
-        .build()
-}
+        .build();
 
-pub fn compaction_opts(
-    config: &common::config::CompactionConfig,
-    parquet_writer_props: &ParquetWriterProperties,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> CompactionProperties {
-    let size_limit = SegmentSizeLimit::from(config);
-    let metadata_concurrency = config.metadata_concurrency;
-    let table_concurrency = config.write_concurrency;
-    let compactor_interval = Duration::from_secs(config.compactor_interval_secs);
-    let collector_interval = Duration::from_secs(config.collector_interval_secs);
-    let parquet_writer_props = parquet_writer_props.clone();
-    let file_lock_duration = config
-        .file_lock_duration_secs
-        .map(Duration::from_secs)
-        .unwrap_or(FILE_LOCK_DURATION);
+    let collector = CollectorProperties::from(config);
+    let compactor = CompactorProperties::from(config);
+    let partition = SegmentSizeLimit::from(&config.target_size);
+    let cache_size_mb = (config.cache_size_mb * 1024 * 1024) as usize;
 
-    CompactionProperties {
-        compactor_active: config.compactor_enabled,
-        collector_active: config.collector_enabled,
-        compactor_interval,
-        collector_interval,
-        file_lock_duration,
-        metadata_concurrency,
-        write_concurrency: table_concurrency,
-        parquet_writer_props,
-        size_limit,
-        metrics,
+    WriterProperties {
+        parquet,
+        compactor,
+        collector,
+        partition,
+        cache_size_mb,
     }
+    .into()
 }

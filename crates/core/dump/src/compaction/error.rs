@@ -12,11 +12,11 @@ use common::{
 };
 use datafusion::error::DataFusionError;
 use metadata_db::FileId;
-use object_store::Error as ObjectStoreError;
+use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
 use crate::{
-    ConsistencyCheckError,
+    ConsistencyCheckError, WriterProperties,
     compaction::{AmpCompactorTaskType, Collector, compactor::Compactor},
 };
 
@@ -25,9 +25,19 @@ pub type CollectionResult<T> = Result<T, CollectorError>;
 
 pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
     type Task: AmpCompactorTaskType<Error = Self>;
+    /// Whether the error is merely for debugging and does not indicate a failure
+    /// Default implementation returns false for all error variants
+    fn is_debug(&self) -> bool {
+        false
+    }
+    /// Whether the error is merely informational and does not indicate a failure
+    /// Default implementation returns false for all error variants
+    fn is_informational(&self) -> bool {
+        false
+    }
 
-    /// Whether the error is recoverable and the task can be retried
-    /// Default implementation returns true for all errors
+    /// Whether the error is recoverable and the task can continue running
+    /// Default implementation returns true for all error variants
     fn is_recoverable(&self) -> bool {
         true
     }
@@ -43,10 +53,12 @@ where
 {
     /// Catching errors while building the canonical chain for a table
     CanonicalChainError { err: BoxError },
+    /// Catching cases where the canonical chain is None or empty
+    EmptyChain,
     /// Catching errors while creating a compaction writer
     CreateWriterError {
         err: BoxError,
-        opts: ParquetWriterProperties,
+        opts: Box<ParquetWriterProperties>,
     },
     /// Catching errors while writing data to a parquet file
     FileWriteError { err: BoxError },
@@ -71,6 +83,10 @@ where
 }
 
 impl CompactorError {
+    pub fn empty_chain() -> Self {
+        Self::EmptyChain
+    }
+
     pub fn chain_error(err: BoxError) -> Self {
         Self::CanonicalChainError { err }
     }
@@ -86,9 +102,9 @@ impl CompactorError {
         }
     }
 
-    pub fn create_writer_error(opts: &ParquetWriterProperties) -> impl FnOnce(BoxError) -> Self {
+    pub fn create_writer_error(opts: &Arc<WriterProperties>) -> impl FnOnce(BoxError) -> Self {
         move |err| CompactorError::CreateWriterError {
-            opts: opts.clone(),
+            opts: opts.parquet.clone().into(),
             err,
         }
     }
@@ -139,6 +155,9 @@ impl Display for CompactorError {
             CompactorError::CanonicalChainError { err, .. } => {
                 write!(f, "Error building canonical chain: {err}")
             }
+            CompactorError::EmptyChain => {
+                write!(f, "Canonical chain is empty or None")
+            }
             CompactorError::FileStreamError { err, .. } => {
                 write!(f, "Error reading data or metadata from parquet file: {err}")
             }
@@ -161,6 +180,7 @@ impl Error for CompactorError {
             CompactorError::FileStreamError { err, .. } => err.source(),
             CompactorError::CreateWriterError { err, .. } => err.source(),
             CompactorError::SendError => None,
+            CompactorError::EmptyChain => None,
         }
     }
 }
@@ -173,6 +193,10 @@ impl From<JoinError> for CompactorError {
 
 impl CompactionErrorExt for CompactorError {
     type Task = Compactor;
+
+    fn is_debug(&self) -> bool {
+        matches!(self, CompactorError::EmptyChain)
+    }
 
     fn is_cancellation(&self) -> bool {
         match self {
@@ -190,10 +214,11 @@ where
     Consistency {
         error: ConsistencyCheckError,
     },
-    FileDeleteError {
-        err: ObjectStoreError,
+    FileNotFound {
         path: String,
-        not_found: bool,
+    },
+    ObjectStoreError {
+        err: ObjectStoreError,
     },
     FileStreamError {
         err: metadata_db::Error,
@@ -201,19 +226,35 @@ where
     JoinError {
         err: JoinError,
     },
-    ManifestDeleteError {
+    FileMetadataDeleteError {
         err: metadata_db::Error,
         file_ids: Vec<FileId>,
+    },
+    ManifestDeleteError {
+        err: metadata_db::Error,
+        file_id: FileId,
     },
     ParseError {
         file_id: FileId,
         err: url::ParseError,
+    },
+    PathError {
+        err: PathError,
+    },
+    MultipleErrors {
+        errors: Vec<Box<CollectorError>>,
     },
 }
 
 impl From<JoinError> for CollectorError {
     fn from(err: JoinError) -> Self {
         CollectorError::JoinError { err }
+    }
+}
+
+impl From<ObjectStoreError> for CollectorError {
+    fn from(err: ObjectStoreError) -> Self {
+        CollectorError::ObjectStoreError { err }
     }
 }
 
@@ -237,12 +278,20 @@ impl CollectorError {
         Self::FileStreamError { err }
     }
 
-    pub fn manifest_update_error(file_ids: Vec<FileId>) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| CollectorError::ManifestDeleteError { err, file_ids }
+    pub fn file_metadata_delete(file_ids: Vec<FileId>, err: metadata_db::Error) -> Self {
+        CollectorError::FileMetadataDeleteError { err, file_ids }
+    }
+
+    pub fn gc_manifest_delete(file_id: FileId) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| CollectorError::ManifestDeleteError { err, file_id }
     }
 
     pub fn parse_error(file_id: FileId) -> impl FnOnce(url::ParseError) -> Self {
         move |err| CollectorError::ParseError { file_id, err }
+    }
+
+    pub fn path_error(err: PathError) -> Self {
+        Self::PathError { err }
     }
 }
 
@@ -250,27 +299,43 @@ impl Display for CollectorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Consistency { error, .. } => error.fmt(f),
-            Self::FileDeleteError {
-                err,
-                path,
-                not_found,
-            } => {
-                if *not_found {
-                    write!(f, "File: {path} not found during deletion",)
-                } else {
-                    err.fmt(f)
-                }
-            }
+            Self::FileNotFound { path } => f.write_str(&format!("File not found: {path}")),
+            Self::ObjectStoreError { err } => err.fmt(f),
             Self::FileStreamError { err } => err.fmt(f),
             Self::JoinError { err } => err.fmt(f),
-            Self::ManifestDeleteError { err, file_ids } => {
+            Self::FileMetadataDeleteError {
+                err,
+                file_ids: file_id,
+            } => {
                 write!(
                     f,
-                    "Error deleting file IDs {file_ids:?} from GC manifest: {err}",
+                    "Error deleting File IDs: [{}] from file_metadata table in Metadata Db: {err}",
+                    file_id
+                        .iter()
+                        .map(|id| (**id).to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Self::ManifestDeleteError { err, file_id } => {
+                write!(
+                    f,
+                    "Error deleting file ID {} from gc_manifest table in Metadata Db: {err}",
+                    *file_id
                 )
             }
             Self::ParseError { file_id, err } => {
                 write!(f, "URL parse error for file {file_id}: {err}")
+            }
+            Self::PathError { err } => {
+                write!(f, "Path error: {err}")
+            }
+            Self::MultipleErrors { errors } => {
+                write!(f, "Multiple errors occurred:")?;
+                for (i, error) in errors.iter().enumerate() {
+                    write!(f, "\n  {}: {}", i + 1, error)?;
+                }
+                Ok(())
             }
         }
     }
@@ -280,19 +345,15 @@ impl Error for CollectorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             CollectorError::Consistency { error, .. } => error.source(),
-            CollectorError::FileDeleteError {
-                err,
-                not_found: false,
-                ..
-            } => err.source(),
-            // Not found errors are not considered a failure
-            CollectorError::FileDeleteError {
-                not_found: true, ..
-            } => None,
+            CollectorError::FileNotFound { .. } => None,
             CollectorError::FileStreamError { err, .. } => err.source(),
             CollectorError::JoinError { err, .. } => err.source(),
+            CollectorError::FileMetadataDeleteError { err, .. } => err.source(),
             CollectorError::ManifestDeleteError { err, .. } => err.source(),
             CollectorError::ParseError { err, .. } => err.source(),
+            CollectorError::PathError { err, .. } => err.source(),
+            CollectorError::ObjectStoreError { err, .. } => err.source(),
+            CollectorError::MultipleErrors { .. } => None,
         }
     }
 }

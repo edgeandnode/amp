@@ -63,13 +63,6 @@ use tests::testlib::{
     helpers as test_helpers,
 };
 
-/// Partition size for dumped data files in megabytes.
-///
-/// This controls the maximum size of individual Parquet files created during
-/// the blessing process. Smaller partitions improve query performance and
-/// parallelism but increase metadata overhead.
-const PARTITION_SIZE_MB: u32 = 100;
-
 /// Number of parallel jobs to use during blessing operations.
 ///
 /// Set to 1 to ensure deterministic, reproducible output for test snapshots.
@@ -301,16 +294,15 @@ async fn bless(
         config,
         metadata_db,
         vec![dataset_name.clone()],
-        true,                     // force_reprocess
-        EndBlock::Absolute(end),  // end_block
-        BLESS_JOB_COUNT,          // n_jobs
-        PARTITION_SIZE_MB as u64, // partition_size_mb
-        None,                     // start_block
-        None,                     // microbatch_max_interval
-        None,                     // microbatch_max_rows
-        false,                    // skip_consistency_check
-        None,                     // meter
-        false,                    // track_progress
+        true,                    // force_reprocess
+        EndBlock::Absolute(end), // end_block
+        BLESS_JOB_COUNT,         // n_jobs
+        None,                    // start_block
+        None,                    // microbatch_max_interval
+        None,                    // microbatch_max_rows
+        false,                   // skip_consistency_check
+        None,                    // meter
+        false,                   // track_progress
     )
     .await
     .map_err(|err| {

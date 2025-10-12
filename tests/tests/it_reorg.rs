@@ -126,8 +126,7 @@ async fn dump_finalized() {
                 vec!["anvil_rpc".to_string()],
                 true, // only_finalized_blocks
                 EndBlock::None,
-                1,   // n_jobs
-                100, // partition_size_mb
+                1, // n_jobs
                 None,
                 None,
                 None,

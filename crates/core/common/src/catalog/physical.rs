@@ -151,6 +151,10 @@ impl TableSnapshot {
     pub fn canonical_segments(&self) -> &[Segment] {
         &self.canonical_segments
     }
+
+    pub fn reader_factory(&self) -> &Arc<AmpReaderFactory> {
+        &self.reader_factory
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -625,7 +629,7 @@ impl TableProvider for TableSnapshot {
         self.physical_table.schema()
     }
 
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all, err, fields(table = %self.physical_table.table_ref(), files = %self.canonical_segments.len()))]
     async fn scan(
         &self,
         state: &dyn Session,
@@ -633,6 +637,10 @@ impl TableProvider for TableSnapshot {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        if let Some(range) = self.synced_range() {
+            tracing::debug!("Scanning range: {range:?}");
+        }
+
         let target_partitions = state.config_options().execution.target_partitions;
         let file_groups = round_robin(self.canonical_segments.iter(), target_partitions);
 
