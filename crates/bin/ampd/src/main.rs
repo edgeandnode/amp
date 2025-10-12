@@ -1,15 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::{dump_cmd, gen_manifest_cmd};
-use clap::Parser as _;
+use ampd::{dev_cmd, dump_cmd, gen_manifest_cmd, migrate_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
-use datasets_derived::Manifest as DerivedDatasetManifest;
+use dataset_store::DatasetKind;
 use dump::EndBlock;
-use metadata_db::MetadataDb;
-use worker::Worker;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -29,7 +23,7 @@ struct Args {
     command: Command,
 }
 
-#[derive(Debug, clap::Subcommand, Clone)]
+#[derive(Debug, Clone, clap::Subcommand)]
 enum Command {
     Dump {
         /// The name or path of the dataset to dump. This will be looked up in the dataset definition directory.
@@ -144,13 +138,10 @@ enum Command {
 
 #[tokio::main]
 async fn main() {
-    match main_inner().await {
-        Ok(()) => {}
-        Err(err) => {
-            // Manually print the error so we can control the format.
-            eprintln!("Exiting with error: {err}");
-            std::process::exit(1);
-        }
+    if let Err(err) = main_inner().await {
+        // Manually print the error so we can control the format.
+        eprintln!("Exiting with error: {err}");
+        std::process::exit(1);
     }
 }
 
@@ -158,7 +149,7 @@ async fn main_inner() -> Result<(), BoxError> {
     let Args {
         config: config_path,
         command,
-    } = Args::parse();
+    } = clap::Parser::parse();
 
     // Log version info
     tracing::info!(
@@ -180,80 +171,26 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server = true;
             }
 
-            let (config, metadata_db) =
-                load_config_and_metadata_db(config_path.as_ref(), true).await?;
+            let config = load_config(config_path.as_ref(), true).await?;
+            let metadata_db = config.metadata_db().await?;
 
-            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+            let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let config = Arc::new(config);
-            // Spawn worker
-            let worker = Worker::new(
-                config.clone(),
-                metadata_db.clone(),
-                "worker".parse().expect("Invalid worker ID"),
-                telemetry_metrics_meter.clone(),
-            );
-            tokio::spawn(async move {
-                if let Err(err) = worker.run().await {
-                    tracing::error!("Worker error: {err}");
-                }
-            });
+            let result = dev_cmd::run(
+                config,
+                metadata_db,
+                flight_server,
+                jsonl_server,
+                admin_server,
+                metrics_meter,
+            )
+            .await;
 
-            // Spawn controller (Admin API) if enabled
-            let controller_fut = if admin_server {
-                let (addr, controller_future) = controller::serve(
-                    config.addrs.admin_api_addr,
-                    config.clone(),
-                    telemetry_metrics_meter.as_ref(),
-                )
-                .await?;
+            monitoring::deinit(metrics_provider, tracing_provider)?;
 
-                tracing::info!("Controller Admin API running at {}", addr);
-                Some(controller_future)
-            } else {
-                None
-            };
-
-            // Spawn server only if at least one query server is enabled
-            let server_fut = if flight_server || jsonl_server {
-                let (addrs, future) = ampd::server::run(
-                    config.clone(),
-                    metadata_db,
-                    flight_server,
-                    jsonl_server,
-                    telemetry_metrics_meter.as_ref(),
-                )
-                .await?;
-
-                if flight_server {
-                    tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
-                }
-                if jsonl_server {
-                    tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
-                }
-                Some(future)
-            } else {
-                None
-            };
-
-            // Wait for either server or controller to complete
-            let result = match (server_fut, controller_fut) {
-                (Some(server_fut), None) => server_fut.await,
-                (None, Some(controller_fut)) => controller_fut.await,
-                (Some(server_fut), Some(controller_fut)) => {
-                    tokio::select! {
-                        result = server_fut => result,
-                        result = controller_fut => result,
-                    }
-                }
-                (None, None) => {
-                    Err("At least one server (flight, jsonl, or admin) must be enabled".into())
-                }
-            };
-
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-            result
+            result?;
+            Ok(())
         }
         Command::Dump {
             end_block,
@@ -266,84 +203,30 @@ async fn main_inner() -> Result<(), BoxError> {
             fresh,
             only_finalized_blocks,
         } => {
-            let (mut config, metadata_db) =
-                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false).await?;
+            let metadata_db = config.metadata_db().await?;
 
-            if let Some(size_mb) = partition_size_mb {
-                config.parquet.target_size.bytes = size_mb * 1024 * 1024;
-            }
-
-            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+            let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            if let Some(ref opentelemetry) = config.opentelemetry {
-                dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
-            }
-
-            // When --run-every-mins is set without end_block, default to "latest"
-            // Otherwise default to continuous mode
-            let end_block = end_block
-                .or(run_every_mins.and(Some(EndBlock::Latest)))
-                .unwrap_or(EndBlock::None);
-
-            if end_block == EndBlock::None && datasets.len() > 1 {
-                return Err("Continuous mode (no end_block) is not supported when dumping multiple datasets. \
-                            Please specify an end_block value or dump datasets individually.".into());
-            }
-
-            let mut datasets_to_dump = Vec::new();
-            let dataset_store = {
-                let provider_configs_store =
-                    ProviderConfigsStore::new(config.providers_store.prefixed_store());
-                let dataset_manifests_store = DatasetManifestsStore::new(
-                    metadata_db.clone(),
-                    config.dataset_defs_store.prefixed_store(),
-                );
-                DatasetStore::new(
-                    metadata_db.clone(),
-                    provider_configs_store,
-                    dataset_manifests_store,
-                )
-            };
-
-            for dataset in datasets {
-                if dataset.ends_with(".json") {
-                    tracing::info!("Registering manifest: {}", dataset);
-
-                    let manifest = std::fs::read_to_string(&dataset)?;
-                    let manifest: DerivedDatasetManifest = serde_json::from_str(&manifest)?;
-                    dataset_store
-                        .register_manifest(&manifest.name, &manifest.version, &manifest)
-                        .await
-                        .map_err(|err| -> BoxError { err.to_string().into() })?;
-
-                    datasets_to_dump.push(format!(
-                        "{}__{}",
-                        manifest.name,
-                        manifest.version.to_underscore_version()
-                    ));
-                } else {
-                    datasets_to_dump.push(dataset);
-                }
-            }
-
-            let result = dump_cmd::dump(
-                config.into(),
+            let result = dump_cmd::run(
+                config,
                 metadata_db,
-                datasets_to_dump,
+                datasets,
                 ignore_deps,
                 end_block,
                 n_jobs,
+                partition_size_mb,
                 run_every_mins,
-                None,
                 location,
                 fresh,
-                telemetry_metrics_meter.as_ref(),
                 only_finalized_blocks,
+                metrics_meter.as_ref(),
             )
             .await;
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
             result?;
             Ok(())
         }
@@ -357,67 +240,68 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server = true;
             }
 
-            let (config, metadata_db) =
-                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false).await?;
+            let metadata_db = config.metadata_db().await?;
 
-            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+            let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let (addrs, server) = ampd::server::run(
-                config.into(),
+            let result = server_cmd::run(
+                config,
                 metadata_db,
                 flight_server,
                 jsonl_server,
-                telemetry_metrics_meter.as_ref(),
+                metrics_meter.as_ref(),
             )
-            .await?;
-            if flight_server {
-                tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
-            }
-            if jsonl_server {
-                tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
-            }
-            let result = server.await;
+            .await;
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-            result
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
+            result?;
+            Ok(())
         }
         Command::Worker { node_id } => {
-            let (config, metadata_db) =
-                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+            let node_id = node_id.parse()?;
 
-            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+            let config = load_config(config_path.as_ref(), false).await?;
+            let metadata_db = config.metadata_db().await?;
+
+            let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let worker = Worker::new(
-                config.into(),
+            let result = worker_cmd::run(
+                config,
                 metadata_db,
-                node_id.parse()?,
-                telemetry_metrics_meter.clone(),
-            );
-            let result = worker.run().await.map_err(Into::into);
+                node_id,
+                metrics_meter
+                    .clone()
+                    .expect("metrics_meter should always be initialized"),
+            )
+            .await;
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-            result
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
+            result?;
+            Ok(())
         }
         Command::Controller => {
-            let (config, _metadata_db) =
-                load_config_and_metadata_db(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false).await?;
 
-            let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
+            let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let (addr, server) = controller::serve(
-                config.addrs.admin_api_addr,
-                config.into(),
-                telemetry_metrics_meter.as_ref(),
-            )
-            .await?;
+            let config = Arc::new(config);
+            let (addr, server) =
+                controller::serve(config.addrs.admin_api_addr, config, metrics_meter.as_ref())
+                    .await?;
+
             tracing::info!("Controller Admin API running at {}", addr);
             let result = server.await;
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-            result
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
+            result?;
+            Ok(())
         }
         Command::GenerateManifest {
             network,
@@ -427,8 +311,10 @@ async fn main_inner() -> Result<(), BoxError> {
             manifest,
             module,
         } => {
-            let (telemetry_tracing_provider, telemetry_metrics_provider, _telemetry_metrics_meter) =
-                monitoring::init(None)?;
+            let name = name.parse()?;
+            let kind = kind.parse::<DatasetKind>()?;
+
+            let (tracing_provider, metrics_provider, _) = monitoring::init(None)?;
 
             let result = if let Some(mut out) = out {
                 if out.is_dir() {
@@ -436,52 +322,40 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                gen_manifest_cmd::run(network, kind, name, manifest, module, &mut out)
-                    .await
-                    .map_err(|err| -> BoxError { err.into() })
+                gen_manifest_cmd::run(name, kind, network, manifest, module, &mut out).await
             } else {
                 let mut stdout = std::io::stdout();
-                gen_manifest_cmd::run(network, kind, name, manifest, module, &mut stdout)
-                    .await
-                    .map_err(|err| -> BoxError { err.into() })
+                gen_manifest_cmd::run(name, kind, network, manifest, module, &mut stdout).await
             };
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
-            result
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
+            result?;
+            Ok(())
         }
         Command::Migrate => {
-            let config_path = config_path.ok_or("--config parameter is mandatory")?;
-            let config = Arc::new(Config::load(config_path, true, None, false).await?);
+            let config = load_config(config_path.as_ref(), false).await?;
 
-            let (telemetry_tracing_provider, telemetry_metrics_provider, _telemetry_metrics_meter) =
+            let (tracing_provider, metrics_provider, _metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let url = config
-                .metadata_db
-                .url
-                .as_ref()
-                .ok_or("metadata_db.url is required for migrate command")?;
+            let result = migrate_cmd::run(config).await;
 
-            tracing::info!("Running migrations on metadata database...");
-            let _metadata_db =
-                MetadataDb::connect_with_config(url, config.metadata_db.pool_size, true).await?;
-            tracing::info!("Migrations completed successfully");
+            monitoring::deinit(metrics_provider, tracing_provider)?;
 
-            monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
+            result?;
             Ok(())
         }
     }
 }
 
-async fn load_config_and_metadata_db(
+async fn load_config(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<(Config, MetadataDb), BoxError> {
+) -> Result<Config, BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
-
     let config = Config::load(config, true, None, allow_temp_db).await?;
-    let metadata_db = config.metadata_db().await?.into();
-    Ok((config, metadata_db))
+    Ok(config)
 }
