@@ -10,6 +10,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
+    plan_visitors::{constrain_by_block_num, unproject_special_block_num_column},
     query_context::{QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
@@ -261,17 +262,19 @@ impl StreamingQuery {
 
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
-            // Start microbatch execution for this chunk
-            let attached_plan = self.plan.clone().attach_to(&ctx)?;
-            let mut stream = ctx
-                .execute_plan_for_range(
-                    attached_plan,
-                    range.start(),
-                    range.end(),
-                    self.preserve_block_num,
-                    false,
-                )
-                .await?;
+            let plan = {
+                // Incrementalize the plan
+                let plan = self.plan.clone().attach_to(&ctx)?;
+                let mut plan = constrain_by_block_num(plan, range.start(), range.end())?;
+
+                // Remove `_block_num` if not needed in the output.
+                if !self.preserve_block_num {
+                    plan = unproject_special_block_num_column(plan)?
+                }
+                plan
+            };
+
+            let mut stream = ctx.execute_plan(plan, false).await?;
 
             // Send start message for this microbatch
             let _ = self
