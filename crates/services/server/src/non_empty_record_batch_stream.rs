@@ -7,7 +7,11 @@ use common::arrow::array::RecordBatch;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::stream::Stream;
 
-/// Stream adapter that yields an empty record batch if stream the stream would otherwise be empty, that is, only yield a `None` without everœ yielding any `Some(_)`.
+/// Stream adapter that yields an empty record batch if the stream would otherwise be empty.
+///
+/// This ensures the stream always yields at least one item - either the actual data or an empty
+/// record batch with the correct schema. Without this adapter, an empty stream would only yield
+/// `None` without ever yielding any `Some(_)`.
 pub struct NonEmptyRecordBatchStream {
     stream: SendableRecordBatchStream,
     has_yielded: bool,
@@ -33,9 +37,6 @@ impl Stream for NonEmptyRecordBatchStream {
             }
             Poll::Ready(None) => {
                 if !self.has_yielded {
-                    println!(
-                        "NonEmptyRecordBatchStream: underlying stream is empty, yielding an empty record batch"
-                    );
                     self.has_yielded = true;
                     Poll::Ready(Some(Ok(RecordBatch::new_empty(self.stream.schema()))))
                 } else {
