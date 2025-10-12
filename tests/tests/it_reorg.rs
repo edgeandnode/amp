@@ -630,7 +630,7 @@ fn check_blocks(blocks: &[BlockRow]) {
 
 /// Check that streaming results contain duplicates from both datasets.
 async fn check_batch(flight_client: &mut FlightClient, take: usize) {
-    let blocks = flight_client
+    let (blocks, _batch_count) = flight_client
         .take_from_stream("stream", take)
         .await
         .expect("Failed to take from stream");
@@ -655,7 +655,7 @@ async fn check_batch(flight_client: &mut FlightClient, take: usize) {
 
 /// Take and sort blocks from a stream.
 async fn take_blocks_from_stream(flight_client: &mut FlightClient, take: usize) -> Vec<BlockRow> {
-    let blocks = flight_client
+    let (blocks, _batch_count) = flight_client
         .take_from_stream("stream", take)
         .await
         .expect("Failed to take from stream");

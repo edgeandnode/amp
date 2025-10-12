@@ -138,7 +138,7 @@ pub async fn handler_with_version(
 }
 
 /// Represents dataset schema information for API responses
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetSchemaResponse {
     /// The name of the dataset (validated identifier)
@@ -152,7 +152,7 @@ pub struct DatasetSchemaResponse {
 }
 
 /// Represents table schema information within a dataset
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TableSchemaInfo {
     /// The name of the table

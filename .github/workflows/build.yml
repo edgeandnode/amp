@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       - name: Build binaries
-        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampup
+        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampup -p ampsync
 
       - name: Sign binaries
         if: startsWith(matrix.target, 'aarch64-apple-darwin')
@@ -56,7 +56,7 @@ jobs:
           security import certificate.p12 -k macos-build.keychain -P "${{ secrets.APPLE_CERT_PASSWORD }}" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions macos-build.keychain
 
-          # Sign both binaries
+          # Sign all binaries
           /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
             --options runtime \
             --entitlements entitlements.plist \
@@ -68,6 +68,12 @@ jobs:
             --entitlements entitlements.plist \
             --timestamp \
             target/${{ matrix.target }}/release/ampup
+          
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
+            target/${{ matrix.target }}/release/ampsync
 
           # Reset to login keychain before deleting
           security default-keychain -s login.keychain-db
@@ -92,6 +98,15 @@ jobs:
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Notarize ampsync
+        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
+        with:
+          product-path: target/${{ matrix.target }}/release/ampsync
+          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
+          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
+          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
       - name: Upload ampd artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -104,6 +119,13 @@ jobs:
         with:
           name: ${{ matrix.target }}-ampup
           path: target/${{ matrix.target }}/release/ampup
+          retention-days: 30
+
+      - name: Upload ampsync artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}-ampsync
+          path: target/${{ matrix.target }}/release/ampsync
           retention-days: 30
 
   release:
@@ -136,6 +158,11 @@ jobs:
           cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
           cp artifacts/aarch64-apple-darwin-ampup/ampup release/ampup-darwin-aarch64
+          
+          # Copy and rename ampsync binaries
+          cp artifacts/x86_64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-aarch64
+          cp artifacts/aarch64-apple-darwin-ampsync/ampsync release/ampsync-darwin-aarch64
 
           # Make all binaries executable
           chmod +x release/*
@@ -160,7 +187,7 @@ jobs:
           token: ${{ secrets.PUBLISH_RELEASE_TOKEN }}
 
   containerize:
-    name: Containerize
+    name: Containerize ampd
     runs-on: ubuntu-latest
     needs: build
     permissions:
@@ -168,6 +195,21 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    strategy:
+      matrix:
+        include:
+          - binary: ampd
+            name: amp
+            source: https://github.com/edgeandnode/amp
+            url: https://github.com/edgeandnode/amp
+            title: Amp
+            description: A tool for building and managing blockchain datasets
+          - binary: ampsync
+            name: ampsync
+            source: https://github.com/edgeandnode/amp
+            url: https://github.com/edgeandnode/amp
+            title: Ampsync
+            description: Syncing engine that listens to the stream changes from the amp-client streaming layer to store changes in a configured database
 
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -175,13 +217,13 @@ jobs:
       - name: Download Linux AMD64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: x86_64-unknown-linux-gnu-ampd
+          name: x86_64-unknown-linux-gnu-${{ matrix.binary }}
           path: ./amd64/
 
       - name: Download Linux ARM64 binary
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: aarch64-unknown-linux-gnu-ampd
+          name: aarch64-unknown-linux-gnu-${{ matrix.binary }}
           path: ./arm64/
           
       - name: Login to GitHub Container Registry
@@ -198,24 +240,24 @@ jobs:
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         id: metadata
         with:
-          images: ghcr.io/edgeandnode/amp
+          images: ghcr.io/edgeandnode/${{ matrix.name }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
             type=sha
           labels: |
-            org.opencontainers.image.source=https://github.com/edgeandnode/amp
-            org.opencontainers.image.url=https://github.com/edgeandnode/amp
+            org.opencontainers.image.source=${{ matrix.source }}
+            org.opencontainers.image.url=${{ matrix.url }}
             org.opencontainers.image.vendor=Edge & Node
-            org.opencontainers.image.title=Amp
-            org.opencontainers.image.description=A tool for building and managing blockchain datasets
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
           annotations: |
-            manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
-            manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
+            manifest:org.opencontainers.image.source=${{ matrix.source }}
+            manifest:org.opencontainers.image.url=${{ matrix.source }}
             manifest:org.opencontainers.image.vendor=Edge & Node
-            manifest:org.opencontainers.image.title=Amp
-            manifest:org.opencontainers.image.description=A tool for building and managing blockchain datasets
+            manifest:org.opencontainers.image.title=${{ matrix.title }}
+            manifest:org.opencontainers.image.description=${{ matrix.description }}
 
       - name: Create multi-arch Dockerfile
         run: |
@@ -230,21 +272,21 @@ jobs:
               rm -rf /var/lib/apt/lists/*
 
           # Copy the appropriate binary based on target architecture
-          COPY ampd-linux-$TARGETARCH /ampd
-          RUN chmod +x /ampd
-          ENTRYPOINT ["/ampd"]
+          COPY ${{ matrix.binary }}-linux-$TARGETARCH /${{ matrix.binary }}
+          RUN chmod +x /${{ matrix.binary }}
+          ENTRYPOINT ["/${{ matrix.binary }}"]
           EOF
 
       - name: Rename binaries for Docker context
         run: |
           # Copy and rename the binaries from their download directories
-          cp ./amd64/ampd ./ampd-linux-amd64
-          chmod +x ./ampd-linux-amd64
-          cp ./arm64/ampd ./ampd-linux-arm64
-          chmod +x ./ampd-linux-arm64
+          cp ./amd64/${{ matrix.binary }} ./${{ matrix.binary }}-linux-amd64
+          chmod +x ./${{ matrix.binary }}-linux-amd64
+          cp ./arm64/${{ matrix.binary }} ./${{ matrix.binary }}-linux-arm64
+          chmod +x ./${{ matrix.binary }}-linux-arm64
 
           # Verify binaries exist
-          ls -la ampd-linux-*
+          ls -la ${{ matrix.binary }}-linux-*
 
       - name: Build and push Docker image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6

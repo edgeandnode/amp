@@ -76,7 +76,7 @@ where
             .metadata_db
             .get_dataset_latest_version_with_details(name)
             .await
-            .map_err(GetLatestVersionError::MetadataDbError)?;
+            .map_err(GetLatestVersionError)?;
 
         Ok(dataset.map(|details| details.version.into()))
     }
@@ -358,13 +358,10 @@ pub enum GetError {
     ObjectStoreFetch(common::store::StoreError),
 }
 
-/// Errors specific to getting latest version operations
+/// Failed to query metadata database for latest version
 #[derive(Debug, thiserror::Error)]
-pub enum GetLatestVersionError {
-    /// Failed to query metadata database for latest version
-    #[error("Failed to query metadata database for latest version: {0}")]
-    MetadataDbError(metadata_db::Error),
-}
+#[error("Failed to query metadata database for latest version: {0}")]
+pub struct GetLatestVersionError(#[source] pub metadata_db::Error);
 
 /// Fetches manifest content from the object store
 ///
@@ -411,11 +408,10 @@ impl TryFrom<String> for ManifestPath {
     type Error = UnsupportedManifestFormat;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.ends_with(".json") {
-            Ok(ManifestPath(ObjectStorePath::from(value)))
-        } else {
-            Err(UnsupportedManifestFormat { format: value })
+        if !value.ends_with(".json") {
+            return Err(UnsupportedManifestFormat { format: value });
         }
+        Ok(ManifestPath(ObjectStorePath::from(value)))
     }
 }
 
@@ -423,13 +419,12 @@ impl TryFrom<ObjectStorePath> for ManifestPath {
     type Error = UnsupportedManifestFormat;
 
     fn try_from(value: ObjectStorePath) -> Result<Self, Self::Error> {
-        if value.as_ref().ends_with(".json") {
-            Ok(ManifestPath(value))
-        } else {
-            Err(UnsupportedManifestFormat {
+        if !value.as_ref().ends_with(".json") {
+            return Err(UnsupportedManifestFormat {
                 format: value.to_string(),
-            })
+            });
         }
+        Ok(ManifestPath(value))
     }
 }
 
@@ -450,18 +445,20 @@ pub struct UnsupportedManifestFormat {
 pub struct ManifestContent(String);
 
 impl ManifestContent {
+    /// Get the raw JSON string content of the manifest, consuming self
+    pub fn into_json_string(self) -> String {
+        self.0
+    }
+
     pub fn try_into_manifest<T>(&self) -> Result<T, ManifestParseError>
     where
         T: serde::de::DeserializeOwned,
     {
-        serde_json::from_str(&self.0).map_err(ManifestParseError::JsonError)
+        serde_json::from_str(&self.0).map_err(ManifestParseError)
     }
 }
 
-/// Errors specific to manifest parsing operations
+/// JSON parsing error when deserializing manifest content
 #[derive(Debug, thiserror::Error)]
-pub enum ManifestParseError {
-    /// JSON parsing error
-    #[error("JSON parsing error: {0}")]
-    JsonError(#[source] serde_json::Error),
-}
+#[error("JSON parsing error: {0}")]
+pub struct ManifestParseError(#[source] pub serde_json::Error);

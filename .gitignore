@@ -19,4 +19,4 @@ build/
 .idea
 .vscode/
 config.toml
-.amp/*
+.amp/

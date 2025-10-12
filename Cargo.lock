@@ -38,7 +38,6 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "object_store",
- "opentelemetry",
  "opentelemetry-instrumentation-tower",
  "rand 0.9.2",
  "serde",
@@ -841,7 +840,6 @@ dependencies = [
 name = "ampd"
 version = "0.1.0"
 dependencies = [
- "admin-api",
  "arrow-flight",
  "axum 0.8.4",
  "clap",
@@ -869,6 +867,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "ampsync"
+version = "0.1.0"
+dependencies = [
+ "admin-api",
+ "alloy",
+ "amp-client",
+ "anyhow",
+ "arrow-array",
+ "arrow-schema",
+ "arrow-to-postgres",
+ "backon",
+ "bytes",
+ "clap",
+ "common",
+ "datafusion",
+ "datasets-common",
+ "datasets-derived",
+ "futures",
+ "lazy_static",
+ "mockito",
+ "monitoring",
+ "pgtemp",
+ "phf 0.13.1",
+ "reqwest",
+ "snmalloc-rs",
+ "sqlx",
+ "thiserror 2.0.16",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "ampup"
 version = "0.1.0"
 dependencies = [
@@ -882,10 +914,8 @@ dependencies = [
  "reqwest",
  "semver 1.0.26",
  "serde",
- "serde_json",
  "tempfile",
  "tokio",
- "url",
  "vergen-gitcl",
 ]
 
@@ -1339,6 +1369,28 @@ dependencies = [
  "num",
  "regex",
  "regex-syntax",
+]
+
+[[package]]
+name = "arrow-to-postgres"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "bytes",
+ "enum_dispatch",
+ "serde_json",
+ "thiserror 2.0.16",
+]
+
+[[package]]
+name = "assert-json-diff"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e4f2b81832e72834d7518d8487a0396a28cc408186a2e8854c0f98011faf12"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1979,7 +2031,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
 dependencies = [
  "chrono",
- "phf",
+ "phf 0.12.1",
 ]
 
 [[package]]
@@ -2068,6 +2120,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "comfy-table"
 version = "7.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2116,7 +2177,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.23",
  "tower 0.5.2",
  "tracing",
  "url",
@@ -3180,6 +3240,7 @@ dependencies = [
  "firehose-datasets",
  "futures",
  "indoc",
+ "itertools 0.14.0",
  "js-runtime",
  "metadata-db",
  "monitoring",
@@ -3487,7 +3548,6 @@ name = "dump"
 version = "0.1.0"
 dependencies = [
  "alloy",
- "backon",
  "common",
  "datafusion",
  "dataset-store",
@@ -3568,6 +3628,18 @@ name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
+
+[[package]]
+name = "enum_dispatch"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
 
 [[package]]
 name = "equivalent"
@@ -5229,12 +5301,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "mockito"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7760e0e418d9b7e5777c0374009ca4c93861b9066f18cb334a20ce50ab63aa48"
+dependencies = [
+ "assert-json-diff",
+ "bytes",
+ "colored",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "rand 0.9.2",
+ "regex",
+ "serde_json",
+ "serde_urlencoded",
+ "similar",
+ "tokio",
+]
+
+[[package]]
 name = "monitoring"
 version = "0.1.0"
 dependencies = [
  "cargo_metadata",
  "common",
- "metadata-db",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -5833,7 +5928,41 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
 dependencies = [
- "phf_shared",
+ "phf_shared 0.12.1",
+]
+
+[[package]]
+name = "phf"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
+dependencies = [
+ "phf_macros",
+ "phf_shared 0.13.1",
+ "serde",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135ace3a761e564ec88c03a77317a7c6b80bb7f7135ef2544dbe054243b89737"
+dependencies = [
+ "fastrand",
+ "phf_shared 0.13.1",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
+dependencies = [
+ "phf_generator",
+ "phf_shared 0.13.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -5841,6 +5970,15 @@ name = "phf_shared"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
 ]
@@ -6084,7 +6222,7 @@ version = "0.13.3"
 source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork-0.13.3#38d1ee0d94d1ee343eeca4949dec07062a0129dc"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -7001,6 +7139,7 @@ dependencies = [
  "prost 0.13.3",
  "serde_json",
  "thiserror 2.0.16",
+ "tokio",
  "tonic 0.12.3",
  "tracing",
 ]
@@ -7092,6 +7231,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "siphasher"
@@ -7620,12 +7765,10 @@ dependencies = [
  "dotenvy",
  "dump",
  "evm-rpc-datasets",
- "figment",
  "firehose-datasets",
  "fs-err",
  "futures",
  "generate-manifest",
- "hex",
  "indoc",
  "metadata-db",
  "monitoring",

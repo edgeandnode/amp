@@ -22,3 +22,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

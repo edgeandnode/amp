@@ -44,7 +44,11 @@ impl Step {
 #[serde(untagged)]
 pub enum SqlTestResult {
     /// Expected successful result with JSON-encoded data.
-    Success { results: String },
+    Success {
+        results: String,
+        #[serde(rename = "recordBatchCount", default)]
+        record_batch_count: Option<usize>,
+    },
     /// Expected failure with a specific error message substring.
     Failure { failure: String },
 }
@@ -52,25 +56,36 @@ pub enum SqlTestResult {
 impl SqlTestResult {
     /// Validates actual results against expected results.
     ///
-    /// For success cases, compares JSON-serialized results for equality.
+    /// For success cases, compares JSON-serialized results for equality and optionally
+    /// validates the number of record batches returned.
     /// For failure cases, checks that the error message contains the expected substring.
     pub(crate) fn assert_eq(
         &self,
-        actual_result: Result<serde_json::Value, BoxError>,
+        actual_result: Result<(serde_json::Value, usize), BoxError>,
     ) -> Result<(), BoxError> {
         match self {
             SqlTestResult::Success {
                 results: expected_json_str,
+                record_batch_count,
             } => {
                 let expected: serde_json::Value = serde_json::from_str(expected_json_str)
                     .unwrap_or_else(|err| panic!("failed to parse expected JSON: {err}"));
-                let actual = actual_result.expect("expected success, got error");
+                let (actual, actual_batch_count) =
+                    actual_result.expect("expected success, got error");
 
                 pretty_assertions::assert_str_eq!(
                     actual.to_string(),
                     expected.to_string(),
                     "Test returned unexpected results",
                 );
+
+                if let Some(expected_batch_count) = record_batch_count {
+                    assert_eq!(
+                        actual_batch_count, *expected_batch_count,
+                        "Expected {} record batch(es), got {}",
+                        expected_batch_count, actual_batch_count
+                    );
+                }
             }
 
             SqlTestResult::Failure { failure } => {

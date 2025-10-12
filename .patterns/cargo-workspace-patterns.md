@@ -6,14 +6,18 @@
 Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Amp project.
 
 ## 🚨 CRITICAL WORKSPACE REQUIREMENTS
+
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
 
 ### Mandatory Workspace Operations
-- **Workspace root execution**: ALL `cargo` commands MUST be issued from the root of the workspace (where the workspace `Cargo.toml` file lives)
+
+- **Workspace root execution**: ALL `cargo` commands MUST be issued from the root of the workspace (where the workspace
+  `Cargo.toml` file lives)
 - **Immediate formatting**: `just fmt-rs` for entire workspace or `just fmt-file <rust_file>.rs` for individual files
 - **Compilation validation**: `just check-rs` and `just check-crate <crate-name>` MUST pass
 
 ### Mandatory Cargo.toml Ordering
+
 - **Workspace members**: Root `Cargo.toml` `members` array MUST be ordered alphabetically
 - **Dependencies**: All `Cargo.toml` dependencies sections MUST be ordered alphabetically
 - **Rationale**: Ensures consistent merge conflict resolution and maintainable dependency management
@@ -25,9 +29,11 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 ### 🏗️ Top-Level Crate Categories
 
 #### 📦 `crates/core/` - Foundation Libraries
+
 **Purpose**: Shared functionality and domain logic used across the entire workspace.
 
 **What belongs here:**
+
 - **`common`**: Shared utilities, error types, configuration, EVM functions
 - **`metadata-db`**: PostgreSQL database operations and worker coordination  
 - **`dataset-store`**: Dataset management, manifest parsing, SQL dataset support
@@ -36,6 +42,7 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 - **`monitoring`**: Observability, metrics, and telemetry
 
 **Dependency Rules:**
+
 - ✅ Core crates can depend on other core crates
 - ❌ Core crates NEVER depend on `bin`, `extractors`, or `services`
 - ✅ Should be the most stable and well-tested crates
@@ -46,6 +53,8 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 **What belongs here:**
 - **`ampd`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
 - **`generate-manifest`**: Utility for creating dataset manifest files
+- **`ampsync`**: Syncing crate that streams data from Apache Arrow `RecordBatch` and inserts into a configured postgres
+  database
 
 **Dependency Rules:**
 - ✅ Can depend on `core`, `extractors`, and `services` crates

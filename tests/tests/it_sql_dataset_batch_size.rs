@@ -75,7 +75,7 @@ async fn sql_dataset_input_batch_size() {
     assert_eq!(file_count_final, 1);
 
     let mut test_client = test.new_flight_client().await.unwrap();
-    let res = test_client
+    let (res, _batch_count) = test_client
         .run_query("select count(*) from sql_stream_ds.even_blocks", None)
         .await
         .unwrap();
