@@ -59,11 +59,17 @@ metadata_db_url = "postgres://<pg_url>"
 # cache_size_mb = 1024
 
 # Target partition size configuration
-# Overflow configuration (default: "4/3" meaning 33% over target size) accepts a fraction string, a float, or an integer
-# overflow = "4/3" 
-
-# Target blocks per file (default: 100000)
-# blocks = 100000
+# Overflow is a tuning parameter that provides some flexibility for some cases,
+# e.g. if two files that are both slightly larger than 50% of the size limit won't
+# compact because their total exceeds the limit. Overflow provides some flexibility
+# in this case. Additionally, the segment size algorithm is based on an approximation
+# of the future compacted segment size which might end up being smaller or larger
+# depending on factors like table width, value cardinality, compression ratios, etc.
+# So adjusting Overflow provides a mechanism to reflect the realities of the data
+# at rest while configuring the compaction algorithm.
+# Examples:
+# overflow = "1"      # 1x target size (default)
+# overflow = "1.5"    # 1.5x target size
 
 # Target bytes per file - 2GB (default: 2147483648 or 2GB)
 # Note: nozzle dump commpand may optionally override this if a partition_size_mb is provided
