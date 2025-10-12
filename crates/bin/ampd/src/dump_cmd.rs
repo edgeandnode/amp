@@ -1,13 +1,8 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, fs, sync::Arc, time::Duration};
 
 use common::{
     BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
-    query_context::parse_sql, store::ObjectStoreUrl, utils::dfs,
+    query_context::parse_sql, store::ObjectStoreUrl, utils::dependency_sort,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{
@@ -249,60 +244,6 @@ pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
                 "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
                 This could lead to less precise metrics."
             );
-        }
-    }
-}
-
-/// Given a map of values to their dependencies, return a set where each value is ordered after
-/// all of its dependencies. An error is returned if a cycle is detected.
-fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
-    let nodes: BTreeSet<&String> = deps
-        .iter()
-        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
-        .collect();
-    let mut ordered: Vec<String> = Default::default();
-    let mut visited: BTreeSet<&String> = Default::default();
-    let mut visited_cycle: BTreeSet<&String> = Default::default();
-    for node in nodes {
-        if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
-        }
-    }
-    Ok(ordered)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dependency_sort_order() {
-        #[allow(clippy::type_complexity)]
-        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
-            (&[("a", &["b"]), ("b", &["a"])], None),
-            (&[("a", &["b"])], Some(&["b", "a"])),
-            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
-            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
-            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
-            (
-                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
-                Some(&["d", "b", "c", "a"]),
-            ),
-            (
-                &[("a", &["b", "c"]), ("b", &["c", "d"])],
-                Some(&["c", "d", "b", "a"]),
-            ),
-        ];
-        for (input, expected) in cases {
-            let deps = input
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(ToString::to_string).collect()))
-                .collect();
-            let result = dependency_sort(deps);
-            match expected {
-                Some(expected) => assert_eq!(*expected, result.unwrap()),
-                None => assert!(result.is_err()),
-            }
         }
     }
 }

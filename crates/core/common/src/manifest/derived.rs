@@ -4,7 +4,7 @@
 //! Derived datasets replace the legacy SQL dataset format, providing versioned, dependency-aware dataset
 //! definitions with explicit schemas and functions.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use datafusion::sql::{parser, resolve::resolve_table_references};
 use datasets_derived::{DATASET_KIND, Manifest, manifest::TableInput};
@@ -13,7 +13,7 @@ use crate::{
     BoxError, Dataset, Table as LogicalTable,
     catalog::logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
     query_context::{self, parse_sql},
-    utils::dfs,
+    utils::dependency_sort,
 };
 
 /// Extract all SQL queries from table views.
@@ -129,7 +129,7 @@ pub fn sort_tables_by_dependencies(
         }
     }
 
-    let sorted_names = table_dependency_sort(deps)?;
+    let sorted_names = dependency_sort(deps)?;
 
     let mut sorted_tables = Vec::new();
     for name in sorted_names {
@@ -139,23 +139,4 @@ pub fn sort_tables_by_dependencies(
     }
 
     Ok(sorted_tables)
-}
-
-/// Topological sort for table dependencies.
-///
-/// Uses depth-first search to order tables such that each table comes after
-/// all tables it depends on. Detects circular dependencies.
-fn table_dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
-    let nodes: BTreeSet<&String> = deps.keys().collect();
-    let mut ordered: Vec<String> = Vec::new();
-    let mut visited: BTreeSet<&String> = BTreeSet::new();
-    let mut visiting: BTreeSet<&String> = BTreeSet::new();
-
-    for node in nodes {
-        if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visiting)?;
-        }
-    }
-
-    Ok(ordered)
 }
