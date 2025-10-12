@@ -61,6 +61,7 @@ pub enum Encoder<'a> {
     TimestampMicrosecond(TimestampMicrosecondEncoder<'a>),
     TimestampMillisecond(TimestampMillisecondEncoder<'a>),
     TimestampSecond(TimestampSecondEncoder<'a>),
+    TimestampNanosecond(TimestampNanosecondEncoder<'a>),
     Date32(Date32Encoder<'a>),
     Time32Millisecond(Time32MillisecondEncoder<'a>),
     Time32Second(Time32SecondEncoder<'a>),
@@ -504,6 +505,7 @@ impl<'a> Encode for Decimal128Encoder<'a> {
 const PG_BASE_TIMESTAMP_OFFSET_US: i64 = 946_684_800_000_000; // microseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 const PG_BASE_TIMESTAMP_OFFSET_MS: i64 = 946_684_800_000; // milliseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 const PG_BASE_TIMESTAMP_OFFSET_S: i64 = 946_684_800; // seconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
+const PG_BASE_TIMESTAMP_OFFSET_NS: i64 = 946_684_800_000_000_000; // nanoseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 
 #[inline(always)]
 fn convert_arrow_timestamp_microseconds_to_pg_timestamp(
@@ -551,6 +553,19 @@ fn convert_arrow_timestamp_seconds_to_pg_timestamp(
         })
 }
 
+/// Convert from Arrow timestamps (nanoseconds since 1970-01-01) to Postgres timestamps (microseconds since 2000-01-01)
+#[inline(always)]
+fn convert_arrow_timestamp_nanoseconds_to_pg_timestamp(
+    _field: &str,
+    timestamp_ns: i64,
+) -> Result<i64, Error> {
+    let timestamp_ns = timestamp_ns.checked_sub(PG_BASE_TIMESTAMP_OFFSET_NS).ok_or_else(|| Error::Encode {
+        reason: "Underflow converting nanoseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
+    })?;
+    // Convert to microseconds (division cannot overflow)
+    Ok(timestamp_ns / 1_000)
+}
+
 #[derive(Debug)]
 pub struct TimestampMicrosecondEncoder<'a> {
     arr: &'a arrow_array::TimestampMicrosecondArray,
@@ -584,6 +599,18 @@ impl_encode_fallible!(
     TimestampSecondEncoder,
     8, // Timestamp is always 8 bytes (i64)
     convert_arrow_timestamp_seconds_to_pg_timestamp,
+    BufMut::put_i64
+);
+
+#[derive(Debug)]
+pub struct TimestampNanosecondEncoder<'a> {
+    arr: &'a arrow_array::TimestampNanosecondArray,
+    field: String,
+}
+impl_encode_fallible!(
+    TimestampNanosecondEncoder,
+    8, // Timestamp is always 8 bytes (i64)
+    convert_arrow_timestamp_nanoseconds_to_pg_timestamp,
     BufMut::put_i64
 );
 
@@ -1395,6 +1422,56 @@ impl BuildEncoder for TimestampSecondEncoderBuilder {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TimestampNanosecondEncoderBuilder {
+    field: Arc<Field>,
+}
+
+impl TimestampNanosecondEncoderBuilder {
+    pub fn new(field: Arc<Field>) -> Result<Self, Error> {
+        if !matches!(
+            field.data_type(),
+            DataType::Timestamp(TimeUnit::Nanosecond, _)
+        ) {
+            return Err(Error::FieldTypeNotSupported {
+                encoder: "TimestampNanosecondEncoderBuilder".to_string(),
+                tp: field.data_type().clone(),
+                field: field.name().clone(),
+            });
+        }
+        Ok(Self { field })
+    }
+}
+
+impl BuildEncoder for TimestampNanosecondEncoderBuilder {
+    fn try_new<'a, 'b: 'a>(&'b self, arr: &'a dyn Array) -> Result<Encoder<'a>, Error> {
+        let field_name = self.field.name();
+        let arr = downcast_checked(arr, field_name)?;
+        Ok(Encoder::TimestampNanosecond(TimestampNanosecondEncoder {
+            arr,
+            field: field_name.to_string(),
+        }))
+    }
+
+    fn schema(&self) -> Column {
+        let timezone = match self.field.data_type() {
+            DataType::Timestamp(_, tz) => tz.as_ref().map(|s| s.to_string()),
+            _ => unreachable!(
+                "TimestampNanosecondEncoderBuilder should only be created for Timestamp types"
+            ),
+        };
+
+        Column {
+            data_type: PostgresType::Timestamp { timezone },
+            nullable: self.field.is_nullable(),
+        }
+    }
+
+    fn field(&self) -> Arc<Field> {
+        self.field.clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Date32EncoderBuilder {
     field: Arc<Field>,
 }
@@ -1711,6 +1788,7 @@ pub enum EncoderBuilder {
     TimestampMicrosecond(TimestampMicrosecondEncoderBuilder),
     TimestampMillisecond(TimestampMillisecondEncoderBuilder),
     TimestampSecond(TimestampSecondEncoderBuilder),
+    TimestampNanosecond(TimestampNanosecondEncoderBuilder),
     Date32(Date32EncoderBuilder),
     Time32Millisecond(Time32MillisecondEncoderBuilder),
     Time32Second(Time32SecondEncoderBuilder),
@@ -1750,11 +1828,7 @@ impl EncoderBuilder {
             DataType::Decimal128(_, _) => Self::Decimal128(Decimal128EncoderBuilder { field }),
             DataType::Timestamp(unit, _) => match unit {
                 TimeUnit::Nanosecond => {
-                    return Err(Error::type_unsupported(
-                        field.name(),
-                        data_type,
-                        "Postgres does not support ns precision; convert to us",
-                    ));
+                    Self::TimestampNanosecond(TimestampNanosecondEncoderBuilder { field })
                 }
                 TimeUnit::Microsecond => {
                     Self::TimestampMicrosecond(TimestampMicrosecondEncoderBuilder { field })
@@ -2042,5 +2116,117 @@ mod tests {
         // Should succeed - TEXT doesn't validate
         encoder.encode(0, &mut buf).unwrap();
         assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_timestamp_nanosecond_encoder_basic() {
+        use arrow_array::TimestampNanosecondArray;
+
+        // Test basic nanosecond timestamp encoding
+        // 2020-01-01 00:00:00 UTC in nanoseconds since 1970-01-01
+        let timestamp_ns = 1_577_836_800_000_000_000i64;
+        let array = TimestampNanosecondArray::from(vec![timestamp_ns]);
+        let field = Arc::new(Field::new(
+            "timestamp_field",
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("+00:00".into())),
+            false,
+        ));
+        let builder = TimestampNanosecondEncoderBuilder::new(field).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        encoder.encode(0, &mut buf).unwrap();
+
+        // Should encode as 8-byte timestamp (4 bytes length + 8 bytes data)
+        assert_eq!(buf.len(), 12);
+    }
+
+    #[test]
+    fn test_timestamp_nanosecond_encoder_nullable() {
+        use arrow_array::TimestampNanosecondArray;
+
+        // Test nullable nanosecond timestamps
+        let timestamp_ns = 1_577_836_800_000_000_000i64;
+        let array =
+            TimestampNanosecondArray::from(vec![Some(timestamp_ns), None, Some(timestamp_ns * 2)]);
+        let field = Arc::new(Field::new(
+            "timestamp_field",
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("+00:00".into())),
+            true,
+        ));
+        let builder = TimestampNanosecondEncoderBuilder::new(field).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // Encode all three values
+        encoder.encode(0, &mut buf).unwrap();
+        encoder.encode(1, &mut buf).unwrap();
+        encoder.encode(2, &mut buf).unwrap();
+
+        // Row 0 (Some): 4-byte length + 8-byte data = 12 bytes
+        // Row 1 (None): 4-byte length (-1) = 4 bytes
+        // Row 2 (Some): 4-byte length + 8-byte data = 12 bytes
+        // Total: 28 bytes
+        assert_eq!(buf.len(), 28);
+    }
+
+    #[test]
+    fn test_timestamp_nanosecond_conversion() {
+        use arrow_array::TimestampNanosecondArray;
+
+        // Test that nanosecond precision is correctly truncated to microseconds
+        // Use a timestamp with sub-microsecond precision
+        // 2020-01-01 00:00:00.000000123 UTC (123 nanoseconds)
+        let timestamp_ns = 1_577_836_800_000_000_123i64;
+        let array = TimestampNanosecondArray::from(vec![timestamp_ns]);
+        let field = Arc::new(Field::new(
+            "timestamp_field",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        ));
+        let builder = TimestampNanosecondEncoderBuilder::new(field).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // Should succeed and truncate sub-microsecond precision
+        encoder.encode(0, &mut buf).unwrap();
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_timestamp_nanosecond_edge_cases() {
+        use arrow_array::TimestampNanosecondArray;
+
+        // Test edge cases: zero, very old timestamp (but after Postgres epoch)
+        // Postgres epoch: 2000-01-01 00:00:00 UTC = 946684800 seconds since 1970-01-01
+        let pg_epoch_ns = 946_684_800_000_000_000i64;
+
+        // Test: exact Postgres epoch, just after, and a recent timestamp
+        let array = TimestampNanosecondArray::from(vec![
+            pg_epoch_ns,                  // Exactly Postgres epoch (should encode as 0 in PG)
+            pg_epoch_ns + 1_000_000,      // 1 millisecond after Postgres epoch
+            1_577_836_800_000_000_000i64, // 2020-01-01 00:00:00 UTC
+        ]);
+
+        let field = Arc::new(Field::new(
+            "timestamp_field",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        ));
+        let builder = TimestampNanosecondEncoderBuilder::new(field).unwrap();
+
+        let encoder = builder.try_new(&array).unwrap();
+        let mut buf = BytesMut::new();
+
+        // All should encode successfully
+        encoder.encode(0, &mut buf).unwrap();
+        encoder.encode(1, &mut buf).unwrap();
+        encoder.encode(2, &mut buf).unwrap();
+
+        // Total: 3 * 12 bytes = 36 bytes
+        assert_eq!(buf.len(), 36);
     }
 }
