@@ -4,7 +4,7 @@ use std::{
     iter::FromIterator,
     mem::swap,
     num::{NonZero, NonZeroI64, NonZeroU64},
-    ops::{Add, AddAssign, Deref, Mul},
+    ops::{Add, AddAssign, Deref, Mul, Not},
     str::FromStr,
 };
 
@@ -604,9 +604,9 @@ impl Display for SegmentSize {
         let mut size_string = (0..6)
             .filter_map(|i| match i {
                 0 if self.length != 0 => Some(format!("length: {}, ", self.length)),
-                1 if self.blocks.is_zero() => Some(format!("blocks: {}, ", self.blocks)),
-                2 if self.bytes.is_zero() => Some(format!("bytes: {}, ", self.bytes)),
-                3 if self.rows.is_zero() => Some(format!("rows: {}, ", self.rows)),
+                1 if self.blocks.is_zero().not() => Some(format!("blocks: {}, ", self.blocks)),
+                2 if self.bytes.is_zero().not() => Some(format!("bytes: {}, ", self.bytes)),
+                3 if self.rows.is_zero().not() => Some(format!("rows: {}, ", self.rows)),
                 4 if self.generation.is_compacted() => {
                     Some(format!("generation: {}, ", self.generation))
                 }
