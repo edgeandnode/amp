@@ -638,7 +638,7 @@ impl TableProvider for TableSnapshot {
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         if let Some(range) = self.synced_range() {
-            tracing::info!("Scanning range: {range:?}");
+            tracing::debug!("Scanning range: {range:?}");
         }
 
         let target_partitions = state.config_options().execution.target_partitions;
