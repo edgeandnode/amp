@@ -43,16 +43,23 @@ pub async fn spawn_stream_tasks(
         debug!(table = %table_name, "processing_table");
 
         // Get the SQL query from the table definition
-        let sql_query = match &table.input {
+        let sql_query_raw = match &table.input {
             TableInput::View(view) => &view.sql,
         };
 
+        // Ensure the query has "SETTINGS stream = true" for streaming behavior
+        let sql_query = if sql_query_raw.contains("SETTINGS stream = true") {
+            sql_query_raw.to_string()
+        } else {
+            format!("{} SETTINGS stream = true", sql_query_raw.trim())
+        };
+
         // Validate that the query only uses incremental operations
-        validate_incremental_query(sql_query)
+        validate_incremental_query(&sql_query)
             .map_err(|e| format!("Table '{}' has invalid query:\n{}", table_name, e))?;
 
         // Extract which columns are selected in the SQL query
-        let selected_columns = extract_select_columns(sql_query)
+        let selected_columns = extract_select_columns(&sql_query)
             .map_err(|e| format!("Failed to parse SQL for table '{}': {}", table_name, e))?;
 
         // Filter the manifest schema based on what columns are actually selected
@@ -144,7 +151,7 @@ pub async fn spawn_stream_tasks(
                     watermark = ?watermark,
                     "resuming_from_watermark"
                 );
-                (Some(watermark.clone()), sql_query.to_string())
+                (Some(watermark.clone()), sql_query.clone())
             }
             crate::sync_engine::ResumePoint::Incremental {
                 network,
@@ -156,7 +163,7 @@ pub async fn spawn_stream_tasks(
                     max_block_num = max_block_num,
                     "resuming_from_incremental_checkpoint"
                 );
-                // sql_query already has "SETTINGS stream = true" from manifest
+                // sql_query already has "SETTINGS stream = true" (ensured above)
                 // Remove it, add WHERE clause, then add SETTINGS back
                 let base_query = sql_query.trim_end_matches(" SETTINGS stream = true");
                 (
@@ -172,7 +179,7 @@ pub async fn spawn_stream_tasks(
                     table = %table_name,
                     "starting_from_beginning"
                 );
-                (None, sql_query.to_string())
+                (None, sql_query)
             }
         };
 

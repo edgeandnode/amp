@@ -33,16 +33,16 @@ impl ManifestError {
     /// Returns true if this error is retryable (transient/recoverable).
     ///
     /// Retryable errors include:
-    /// - Dataset not found (may be published soon)
-    /// - No versions available (may be published soon)
-    /// - Network errors (may be transient)
+    /// - Dataset not found (maybe published soon)
+    /// - No versions available (maybe published soon)
+    /// - Network errors (maybe transient)
     /// - 5xx HTTP errors (server-side issues, may recover)
     pub fn is_retryable(&self) -> bool {
         match self {
             ManifestError::DatasetNotFound { .. }
             | ManifestError::NoVersionsAvailable { .. }
-            | ManifestError::NetworkError { .. } => true,
-            ManifestError::InvalidManifest { .. } => false,
+            | ManifestError::NetworkError { .. }
+            | ManifestError::InvalidManifest { .. } => true,
             ManifestError::HttpError { status, .. } => *status >= 500,
         }
     }
