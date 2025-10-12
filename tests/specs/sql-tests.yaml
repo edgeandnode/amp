@@ -1,9 +1,6 @@
 - name: restore_eth_rpc
   restore: eth_rpc
 
-- name: restore_eth_firehose
-  restore: eth_firehose
-
 - name: select_alias_special_block_num_empty_relation
   query: |
     SELECT 0 AS _block_num
