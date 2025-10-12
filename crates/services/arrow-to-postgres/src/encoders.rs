@@ -507,60 +507,99 @@ const PG_BASE_TIMESTAMP_OFFSET_MS: i64 = 946_684_800_000; // milliseconds betwee
 const PG_BASE_TIMESTAMP_OFFSET_S: i64 = 946_684_800; // seconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 const PG_BASE_TIMESTAMP_OFFSET_NS: i64 = 946_684_800_000_000_000; // nanoseconds between 2000-01-01 at midnight (Postgres's epoch) and 1970-01-01 (Arrow's / UNIX epoch)
 
+/// Converts Arrow timestamp (microseconds since Unix epoch) to Postgres timestamp (microseconds since 2000-01-01).
+///
+/// # Errors
+///
+/// Returns an error if the timestamp is before Postgres epoch (2000-01-01 00:00:00 UTC).
 #[inline(always)]
 fn convert_arrow_timestamp_microseconds_to_pg_timestamp(
-    _field: &str,
+    field: &str,
     timestamp_us: i64,
 ) -> Result<i64, Error> {
-    // adjust the timestamp from microseconds since 1970-01-01 to microseconds since 2000-01-01 checking for overflows and underflow
     timestamp_us
         .checked_sub(PG_BASE_TIMESTAMP_OFFSET_US)
         .ok_or_else(|| Error::Encode {
-            reason: "Underflow converting microseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
+            reason: format!(
+                "Field '{}': Underflow converting microseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)",
+                field
+            ),
         })
 }
 
-/// Convert from Arrow timestamps (milliseconds since 1970-01-01) to Postgres timestamps (microseconds since 2000-01-01)
+/// Converts Arrow timestamp (milliseconds since Unix epoch) to Postgres timestamp (microseconds since 2000-01-01).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The timestamp is before Postgres epoch (2000-01-01 00:00:00 UTC)
+/// - Multiplication to microseconds overflows
 #[inline(always)]
 fn convert_arrow_timestamp_milliseconds_to_pg_timestamp(
-    _field: &str,
+    field: &str,
     timestamp_ms: i64,
 ) -> Result<i64, Error> {
     let timestamp_ms = timestamp_ms.checked_sub(PG_BASE_TIMESTAMP_OFFSET_MS).ok_or_else(|| Error::Encode {
-        reason: "Underflow converting milliseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
+        reason: format!(
+            "Field '{}': Underflow converting milliseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)",
+            field
+        ),
     })?;
-    // convert to microseconds, checking for overflows
     timestamp_ms
         .checked_mul(1_000)
         .ok_or_else(|| Error::Encode {
-            reason: "Overflow converting milliseconds to microseconds".to_string(),
+            reason: format!(
+                "Field '{}': Overflow converting milliseconds to microseconds",
+                field
+            ),
         })
 }
 
+/// Converts Arrow timestamp (seconds since Unix epoch) to Postgres timestamp (microseconds since 2000-01-01).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The timestamp is before Postgres epoch (2000-01-01 00:00:00 UTC)
+/// - Multiplication to microseconds overflows
 #[inline(always)]
 fn convert_arrow_timestamp_seconds_to_pg_timestamp(
-    _field: &str,
+    field: &str,
     timestamp_s: i64,
 ) -> Result<i64, Error> {
     let timestamp_s = timestamp_s.checked_sub(PG_BASE_TIMESTAMP_OFFSET_S).ok_or_else(|| Error::Encode {
-        reason: "Underflow converting seconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
+        reason: format!(
+            "Field '{}': Underflow converting seconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)",
+            field
+        ),
     })?;
-    // convert to microseconds, checking for overflows
     timestamp_s
         .checked_mul(1_000_000)
         .ok_or_else(|| Error::Encode {
-            reason: "Overflow converting seconds to microseconds".to_string(),
+            reason: format!(
+                "Field '{}': Overflow converting seconds to microseconds",
+                field
+            ),
         })
 }
 
-/// Convert from Arrow timestamps (nanoseconds since 1970-01-01) to Postgres timestamps (microseconds since 2000-01-01)
+/// Converts Arrow timestamp (nanoseconds since Unix epoch) to Postgres timestamp (microseconds since 2000-01-01).
+///
+/// Note: Sub-microsecond precision is truncated during conversion since PostgreSQL only supports microsecond precision.
+///
+/// # Errors
+///
+/// Returns an error if the timestamp is before Postgres epoch (2000-01-01 00:00:00 UTC).
 #[inline(always)]
 fn convert_arrow_timestamp_nanoseconds_to_pg_timestamp(
-    _field: &str,
+    field: &str,
     timestamp_ns: i64,
 ) -> Result<i64, Error> {
     let timestamp_ns = timestamp_ns.checked_sub(PG_BASE_TIMESTAMP_OFFSET_NS).ok_or_else(|| Error::Encode {
-        reason: "Underflow converting nanoseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)".to_string(),
+        reason: format!(
+            "Field '{}': Underflow converting nanoseconds since 1970-01-01 (Arrow) to microseconds since 2000-01-01 (Postgres)",
+            field
+        ),
     })?;
     // Convert to microseconds (division cannot overflow)
     Ok(timestamp_ns / 1_000)
