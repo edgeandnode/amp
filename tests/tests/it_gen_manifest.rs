@@ -1,6 +1,6 @@
+use ampd::gen_manifest_cmd;
 use common::manifest::common::schema_from_tables;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name};
-use generate_manifest;
 use monitoring::logging;
 use substreams_datasets::SubstreamsDatasetKind;
 
@@ -14,7 +14,7 @@ async fn generate_manifest_evm_rpc_builtin() {
 
     let mut out = Vec::new();
 
-    let _ = generate_manifest::run(
+    let _ = gen_manifest_cmd::run(
         network.clone(),
         kind.clone(),
         name.clone(),
@@ -44,7 +44,7 @@ async fn generate_manifest_firehose_builtin() {
 
     let mut out = Vec::new();
 
-    let _ = generate_manifest::run(
+    let _ = gen_manifest_cmd::run(
         network.clone(),
         kind.clone(),
         name.clone(),
@@ -76,7 +76,7 @@ async fn generate_manifest_substreams() {
 
     let mut out = Vec::new();
 
-    let _ = generate_manifest::run(
+    let _ = gen_manifest_cmd::run(
         network.clone(),
         kind.to_string(),
         name.to_string(),
@@ -115,7 +115,7 @@ async fn generate_manifest_manifest_builtin() {
 
     let mut out = Vec::new();
 
-    let err = generate_manifest::run(
+    let err = gen_manifest_cmd::run(
         network.clone(),
         kind.clone(),
         name.clone(),
@@ -141,7 +141,7 @@ async fn generate_manifest_bad_dataset_kind() {
 
     let mut out = Vec::new();
 
-    let err = generate_manifest::run(
+    let err = gen_manifest_cmd::run(
         network.clone(),
         bad_kind.clone(),
         name.clone(),
@@ -154,6 +154,6 @@ async fn generate_manifest_bad_dataset_kind() {
 
     assert_eq!(
         err.to_string(),
-        format!("unsupported dataset kind '{bad_kind}'")
+        format!("Unsupported dataset kind '{bad_kind}'")
     );
 }

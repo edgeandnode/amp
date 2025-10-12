@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::dump_cmd;
+use ampd::{dump_cmd, gen_manifest_cmd};
 use clap::Parser as _;
 use common::{BoxError, config::Config};
 use dataset_store::{
@@ -436,10 +436,14 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                generate_manifest::run(network, kind, name, manifest, module, &mut out).await
+                gen_manifest_cmd::run(network, kind, name, manifest, module, &mut out)
+                    .await
+                    .map_err(|err| -> BoxError { err.into() })
             } else {
                 let mut stdout = std::io::stdout();
-                generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
+                gen_manifest_cmd::run(network, kind, name, manifest, module, &mut stdout)
+                    .await
+                    .map_err(|err| -> BoxError { err.into() })
             };
 
             monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
