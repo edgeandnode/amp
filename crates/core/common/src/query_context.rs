@@ -42,10 +42,7 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    plan_visitors::{
-        constrain_by_block_num, extract_table_references_from_plan,
-        forbid_underscore_prefixed_aliases, unproject_special_block_num_column,
-    },
+    plan_visitors::{extract_table_references_from_plan, forbid_underscore_prefixed_aliases},
 };
 
 #[derive(Error, Debug)]
@@ -303,48 +300,6 @@ impl QueryContext {
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let table_snapshot = self.get_table(table)?;
         Ok(table_snapshot.synced_range())
-    }
-
-    /// This will:
-    /// - Validate that dependencies have synced the required block range.
-    /// - Inject block range constraints into the plan.
-    /// - Execute the plan.
-    ///
-    /// This assumes that the `_block_num` column has already been propagated and is therefore
-    ///  present in the schema of `plan`.
-    #[instrument(skip_all, err)]
-    pub async fn execute_plan_for_range(
-        &self,
-        plan: LogicalPlan,
-        start: BlockNum,
-        end: BlockNum,
-        preserve_block_num: bool,
-        logical_optimize: bool,
-    ) -> Result<SendableRecordBatchStream, BoxError> {
-        let tables = extract_table_references_from_plan(&plan)?;
-
-        // Validate dependency block ranges
-        {
-            for table in tables {
-                let range = self.get_synced_range_for_table(&table)?;
-                let synced = range.map(|r| end <= *r.end()).unwrap_or(false);
-                if !synced {
-                    return Err(format!(
-                    "tried to query up to block {end} of table {table} but it has not been synced"
-                )
-                    .into());
-                }
-            }
-        }
-
-        let plan = {
-            let mut plan = constrain_by_block_num(plan, start, end)?;
-            if !preserve_block_num {
-                plan = unproject_special_block_num_column(plan)?
-            }
-            plan
-        };
-        Ok(self.execute_plan(plan, logical_optimize).await?)
     }
 }
 

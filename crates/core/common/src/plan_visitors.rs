@@ -99,6 +99,9 @@ pub fn unproject_special_block_num_column(
 }
 
 /// Adds `where start <= _block_num and _block_num <= end` to the plan and runs filter pushdown.
+///
+/// This assumes that the `_block_num` column has already been propagated and is therefore
+/// present in the schema of `plan`.
 #[instrument(skip_all, err)]
 pub fn constrain_by_block_num(
     plan: LogicalPlan,
