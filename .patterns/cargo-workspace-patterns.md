@@ -3,7 +3,7 @@
 
 ## 🎯 OVERVIEW
 
-Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Nozzle project.
+Comprehensive workspace management strategies for Rust multi-crate projects, with emphasis on proper dependency management, cross-crate interactions, and workspace-level operations in the Amp project.
 
 ## 🚨 CRITICAL WORKSPACE REQUIREMENTS
 **🤖 AI AGENTS: These rules are NON-NEGOTIABLE. Follow them exactly.**
@@ -20,7 +20,7 @@ Comprehensive workspace management strategies for Rust multi-crate projects, wit
 
 ## 📁 Workspace structure
 
-The Nozzle workspace follows a hierarchical organization under the `crates/` directory with four main categories: `core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct dependency patterns.
+The Amp workspace follows a hierarchical organization under the `crates/` directory with four main categories: `core`, `bin`, `extractors`, and `services`. Each category serves a specific architectural purpose and has distinct dependency patterns.
 
 ### 🏗️ Top-Level Crate Categories
 
@@ -44,9 +44,8 @@ The Nozzle workspace follows a hierarchical organization under the `crates/` dir
 **Purpose**: Main entry points and command-line applications.
 
 **What belongs here:**
-- **`nozzle`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
+- **`ampd`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
 - **`generate-manifest`**: Utility for creating dataset manifest files
-- **`dump-check`**: Data validation and integrity checking tool
 
 **Dependency Rules:**
 - ✅ Can depend on `core`, `extractors`, and `services` crates
@@ -73,17 +72,15 @@ The Nozzle workspace follows a hierarchical organization under the `crates/` dir
 **What belongs here:**
 - **`server`**: Arrow Flight gRPC server and JSON Lines HTTP server
 - **`admin-api`**: Administrative HTTP API for management
-- **`http-common`**: Shared HTTP utilities and middleware
 
 **Dependency Rules:**
 - ✅ Can depend on `core` crates for business logic
-- ✅ `http-common` can be shared among other service crates
 - ❌ Should NOT depend on `extractors` or `bin` crates directly
 - ✅ Services orchestrate core functionality for external interfaces
 
 #### 📋 Additional Workspace Components
 
-**`crates/client/`**: Client libraries for connecting to Nozzle services
+**`crates/client/`**: Client libraries for connecting to Amp services
 - Language bindings and SDK functionality
 - Can depend on `core` for shared data structures
 
@@ -376,8 +373,6 @@ Each feature must follow this exact format:
 [features]
 # Default features (enabled by default)
 default = ["basic-logging"]
-# Enable admin API endpoints and management interface
-admin-api = ["dep:axum", "dep:tower", "http-common/admin"]
 # Basic logging functionality with structured output
 basic-logging = ["dep:tracing", "dep:tracing-subscriber"]
 # PostgreSQL database support with connection pooling

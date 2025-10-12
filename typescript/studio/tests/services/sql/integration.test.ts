@@ -7,12 +7,12 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import {
+  AmpCompletionProvider,
   areProvidersActive,
   disposeAllProviders,
   getProviderMetrics,
-  NozzleCompletionProvider,
   QueryContextAnalyzer,
-  setupNozzleSQLProviders,
+  setupAmpSQLProviders,
   updateProviderData,
 } from "../../../src/services/sql"
 
@@ -57,7 +57,7 @@ describe("SQL Intellisense Integration", () => {
   describe("Provider Lifecycle Management", () => {
     test("should setup and dispose providers properly", () => {
       // Setup providers
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
 
       expect(areProvidersActive()).toBe(true)
       expect(disposable).toBeDefined()
@@ -71,7 +71,7 @@ describe("SQL Intellisense Integration", () => {
     })
 
     test("should handle setup with empty metadata", () => {
-      disposable = setupNozzleSQLProviders(mockMetadataEmpty, mockUDFsEmpty)
+      disposable = setupAmpSQLProviders(mockMetadataEmpty, mockUDFsEmpty)
 
       expect(areProvidersActive()).toBe(true)
 
@@ -82,7 +82,7 @@ describe("SQL Intellisense Integration", () => {
 
     test("should support metadata updates", () => {
       // Initial setup with empty metadata
-      disposable = setupNozzleSQLProviders(mockMetadataEmpty, mockUDFsEmpty)
+      disposable = setupAmpSQLProviders(mockMetadataEmpty, mockUDFsEmpty)
       expect(areProvidersActive()).toBe(true)
 
       // Update with real metadata
@@ -95,7 +95,7 @@ describe("SQL Intellisense Integration", () => {
     })
 
     test("should handle multiple dispose calls gracefully", () => {
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
 
       expect(areProvidersActive()).toBe(true)
 
@@ -109,7 +109,7 @@ describe("SQL Intellisense Integration", () => {
     })
 
     test("should track performance metrics", () => {
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
 
       const metrics = getProviderMetrics()
       expect(metrics).toBeDefined()
@@ -124,7 +124,7 @@ describe("SQL Intellisense Integration", () => {
   describe("End-to-End Completion Flow", () => {
     beforeEach(() => {
       // Setup providers for each test
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
 
       // Wait for Monaco to be available (mock setup)
       // if (typeof window !== "undefined" && !window.monaco) {
@@ -144,7 +144,7 @@ describe("SQL Intellisense Integration", () => {
       // For integration testing, we'll directly test the completion provider
       // since Monaco's internal provider registration is complex to mock
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -165,7 +165,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -188,7 +188,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -221,7 +221,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -245,7 +245,7 @@ describe("SQL Intellisense Integration", () => {
 
   describe("Error Recovery and Edge Cases", () => {
     beforeEach(() => {
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
       // if (typeof window !== "undefined" && !window.monaco) {
       //   ;(window as any).monaco = monaco
       // }
@@ -258,7 +258,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -281,7 +281,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -302,7 +302,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
@@ -319,7 +319,7 @@ describe("SQL Intellisense Integration", () => {
 
   describe("Performance and Caching", () => {
     beforeEach(() => {
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs)
       // if (typeof window !== "undefined" && !window.monaco) {
       //   ;(window as any).monaco = monaco
       // }
@@ -332,7 +332,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       // Verify cache is initially empty
       expect(contextAnalyzer.getCacheStats().contextCache).toBe(0)
@@ -389,7 +389,7 @@ describe("SQL Intellisense Integration", () => {
         showDebugInfo: true,
       }
 
-      disposable = setupNozzleSQLProviders(mockMetadata, mockUDFs, config)
+      disposable = setupAmpSQLProviders(mockMetadata, mockUDFs, config)
 
       const model = createAndTrackModel("SELECT a")
       const position = new monaco.Position(1, 9)
@@ -397,7 +397,7 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer(config)
-      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer, config)
+      const completionProvider = new AmpCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer, config)
 
       const result = await completionProvider.provideCompletionItems(model, position, context, token)
 

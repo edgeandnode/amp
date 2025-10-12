@@ -12,7 +12,7 @@ pub const DEFAULT_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 pub type Result = std::result::Result<(SdkMeterProvider, Meter), ExporterBuildError>;
 
-const NOZZLE_METER: &str = "nozzle-meter";
+const AMP_METER: &str = "amp-meter";
 
 /// Starts a periodic OpenTelemetry metrics exporter over binary HTTP transport.
 pub fn start(url: String, export_interval: Option<Duration>) -> Result {
@@ -31,7 +31,7 @@ pub fn start(url: String, export_interval: Option<Duration>) -> Result {
         .with_reader(reader)
         .build();
     opentelemetry::global::set_meter_provider(meter_provider.clone());
-    let meter = opentelemetry::global::meter(NOZZLE_METER);
+    let meter = opentelemetry::global::meter(AMP_METER);
 
     Ok((meter_provider, meter))
 }
@@ -180,6 +180,61 @@ impl Counter {
     /// Increment the OpenTelemetry counter by one.
     pub fn inc(&self) {
         self.inc_with_kvs(&[]);
+    }
+}
+
+/// An OpenTelemetry UpDownCounter for values that can increase and decrease.
+///
+/// Unlike Counter (which only increases), UpDownCounter supports both add and subtract operations.
+/// Useful for tracking active connections, queue depth, or any metric that fluctuates.
+#[derive(Debug, Clone)]
+pub struct UpDownCounter(opentelemetry::metrics::UpDownCounter<i64>);
+
+impl UpDownCounter {
+    /// Create a new OpenTelemetry UpDownCounter.
+    pub fn new(
+        meter: &Meter,
+        name: impl Into<Cow<'static, str>>,
+        description: impl Into<Cow<'static, str>>,
+        unit: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        let inner = meter
+            .i64_up_down_counter(name)
+            .with_description(description)
+            .with_unit(unit)
+            .build();
+
+        Self(inner)
+    }
+
+    /// Add (increment) or subtract (decrement) with additional key-value pairs.
+    pub fn add_with_kvs(&self, value: i64, kv_pairs: &[KeyValue]) {
+        self.0.add(value, kv_pairs);
+    }
+
+    /// Add (increment) or subtract (decrement) without labels.
+    pub fn add(&self, value: i64) {
+        self.add_with_kvs(value, &[]);
+    }
+
+    /// Increment by 1 with additional key-value pairs.
+    pub fn inc_with_kvs(&self, kv_pairs: &[KeyValue]) {
+        self.add_with_kvs(1, kv_pairs);
+    }
+
+    /// Increment by 1.
+    pub fn inc(&self) {
+        self.add(1);
+    }
+
+    /// Decrement by 1 with additional key-value pairs.
+    pub fn dec_with_kvs(&self, kv_pairs: &[KeyValue]) {
+        self.add_with_kvs(-1, kv_pairs);
+    }
+
+    /// Decrement by 1.
+    pub fn dec(&self) {
+        self.add(-1);
     }
 }
 

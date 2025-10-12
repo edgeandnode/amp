@@ -1,4 +1,4 @@
 {
   "extends": "../tsconfig.json",
-  "include": ["nozzle.config.ts"]
+  "include": ["amp.config.ts"]
 }

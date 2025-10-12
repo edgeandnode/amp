@@ -1,4 +1,4 @@
-//! Rust client library for Nozzle
+//! Rust client library for Amp
 
 mod decode;
 
@@ -44,9 +44,10 @@ pub struct ResponseBatch {
     pub metadata: Metadata,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Metadata {
     pub ranges: Vec<BlockRange>,
+    pub ranges_complete: bool,
 }
 
 impl Stream for ResultStream {
@@ -57,7 +58,7 @@ impl Stream for ResultStream {
     }
 }
 
-/// Arrow Flight client for connecting to nozzle server.
+/// Arrow Flight client for connecting to amp server.
 #[derive(Clone)]
 pub struct SqlClient {
     client: FlightSqlServiceClient<tonic::transport::Channel>,
@@ -82,7 +83,7 @@ impl SqlClient {
         resume_watermark: Option<&ResumeWatermark>,
     ) -> Result<ResultStream, Error> {
         self.client.set_header(
-            "nozzle-resume",
+            "amp-resume",
             resume_watermark
                 .map(|value| serde_json::to_string(value).unwrap())
                 .unwrap_or_default(),
@@ -90,9 +91,9 @@ impl SqlClient {
         let flight_info = match self.client.execute(sql.to_string(), transaction_id).await {
             Ok(flight_info) => flight_info,
             Err(err) => {
-                // Unset the nozzle-resume header after GetFlightInfo, since otherwise it gets
+                // Unset the amp-resume header after GetFlightInfo, since otherwise it gets
                 // retained for subsequent requests.
-                self.client.set_header("nozzle-resume", "");
+                self.client.set_header("amp-resume", "");
                 return Err(err.into());
             }
         };
@@ -115,6 +116,8 @@ pub enum ResponseBatchWithReorg {
         data: RecordBatch,
         metadata: Metadata,
     },
+    /// Watermark used to indicate the fully processed ranges when resuming a dropped stream.
+    Watermark(ResumeWatermark),
     /// Reorg marker, invalidating prior batches overlapping with the given ranges.
     Reorg {
         invalidation: Vec<InvalidationRange>,
@@ -154,19 +157,20 @@ impl From<BlockRange> for InvalidationRange {
 /// # Example
 ///
 /// ```rust,no_run
+/// use amp_client::{Error, ResponseBatchWithReorg, with_reorg};
 /// use futures::StreamExt;
-/// use nozzle_client::{Error, ResponseBatchWithReorg, with_reorg};
 ///
-/// # async fn example(stream: nozzle_client::ResultStream) -> Result<(), Error> {
+/// # async fn example(stream: amp_client::ResultStream) -> Result<(), Error> {
 /// let mut reorg_stream = with_reorg(stream);
 /// while let Some(result) = reorg_stream.next().await {
 ///     match result? {
 ///         ResponseBatchWithReorg::Batch { data, metadata } => {
-///             // Process normal data batch
 ///             println!("Received batch for block ranges: {:#?}", metadata.ranges);
 ///         }
+///         ResponseBatchWithReorg::Watermark(watermark) => {
+///             println!("Completed stream up to {:#?}", watermark);
+///         }
 ///         ResponseBatchWithReorg::Reorg { invalidation } => {
-///             // Handle reorg - invalidate data for these ranges
 ///             println!("Reorg detected, invalidating ranges: {:#?}", invalidation);
 ///         }
 ///     }
@@ -202,10 +206,15 @@ pub fn with_reorg(
                 yield Ok(ResponseBatchWithReorg::Reorg { invalidation });
             }
             prev_ranges = ranges;
-            yield Ok(ResponseBatchWithReorg::Batch{
-                data: batch.data,
-                metadata: batch.metadata,
-            });
+            if batch.metadata.ranges_complete {
+                let watermark = ResumeWatermark::from_ranges(batch.metadata.ranges);
+                yield Ok(ResponseBatchWithReorg::Watermark(watermark));
+            } else {
+                yield Ok(ResponseBatchWithReorg::Batch{
+                    data: batch.data,
+                    metadata: batch.metadata,
+                });
+            }
         }
     }
     .boxed()

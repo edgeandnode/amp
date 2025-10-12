@@ -1,24 +1,26 @@
 //! Daemon server fixture for isolated test environments.
 //!
-//! This fixture module provides the `DaemonServerFixture` type for managing Nozzle server
+//! This fixture module provides the `DaemonServer` type for managing Amp server
 //! instances in test environments. It handles server lifecycle, task management, and provides
-//! convenient access to server endpoints and addresses.
+//! convenient access to query server endpoints (Flight and JSON Lines).
 
 use std::{net::SocketAddr, sync::Arc};
 
+use ampd::server::BoundAddrs;
 use common::{BoxError, BoxResult, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
-use nozzle::server::BoundAddrs;
 use tokio::task::JoinHandle;
 
-/// Fixture for managing Nozzle daemon server instances in tests.
+/// Fixture for managing Amp daemon server instances in tests.
 ///
-/// This fixture wraps a running Nozzle server instance and provides convenient access
-/// to server endpoints and addresses. The fixture automatically handles server lifecycle
-/// and cleanup by aborting the server task when dropped.
+/// This fixture wraps a running Amp server instance and provides convenient access
+/// to query server endpoints (Arrow Flight and JSON Lines). The fixture automatically
+/// handles server lifecycle and cleanup by aborting the server task when dropped.
+///
+/// Note: For Admin API access, use the `DaemonController` fixture instead.
 pub struct DaemonServer {
     config: Arc<Config>,
     server_addrs: BoundAddrs,
@@ -27,16 +29,18 @@ pub struct DaemonServer {
 }
 
 impl DaemonServer {
-    /// Create and start a new Nozzle server for testing.
+    /// Create and start a new Amp server for testing.
     ///
-    /// Starts a Nozzle server with the provided configuration and metadata database.
+    /// Starts a Amp server with the provided configuration and metadata database.
+    /// Only query servers (Flight and JSON Lines) are enabled. For Admin API,
+    /// use the `DaemonController` fixture.
     /// The server will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<Config>,
         metadb: MetadataDb,
         enable_flight: bool,
         enable_jsonl: bool,
-        enable_admin_api: bool,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         let dataset_store = {
             let provider_configs_store =
@@ -52,12 +56,17 @@ impl DaemonServer {
             )
         };
 
-        let (server_addrs, server) = nozzle::server::run(
+        // For tests, leak the meter to get a 'static reference
+        // This is acceptable in tests since they're short-lived
+        let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
+            meter.map(|m| Box::leak(Box::new(m)) as &'static _);
+
+        let (server_addrs, server) = ampd::server::run(
             config.clone(),
             metadb,
             enable_flight,
             enable_jsonl,
-            enable_admin_api,
+            meter_ref,
         )
         .await?;
 
@@ -71,15 +80,16 @@ impl DaemonServer {
         })
     }
 
-    /// Create and start a new Nozzle server with all services enabled.
+    /// Create and start a new Amp server with all query services enabled.
     ///
-    /// Convenience method that starts a server with all services (Flight, JSON Lines,
-    /// and Admin API) enabled.
+    /// Convenience method that starts a server with both query services
+    /// (Flight and JSON Lines) enabled. For Admin API, use `DaemonController`.
     pub async fn new_with_all_services(
         config: Arc<Config>,
         metadata_db: MetadataDb,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
-        Self::new(config, metadata_db, true, true, true).await
+        Self::new(config, metadata_db, true, true, meter).await
     }
 
     /// Get the server configuration.
@@ -112,17 +122,7 @@ impl DaemonServer {
         format!("http://{}", self.server_addrs.jsonl_addr)
     }
 
-    /// Get the admin API server address.
-    pub fn admin_api_server_addr(&self) -> SocketAddr {
-        self.server_addrs.admin_api_addr
-    }
-
-    /// Get the admin API server URL.
-    pub fn admin_api_server_url(&self) -> String {
-        format!("http://{}", self.server_addrs.admin_api_addr)
-    }
-
-    /// Get the bound addresses for all server endpoints.
+    /// Get the bound addresses for all query server endpoints.
     ///
     /// Returns the complete BoundAddrs structure containing all server socket addresses.
     /// This is useful for creating CLI fixtures and other components that need to connect

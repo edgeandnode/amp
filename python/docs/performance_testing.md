@@ -38,7 +38,7 @@ Performance tests use the same database configuration as integration tests (`.en
 # Required for PostgreSQL performance tests
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_DB=test_nozzle
+POSTGRES_DB=test_amp
 POSTGRES_USER=ford
 POSTGRES_PASSWORD=word
 
@@ -214,7 +214,7 @@ Each benchmark includes:
 **"PostgreSQL throughput too low"**
 ```bash
 # Check database configuration
-psql -h localhost -U ford -d test_nozzle -c "SELECT version();"
+psql -h localhost -U ford -d test_amp -c "SELECT version();"
 
 # Verify connection pooling
 grep "max_connections" .test.env

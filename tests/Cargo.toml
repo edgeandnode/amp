@@ -2,6 +2,7 @@
 name = "tests"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "tests"
@@ -17,13 +18,13 @@ backon.workspace = true
 clap.workspace = true
 color-backtrace = { version = "0.7.1", default-features = false, features = ["use-btparse-crate"] }
 common = { path = "../crates/core/common" }
+controller = { path = "../crates/services/controller" }
 ctor = "0.5.0"
 dataset-store = { path = "../crates/core/dataset-store" }
 datasets-common = { path = "../crates/core/datasets-common" }
-datasets-derived = { version = "0.1.0", path = "../crates/core/datasets-derived" }
+datasets-derived = { path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true
 dump = { path = "../crates/core/dump" }
-dump-check = { path = "../crates/bin/dump-check" }
 evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
 figment.workspace = true
 firehose-datasets = { path = "../crates/extractors/firehose" }
@@ -34,8 +35,10 @@ hex.workspace = true
 indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
-nozzle = { path = "../crates/bin/nozzle" }
-nozzle-client = { path = "../crates/client" }
+ampd = { path = "../crates/bin/ampd" }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+amp-client = { path = "../crates/client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true
@@ -51,3 +54,4 @@ toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 worker = { path = "../crates/services/worker" }
+

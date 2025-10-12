@@ -2,16 +2,16 @@
 
 """
 Unit tests for base classes and utilities.
-Updated for nozzle project structure.
+Updated for amp project structure.
 """
 
 import pytest
 
 try:
-    from src.nozzle.loaders.base import LoadConfig, LoadMode, LoadResult
+    from src.amp.loaders.base import LoadConfig, LoadMode, LoadResult
 except ImportError:
     # Skip tests if modules not available
-    pytest.skip('nozzle modules not available', allow_module_level=True)
+    pytest.skip('amp modules not available', allow_module_level=True)
 
 from tests.fixtures.mock_clients import MockDataLoader
 

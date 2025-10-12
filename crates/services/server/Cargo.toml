@@ -2,6 +2,7 @@
 name = "server"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [dependencies]
 arrow-flight.workspace = true
@@ -14,8 +15,8 @@ datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
-http-common = { path = "../http-common" }
 metadata-db = { path = "../../core/metadata-db" }
+monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

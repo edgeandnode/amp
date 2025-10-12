@@ -20,7 +20,7 @@ use axum::{Json, http::StatusCode};
 ///   "error_message": "dataset 'eth_mainnet' version '1.0.0' not found"
 /// }
 /// ```
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ErrorResponse {
     /// HTTP status code for this error

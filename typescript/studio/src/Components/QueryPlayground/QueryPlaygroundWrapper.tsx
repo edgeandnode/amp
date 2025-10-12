@@ -42,7 +42,7 @@ export const { useAppForm } = createFormHook({
   formContext,
 })
 
-const NozzleStudioQueryEditorForm = Schema.Struct({
+const AmpStudioQueryEditorForm = Schema.Struct({
   activeTab: Schema.NonNegativeInt,
   queries: Schema.Array(
     Schema.Struct({
@@ -51,7 +51,7 @@ const NozzleStudioQueryEditorForm = Schema.Struct({
     }),
   ),
 })
-type NozzleStudioQueryEditorForm = typeof NozzleStudioQueryEditorForm.Type
+type AmpStudioQueryEditorForm = typeof AmpStudioQueryEditorForm.Type
 
 export function QueryPlaygroundWrapper() {
   const { data: os } = useOSQuery()
@@ -75,14 +75,14 @@ export function QueryPlaygroundWrapper() {
     },
   })
 
-  const defaultValues: NozzleStudioQueryEditorForm = {
+  const defaultValues: AmpStudioQueryEditorForm = {
     activeTab: 0,
     queries: [{ query: defQuery.query, tab: defQuery.title }],
   }
   const form = useAppForm({
     defaultValues,
     validators: {
-      onChange: Schema.standardSchemaV1(NozzleStudioQueryEditorForm),
+      onChange: Schema.standardSchemaV1(AmpStudioQueryEditorForm),
     },
     async onSubmit({ value }) {
       const active = value.queries[value.activeTab]

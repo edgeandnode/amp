@@ -1,6 +1,6 @@
 //! Daemon worker fixture for isolated test environments.
 //!
-//! This fixture module provides the `DaemonWorkerFixture` type for managing Nozzle worker
+//! This fixture module provides the `DaemonWorkerFixture` type for managing Amp worker
 //! instances in test environments. It handles worker lifecycle, task management, and provides
 //! convenient configuration options for worker nodes.
 
@@ -14,9 +14,9 @@ use metadata_db::MetadataDb;
 use tokio::task::JoinHandle;
 use worker::{Error as WorkerError, NodeId, Worker};
 
-/// Fixture for managing Nozzle daemon worker instances in tests.
+/// Fixture for managing Amp daemon worker instances in tests.
 ///
-/// This fixture wraps a running Nozzle worker instance and provides convenient configuration
+/// This fixture wraps a running Amp worker instance and provides convenient configuration
 /// and lifecycle management. The fixture automatically handles worker lifecycle and cleanup
 /// by aborting the worker task when dropped.
 pub struct DaemonWorker {
@@ -27,15 +27,14 @@ pub struct DaemonWorker {
 }
 
 impl DaemonWorker {
-    /// Create and start a new Nozzle worker for testing.
+    /// Create and start a new Amp worker for testing.
     ///
-    /// Starts a Nozzle worker with the provided configuration, metadata database, and worker ID.
+    /// Starts a Amp worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
         node_id: NodeId,
         config: Arc<Config>,
         metadb: MetadataDb,
-        metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         let dataset_store = {
@@ -52,13 +51,7 @@ impl DaemonWorker {
             )
         };
 
-        let worker = Worker::new(
-            config.clone(),
-            metadb,
-            node_id.clone().into(),
-            metrics,
-            meter,
-        );
+        let worker = Worker::new(config.clone(), metadb, node_id.clone().into(), meter);
 
         let worker_task = tokio::spawn(worker.run());
 
@@ -70,7 +63,7 @@ impl DaemonWorker {
         })
     }
 
-    /// Create and start a new Nozzle worker with a generated worker ID.
+    /// Create and start a new Amp worker with a generated worker ID.
     ///
     /// Convenience method that creates a worker with a worker ID based on the provided name.
     /// This is useful for tests that don't need to specify a custom WorkerNodeId.
@@ -88,7 +81,7 @@ impl DaemonWorker {
         let worker_node_id = NodeId::from_str(worker_name)
             .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
 
-        Self::new(worker_node_id, config, metadata_db, None, None).await
+        Self::new(worker_node_id, config, metadata_db, None).await
     }
 
     /// Get the worker node ID.

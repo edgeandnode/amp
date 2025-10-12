@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@edgeandnode/amp':
+        specifier: workspace:*
+        version: link:typescript/amp
       '@effect/eslint-plugin':
         specifier: ^0.3.2
         version: 0.3.2
@@ -32,9 +35,6 @@ importers:
       eslint-plugin-sort-destructure-keys:
         specifier: ^2.0.0
         version: 2.0.0(eslint@9.36.0(jiti@2.6.0))
-      nozzl:
-        specifier: workspace:*
-        version: link:typescript/nozzle
       prettier:
         specifier: ^3.6.2
         version: 3.6.2
@@ -50,31 +50,35 @@ importers:
 
   tests/datasets/basic_function:
     dependencies:
-      nozzl:
+      '@edgeandnode/amp':
         specifier: workspace:*
-        version: link:../../../typescript/nozzle
+        version: link:../../../typescript/amp
 
   tests/datasets/intra_deps:
     dependencies:
-      nozzl:
+      '@edgeandnode/amp':
         specifier: workspace:*
-        version: link:../../../typescript/nozzle
+        version: link:../../../typescript/amp
 
   tests/datasets/multi_version:
     dependencies:
-      nozzl:
+      '@edgeandnode/amp':
         specifier: workspace:*
-        version: link:../../../typescript/nozzle
+        version: link:../../../typescript/amp
 
   tests/datasets/non_incremental:
     dependencies:
-      nozzl:
+      '@edgeandnode/amp':
         specifier: workspace:*
-        version: link:../../../typescript/nozzle
+        version: link:../../../typescript/amp
+
+  tests/datasets/sql_over_anvil_1: {}
+
+  tests/datasets/sql_over_anvil_2: {}
 
   tests/datasets/sql_stream_ds: {}
 
-  typescript/nozzle:
+  typescript/amp:
     dependencies:
       '@bufbuild/protobuf':
         specifier: 2.6.3
@@ -137,6 +141,9 @@ importers:
       '@base-ui-components/react':
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@types/react@19.1.13)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@edgeandnode/amp':
+        specifier: workspace:*
+        version: link:../amp
       '@graphprotocol/gds-react':
         specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@c6fb9f6
         version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@c6fb9f6(@types/react@19.1.13)(react-dom@19.1.1(react@19.1.1))(react-is@17.0.2)(react@19.1.1)(tailwindcss@4.1.13)
@@ -176,9 +183,6 @@ importers:
       monaco-editor:
         specifier: ^0.53.0
         version: 0.53.0
-      nozzl:
-        specifier: workspace:*
-        version: link:../nozzle
       react:
         specifier: ^19.1.1
         version: 19.1.1
@@ -274,6 +278,9 @@ importers:
       '@connectrpc/connect-node':
         specifier: ^2.1.0
         version: 2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))
+      '@edgeandnode/amp':
+        specifier: workspace:*
+        version: link:../amp
       '@effect/platform':
         specifier: ^0.91.1
         version: 0.91.1(effect@3.17.14)
@@ -289,9 +296,6 @@ importers:
       effect:
         specifier: ^3.17.14
         version: 3.17.14
-      nozzl:
-        specifier: workspace:*
-        version: link:../nozzle
       typescript:
         specifier: ^5.8.3
         version: 5.9.2

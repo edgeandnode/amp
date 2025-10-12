@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
+use ampd::dump_cmd::dump as amp_dump;
 use arrow_flight::FlightData;
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use dump::EndBlock;
 use monitoring::logging;
-use nozzle::dump_cmd::dump as nozzle_dump;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
 use tests::testlib::{
@@ -119,18 +120,17 @@ async fn dump_finalized() {
         let config = test.ctx.daemon_server().config().clone();
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
-            nozzle_dump(
+            amp_dump(
                 config,
                 metadata_db,
                 vec!["anvil_rpc".to_string()],
                 true, // only_finalized_blocks
-                None,
+                EndBlock::None,
                 1, // n_jobs
                 None,
                 None,
                 None,
                 false,
-                None,
                 None,
                 true, // enable continuous dump
             )
@@ -166,6 +166,9 @@ async fn flight_data_app_metadata() {
     test.dump("anvil_rpc", 0).await;
     let mut flight_data = test.flight_metadata_stream(query).await;
 
+    // This sleep avoids a race between the first schema message, the flight data message,
+    // and receiving both.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
     assert_eq!(
@@ -414,9 +417,9 @@ impl ReorgTestCtx {
             .expect("Failed to create test context");
 
         // Register derived (TypeScript) datasets
-        let cli = ctx.new_nozzl_cli();
+        let cli = ctx.new_amp_cli();
         for dataset_name in derived_datasets {
-            let dataset = DatasetPackage::new(dataset_name, Some("nozzle.config.ts"));
+            let dataset = DatasetPackage::new(dataset_name, Some("amp.config.ts"));
             dataset
                 .register(&cli)
                 .await
@@ -542,11 +545,12 @@ impl ReorgTestCtx {
             .expect("Failed to start metadata stream")
     }
 
-    /// Extract BlockRange metadata from FlightData app_metadata field.
+    /// Extract BlockRange metadata from FlightData app_metadata field on microbatch end.
     ///
-    /// Returns None if the FlightData contains no metadata or if parsing fails.
+    /// Returns None if the FlightData contains no metadata, parsing fails, or the microbatch is
+    /// incomplete.
     fn extract_block_range(data: &FlightData) -> Option<BlockRange> {
-        if data.app_metadata.is_empty() {
+        if data.app_metadata.is_empty() || data.data_body.is_empty() {
             return None;
         }
 

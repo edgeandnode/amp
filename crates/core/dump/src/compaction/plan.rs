@@ -10,7 +10,7 @@ use common::{
     BlockNum,
     catalog::{
         physical::{PhysicalTable, TableSnapshot},
-        reader::NozzleReaderFactory,
+        reader::AmpReaderFactory,
     },
     metadata::{
         SegmentSize,
@@ -37,6 +37,7 @@ use metadata_db::FileId;
 use crate::{
     WriterProperties,
     compaction::{CompactionResult, CompactorError, compactor::CompactionGroup},
+    metrics::MetricsRegistry,
 };
 
 pub struct CompactionFile {
@@ -49,7 +50,7 @@ pub struct CompactionFile {
 
 impl CompactionFile {
     pub async fn try_new(
-        reader_factory: Arc<NozzleReaderFactory>,
+        reader_factory: Arc<AmpReaderFactory>,
         partition_index: usize,
         segment: &Segment,
         is_tail: bool,
@@ -112,6 +113,9 @@ pub struct CompactionPlan<'a> {
     /// Compaction properties configuring the compaction algorithm
     /// and other properties of the compaction process.
     opts: Arc<WriterProperties>,
+    /// The metrics registry for tracking compaction metrics.
+    /// This is optional because metrics may not be enabled.
+    metrics: Option<Arc<MetricsRegistry>>,
     /// The physical table being compacted.
     table: Arc<PhysicalTable>,
     /// The current group of files being built for compaction.
@@ -131,6 +135,7 @@ impl<'a> CompactionPlan<'a> {
     pub async fn from_snapshot(
         table: &'a TableSnapshot,
         opts: Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
     ) -> CompactionResult<Self> {
         let chain = table.canonical_segments();
 
@@ -153,11 +158,12 @@ impl<'a> CompactionPlan<'a> {
             })
             .buffered(opts.compactor.metadata_concurrency)
             .boxed();
-        let current_group = CompactionGroup::new_empty(&opts, table.physical_table());
+        let current_group = CompactionGroup::new_empty(&opts, metrics, table.physical_table());
 
         Ok(Self {
             files,
             opts,
+            metrics: metrics.as_ref().map(Arc::clone),
             table: Arc::clone(table.physical_table()),
             current_group,
             current_file: None,
@@ -202,7 +208,8 @@ impl<'a> Stream for CompactionPlan<'a> {
                     // start a new group with the candidate as the current file.
                     } else if this.current_group.is_empty_or_singleton() {
                         this.current_file = Some(candidate);
-                        this.current_group = CompactionGroup::new_empty(&this.opts, &this.table);
+                        this.current_group =
+                            CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table);
                     // If it can't, and the current group has multiple files,
                     // yield the current group and start a new group with the
                     // candidate as the current file.
@@ -210,7 +217,7 @@ impl<'a> Stream for CompactionPlan<'a> {
                         this.current_candidate = Some(candidate);
                         let group = std::mem::replace(
                             &mut this.current_group,
-                            CompactionGroup::new_empty(&this.opts, &this.table),
+                            CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table),
                         );
                         this.group_count += 1;
                         tracing::info!(
@@ -245,7 +252,7 @@ impl<'a> Stream for CompactionPlan<'a> {
                         None => {
                             let group = std::mem::replace(
                                 &mut this.current_group,
-                                CompactionGroup::new_empty(&this.opts, &this.table),
+                                CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table),
                             );
                             this.done = true;
                             this.group_count += 1;

@@ -1,6 +1,6 @@
 //! Dataset kind types and parsing utilities.
 //!
-//! This module defines the different types of datasets supported by the nozzle system
+//! This module defines the different types of datasets supported by the amp system
 //! and provides utilities for parsing dataset kind strings into strongly-typed enums.
 //!
 //! # Dataset Types

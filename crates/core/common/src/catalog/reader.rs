@@ -20,14 +20,14 @@ use metadata_db::{FileId, LocationId, MetadataDb};
 use object_store::ObjectStore;
 
 #[derive(Debug, Clone)]
-pub struct NozzleReaderFactory {
+pub struct AmpReaderFactory {
     pub location_id: LocationId,
     pub metadata_db: MetadataDb,
     pub object_store: Arc<dyn ObjectStore>,
     pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
 
-impl ParquetFileReaderFactory for NozzleReaderFactory {
+impl ParquetFileReaderFactory for AmpReaderFactory {
     fn create_reader(
         &self,
         partition_index: usize,
@@ -53,7 +53,7 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
                 DataFusionError::Execution("FileMeta extensions are not of type FileId".to_string())
             })?;
 
-        Ok(Box::new(NozzleReader {
+        Ok(Box::new(AmpReader {
             location_id,
             file_id: *file_id,
             inner,
@@ -64,7 +64,7 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
     }
 }
 
-pub struct NozzleReader {
+pub struct AmpReader {
     pub location_id: LocationId,
     pub file_id: FileId,
     pub metadata_db: MetadataDb,
@@ -73,7 +73,7 @@ pub struct NozzleReader {
     pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
 
-impl AsyncFileReader for NozzleReader {
+impl AsyncFileReader for AmpReader {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         let bytes_scanned = range.end - range.start;
         self.file_metrics.bytes_scanned.add(bytes_scanned as usize);

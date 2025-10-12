@@ -224,7 +224,7 @@ impl DaemonConfigBuilder {
 
     /// Set maximum memory in MB.
     ///
-    /// Controls the memory limit for the test environment's Nozzle instance.
+    /// Controls the memory limit for the test environment's Amp instance.
     ///
     /// **Default**: `30_000` MB
     pub fn max_mem_mb(mut self, max_mem_mb: impl Into<Option<u32>>) -> Self {

@@ -2,6 +2,7 @@
 name = "firehose-datasets"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [features]
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
@@ -12,6 +13,7 @@ common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
 futures.workspace = true
 hex.workspace = true
+monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true

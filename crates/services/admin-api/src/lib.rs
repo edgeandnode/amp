@@ -1,4 +1,4 @@
-//! Nozzle Admin API
+//! Amp Admin API
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
@@ -7,10 +7,8 @@ use axum::{
     routing::{get, post, put},
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxResult, config::Config};
+use common::{BoxResult, config::Config, utils::shutdown_signal};
 use dataset_store::DatasetStore;
-use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
 
 mod ctx;
 pub mod handlers;
@@ -20,10 +18,13 @@ use ctx::Ctx;
 use dataset_store::{manifests::DatasetManifestsStore, providers::ProviderConfigsStore};
 use handlers::{datasets, files, jobs, locations, providers, schema};
 use scheduler::Scheduler;
+use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
@@ -42,8 +43,14 @@ pub async fn serve(
     };
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
+    let ctx = Ctx {
+        metadata_db,
+        dataset_store,
+        scheduler,
+    };
+
     // Register the routes
-    let app = Router::new()
+    let mut app = Router::new()
         .route(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::register::handler),
@@ -94,19 +101,28 @@ pub async fn serve(
             get(providers::get_by_id::handler).delete(providers::delete_by_id::handler),
         )
         .route("/schema", post(schema::handler))
-        .with_state(Ctx {
-            metadata_db,
-            dataset_store,
-            scheduler,
-        });
+        .with_state(ctx);
+
+    // Add OpenTelemetry HTTP metrics middleware if meter is provided
+    if let Some(meter) = meter {
+        let metrics_layer = opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder::builder()
+            .with_meter(meter.clone())
+            .build()?;
+        app = app.layer(metrics_layer);
+    }
 
     let listener = TcpListener::bind(at)
         .await?
         .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
     let addr = listener.local_addr()?;
 
-    let app = app.layer(CorsLayer::permissive());
-    let server = async move { axum::serve(listener, app).await.map_err(Into::into) };
+    let router = app.layer(CorsLayer::permissive());
+    let server = async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            .map_err(Into::into)
+    };
     Ok((addr, server))
 }
 
@@ -114,7 +130,7 @@ pub async fn serve(
 #[derive(utoipa::OpenApi)]
 #[openapi(
     info(
-        title = "Nozzle Admin API",
+        title = "Amp Admin API",
         version = "1.0.0",
         description = include_str!("../SPEC_DESCRIPTION.md")
     ),

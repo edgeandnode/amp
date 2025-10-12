@@ -2,5 +2,5 @@
   "$schema": "http://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.jsonc",
   "include": [],
-  "references": [{ "path": "typescript/nozzle/tsconfig.build.json" }]
+  "references": [{ "path": "typescript/amp/tsconfig.build.json" }]
 }

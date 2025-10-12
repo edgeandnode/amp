@@ -1,7 +1,7 @@
 "use client"
 
+import { DatasetManifest } from "@edgeandnode/amp/Model"
 import { Schema } from "effect"
-import { DatasetManifest } from "nozzl/Model"
 import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import * as Constants from "../constants.js"

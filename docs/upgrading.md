@@ -1,11 +1,11 @@
 # Upgrading
 
-This document describes the process for upgrading Nozzle between versions.
+This document describes the process for upgrading Amp between versions.
 
 ## Overview
 
-Upgrading Nozzle typically involves:
-1. Updating the Nozzle binary or container image
+Upgrading Amp typically involves:
+1. Updating the Amp binary or container image
 2. Running database migrations to update the metadata database schema
 3. Restarting services with the new version
 
@@ -13,12 +13,12 @@ Upgrading Nozzle typically involves:
 
 ### The `migrate` Command
 
-The `migrate` command runs database migrations on the metadata database to ensure the database schema is up-to-date with the current version of Nozzle. This is essential for maintaining database compatibility across version upgrades.
+The `migrate` command runs database migrations on the metadata database to ensure the database schema is up-to-date with the current version of Amp. This is essential for maintaining database compatibility across version upgrades.
 
 ### When to Run Migrations
 
-- **After upgrades**: After updating Nozzle to a new version that includes schema changes
-- **Initial setup**: When setting up a new Nozzle deployment for the first time
+- **After upgrades**: After updating Amp to a new version that includes schema changes
+- **Initial setup**: When setting up a new Amp deployment for the first time
 - **Database recovery**: When restoring from backup or moving to a new database instance
 - **CI/CD pipelines**: As part of automated deployment processes
 
@@ -26,7 +26,7 @@ The `migrate` command runs database migrations on the metadata database to ensur
 
 ```bash
 # Run migrations on the metadata database
-nozzle migrate --config /path/to/config.toml
+ampd migrate --config /path/to/config.toml
 ```
 
 ### Configuration Requirements
@@ -65,7 +65,7 @@ The migrate command requires:
 
 ```sql
 -- Grant necessary permissions
-GRANT CREATE, ALTER, DROP ON DATABASE nozzle_metadata TO nozzle_user;
+GRANT CREATE, ALTER, DROP ON DATABASE nozzle_metadata TO amp_user;
 ```
 
 **Connection failures**: Verify `metadata_db.url` in config file is correct
@@ -79,22 +79,22 @@ psql "postgresql://user:pass@host:5432/nozzle_metadata"
 
 ```bash
 # Run with debug logging
-NOZZLE_LOG=debug nozzle migrate --config ./config/production.toml
+AMP_LOG=debug ampd migrate --config ./config/production.toml
 ```
 
 **Partial migrations**: If a migration fails partway through, manual intervention may be required
 
 ```bash
 # Check migration status in database
-psql -c "SELECT * FROM _nozzle_migrations ORDER BY id;"
+psql -c "SELECT * FROM _amp_migrations ORDER BY id;"
 
 # May need to manually fix database state before retrying
 ```
 
 ### Version Compatibility
 
-- **Backward compatibility**: Newer Nozzle versions can always read data written by older versions
-- **Forward compatibility**: Older Nozzle versions may not be able to read data written by newer versions
+- **Backward compatibility**: Newer Amp versions can always read data written by older versions
+- **Forward compatibility**: Older Amp versions may not be able to read data written by newer versions
 - **Rolling back**: If you need to roll back, restore database from backup taken before migration
 
 ### Best Practices

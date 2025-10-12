@@ -12,17 +12,17 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
-from src.nozzle.loaders.base import LoadMode
+from src.amp.loaders.base import LoadMode
 
 try:
-    from src.nozzle.loaders.implementations.iceberg_loader import ICEBERG_AVAILABLE, IcebergLoader
+    from src.amp.loaders.implementations.iceberg_loader import ICEBERG_AVAILABLE, IcebergLoader
 
     # Skip all tests if iceberg is not available
     if not ICEBERG_AVAILABLE:
         pytest.skip('Apache Iceberg not available', allow_module_level=True)
 
 except ImportError:
-    pytest.skip('nozzle modules not available', allow_module_level=True)
+    pytest.skip('amp modules not available', allow_module_level=True)
 
 
 @pytest.fixture(scope='session')

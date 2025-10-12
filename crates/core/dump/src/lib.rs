@@ -1,5 +1,7 @@
 //! # Dump
 
+use std::sync::Arc;
+
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 pub mod compaction;
@@ -10,7 +12,6 @@ mod raw_dataset_writer;
 pub mod streaming_query;
 
 pub use core::*;
-use std::sync::Arc;
 
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 

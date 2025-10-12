@@ -1,4 +1,4 @@
-//! Test support CLI for the Nozzle project.
+//! Test support CLI for the Amp project.
 //!
 //! This module provides a command-line interface for test-related operations,
 //! particularly for creating and managing blessed dataset snapshots used in
@@ -47,17 +47,17 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use ampd::dump_cmd::{datasets_and_dependencies, dump};
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
-use dump::consistency_check;
+use dump::{EndBlock, consistency_check};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use monitoring::logging;
-use nozzle::dump_cmd::{datasets_and_dependencies, dump};
 use tests::testlib::{
     fixtures::{DaemonConfigBuilder, TempMetadataDb},
     helpers as test_helpers,
@@ -76,7 +76,7 @@ const BLESS_JOB_COUNT: u16 = 1;
 /// dataset snapshots that can be used in integration tests.
 #[derive(Parser, Debug)]
 #[command(name = "tests")]
-#[command(about = "Test support utilities for the Nozzle project")]
+#[command(about = "Test support utilities for the Amp project")]
 #[command(
     long_about = "Provides commands for creating and managing blessed dataset snapshots used in integration tests"
 )]
@@ -294,16 +294,15 @@ async fn bless(
         config,
         metadata_db,
         vec![dataset_name.clone()],
-        true,             // force_reprocess
-        Some(end as i64), // end_block
-        BLESS_JOB_COUNT,  // n_jobs
-        None,             // start_block
-        None,             // microbatch_max_interval
-        None,             // microbatch_max_rows
-        false,            // skip_consistency_check
-        None,             // metrics
-        None,             // meter
-        false,            // track_progress
+        true,                    // force_reprocess
+        EndBlock::Absolute(end), // end_block
+        BLESS_JOB_COUNT,         // n_jobs
+        None,                    // start_block
+        None,                    // microbatch_max_interval
+        None,                    // microbatch_max_rows
+        false,                   // skip_consistency_check
+        None,                    // meter
+        false,                   // track_progress
     )
     .await
     .map_err(|err| {
@@ -360,7 +359,7 @@ async fn bless(
 /// - The workspace root: `cargo run -p tests`
 /// - The tests crate directory: `cargo run`
 fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
-    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/data", "data"];
+    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
     TEST_DATA_BASE_DIRS
         .iter()
         .filter_map(|dir| std::path::Path::new(dir).canonicalize().ok())

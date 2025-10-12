@@ -10,7 +10,7 @@ use metadata_db::MetadataDb;
 
 use crate::{
     WriterProperties,
-    compaction::NozzleCompactor,
+    compaction::AmpCompactor,
     metrics,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
 };
@@ -115,7 +115,7 @@ struct RawTableWriter {
 
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 
-    compactor: NozzleCompactor,
+    compactor: AmpCompactor,
 }
 
 impl RawTableWriter {
@@ -137,8 +137,8 @@ impl RawTableWriter {
             None => None,
         };
 
-        let nozzle_compactor =
-            NozzleCompactor::start(table.clone(), cache, opts.clone(), metrics.clone());
+        let amp_compactor =
+            AmpCompactor::start(table.clone(), cache, opts.clone(), metrics.clone());
 
         Ok(Self {
             table,
@@ -147,7 +147,7 @@ impl RawTableWriter {
             current_file,
             current_range: None,
             metrics,
-            compactor: nozzle_compactor,
+            compactor: amp_compactor,
         })
     }
 
@@ -233,11 +233,14 @@ impl RawTableWriter {
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
             let dataset_name = self.table.dataset().name.clone();
+            let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();
-            metrics.inc_raw_dataset_bytes_written_by(
+            // Record bytes only (rows tracked separately)
+            metrics.record_ingestion_bytes(
                 num_bytes,
                 dataset_name.to_string(),
+                dataset_version,
                 table_name,
                 *location_id,
             );
@@ -280,7 +283,15 @@ impl RawTableWriter {
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
-            metrics.inc_raw_dataset_files_written(dataset_name.to_string());
+            let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
+            let table_name = self.table.table_name().to_string();
+            let location_id = self.table.location_id();
+            metrics.record_file_written(
+                dataset_name.to_string(),
+                dataset_version,
+                table_name,
+                *location_id,
+            );
         }
 
         Ok(metadata)

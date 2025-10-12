@@ -1,5 +1,5 @@
 [project]
-name = "nozzle"
+name = "amp"
 version = "0.1.0"
 description = "Flight SQL client with comprehensive data loading capabilities"
 readme = "README.md"
@@ -131,7 +131,7 @@ select = [
     "B",    # flake8-bugbear
 ]
 exclude = [
-    "src/nozzle/FlightSql_pb2.py",     # Generated protobuf file
+    "src/amp/FlightSql_pb2.py",     # Generated protobuf file
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -146,9 +146,9 @@ exclude = [
 ]
 
 [tool.coverage.run]
-source = ["src/nozzle"]
+source = ["src/amp"]
 omit = [
-    "src/nozzle/FlightSql_pb2.py",
+    "src/amp/FlightSql_pb2.py",
     "tests/*",
     "notebooks/*"
 ]

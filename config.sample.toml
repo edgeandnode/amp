@@ -1,4 +1,4 @@
-# Sample of a configuration. Copy this file and edit it. Set the environment variable `NOZZLE_CONFIG`
+# Sample of a configuration. Copy this file and edit it. Set the environment variable `AMP_CONFIG`
 # to its location. See the CONFIG.md for more context.
 # 
 # Note that using a config file is not mandatory. You can alternatively provide some or all values

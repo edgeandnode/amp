@@ -1,4 +1,7 @@
+use std::ops::RangeInclusive;
+
 use alloy::primitives::BlockHash;
+use amp_client::SqlClient;
 use common::{
     BlockNum,
     arrow::array::{FixedSizeBinaryArray, UInt64Array},
@@ -6,37 +9,46 @@ use common::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use nozzle_client::{InvalidationRange, SqlClient};
 use tests::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
 use tokio::task::JoinHandle;
 
 #[tokio::test]
 async fn query_with_reorg_stream_returns_correct_control_messages() {
-    let test = TestCtx::setup("nozzle_client", "anvil_rpc").await;
+    let test = TestCtx::setup("amp_client", "anvil_rpc").await;
     let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
     let last_block = 3;
-    let mut client = test.new_nozzle_client().await;
+    let mut client = test.new_amp_client().await;
     test.dump("anvil_rpc", 0).await;
     let stream = client
         .query(query, None, None)
         .await
         .expect("Failed to create query stream");
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum ControlMessage {
+        Batch(RangeInclusive<BlockNum>),
+        Reorg(RangeInclusive<BlockNum>),
+    }
+
     let handle: JoinHandle<Vec<ControlMessage>> = tokio::spawn(async move {
         let mut control_messages: Vec<ControlMessage> = Default::default();
-        let mut stream = nozzle_client::with_reorg(stream);
+        let mut stream = amp_client::with_reorg(stream);
+        let mut latest_range = None;
         while let Some(result) = stream.next().await {
             let response_batch = result.expect("Failed to get response batch from stream");
-            control_messages.push(match response_batch {
-                nozzle_client::ResponseBatchWithReorg::Batch { metadata, .. } => {
-                    ControlMessage::Batch(metadata.ranges.into_iter().map(Into::into).collect())
+            match response_batch {
+                amp_client::ResponseBatchWithReorg::Batch { metadata, .. } => {
+                    latest_range = Some(metadata.ranges[0].numbers.clone());
                 }
-                nozzle_client::ResponseBatchWithReorg::Reorg { invalidation } => {
-                    ControlMessage::Reorg(invalidation)
+                amp_client::ResponseBatchWithReorg::Watermark(_) => {
+                    control_messages.push(ControlMessage::Batch(latest_range.take().unwrap()));
                 }
-            });
-            if let Some(ControlMessage::Batch(ranges)) = control_messages.last()
-                && *ranges[0].numbers.end() == last_block
+                amp_client::ResponseBatchWithReorg::Reorg { invalidation } => {
+                    control_messages.push(ControlMessage::Reorg(invalidation[0].numbers.clone()));
+                }
+            };
+            if let Some(ControlMessage::Batch(numbers)) = control_messages.last()
+                && *numbers.end() == last_block
             {
                 break;
             }
@@ -56,26 +68,11 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
     assert_eq!(
         handle.await.expect("Failed to await control messages task"),
         vec![
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 0..=0,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 1..=1,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=2,
-            }]),
-            ControlMessage::Reorg(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=3,
-            }]),
-            ControlMessage::Batch(vec![InvalidationRange {
-                network: "anvil".to_string(),
-                numbers: 2..=3,
-            }]),
+            ControlMessage::Batch(0..=0),
+            ControlMessage::Batch(1..=1),
+            ControlMessage::Batch(2..=2),
+            ControlMessage::Reorg(2..=3),
+            ControlMessage::Batch(2..=3),
         ],
     );
 }
@@ -84,7 +81,7 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
 async fn stream_with_resume_watermark_returns_incremental_blocks() {
     let test = TestCtx::setup("client_stream_resume", "anvil_rpc").await;
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
-    let mut client = test.new_nozzle_client().await;
+    let mut client = test.new_amp_client().await;
 
     test.mine(1).await;
     test.dump("anvil_rpc", 1).await;
@@ -116,7 +113,7 @@ async fn stream_with_resume_watermark_returns_incremental_blocks() {
 
 /// Test context wrapper for client-related tests.
 ///
-/// This provides convenience methods for testing nozzle client functionality
+/// This provides convenience methods for testing amp client functionality
 /// with blockchain data and reorg scenarios.
 struct TestCtx {
     ctx: testlib::ctx::TestCtx,
@@ -155,7 +152,7 @@ impl TestCtx {
             .expect("Failed to reorg blocks");
     }
 
-    /// Dump a dataset using nozzle dump command.
+    /// Dump a dataset using amp dump command.
     async fn dump(&self, dataset: &str, end: BlockNum) {
         test_helpers::dump_dataset(
             self.ctx.daemon_server().config(),
@@ -189,12 +186,12 @@ impl TestCtx {
             .expect("Failed to query blocks")
     }
 
-    /// Create a new nozzle_client::SqlClient for this test context.
-    async fn new_nozzle_client(&self) -> SqlClient {
+    /// Create a new amp_client::SqlClient for this test context.
+    async fn new_amp_client(&self) -> SqlClient {
         let endpoint = self.ctx.daemon_server().flight_server_url();
         SqlClient::new(&endpoint)
             .await
-            .expect("Failed to create nozzle client")
+            .expect("Failed to create amp client")
     }
 }
 
@@ -216,13 +213,6 @@ impl From<BlockInfo> for BlockRow {
 }
 
 // Helper types and functions
-
-/// Control message types from nozzle client streaming.
-#[derive(Debug, PartialEq, Eq)]
-enum ControlMessage {
-    Batch(Vec<InvalidationRange>),
-    Reorg(Vec<InvalidationRange>),
-}
 
 /// Stream records with resumption watermark.
 #[derive(Debug)]

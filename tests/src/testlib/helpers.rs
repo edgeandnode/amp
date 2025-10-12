@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use ampd::dump_cmd::dump;
 use common::{
     BoxError, LogicalCatalog,
     arrow::array::RecordBatch,
@@ -15,9 +16,8 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::consistency_check;
+use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
-use nozzle::dump_cmd::dump;
 
 use super::fixtures::SnapshotContext;
 
@@ -41,13 +41,12 @@ pub async fn dump_dataset(
         metadata_db.clone(),
         vec![dataset_name.to_string()],
         true,
-        Some(end as i64),
+        EndBlock::Absolute(end),
         n_jobs,
         None,
         microbatch_max_interval.into(),
         None,
         false,
-        None,
         None,
         false,
     )
@@ -241,4 +240,29 @@ pub async fn catalog_for_dataset(
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
     Ok(Catalog::new(tables, logical))
+}
+
+/// Create a test metrics context for validating metrics collection.
+///
+/// This helper creates a `TestMetricsContext` that can be used to collect and validate
+/// metrics during test execution. The context uses an in-memory exporter that captures
+/// all recorded metrics without requiring external observability infrastructure.
+///
+/// # Example
+///
+/// ```ignore
+/// let metrics = test_helpers::create_test_metrics_context();
+/// let test_ctx = TestCtxBuilder::new("my_test")
+///     .with_meter(metrics.meter().clone())
+///     .build()
+///     .await?;
+///
+/// // ... perform operations that should record metrics ...
+///
+/// let metrics = metrics.collect().await;
+/// let counter = find_counter(&metrics, "my_metric_name").unwrap();
+/// assert_eq!(counter.value, 1);
+/// ```
+pub fn create_test_metrics_context() -> crate::testlib::metrics::TestMetricsContext {
+    crate::testlib::metrics::TestMetricsContext::new()
 }

@@ -17,8 +17,7 @@ use metadata_db::MetadataDb;
 use crate::{
     WriterProperties,
     compaction::{
-        CompactionResult, CompactorError, NozzleCompactorTaskType,
-        algorithm::CompactionAlgorithm,
+        AmpCompactorTaskType, CompactionAlgorithm, CompactionResult, CompactorError,
         plan::{CompactionFile, CompactionPlan},
     },
     metrics::MetricsRegistry,
@@ -90,7 +89,7 @@ impl Compactor {
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = CompactionPlan::from_snapshot(&snapshot, opts)
+        let mut join_set = CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics)
             .await?
             .try_compact_all();
 
@@ -119,7 +118,7 @@ impl Compactor {
     }
 }
 
-impl NozzleCompactorTaskType for Compactor {
+impl AmpCompactorTaskType for Compactor {
     type Error = CompactorError;
 
     fn new(
@@ -159,15 +158,21 @@ impl NozzleCompactorTaskType for Compactor {
 
 pub struct CompactionGroup {
     pub opts: Arc<WriterProperties>,
+    pub metrics: Option<Arc<MetricsRegistry>>,
     pub size: SegmentSize,
     pub streams: Vec<CompactionFile>,
     pub table: Arc<PhysicalTable>,
 }
 
 impl CompactionGroup {
-    pub fn new_empty(opts: &Arc<WriterProperties>, table: &Arc<PhysicalTable>) -> Self {
+    pub fn new_empty(
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+        table: &Arc<PhysicalTable>,
+    ) -> Self {
         CompactionGroup {
             opts: Arc::clone(opts),
+            metrics: metrics.clone(),
             size: SegmentSize::default(),
             streams: Vec::new(),
             table: Arc::clone(table),
@@ -229,13 +234,40 @@ impl CompactionGroup {
 
     #[tracing::instrument(skip_all, fields(files = self.len(), start = self.range().start(), end = self.range().end()))]
     pub async fn compact(self) -> CompactionResult<BlockNum> {
+        let start = self.range().start().clone();
+        let start_time = std::time::Instant::now();
         let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.collector.file_lock_duration;
 
+        // Calculate input metrics before compaction
+        let input_file_count = self.streams.len() as u64;
+        let input_bytes: u64 = self.streams.iter().map(|s| s.size.bytes as u64).sum();
+
+        // Extract values before move
+        let metrics = self.metrics.clone();
+        let dataset = self.table.dataset().name.to_string();
+        let table_name = self.table.table_name().to_string();
+        let location_id = *self.table.location_id();
+
         let output = self.write_and_finish().await?;
 
-        // Unwrap: We always have at least one range since we just wrote it
-        let start = output.parquet_meta.ranges.first().unwrap().start();
+        // Calculate output metrics
+        let output_bytes = output.object_meta.size as u64;
+        let duration_millis = start_time.elapsed().as_millis() as f64;
+
+        // Record metrics if available
+        if let Some(ref metrics) = metrics {
+            metrics.record_compaction(
+                dataset,
+                table_name,
+                location_id,
+                input_file_count,
+                input_bytes,
+                output_bytes,
+                duration_millis,
+            );
+        }
+
         output
             .commit_metadata(&metadata_db)
             .await

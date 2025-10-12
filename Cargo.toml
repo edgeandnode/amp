@@ -1,9 +1,8 @@
 [workspace]
 members = [
-    "crates/bin/dump-check",
     "crates/bin/generate-manifest",
-    "crates/bin/nozzle",
-    "crates/bin/nozzleup",
+    "crates/bin/ampd",
+    "crates/bin/ampup",
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
@@ -24,7 +23,7 @@ members = [
     "crates/extractors/substreams/gen",
     "crates/services/admin-api",
     "crates/services/admin-api/gen",
-    "crates/services/http-common",
+    "crates/services/controller",
     "crates/services/server",
     "crates/services/worker",
     "tests",
@@ -35,6 +34,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 alloy = { version = "1.0.9", default-features = false, features = [
@@ -68,9 +68,9 @@ governor = "0.10.0"
 hex = "0.4.3"
 indoc = "2.0.6"
 itertools = "0.14.0"
-opentelemetry = { version = "0.30", features = ["trace"] }
-opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
-opentelemetry_sdk = { version = "0.30" }
+opentelemetry = { version = "0.31", features = ["trace"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.31" }
 pretty_assertions = "1.4.1"
 rand = "0.9.0"
 regex = "1.10.2"
@@ -95,9 +95,10 @@ toml = "0.8.10"
 tower = "0.5.2"
 tower-http = "0.6.2"
 tracing = "0.1"
-tracing-opentelemetry = { version = "0.31", features = ["default"] }
+tracing-opentelemetry = { version = "0.32", features = ["default"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 url = { version = "2.5.0", features = ["serde"] }
+utoipa = "5.4.0"
 uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates

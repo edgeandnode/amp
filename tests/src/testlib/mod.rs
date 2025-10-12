@@ -1,9 +1,9 @@
 //! Test infrastructure for creating isolated end-to-end test environments.
 //!
-//! This module provides a comprehensive testing framework for the Nozzle ETL pipeline,
+//! This module provides a comprehensive testing framework for the Amp ETL pipeline,
 //! enabling the creation of completely isolated test environments with their own
 //! temporary directories, configurations, and resource loading. The infrastructure
-//! supports full end-to-end testing of the distributed Nozzle architecture including
+//! supports full end-to-end testing of the distributed Amp architecture including
 //! servers, workers, and database components.
 //!
 //! # Core Principles
@@ -38,6 +38,7 @@ pub mod ctx;
 pub mod debug;
 mod env_dir;
 pub mod helpers;
+pub mod metrics;
 
 /// Low-level test fixtures and directory utilities.
 ///
@@ -53,6 +54,7 @@ pub mod fixtures {
     mod anvil;
     mod cli;
     mod daemon_config;
+    mod daemon_controller;
     mod daemon_server;
     mod daemon_state_dir;
     mod daemon_worker;
@@ -66,6 +68,7 @@ pub mod fixtures {
     pub use anvil::*;
     pub use cli::*;
     pub use daemon_config::*;
+    pub use daemon_controller::*;
     pub use daemon_server::*;
     pub use daemon_state_dir::*;
     pub use daemon_worker::*;

@@ -16,7 +16,7 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 use crate::{
     WriterProperties,
     compaction::{
-        NozzleCompactorTaskType,
+        AmpCompactorTaskType,
         error::{CollectionResult, CollectorError},
     },
     consistency_check,
@@ -113,7 +113,7 @@ impl Display for Collector {
     }
 }
 
-impl NozzleCompactorTaskType for Collector {
+impl AmpCompactorTaskType for Collector {
     type Error = CollectorError;
 
     fn new(

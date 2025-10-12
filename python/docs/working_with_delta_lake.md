@@ -5,7 +5,7 @@ High-performance data loader with zero-copy Arrow → Delta Lake integration. Pr
 ## Basic Usage
 
 ```python
-from nozzle.client import Client
+from amp.client import Client
 
 # Configure connection
 client = Client(url="grpc://localhost:8080")
@@ -87,7 +87,7 @@ config = {
 
 ### Loading Modes
 ```python
-from nozzle.loaders.base import LoadMode
+from amp.loaders.base import LoadMode
 
 # Create/replace table
 result = client.sql(query).load("conn", "table", mode=LoadMode.OVERWRITE)
@@ -138,7 +138,7 @@ config = {
 
 ### Manual Optimization
 ```python
-from nozzle.loaders.implementations.deltalake_loader import DeltaLakeLoader
+from amp.loaders.implementations.deltalake_loader import DeltaLakeLoader
 
 loader = DeltaLakeLoader(config)
 with loader:

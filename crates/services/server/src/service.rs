@@ -2,21 +2,24 @@ use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult, Ticket,
-    encode::FlightDataEncoderBuilder,
+    HandshakeResponse, PutResult, SchemaAsIpc, Ticket,
+    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES},
+    error::FlightError,
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
 };
 use async_stream::stream;
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response as AxumResponse},
-};
+use axum::{http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BoxError, DetachedLogicalPlan, PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
-    arrow::{self, array::RecordBatch, datatypes::SchemaRef, ipc::writer::IpcDataGenerator},
+    DetachedLogicalPlan, PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
+    arrow::{
+        self,
+        array::RecordBatch,
+        datatypes::SchemaRef,
+        ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
+    },
     catalog::physical::Catalog,
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
@@ -27,7 +30,9 @@ use common::{
 use datafusion::{
     common::{DFSchema, tree_node::TreeNodeRecursion},
     error::DataFusionError,
+    execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
+    physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{
     CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
@@ -38,7 +43,6 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use serde_json::json;
@@ -84,20 +88,7 @@ pub enum Error {
     StreamingExecutionError(String),
 }
 
-impl From<prost::DecodeError> for Error {
-    fn from(e: prost::DecodeError) -> Self {
-        Error::PbDecodeError(e.to_string())
-    }
-}
-
-fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
-    match e {
-        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
-        _ => Status::internal(outer.to_string()),
-    }
-}
-
-impl RequestError for Error {
+impl Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::PbDecodeError(_) => "PB_DECODE_ERROR",
@@ -122,9 +113,24 @@ impl RequestError for Error {
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
         }
     }
+}
 
-    fn status_code(&self) -> StatusCode {
-        match self {
+impl From<prost::DecodeError> for Error {
+    fn from(e: prost::DecodeError) -> Self {
+        Error::PbDecodeError(e.to_string())
+    }
+}
+
+fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
+    match e {
+        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
+        _ => Status::internal(outer.to_string()),
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let status_code = match self {
             Error::CoreError(
                 CoreError::InvalidPlan(_)
                 | CoreError::SqlParseError(_)
@@ -149,13 +155,13 @@ impl RequestError for Error {
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
             Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
-        }
-    }
-}
+        };
+        let res = json!({
+            "error_code": self.error_code(),
+            "error_message": self.to_string(),
+        });
 
-impl IntoResponse for Error {
-    fn into_response(self) -> AxumResponse {
-        BoxRequestError::from(self).into_response()
+        (status_code, res.to_string()).into_response()
     }
 }
 
@@ -194,7 +200,27 @@ impl From<Error> for Status {
     }
 }
 
-pub type QueryResultStream = BoxStream<'static, Result<(RecordBatch, Option<BlockRange>), Error>>;
+pub enum QueryResultStream {
+    NonIncremental(SendableRecordBatchStream),
+    Incremental(BoxStream<'static, Result<QueryMessage, Error>>),
+}
+
+impl QueryResultStream {
+    pub fn record_batches(self) -> BoxStream<'static, Result<RecordBatch, Error>> {
+        match self {
+            Self::NonIncremental(stream) => stream
+                .map_err(|err| Error::StreamingExecutionError(err.to_string()))
+                .boxed(),
+            Self::Incremental(stream) => stream
+                .filter_map(async |result| match result {
+                    Err(err) => Some(Err(err)),
+                    Ok(QueryMessage::Data(batch)) => Some(Ok(batch)),
+                    Ok(_) => None,
+                })
+                .boxed(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Service {
@@ -202,10 +228,15 @@ pub struct Service {
     env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl Service {
-    pub async fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Result<Self, Error> {
+    pub async fn new(
+        config: Arc<Config>,
+        metadata_db: MetadataDb,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
+    ) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = {
             let provider_configs_store =
@@ -222,29 +253,45 @@ impl Service {
         };
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
+        let metrics = meter.map(|m| Arc::new(crate::metrics::MetricsRegistry::new(m)));
+
         Ok(Self {
             config,
             env,
             dataset_store,
             notification_multiplexer,
+            metrics,
         })
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<QueryResultStream, Error> {
-        let query = parse_sql(sql).map_err(|err| Error::from(err))?;
+        let query = parse_sql(sql).map_err(Error::from)?;
         let dataset_store = self.dataset_store.clone();
         let catalog = dataset_store
             .catalog_for_sql(&query, self.env.clone())
             .await?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = ctx
-            .plan_sql(query.clone())
-            .await
-            .map_err(|err| Error::from(err))?;
+        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
+
         let is_streaming = common::stream_helpers::is_streaming(&query);
-        self.execute_plan(catalog, dataset_store, plan, is_streaming, None)
-            .await
+        let result = self
+            .execute_plan(catalog, dataset_store, plan, is_streaming, None)
+            .await;
+
+        // Record execution error
+        if result.is_err()
+            && let Some(metrics) = &self.metrics
+        {
+            let error_code = result
+                .as_ref()
+                .err()
+                .map(|e| e.error_code())
+                .unwrap_or("UNKNOWN_ERROR");
+            metrics.record_query_error(error_code);
+        }
+
+        result
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -256,6 +303,8 @@ impl Service {
         is_streaming: bool,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
+        let query_start_time = std::time::Instant::now();
+
         // is_incremental returns an error if query contains DDL, DML, etc.
         let incremental_check = plan
             .is_incremental()
@@ -290,21 +339,26 @@ impl Service {
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
             let record_baches = ctx.execute_plan(plan, true).await?;
-            Ok(record_baches
-                .map_ok(|batch| (batch, None))
-                .map_err(|err| Error::StreamingExecutionError(err.to_string()))
-                .boxed())
+            let stream = QueryResultStream::NonIncremental(record_baches);
+
+            if let Some(metrics) = &self.metrics {
+                Ok(track_query_metrics(stream, metrics, query_start_time))
+            } else {
+                Ok(stream)
+            }
         } else {
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
             let earliest_block = catalog
                 .earliest_block()
                 .await
-                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+                .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;
 
             // If no tables are synced, we return an empty stream.
             let Some(earliest_block) = earliest_block else {
-                return Ok(Box::pin(stream::empty()));
+                let schema = plan.schema().as_ref().clone().into();
+                let empty_stream = RecordBatchStreamAdapter::new(schema, stream::empty());
+                return Ok(QueryResultStream::NonIncremental(Box::pin(empty_stream)));
             };
 
             let query = StreamingQuery::spawn(
@@ -322,7 +376,18 @@ impl Service {
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
-            Ok(query_result_stream(query.as_stream()))
+            let stream = QueryResultStream::Incremental(
+                query
+                    .as_stream()
+                    .map_err(|err| Error::StreamingExecutionError(err.to_string()))
+                    .boxed(),
+            );
+
+            if let Some(metrics) = &self.metrics {
+                Ok(track_query_metrics(stream, metrics, query_start_time))
+            } else {
+                Ok(stream)
+            }
         }
     }
 }
@@ -386,7 +451,7 @@ impl FlightService for Service {
     ) -> Result<Response<FlightInfo>, Status> {
         let resume_watermark = request
             .metadata()
-            .get("nozzle-resume")
+            .get("amp-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
         let descriptor = request.into_inner();
         let info = self.get_flight_info(descriptor, resume_watermark).await?;
@@ -549,34 +614,193 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     bytes.into_inner().into()
 }
 
-fn query_result_stream(
-    mut message_stream: BoxStream<'static, Result<QueryMessage, BoxError>>,
+/// Wrap a query result stream with metrics tracking
+fn track_query_metrics(
+    stream: QueryResultStream,
+    metrics: &Arc<crate::metrics::MetricsRegistry>,
+    start_time: std::time::Instant,
 ) -> QueryResultStream {
-    stream! {
-        let mut current_range: Option<BlockRange> = None;
-        while let Some(result) = message_stream.next().await {
-            match result {
-                Ok(message) => {
-                    match message {
-                        QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
-                            assert_eq!(current_range, None);
-                            current_range = Some(range);
+    let metrics = metrics.clone();
+
+    match stream {
+        QueryResultStream::NonIncremental(record_batch_stream) => {
+            let schema = record_batch_stream.schema();
+            let wrapped_stream = stream! {
+                let mut total_rows = 0u64;
+                let mut total_bytes = 0u64;
+
+                for await result in record_batch_stream {
+                    match result {
+                        Ok(batch) => {
+                            let batch_rows = batch.num_rows() as u64;
+                            let batch_bytes = batch.get_array_memory_size() as u64;
+
+                            // Track cumulative totals
+                            total_rows += batch_rows;
+                            total_bytes += batch_bytes;
+
+                            yield Ok(batch);
                         }
-                        QueryMessage::Data(record_batch) => {
-                            assert!(current_range.is_some());
-                            yield Ok((record_batch, current_range.clone()));
-                        }
-                        QueryMessage::MicrobatchEnd(_) => {
-                            assert!(current_range.is_some());
-                            current_range = None;
-                        }
-                        QueryMessage::BlockComplete(_) => {
-                            // We don't yet expose this
+                        Err(e) => {
+                            // Record metrics on error
+                            let duration = start_time.elapsed().as_millis() as f64;
+                            let err_msg = e.to_string();
+                            metrics.record_query_error(&err_msg);
+                            metrics.record_query_execution(duration, total_rows, total_bytes);
+
+                            yield Err(e);
+                            return;
                         }
                     }
                 }
+
+                // Stream completed successfully, record metrics
+                let duration = start_time.elapsed().as_millis() as f64;
+                metrics.record_query_execution(duration, total_rows, total_bytes);
+            };
+
+            let wrapped: SendableRecordBatchStream =
+                Box::pin(RecordBatchStreamAdapter::new(schema, wrapped_stream));
+
+            QueryResultStream::NonIncremental(wrapped)
+        }
+        QueryResultStream::Incremental(message_stream) => {
+            // Increment active streaming query counter
+            metrics.streaming_queries_active.inc();
+            metrics.streaming_queries_started.inc();
+
+            let wrapped = stream! {
+                let mut microbatch_start: Option<std::time::Instant> = None;
+
+                for await result in message_stream {
+                    match result {
+                        Ok(message) => {
+                            match message {
+                                QueryMessage::MicrobatchStart { .. } => {
+                                    microbatch_start = Some(std::time::Instant::now());
+                                }
+                                QueryMessage::Data(ref batch) => {
+                                    let batch_rows = batch.num_rows() as u64;
+                                    let batch_bytes = batch.get_array_memory_size() as u64;
+                                    // Record incremental throughput per batch (counters track cumulative totals)
+                                    metrics.record_streaming_batch(batch_rows, batch_bytes);
+                                }
+                                QueryMessage::MicrobatchEnd(_) => {
+                                    if let Some(start) = microbatch_start.take() {
+                                        let duration = start.elapsed().as_millis() as f64;
+                                        metrics.record_streaming_microbatch_duration(duration);
+                                    }
+                                }
+                                QueryMessage::BlockComplete(_) => {}
+                            }
+
+                            yield Ok(message);
+                        }
+                        Err(e) => {
+                            // Record metrics on error
+                            let duration = start_time.elapsed().as_millis() as f64;
+                            metrics.streaming_queries_completed.inc();
+                            metrics.streaming_queries_active.dec();
+                            metrics.record_streaming_lifetime(duration);
+
+                            yield Err(e);
+                            return;
+                        }
+                    }
+                }
+
+                // Record metrics on success
+                let duration = start_time.elapsed().as_millis() as f64;
+                metrics.streaming_queries_completed.inc();
+                metrics.streaming_queries_active.dec();
+                metrics.record_streaming_lifetime(duration);
+            }
+            .boxed();
+
+            QueryResultStream::Incremental(wrapped)
+        }
+    }
+}
+
+fn flight_data_stream(
+    query_result_stream: QueryResultStream,
+    schema: SchemaRef,
+) -> TonicStream<FlightData> {
+    let mut incremental_stream = match query_result_stream {
+        QueryResultStream::Incremental(incremental_stream) => incremental_stream,
+        QueryResultStream::NonIncremental(non_incremental_stream) => {
+            return FlightDataEncoderBuilder::new()
+                .with_schema(schema)
+                .build(
+                    non_incremental_stream
+                        .map_err(Error::ExecutionError)
+                        .map_err(Status::from)
+                        .err_into(),
+                )
+                .map_err(Status::from)
+                .boxed();
+        }
+    };
+    stream! {
+        let mut dictionary_tracker = DictionaryTracker::new(true);
+        let mut ranges: Vec<BlockRange> = Default::default();
+        let mut first_message = true;
+        while let Some(result) = incremental_stream.next().await {
+            match result {
                 Err(err) => {
-                    yield Err(Error::StreamingExecutionError(err.to_string()));
+                    yield Err(Error::StreamingExecutionError(err.to_string()).into());
+                    break;
+                }
+                Ok(message) => match message {
+                    QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
+                        assert!(ranges.is_empty());
+                        ranges.push(range);
+
+                        if first_message {
+                            first_message = false;
+                            let schema_message =
+                                FlightData::from(SchemaAsIpc::new(&schema, &IpcWriteOptions::default()));
+                            yield Ok(schema_message);
+                        }
+                    }
+                    QueryMessage::Data(batch) => {
+                        let app_metadata = json!({
+                            "ranges": &ranges,
+                            "ranges_complete": false,
+                        });
+                        match encode_record_batch(batch, &app_metadata, &mut dictionary_tracker) {
+                            Ok(encoded) => {
+                                for message in encoded {
+                                    yield Ok(message);
+                                }
+                            }
+                            Err(err) => {
+                                yield Err(err);
+                                return;
+                            }
+                        };
+                    }
+                    QueryMessage::BlockComplete(_) => (),
+                    QueryMessage::MicrobatchEnd(_) => {
+                        assert!(ranges.len() > 0);
+                        let empty_batch = RecordBatch::new_empty(schema.clone());
+                        let app_metadata = json!({
+                            "ranges": &ranges,
+                            "ranges_complete": true,
+                        });
+                        match encode_record_batch(empty_batch, &app_metadata, &mut dictionary_tracker) {
+                            Ok(encoded) => {
+                                for message in encoded {
+                                    yield Ok(message);
+                                }
+                            }
+                            Err(err) => {
+                                yield Err(err);
+                                return;
+                            }
+                        };
+                        ranges.clear();
+                    }
                 }
             }
         }
@@ -584,65 +808,63 @@ fn query_result_stream(
     .boxed()
 }
 
-fn flight_data_stream(
-    mut query_result_stream: QueryResultStream,
-    schema: SchemaRef,
-) -> TonicStream<FlightData> {
-    // The FlightDataEncoderBuilder interface doesn't allow us to set the metadata per record
-    // batch. And there doesn't seem to be an interface that allows us to cleanly encode the
-    // output stream ourselves. So we need to be careful to send schema messages and metadata
-    // properly.
-    stream! {
-        let mut schema_sent = false;
-        while let Some(result) = query_result_stream.next().await {
-            let (batch, range) = match result {
-                Ok(result) => result,
-                Err(err) => {
-                    yield Err(err.into());
-                    return;
-                }
-            };
-            let ranges: Vec<BlockRange> = range.into_iter().collect();
-            let metadata = serde_json::to_string(&json!({"ranges": ranges})).unwrap();
-
-            if !schema_sent {
-                // Send schema message.
-                let mut schema_encoder = FlightDataEncoderBuilder::new()
-                    .with_schema(schema.clone())
-                    .build(futures::stream::empty());
-                if let Some(schema_result) = schema_encoder.next().await {
-                    match schema_result {
-                        Ok(flight_data) => yield Ok(flight_data),
-                        Err(err) => {
-                            yield Err(err.into());
-                            return;
-                        }
-                    }
-                }
-                schema_sent = true;
-            }
-
-            // Create encoder for this single batch with custom metadata, skipping schema messages.
-            let mut batch_encoder = FlightDataEncoderBuilder::new()
-                .build(futures::stream::once(async { Ok(batch) }));
-            let mut first_message = true;
-            while let Some(result) = batch_encoder.next().await {
-                let flight_data = match result {
-                    Ok(flight_data) => flight_data,
-                    Err(err) => {
-                        yield Err(err.into());
-                        return;
-                    }
-                };
-                let schema_message = first_message && !flight_data.data_header.is_empty() && flight_data.data_body.is_empty();
-                first_message = false;
-                if schema_message {
-                    continue;
-                } else {
-                    yield Ok(flight_data.with_app_metadata(metadata.clone()));
-                }
-            }
+pub fn encode_record_batch(
+    batch: RecordBatch,
+    app_metadata: &serde_json::Value,
+    dictionary_tracker: &mut DictionaryTracker,
+) -> Result<Vec<FlightData>, Status> {
+    let ipc = IpcDataGenerator::default();
+    let options = IpcWriteOptions::default();
+    let mut encoded: Vec<FlightData> = Default::default();
+    let app_metadata = serde_json::to_string(app_metadata).unwrap();
+    for batch in split_batch_for_grpc_response(batch, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES) {
+        let (encoded_dictionaries, encoded_batch) = ipc
+            .encoded_batch(&batch, dictionary_tracker, &options)
+            .map_err(FlightError::from)?;
+        for encoded_dictionary in encoded_dictionaries {
+            encoded.push(encoded_dictionary.into());
         }
+        encoded.push(FlightData::from(encoded_batch).with_app_metadata(app_metadata.clone()));
     }
-    .boxed()
+    Ok(encoded)
+}
+
+/// Split [`RecordBatch`] so it hopefully fits into a gRPC response.
+///
+/// Data is zero-copy sliced into batches.
+///
+/// Note: this method does not take into account already sliced
+/// arrays: <https://github.com/apache/arrow-rs/issues/3407>
+///
+/// Implementation adapted from https://github.com/apache/arrow-rs/blob/4b62c8004f5c617fc6b552c7fce73fc93c8fab04/arrow-flight/src/encode.rs#L614-L638.
+fn split_batch_for_grpc_response(
+    batch: RecordBatch,
+    max_flight_data_size: usize,
+) -> Vec<RecordBatch> {
+    // Original imlementation would return an empty vec for an empty batch. We need to send empty
+    // batches to send metadata to clients on microbatch end.
+    if batch.num_rows() == 0 {
+        return vec![batch];
+    }
+
+    let size = batch
+        .columns()
+        .iter()
+        .map(|col| col.get_buffer_memory_size())
+        .sum::<usize>();
+
+    let n_batches =
+        (size / max_flight_data_size + usize::from(size % max_flight_data_size != 0)).max(1);
+    let rows_per_batch = (batch.num_rows() / n_batches).max(1);
+    let mut out = Vec::with_capacity(n_batches + 1);
+
+    let mut offset = 0;
+    while offset < batch.num_rows() {
+        let length = (rows_per_batch).min(batch.num_rows() - offset);
+        out.push(batch.slice(offset, length));
+
+        offset += length;
+    }
+
+    out
 }

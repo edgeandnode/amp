@@ -94,7 +94,7 @@
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
@@ -108,10 +108,10 @@ use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use tracing::instrument;
 
-use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
     WriterProperties,
-    compaction::NozzleCompactor,
+    compaction::AmpCompactor,
     metrics,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
@@ -126,11 +126,19 @@ pub async fn dump_table(
     table: Arc<PhysicalTable>,
     opts: &Arc<WriterProperties>,
     microbatch_max_interval: u64,
-    end: Option<i64>,
+    end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
+    let dump_start_time = Instant::now();
+
     let dataset_name = manifest.name.clone();
     let table_name = table.table_name().to_string();
+
+    // Clone values needed for metrics after async block
+    let dataset_name_for_metrics = dataset_name.clone();
+    let table_name_for_metrics = table_name.clone();
+    let dataset_version = table.dataset().dataset_version().unwrap_or_default();
+    let metrics_for_after = metrics.clone();
 
     // Get the table definition from the manifest
     let table_def = manifest.tables.get(&table_name).ok_or_else(|| {
@@ -168,20 +176,25 @@ pub async fn dump_table(
             tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
             return Ok::<(), BoxError>(());
         };
-        let end = match end {
-            Some(end) if end >= 0 => end as BlockNum,
-            _ => {
+
+        let resolved = end
+            .resolve(start, async {
                 let query_ctx =
                     QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                let Some(max_end_block) = query_ctx
+                query_ctx
                     .max_end_block(&plan.clone().attach_to(&query_ctx)?)
-                    .await?
-                else {
-                    tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
-                    return Ok::<(), BoxError>(());
-                };
-                block_ranges::resolve_relative(start, end, max_end_block)?
+                    .await
+                    .map_err(Into::into)
+            })
+            .await?;
+
+        let end = match resolved {
+            ResolvedEndBlock::Continuous => None,
+            ResolvedEndBlock::NoDataAvailable => {
+                tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+                return Ok::<(), BoxError>(());
             }
+            ResolvedEndBlock::Block(block) => Some(block),
         };
 
         if let IncrementalCheck::NonIncremental(op) = incremental_check {
@@ -199,7 +212,8 @@ pub async fn dump_table(
             &env,
             &catalog,
             plan.clone(),
-            start..=end,
+            start,
+            end,
             resume_watermark,
             table.clone(),
             &opts,
@@ -215,7 +229,30 @@ pub async fn dump_table(
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
         tracing::error!(dataset=%manifest.name, error=%err, "dataset dump failed");
+
+        // Record error metrics
+        if let Some(ref metrics) = metrics_for_after {
+            metrics.record_dump_error(
+                dataset_name_for_metrics.to_string(),
+                dataset_version,
+                table_name_for_metrics.to_string(),
+            );
+        }
+
         return Err(err.into_box_error());
+    }
+
+    // Record dump duration on successful completion
+    if let Some(ref metrics) = metrics_for_after {
+        let duration_millis = dump_start_time.elapsed().as_millis() as f64;
+        let job_id = format!("{}_{}", dataset_name_for_metrics, table_name_for_metrics);
+        metrics.record_dump_duration(
+            duration_millis,
+            dataset_name_for_metrics.to_string(),
+            dataset_version,
+            table_name_for_metrics.to_string(),
+            job_id,
+        );
     }
 
     Ok(())
@@ -227,7 +264,8 @@ async fn dump_sql_query(
     env: &QueryEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
-    range: RangeInclusive<BlockNum>,
+    start: BlockNum,
+    end: Option<BlockNum>,
     resume_watermark: Option<ResumeWatermark>,
     physical_table: Arc<PhysicalTable>,
     opts: &Arc<WriterProperties>,
@@ -238,8 +276,8 @@ async fn dump_sql_query(
     tracing::info!(
         "dumping {} [{}-{}]",
         physical_table.table_ref(),
-        range.start(),
-        range.end(),
+        start,
+        end.map(|e| e.to_string()).unwrap_or_default(),
     );
     let mut stream = {
         StreamingQuery::spawn(
@@ -247,8 +285,8 @@ async fn dump_sql_query(
             catalog.clone(),
             ctx.dataset_store.clone(),
             query,
-            *range.start(),
-            Some(*range.end()),
+            start,
+            end,
             resume_watermark,
             notification_multiplexer,
             Some(physical_table.clone()),
@@ -258,14 +296,14 @@ async fn dump_sql_query(
         .as_stream()
     };
 
-    let mut microbatch_start = *range.start();
+    let mut microbatch_start = start;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
     let dataset_name = physical_table.dataset().name.clone();
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
-    let mut compactor = NozzleCompactor::start(
+    let mut compactor = AmpCompactor::start(
         physical_table.clone(),
         env.parquet_footer_cache.clone(),
         opts.clone(),
@@ -287,15 +325,21 @@ async fn dump_sql_query(
                 if let Some(ref metrics) = metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                    metrics.inc_sql_dataset_rows_by(
+                    let dataset_version = physical_table
+                        .dataset()
+                        .dataset_version()
+                        .unwrap_or_default();
+                    metrics.record_ingestion_rows(
                         num_rows,
                         dataset_name.to_string(),
+                        dataset_version.clone(),
                         table_name.to_string(),
                         location_id,
                     );
-                    metrics.inc_sql_dataset_bytes_written_by(
+                    metrics.record_ingestion_bytes(
                         num_bytes,
                         dataset_name.to_string(),
+                        dataset_version,
                         table_name.to_string(),
                         location_id,
                     );
@@ -330,12 +374,20 @@ async fn dump_sql_query(
                 writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
                 if let Some(ref metrics) = metrics {
-                    metrics.inc_sql_dataset_files_written(dataset_name.to_string());
+                    let dataset_version = physical_table
+                        .dataset()
+                        .dataset_version()
+                        .unwrap_or_default();
+                    metrics.record_file_written(
+                        dataset_name.to_string(),
+                        dataset_version,
+                        table_name.to_string(),
+                        location_id,
+                    );
                 }
             }
         }
     }
-    assert!(microbatch_start == range.end() + 1);
 
     Ok(())
 }

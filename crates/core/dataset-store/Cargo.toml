@@ -2,6 +2,7 @@
 name = "dataset-store"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 
 [dependencies]
@@ -9,8 +10,8 @@ async-stream.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
-datasets-derived = { version = "0.1.0", path = "../datasets-derived" }
-eth-beacon-datasets = { version = "0.1.0", path = "../../extractors/eth-beacon" }
+datasets-derived = { path = "../datasets-derived" }
+eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true

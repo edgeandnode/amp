@@ -38,8 +38,8 @@ use common::{BoxError, config::Config};
 use worker::NodeId;
 
 use super::fixtures::{
-    Anvil, DaemonConfig, DaemonConfigBuilder, DaemonServer, DaemonStateDir, DaemonWorker,
-    FlightClient, JsonlClient, NozzlCli, TempMetadataDb as MetadataDbFixture,
+    AmpCli, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
+    DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, TempMetadataDb as MetadataDbFixture,
     builder as daemon_state_dir_builder,
 };
 use crate::testlib::env_dir::TestEnvDir;
@@ -56,6 +56,7 @@ pub struct TestCtxBuilder {
     dataset_manifests_to_preload: BTreeSet<String>,
     provider_configs_to_preload: BTreeSet<String>,
     dataset_snapshots_to_preload: BTreeSet<String>,
+    meter: Option<monitoring::telemetry::metrics::Meter>,
 }
 
 impl TestCtxBuilder {
@@ -68,6 +69,7 @@ impl TestCtxBuilder {
             dataset_manifests_to_preload: Default::default(),
             provider_configs_to_preload: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
+            meter: None,
         }
     }
 
@@ -77,6 +79,15 @@ impl TestCtxBuilder {
     /// written to the generated config.toml file in the test environment.
     pub fn with_config(mut self, config: DaemonConfig) -> Self {
         self.daemon_config = config;
+        self
+    }
+
+    /// Enable metrics collection for this test environment.
+    ///
+    /// Provides a meter that will be passed to the daemon server and worker for metrics collection.
+    /// Use with `monitoring::test_utils::TestMetricsContext` to collect and validate metrics.
+    pub fn with_meter(mut self, meter: monitoring::telemetry::metrics::Meter) -> Self {
+        self.meter = Some(meter);
         self
     }
 
@@ -381,23 +392,29 @@ impl TestCtxBuilder {
             None => None,
         };
 
-        // Start nozzle server using the fixture
+        // Clone meter for worker and controller before server consumes it
+        let worker_meter = self.meter.clone();
+        let controller_meter = self.meter.clone();
+
+        // Start amp server using the fixture (only query servers)
         let server = DaemonServer::new(
             config.clone(),
             temp_db.metadata_db().clone(),
             true, // enable_flight
             true, // enable_jsonl
-            true, // enable_admin_api
+            self.meter,
         )
         .await?;
+
+        // Start controller using the fixture (Admin API)
+        let controller = DaemonController::new(config.clone(), controller_meter).await?;
 
         // Start worker using the fixture
         let worker = DaemonWorker::new(
             NodeId::from_str(&self.test_name).expect("test name should be a valid WorkerNodeId"),
             config,
             temp_db.metadata_db().clone(),
-            None,
-            None,
+            worker_meter,
         )
         .await?;
 
@@ -408,6 +425,7 @@ impl TestCtxBuilder {
             daemon_state_dir,
             tempdb_fixture: temp_db,
             daemon_server_fixture: server,
+            daemon_controller_fixture: controller,
             daemon_worker_fixture: worker,
             anvil_fixture: anvil,
         })
@@ -427,6 +445,7 @@ pub struct TestCtx {
 
     tempdb_fixture: MetadataDbFixture,
     daemon_server_fixture: DaemonServer,
+    daemon_controller_fixture: DaemonController,
     daemon_worker_fixture: DaemonWorker,
     anvil_fixture: Option<Anvil>,
 }
@@ -460,6 +479,11 @@ impl TestCtx {
     /// Get a reference to the [`DaemonServer`] fixture.
     pub fn daemon_server(&self) -> &DaemonServer {
         &self.daemon_server_fixture
+    }
+
+    /// Get a reference to the [`DaemonController`] fixture.
+    pub fn daemon_controller(&self) -> &DaemonController {
+        &self.daemon_controller_fixture
     }
 
     /// Get a reference to the daemon worker fixture.
@@ -498,13 +522,13 @@ impl TestCtx {
         JsonlClient::new(self.daemon_server_fixture.jsonl_server_url())
     }
 
-    /// Create a new `nozzl` CLI fixture connected to this test environment's server.
+    /// Create a new `amp` CLI fixture connected to this test environment's controller.
     ///
-    /// This convenience method creates a new [`NozzlCli`] instance connected to the
-    /// daemon server's admin API endpoint for executing `nozzl` CLI commands in tests.
+    /// This convenience method creates a new [`AmpCli`] instance connected to the
+    /// daemon controller's admin API endpoint for executing `amp` CLI commands in tests.
     ///
-    /// Returns a new [`NozzlCli`] instance ready to execute CLI commands.
-    pub fn new_nozzl_cli(&self) -> NozzlCli {
-        NozzlCli::new(self.daemon_server_fixture.admin_api_server_url())
+    /// Returns a new [`AmpCli`] instance ready to execute CLI commands.
+    pub fn new_amp_cli(&self) -> AmpCli {
+        AmpCli::new(self.daemon_controller_fixture.admin_api_url())
     }
 }

@@ -17,14 +17,14 @@ use tokio::task::JoinError;
 
 use crate::{
     ConsistencyCheckError, WriterProperties,
-    compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor},
+    compaction::{AmpCompactorTaskType, Collector, compactor::Compactor},
 };
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
 
 pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
-    type Task: NozzleCompactorTaskType<Error = Self>;
+    type Task: AmpCompactorTaskType<Error = Self>;
     /// Whether the error is merely for debugging and does not indicate a failure
     /// Default implementation returns false for all error variants
     fn is_debug(&self) -> bool {

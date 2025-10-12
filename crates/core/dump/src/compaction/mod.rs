@@ -30,19 +30,19 @@ use crate::{
 /// Duration collector must wait prior to deleting files
 pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
-pub struct NozzleCompactor {
+pub struct AmpCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
 }
 
-impl NozzleCompactor {
+impl AmpCompactor {
     pub fn start(
         table: Arc<PhysicalTable>,
         cache: ParquetFooterCache,
         opts: Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        NozzleCompactor {
+        AmpCompactor {
             compaction_task: Compactor::start(&table, &cache, &opts, &metrics),
             deletion_task: Collector::start(&table, &cache, &opts, &metrics),
         }
@@ -75,10 +75,10 @@ impl NozzleCompactor {
     }
 }
 
-pub type CompactionTask = NozzleCompactorTask<Compactor>;
-pub type DeletionTask = NozzleCompactorTask<Collector>;
+pub type CompactionTask = AmpCompactorTask<Compactor>;
+pub type DeletionTask = AmpCompactorTask<Collector>;
 
-pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
+pub struct AmpCompactorTask<T: AmpCompactorTaskType> {
     task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
     cache: ParquetFooterCache,
@@ -87,7 +87,7 @@ pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
     previous: Option<Timestamp>,
 }
 
-impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
+impl<T: AmpCompactorTaskType> AmpCompactorTask<T> {
     pub fn abort(&self) {
         self.task.abort();
     }
@@ -147,7 +147,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
     }
 }
 
-pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
+pub trait AmpCompactorTaskType: Debug + Display + Sized + Send + 'static {
     type Error: CompactionErrorExt;
 
     fn new(
@@ -175,7 +175,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         cache: &ParquetFooterCache,
         opts: &mut Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
-        err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
+        err: impl Into<<Self as AmpCompactorTaskType>::Error>,
     ) -> Self {
         let this = Self::new(table, cache, opts, metrics);
         let err = err.into();
@@ -203,10 +203,10 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         cache: &ParquetFooterCache,
         opts: &Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
-    ) -> NozzleCompactorTask<Self> {
+    ) -> AmpCompactorTask<Self> {
         let task = tokio::spawn(ready_ok(Self::new(table, cache, opts, metrics)));
 
-        let mut this = NozzleCompactorTask {
+        let mut this = AmpCompactorTask {
             task,
             table: Arc::clone(table),
             cache: cache.clone(),

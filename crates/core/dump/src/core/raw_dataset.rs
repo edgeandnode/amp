@@ -98,7 +98,7 @@ use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
-use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
@@ -113,12 +113,14 @@ pub async fn dump(
     catalog: Catalog,
     tables: &[Arc<PhysicalTable>],
     parquet_opts: Arc<WriterProperties>,
-    end: Option<i64>,
+    end: EndBlock,
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
+    let dump_start_time = Instant::now();
+
     let mut client = ctx
         .dataset_store
         .get_client(dataset_name, None, only_finalized_blocks, meter)
@@ -128,13 +130,15 @@ pub async fn dump(
     tracing::info!("connected to provider: {}", client.provider_name());
 
     let mut start = tables[0].dataset().start_block.unwrap_or(0);
-    let end = match end {
-        None => None,
-        Some(end) => Some(block_ranges::resolve_relative(
-            start,
-            Some(end),
-            client.latest_block().await?,
-        )?),
+    let resolved = end.resolve(start, client.latest_block()).await?;
+
+    let end = match resolved {
+        ResolvedEndBlock::NoDataAvailable => {
+            tracing::warn!("no blocks available from provider for {}", dataset_name);
+            return Ok(());
+        }
+        ResolvedEndBlock::Continuous => None,
+        ResolvedEndBlock::Block(block) => Some(block),
     };
 
     let mut timer = tokio::time::interval(Duration::from_secs(1));
@@ -142,7 +146,10 @@ pub async fn dump(
     loop {
         timer.tick().await;
 
-        let latest_block = client.latest_block().await?;
+        let Some(latest_block) = client.latest_block().await? else {
+            // No data to dump
+            continue;
+        };
         if latest_block < start {
             continue;
         }
@@ -228,12 +235,42 @@ pub async fn dump(
         // Wait for all the jobs to finish, returning an error if any job panics or fails.
         if let Err(err) = join_set.try_wait_all().await {
             tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+
+            // Record error metrics
+            if let Some(ref metrics) = metrics {
+                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
+                for table in tables {
+                    let table_name = table.table_name().to_string();
+                    metrics.record_dump_error(
+                        dataset_name.to_string(),
+                        dataset_version.clone(),
+                        table_name,
+                    );
+                }
+            }
+
             return Err(err.into_box_error());
         }
 
         if let Some(end) = end
             && latest_block >= end
         {
+            // Record dump duration on successful completion
+            if let Some(ref metrics) = metrics {
+                let duration_millis = dump_start_time.elapsed().as_millis() as f64;
+                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
+                for table in tables {
+                    let table_name = table.table_name().to_string();
+                    let job_id = format!("{}_{}", dataset_name, table_name);
+                    metrics.record_dump_duration(
+                        duration_millis,
+                        dataset_name.to_string(),
+                        dataset_version.clone(),
+                        table_name,
+                        job_id,
+                    );
+                }
+            }
             return Ok(());
         }
 
@@ -417,18 +454,33 @@ impl<S: BlockStreamer> DumpPartition<S> {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
                     let table_name = table_rows.table.name().to_string();
-                    let location_id = self
+                    let block_num = table_rows.block_num();
+                    let physical_table = self
                         .catalog
                         .tables()
                         .iter()
                         .find(|t| t.table_name() == table_name)
-                        .map(|t| t.location_id())
                         .expect("table should exist");
-                    metrics.inc_raw_dataset_rows_by(
+                    let location_id = *physical_table.location_id();
+                    let dataset_version = physical_table
+                        .dataset()
+                        .dataset_version()
+                        .unwrap_or_default();
+                    // Record rows only (bytes tracked separately in writer)
+                    metrics.record_ingestion_rows(
                         num_rows,
                         self.dataset_name.clone(),
+                        dataset_version.clone(),
+                        table_name.clone(),
+                        location_id,
+                    );
+                    // Update latest block gauge
+                    metrics.set_latest_block(
+                        block_num,
+                        self.dataset_name.clone(),
+                        dataset_version,
                         table_name,
-                        *location_id,
+                        location_id,
                     );
                 }
 
