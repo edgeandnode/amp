@@ -26,12 +26,10 @@ datasets-derived = { path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true
 dump = { path = "../crates/core/dump" }
 evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
-figment.workspace = true
 firehose-datasets = { path = "../crates/extractors/firehose" }
 fs-err.workspace = true
 futures.workspace = true
 generate-manifest = { path = "../crates/bin/generate-manifest" }
-hex.workspace = true
 indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }

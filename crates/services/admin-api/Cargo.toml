@@ -16,7 +16,6 @@ futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 object_store.workspace = true
-opentelemetry.workspace = true
 opentelemetry-instrumentation-tower = { version = "0.17", features = ["axum"] }
 tokio.workspace = true
 tower-http = { workspace = true, features = ["cors"] }

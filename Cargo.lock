@@ -38,7 +38,6 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "object_store",
- "opentelemetry",
  "opentelemetry-instrumentation-tower",
  "rand 0.9.2",
  "serde",
@@ -841,7 +840,6 @@ dependencies = [
 name = "ampd"
 version = "0.1.0"
 dependencies = [
- "admin-api",
  "arrow-flight",
  "axum 0.8.4",
  "clap",
@@ -916,10 +914,8 @@ dependencies = [
  "reqwest",
  "semver 1.0.26",
  "serde",
- "serde_json",
  "tempfile",
  "tokio",
- "url",
  "vergen-gitcl",
 ]
 
@@ -3552,7 +3548,6 @@ name = "dump"
 version = "0.1.0"
 dependencies = [
  "alloy",
- "backon",
  "common",
  "datafusion",
  "dataset-store",
@@ -5335,7 +5330,6 @@ version = "0.1.0"
 dependencies = [
  "cargo_metadata",
  "common",
- "metadata-db",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -7770,12 +7764,10 @@ dependencies = [
  "dotenvy",
  "dump",
  "evm-rpc-datasets",
- "figment",
  "firehose-datasets",
  "fs-err",
  "futures",
  "generate-manifest",
- "hex",
  "indoc",
  "metadata-db",
  "monitoring",
