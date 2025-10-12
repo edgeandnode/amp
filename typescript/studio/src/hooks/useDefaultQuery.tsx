@@ -1,9 +1,9 @@
 "use client"
 
+import { StudioModel } from "@edgeandnode/amp"
 import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 import { Schema } from "effect"
-import { DefaultQuery } from "studio-cli/Studio/Model"
 
 import * as Constants from "../constants.js"
 
@@ -18,13 +18,13 @@ export const defaultQueryOptions = queryOptions({
     }
     const json = await response.json()
 
-    return Schema.decodeUnknownSync(DefaultQuery)(json)
+    return Schema.decodeUnknownSync(StudioModel.DefaultQuery)(json)
   },
 })
 
 export function useDefaultQuery(
   options: Omit<
-    UseSuspenseQueryOptions<DefaultQuery, Error, DefaultQuery, readonly ["Query", "Default"]>,
+    UseSuspenseQueryOptions<StudioModel.DefaultQuery, Error, StudioModel.DefaultQuery, readonly ["Query", "Default"]>,
     "queryKey" | "queryFn"
   > = {},
 ) {

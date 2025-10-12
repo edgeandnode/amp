@@ -13,9 +13,9 @@
  *
  * @file UnifiedSQLProvider.ts
  */
+import type { StudioModel } from "@edgeandnode/amp"
 import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
@@ -84,7 +84,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
   ] as const
 
   constructor(
-    private readonly sources: ReadonlyArray<DatasetSource>,
+    private readonly sources: ReadonlyArray<StudioModel.DatasetSource>,
     private readonly udfs: ReadonlyArray<UserDefinedFunction>,
     private readonly config: SQLProviderConfig,
   ) {}

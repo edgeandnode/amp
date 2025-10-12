@@ -2,15 +2,15 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
+import type { StudioModel } from "@edgeandnode/amp"
 import { FileSqlIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
-import type { QueryableEvent } from "studio-cli/Studio/Model"
 
 import { useQueryableEventsQuery } from "@/hooks/useQueryableEventsQuery"
 
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
 export type SchemaBrowserProps = {
-  onEventSelected: (event: QueryableEvent) => void
+  onEventSelected: (event: StudioModel.QueryableEvent) => void
 }
 export function SchemaBrowser({ onEventSelected }: Readonly<SchemaBrowserProps>) {
   const { data: queryableEvents } = useQueryableEventsQuery()

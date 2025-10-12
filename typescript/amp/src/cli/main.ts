@@ -26,6 +26,7 @@ import { locations } from "./commands/locations.ts"
 import { proxy } from "./commands/proxy.ts"
 import { query } from "./commands/query.ts"
 import { register } from "./commands/register.ts"
+import { studio } from "./commands/studio.ts"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const amp = Command.make("amp", {
@@ -38,7 +39,7 @@ const amp = Command.make("amp", {
   },
 }).pipe(
   Command.withDescription("The Amp Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register]),
+  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register, studio]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 

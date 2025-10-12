@@ -2,15 +2,15 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
+import type { StudioModel } from "@edgeandnode/amp"
 import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
 export type SourcesBrowserProps = {
-  onSourceSelected: (source: DatasetSource) => void
+  onSourceSelected: (source: StudioModel.DatasetSource) => void
 }
 export function SourcesBrowser({ onSourceSelected: onTableSelected }: Readonly<SourcesBrowserProps>) {
   const { data: sources } = useSourcesSuspenseQuery()

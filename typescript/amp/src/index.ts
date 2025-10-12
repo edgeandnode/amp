@@ -12,6 +12,7 @@ export * as ApiError from "./api/Error.ts"
 export * as JsonLines from "./api/JsonLines.ts"
 export * as Arrow from "./Arrow.ts"
 export * as Model from "./Model.ts"
+export * as StudioModel from "./studio/Model.ts"
 
 export const defineDataset = (fn: (context: Context) => Model.DatasetDefinition) => {
   return (context: Context) => fn(context)

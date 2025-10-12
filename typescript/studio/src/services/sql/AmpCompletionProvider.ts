@@ -16,6 +16,7 @@
  * @file completionProvider.ts
  * @author SQL Intellisense System
  */
+import type { StudioModel } from "@edgeandnode/amp"
 import type {
   CancellationToken,
   editor,
@@ -24,7 +25,6 @@ import type {
   Position,
 } from "monaco-editor/esm/vs/editor/editor.api"
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types.ts"
@@ -74,7 +74,7 @@ export class AmpCompletionProvider implements languages.CompletionItemProvider {
   }
 
   constructor(
-    private metadata: ReadonlyArray<DatasetSource>,
+    private metadata: ReadonlyArray<StudioModel.DatasetSource>,
     private udfs: ReadonlyArray<UserDefinedFunction>,
     analyzer?: QueryContextAnalyzer,
     config: Partial<CompletionConfig> = DEFAULT_COMPLETION_CONFIG,
@@ -367,14 +367,14 @@ export class AmpCompletionProvider implements languages.CompletionItemProvider {
    * @returns Monaco snippet string
    */
   private readonly udfSnippets: Record<string, string> = {
-    "evm_decode_log": "evm_decode_log(${1:topic1}, ${2:topic2}, ${3:topic3}, ${4:data}, '${5:signature}')$0",
-    "evm_topic": "evm_topic('${1:signature}')$0",
+    evm_decode_log: "evm_decode_log(${1:topic1}, ${2:topic2}, ${3:topic3}, ${4:data}, '${5:signature}')$0",
+    evm_topic: "evm_topic('${1:signature}')$0",
     "${dataset}.eth_call": "${1:dataset}.eth_call(${2:from_address}, ${3:to_address}, ${4:input_data}, '${5:block}')$0",
-    "evm_decode_params": "evm_decode_params(${1:input_data}, '${2:signature}')$0",
-    "evm_encode_params": "evm_encode_params(${1:arg1}, ${2:arg2}, '${3:signature}')$0",
-    "evm_encode_type": "evm_encode_type(${1:value}, '${2:type}')$0",
-    "evm_decode_type": "evm_decode_type(${1:data}, '${2:type}')$0",
-    "attestation_hash": "attestation_hash(${1:column1}${2:, ${3:column2}})$0",
+    evm_decode_params: "evm_decode_params(${1:input_data}, '${2:signature}')$0",
+    evm_encode_params: "evm_encode_params(${1:arg1}, ${2:arg2}, '${3:signature}')$0",
+    evm_encode_type: "evm_encode_type(${1:value}, '${2:type}')$0",
+    evm_decode_type: "evm_decode_type(${1:data}, '${2:type}')$0",
+    attestation_hash: "attestation_hash(${1:column1}${2:, ${3:column2}})$0",
   }
 
   private createUDFSnippet(udf: UserDefinedFunction): string {
@@ -608,7 +608,7 @@ export class AmpCompletionProvider implements languages.CompletionItemProvider {
    * Updates the metadata and UDF information when data changes.
    * This is called by the provider manager when fresh data is available.
    */
-  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
+  updateData(metadata: ReadonlyArray<StudioModel.DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     this.metadata = metadata
     this.udfs = udfs
     this.analyzer.clearCache() // Clear analysis cache when data changes

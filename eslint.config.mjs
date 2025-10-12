@@ -4,9 +4,10 @@ import * as tsResolver from "eslint-import-resolver-typescript"
 import importPlugin from "eslint-plugin-import-x"
 import simpleImportSort from "eslint-plugin-simple-import-sort"
 import sortDestructureKeys from "eslint-plugin-sort-destructure-keys"
+import { defineConfig } from "eslint/config"
 import tseslint from "typescript-eslint"
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: ["crates/", "target/", "**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md"],
   },

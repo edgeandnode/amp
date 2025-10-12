@@ -1,9 +1,9 @@
 "use client"
 
+import { StudioModel } from "@edgeandnode/amp"
 import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 import { Schema } from "effect"
-import { DatasetSource } from "studio-cli/Studio/Model"
 
 import * as Constants from "../constants.js"
 
@@ -18,16 +18,16 @@ export const sourcesQueryOptions = queryOptions({
     }
     const json = await response.json()
 
-    return Schema.decodeUnknownSync(Schema.Array(DatasetSource))(json)
+    return Schema.decodeUnknownSync(Schema.Array(StudioModel.DatasetSource))(json)
   },
 })
 
 export function useSourcesSuspenseQuery(
   options: Omit<
     UseSuspenseQueryOptions<
-      ReadonlyArray<DatasetSource>,
+      ReadonlyArray<StudioModel.DatasetSource>,
       Error,
-      ReadonlyArray<DatasetSource>,
+      ReadonlyArray<StudioModel.DatasetSource>,
       readonly ["Query", "Sources"]
     >,
     "queryKey" | "queryFn"
