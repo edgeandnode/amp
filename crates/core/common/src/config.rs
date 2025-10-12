@@ -80,6 +80,19 @@ pub struct ParquetConfig {
     pub target_size: SizeLimitConfig,
 }
 
+impl Default for ParquetConfig {
+    fn default() -> Self {
+        Self {
+            compression: default_compression(),
+            bloom_filters: false,
+            cache_size_mb: default_cache_size_mb(),
+            compactor: CompactorConfig::default(),
+            collector: CollectorConfig::default(),
+            target_size: SizeLimitConfig::default_upper_limit(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CollectorConfig {
@@ -302,6 +315,7 @@ pub struct ConfigFile {
     pub jsonl_addr: Option<String>,
     pub admin_api_addr: Option<String>,
     pub opentelemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
     pub writer: ParquetConfig,
 }
 

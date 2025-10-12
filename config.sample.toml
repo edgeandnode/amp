@@ -22,7 +22,7 @@ dataset_defs_dir = "<config_dir/dataset_defs>"
 metadata_db_url = "postgres://<pg_url>"
 
 # Metadata DB configuration (optional)
-[metadata_db]
+# [metadata_db]
 # Database connection URL - alternative to metadata_db_url above
 # url = "postgres://<pg_url>"
 
@@ -47,8 +47,8 @@ metadata_db_url = "postgres://<pg_url>"
 # Admin API server address
 # admin_api_addr = "0.0.0.0:1610"
 
-# Writer/Parquet configuration (renamed from [parquet] to [writer])
-[writer]
+# Writer/Parquet configuration (renamed from [parquet] to [writer], optional)
+# [writer]
 # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
 # compression = "zstd(1)"
 
@@ -79,8 +79,8 @@ metadata_db_url = "postgres://<pg_url>"
 # Target rows per file, 0 means no limit (default: 0)
 # rows = 0
 
-# File compactor configuration (nested under writer)
-[writer.compactor]
+# File compactor configuration (nested under writerl, optional)
+# [writer.compactor]
 # Enable or disable the compactor (default: false)
 # active = false
 
@@ -94,7 +94,7 @@ metadata_db_url = "postgres://<pg_url>"
 # min_interval = 1
 
 # Compaction algorithm configuration
-# base_cooldown_duration = 5  # Base cooldown duration in seconds (default: 5 seconds)
+# cooldown_duration = 5  # Base cooldown duration in seconds (default: 5 seconds)
 
 # Eager compaction limits (when to compact eagerly)
 # overflow = 1 # Overflow configuration (default: 1)
@@ -102,13 +102,15 @@ metadata_db_url = "postgres://<pg_url>"
 # bytes = 0  # Byte threshold for eager compaction (default: 0)
 # rows = 0  # Row threshold for eager compaction (default: 0)
 
-# Garbage collector configuration (nested under writer, renamed from collector)
-[writer.collector]
+# Garbage collector configuration (nested under writer, optional)
+# [writer.collector]
 # Enable or disable the collector (default: false)
 # active = false
 
 # The interval at which to run the garbage collector (default: 5 seconds)
-# min_interval = 5
+# [writer.collector.min_interval]
+# secs = 5
 
 # The duration for which to hold a deletion lock on compacted files (default: 30 minutes, minimum: 200 milliseconds)
-# deletion_lock_duration = "1800s"
+# [writer.collector.deletion_lock_duration]
+# secs = 1800
