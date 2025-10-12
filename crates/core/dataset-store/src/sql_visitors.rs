@@ -1,11 +1,11 @@
 use std::ops::ControlFlow;
 
+use common::BoxError;
 use datafusion::sql::{
     parser::Statement,
     sqlparser::ast::{Expr, Function, ObjectNamePart, Visit, Visitor},
 };
 use itertools::Itertools;
-use js_runtime::BoxError;
 
 /// Returns a list of all function names in the SQL statement.
 ///
