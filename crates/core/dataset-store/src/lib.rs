@@ -6,7 +6,6 @@ use common::{
     evm::{self, udfs::EthCall},
     manifest::{common::schema_from_tables, derived},
     query_context::QueryEnv,
-    sql_visitors::all_function_names,
 };
 use datafusion::{
     common::HashMap,
@@ -41,6 +40,7 @@ mod env_substitute;
 mod error;
 pub mod manifests;
 pub mod providers;
+mod sql_visitors;
 
 use self::{
     block_stream_client::BlockStreamClient,
@@ -632,7 +632,7 @@ impl DatasetStore {
     ) -> Result<Catalog, CatalogForSqlError> {
         let (tables, _) = resolve_table_references(query, true)
             .map_err(|err| CatalogForSqlError::TableReferenceResolution { source: err.into() })?;
-        let function_names = all_function_names(query)
+        let function_names = sql_visitors::all_function_names(query)
             .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err.into() })?;
 
         self.get_physical_catalog(tables, function_names, &env)
@@ -677,7 +677,7 @@ impl DatasetStore {
         let (tables, _) = resolve_table_references(query, true).map_err(|err| {
             PlanningCtxForSqlError::TableReferenceResolution { source: err.into() }
         })?;
-        let function_names = all_function_names(query)
+        let function_names = sql_visitors::all_function_names(query)
             .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err.into() })?;
         let resolved_tables = self
             .get_logical_catalog(tables, function_names, &IsolatePool::dummy())

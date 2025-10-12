@@ -15,6 +15,7 @@ eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
+itertools.workspace = true
 js-runtime = { path = "../js-runtime" }
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }

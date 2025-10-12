@@ -10,7 +10,6 @@ pub mod notification_multiplexer;
 pub mod plan_visitors;
 pub mod planning_context;
 pub mod query_context;
-pub mod sql_visitors;
 pub mod store;
 pub mod stream_helpers;
 pub mod utils;
