@@ -1,18 +1,18 @@
-# Ampsync | Nozzle syncing crate
+# Ampsync | Amp syncing crate
 
-A high-performance synchronization service that streams dataset changes from a Nozzle server and syncs them to a
+A high-performance synchronization service that streams dataset changes from a Amp server and syncs them to a
 PostgreSQL database. Designed for production deployments with features like hot-reloading, adaptive batching, and
 automatic schema evolution.
 
 There are many powerful, battle-tested, well-documented, already existing tools in the application development ecosystem
 that have years of usage and examples; that interact with relational database management systems.
-Running this crate alongside Nozzle unlocks these tools, and developer potential by streaming data from datasets into
+Running this crate alongside Amp unlocks these tools, and developer potential by streaming data from datasets into
 postgres.
 
 ## Overview
 
-Ampsync connects to a Nozzle server to stream dataset changes and synchronizes them to a PostgreSQL database. This
-enables applications to work with Nozzle datasets in their local PostgreSQL instance while maintaining real-time updates
+Ampsync connects to a Amp server to stream dataset changes and synchronizes them to a PostgreSQL database. This
+enables applications to work with Amp datasets in their local PostgreSQL instance while maintaining real-time updates
 and handling blockchain reorganizations automatically.
 
 ## Key Features
@@ -20,7 +20,7 @@ and handling blockchain reorganizations automatically.
 - **Real-time Streaming**: Continuously syncs dataset changes as they occur
 - **Automatic SQL Generation**: Generates SQL queries from schema - no config files needed
 - **Version Polling**: Automatically detects and loads new dataset versions (when not pinned to specific version)
-- **Automatic Schema Inference**: Fetches table schemas from Nozzle Admin API automatically
+- **Automatic Schema Inference**: Fetches table schemas from Amp Admin API automatically
 - **Schema Evolution**: Supports adding new columns to existing tables. As well as adding newly added tables.
     - **Note** removing columns is _NOT_ supported as it will result in data loss.
 - **Progress Checkpointing**: Resumes from last processed block on restart (no reprocessing)
@@ -43,7 +43,7 @@ The service is configured through environment variables:
 - **`DATASET_NAME`** - Name of the dataset to sync
     - **Type**: Dataset name (string, must be valid `datasets_common::name::Name`)
     - **Example**: `my_dataset`, `ethereum_blocks`
-    - **Notes**: Must match a published dataset in Nozzle Admin API
+    - **Notes**: Must match a published dataset in Amp Admin API
 
 #### Database Connection
 
@@ -92,17 +92,17 @@ Option 2: Individual components (all required except password)
     - **Notes**: Only used when `DATASET_VERSION` is NOT specified. Controls how frequently ampsync checks for new
       versions.
 
-#### Nozzle Connection
+#### Amp Connection
 
-- **`AMP_FLIGHT_ADDR`** - URL to Nozzle Arrow Flight server
+- **`AMP_FLIGHT_ADDR`** - URL to Amp Arrow Flight server
     - **Type**: HTTP/HTTPS URL
     - **Default**: `http://localhost:1602`
-    - **Example**: `https://nozzle.example.com:1602`
+    - **Example**: `https://amp.example.com:1602`
 
-- **`AMP_ADMIN_API_ADDR`** - URL to Nozzle Admin API server
+- **`AMP_ADMIN_API_ADDR`** - URL to Amp Admin API server
     - **Type**: HTTP/HTTPS URL
     - **Default**: `http://localhost:1610`
-    - **Example**: `https://nozzle.example.com:1610`
+    - **Example**: `https://amp.example.com:1610`
     - **Notes**: Used to fetch dataset schemas and versions
 
 #### Performance Tuning
@@ -144,18 +144,18 @@ Option 2: Individual components (all required except password)
 
 **Automatic SQL Generation**:
 
-1. Ampsync fetches the complete dataset manifest from Nozzle Admin API (`GET /datasets/{name}/versions/{version}/manifest`)
+1. Ampsync fetches the complete dataset manifest from Amp Admin API (`GET /datasets/{name}/versions/{version}/manifest`)
 2. Automatically generates SQL queries for each table:
    `SELECT col1, col2, ... FROM network.table SETTINGS stream = true`
 3. Creates PostgreSQL tables with the Arrow schema from the manifest
 4. Starts streaming data using the generated SQL queries.
 5. When data is received, it is encoded by the `arrow-to-postgres` library and inserted into the postgres database.
 
-**First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `nozzle dump` run), ampsync
+**First-Run Behavior**: On initial startup, if the dataset hasn't been published yet (no `amp dump` run), ampsync
 will wait:
 
 - Polls the Admin API every 2-30 seconds (exponential backoff)
-- Logs helpful messages: "Have you run 'nozzle dump --dataset <name>'?"
+- Logs helpful messages: "Have you run 'amp dump --dataset <name>'?"
 - Continues polling indefinitely until the dataset becomes available
 - Once found, proceeds normally with streaming
 
@@ -175,7 +175,7 @@ services:
       - "5432:5432"
 
   amp:
-    image: ghcr.io/edgeandnode/nozzle:latest
+    image: ghcr.io/edgeandnode/amp:latest
     command: [ "--config", "/var/lib/amp/config.toml", "dev" ]
     depends_on:
       db:
@@ -198,14 +198,15 @@ services:
 
   ampsync:
     image: ghcr.io/edgeandnode/ampsync:latest
+    command: ["sync"]
     environment:
       # Dataset configuration
       DATASET_NAME: my_dataset
       # DATASET_VERSION: 0.1.0  # Optional: pin to specific version
 
-      # Nozzle server endpoints
-      AMP_FLIGHT_ADDR: http://nozzle-server:1602
-      AMP_ADMIN_API_ADDR: http://nozzle-server:1610
+      # Amp server endpoints
+      AMP_FLIGHT_ADDR: http://amp:1602
+      AMP_ADMIN_API_ADDR: http://amp:1610
 
       # Database connection
       DATABASE_URL: postgresql://myuser:mypassword@postgres:5432/myapp
@@ -250,7 +251,7 @@ cargo run --release -p ampsync
     - **Watermark available**: Hash-verified resumption (server-side, via `query()` parameter)
     - **Incremental only**: Best-effort resumption (client-side, adds `WHERE block_num > X`)
     - **None**: Starts from the beginning
-6. **Streaming**: Executes generated SQL queries with `SETTINGS stream = true` on Nozzle server
+6. **Streaming**: Executes generated SQL queries with `SETTINGS stream = true` on Amp server
 7. **Reorg Detection**: Wraps streams with `with_reorg()` to detect blockchain reorganizations
 8. **Batch Processing**:
     - Receives `Batch` events from streams
@@ -279,7 +280,7 @@ cargo run --release -p ampsync
 
 #### User Tables
 
-Created automatically from your nozzle config with schemas fetched from Admin API.
+Created automatically from your amp config with schemas fetched from Admin API.
 
 **System Metadata Columns** (automatically injected into ALL tables):
 
@@ -401,16 +402,16 @@ crates/bin/ampsync/
 **"Dataset not found in admin-api. This is expected on first run."**
 
 - **This is normal on first startup!** Ampsync is waiting for the dataset to be published.
-- Run `nozzle dump --dataset <name>` to publish the dataset
+- Run `amp dump --dataset <name>` to publish the dataset
 - Ampsync will automatically detect when the dataset becomes available and start streaming
 - No restart needed - it polls the Admin API automatically
 
 **"Failed to fetch manifest from admin-api: HTTP 404"**
 
-- If this error persists after running `nozzle dump`, check:
+- If this error persists after running `amp dump`, check:
     - Dataset name and version match between config and published dataset
     - `AMP_ADMIN_API_ADDR` points to the correct Admin API endpoint
-    - Dataset was successfully published (check Nozzle server logs)
+    - Dataset was successfully published (check Amp server logs)
 
 **"Database connection failed"**
 
@@ -422,8 +423,8 @@ crates/bin/ampsync/
 **"Stream ended for table 'X'. Attempting reconnection..."**
 
 - Normal behavior - streams reconnect automatically
-- Check Nozzle server logs for issues
-- Verify network connectivity to Nozzle server
+- Check Amp server logs for issues
+- Verify network connectivity to Amp server
 - If persistent, check `RUST_LOG=debug` output for details
 
 **Memory usage increasing over time**
