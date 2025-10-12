@@ -12,7 +12,6 @@ default = ["snmalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
-admin-api = { path = "../../services/admin-api" }
 arrow-flight.workspace = true
 axum.workspace = true
 clap.workspace = true
