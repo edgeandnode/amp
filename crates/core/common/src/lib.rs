@@ -2,7 +2,6 @@ pub mod arrow_helpers;
 pub mod attestation;
 pub mod catalog;
 pub mod config;
-pub mod env_substitute;
 pub mod evm;
 pub mod js_udf;
 pub mod manifest;

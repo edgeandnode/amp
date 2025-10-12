@@ -37,6 +37,7 @@ use url::Url;
 
 mod block_stream_client;
 mod dataset_kind;
+mod env_substitute;
 mod error;
 pub mod manifests;
 pub mod providers;
@@ -592,7 +593,7 @@ impl DatasetStore {
         'try_find_provider: for mut provider in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = common::env_substitute::substitute_env_vars(value) {
+                if let Err(err) = crate::env_substitute::substitute_env_vars(value) {
                     tracing::warn!(
                         provider_name = %provider.name,
                         provider_kind = %kind,
