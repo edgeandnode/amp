@@ -24,10 +24,9 @@
  * @file index.ts
  * @author SQL Intellisense System
  */
-
+import type { StudioModel } from "@edgeandnode/amp"
 import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
@@ -82,7 +81,7 @@ class SqlProviderManager {
   ] as const
 
   constructor(
-    private metadata: ReadonlyArray<DatasetSource>,
+    private metadata: ReadonlyArray<StudioModel.DatasetSource>,
     private udfs: ReadonlyArray<UserDefinedFunction>,
     private config: CompletionConfig = DEFAULT_COMPLETION_CONFIG,
   ) {}
@@ -99,12 +98,7 @@ class SqlProviderManager {
     try {
       // Initialize core components
       this.contextAnalyzer = new QueryContextAnalyzer(this.config)
-      this.completionProvider = new AmpCompletionProvider(
-        this.metadata,
-        this.udfs,
-        this.contextAnalyzer,
-        this.config,
-      )
+      this.completionProvider = new AmpCompletionProvider(this.metadata, this.udfs, this.contextAnalyzer, this.config)
       this.snippetGenerator = new UdfSnippetGenerator()
       this.validator = new SqlValidation(this.metadata, this.udfs, this.config)
 
@@ -152,7 +146,7 @@ class SqlProviderManager {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions
    */
-  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
+  updateData(metadata: ReadonlyArray<StudioModel.DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     if (this.isDisposed) {
       this.logWarning("Attempted to update disposed provider manager")
       return
@@ -442,7 +436,7 @@ let activeProviderManager: SqlProviderManager | null = null
  * @returns Disposable handle for cleanup
  */
 export function setupAmpSQLProviders(
-  metadata: ReadonlyArray<DatasetSource>,
+  metadata: ReadonlyArray<StudioModel.DatasetSource>,
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
 ): DisposableHandle {
@@ -480,7 +474,7 @@ export function setupAmpSQLProviders(
  * @param udfs - Updated UDF definitions
  */
 export function updateProviderData(
-  metadata: ReadonlyArray<DatasetSource>,
+  metadata: ReadonlyArray<StudioModel.DatasetSource>,
   udfs: ReadonlyArray<UserDefinedFunction>,
 ): void {
   if (activeProviderManager) {

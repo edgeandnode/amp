@@ -1,5 +1,5 @@
+import { StudioModel } from "@edgeandnode/amp"
 import { renderHook, waitFor } from "@testing-library/react"
-import { QueryableEvent, QueryableEventStream } from "studio-cli/Studio/Model"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useQueryableEventsQuery } from "../../src/hooks/useQueryableEventsQuery.js"
@@ -86,15 +86,15 @@ describe("useQueryableEventsQuery", () => {
 
   it("should connect to EventSource and decode server-sent events successfully", async () => {
     // Mock SSE data in the format the API would send
-    const mockEventData = QueryableEventStream.make({
+    const mockEventData = StudioModel.QueryableEventStream.make({
       events: [
-        QueryableEvent.make({
+        StudioModel.QueryableEvent.make({
           name: "Count",
           params: [{ name: "count", datatype: "uint256", indexed: false }],
           signature: "Count(uint256 count)",
           source: ["./contracts/src/Counter.sol"],
         }),
-        QueryableEvent.make({
+        StudioModel.QueryableEvent.make({
           name: "Transfer",
           params: [
             { name: "from", datatype: "address", indexed: true },
@@ -126,9 +126,9 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should handle multiple SSE messages", async () => {
-    const mockEventData1 = QueryableEventStream.make({
+    const mockEventData1 = StudioModel.QueryableEventStream.make({
       events: [
-        QueryableEvent.make({
+        StudioModel.QueryableEvent.make({
           name: "Count",
           params: [{ name: "count", datatype: "uint256", indexed: false }],
           signature: "Count(uint256 count)",
@@ -137,9 +137,9 @@ describe("useQueryableEventsQuery", () => {
       ],
     })
 
-    const mockEventData2 = QueryableEventStream.make({
+    const mockEventData2 = StudioModel.QueryableEventStream.make({
       events: [
-        QueryableEvent.make({
+        StudioModel.QueryableEvent.make({
           name: "Transfer",
           params: [
             { name: "from", datatype: "address", indexed: true },

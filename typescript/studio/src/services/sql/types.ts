@@ -14,6 +14,7 @@
  * @file types.ts
  * @author SQL Intellisense System
  */
+import type { StudioModel } from "@edgeandnode/amp"
 import type {
   CancellationToken,
   editor,
@@ -23,7 +24,6 @@ import type {
   Position,
   Range,
 } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import type { UserDefinedFunctionName } from "../../constants.ts"
 
@@ -499,14 +499,11 @@ export interface PerformanceMetrics {
   lastUpdate: number
 }
 
-// Re-export DatasetSource type for convenience
-export type { DatasetSource }
-
 /**
  * Extended DatasetSource type to handle different metadata structures
  * Some datasets have additional properties or alternative column formats
  */
-export type ExtendedDatasetSource = DatasetSource & {
+export type ExtendedDatasetSource = StudioModel.DatasetSource & {
   // Alternative properties that may exist in some datasets
   destination?: string
   dataset_name?: string

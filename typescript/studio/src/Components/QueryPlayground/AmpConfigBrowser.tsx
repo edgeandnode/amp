@@ -67,7 +67,7 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
                 </Accordion.Header>
                 <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden ml-4">
                   <pre className="bg-black text-white p-3 rounded-4 text-12 overflow-x-auto">
-                <code className="language-sql">{String.trim(def.input.sql)}</code>
+                  <code className="language-sql">{String.trim(def.input.sql)}</code>
                   </pre>
                 </Accordion.Panel>
               </Accordion.Item>

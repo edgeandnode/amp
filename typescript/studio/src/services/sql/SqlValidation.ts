@@ -15,9 +15,9 @@
  * @file SqlValidator.ts
  * @author SQL Error Markers System
  */
+import type { StudioModel } from "@edgeandnode/amp"
 import { Array as EffectArray } from "effect"
 import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type {
@@ -43,7 +43,7 @@ import {
  * including syntax checking and metadata validation.
  */
 export class SqlValidation {
-  private metadata: ReadonlyArray<DatasetSource>
+  private metadata: ReadonlyArray<StudioModel.DatasetSource>
   private udfs: ReadonlyArray<UserDefinedFunction>
   private config: CompletionConfig
   private contextAnalyzer: QueryContextAnalyzer
@@ -58,7 +58,7 @@ export class SqlValidation {
   }
 
   constructor(
-    metadata: ReadonlyArray<DatasetSource>,
+    metadata: ReadonlyArray<StudioModel.DatasetSource>,
     udfs: ReadonlyArray<UserDefinedFunction>,
     config: CompletionConfig = DEFAULT_COMPLETION_CONFIG,
   ) {
@@ -138,7 +138,7 @@ export class SqlValidation {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions
    */
-  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
+  updateData(metadata: ReadonlyArray<StudioModel.DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     this.metadata = metadata
     this.udfs = udfs
 
@@ -773,7 +773,7 @@ export class SqlValidation {
     return tableName // Return the full table name if no alias found
   }
 
-  private findTable(tableName: string): DatasetSource | null {
+  private findTable(tableName: string): StudioModel.DatasetSource | null {
     const result = this.metadata.find((dataset) => {
       const d = dataset as ExtendedDatasetSource
       // Check both possible structures
@@ -784,7 +784,7 @@ export class SqlValidation {
     return result
   }
 
-  private suggestSimilarColumn(columnName: string, table: DatasetSource): string | null {
+  private suggestSimilarColumn(columnName: string, table: StudioModel.DatasetSource): string | null {
     const columnNames = getColumnNames(table as ExtendedDatasetSource)
     if (columnNames.length === 0) {
       return null
@@ -808,7 +808,7 @@ export class SqlValidation {
     return bestMatch
   }
 
-  private getAllAvailableTables(tableAliasMap: Map<string, string>): Array<DatasetSource> {
+  private getAllAvailableTables(tableAliasMap: Map<string, string>): Array<StudioModel.DatasetSource> {
     const tableNames = new Set(Array.from(tableAliasMap.values()))
 
     const result = this.metadata.filter((dataset) => {
@@ -881,10 +881,7 @@ export class SqlValidation {
       // Check if previous token is an identifier (could be column/table name)
       if (prevIndex >= 0 && tokens[prevIndex].type === "IDENTIFIER") {
         // Make sure we're not in a qualified name (table.column)
-        if (
-          prevIndex === 0 ||
-          (tokens[prevIndex - 1].type !== "DELIMITER" || tokens[prevIndex - 1].value !== ".")
-        ) {
+        if (prevIndex === 0 || tokens[prevIndex - 1].type !== "DELIMITER" || tokens[prevIndex - 1].value !== ".") {
           // Check if this looks like an alias pattern by looking at what comes after
           let nextIndex = index + 1
           while (nextIndex < tokens.length && tokens[nextIndex].type === "WHITESPACE") {

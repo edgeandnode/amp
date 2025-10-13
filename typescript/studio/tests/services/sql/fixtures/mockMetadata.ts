@@ -3,9 +3,9 @@
  * Provides realistic test data representing Amp dataset metadata
  */
 
-import type { DatasetSource } from "studio-cli/Studio/Model"
+import type { StudioModel } from "@edgeandnode/amp"
 
-export const mockMetadata: ReadonlyArray<DatasetSource & { destination: string }> = [
+export const mockMetadata: ReadonlyArray<StudioModel.DatasetSource & { destination: string }> = [
   {
     source: "anvil.logs",
     destination: "anvil_logs",
@@ -64,7 +64,7 @@ export const mockMetadata: ReadonlyArray<DatasetSource & { destination: string }
  * Minimal metadata for testing edge cases with few columns
  */
 export const mockMetadataMinimal: ReadonlyArray<
-  Omit<DatasetSource, "source"> & { source: string; destination: string }
+  Omit<StudioModel.DatasetSource, "source"> & { source: string; destination: string }
 > = [
   {
     source: "test.simple" as any,
@@ -79,7 +79,7 @@ export const mockMetadataMinimal: ReadonlyArray<
 /**
  * Empty metadata for testing graceful degradation
  */
-export const mockMetadataEmpty: ReadonlyArray<DatasetSource> = [] as const
+export const mockMetadataEmpty: ReadonlyArray<StudioModel.DatasetSource> = [] as const
 
 /**
  * Large metadata for performance testing
@@ -101,22 +101,22 @@ export const mockMetadataLarge: ReadonlyArray<{
  * Helper function to get metadata by table name
  */
 export function getMetadataByTableName(
-  metadata: ReadonlyArray<DatasetSource>,
+  metadata: ReadonlyArray<StudioModel.DatasetSource>,
   tableName: string,
-): DatasetSource | undefined {
+): StudioModel.DatasetSource | undefined {
   return metadata.find((m) => m.source === tableName)
 }
 
 /**
  * Helper function to get all column names from a dataset
  */
-export function getAllColumnNames(metadata: ReadonlyArray<DatasetSource>): Array<string> {
+export function getAllColumnNames(metadata: ReadonlyArray<StudioModel.DatasetSource>): Array<string> {
   return metadata.flatMap((dataset) => dataset.metadata_columns.map((col) => col.name))
 }
 
 /**
  * Helper function to get all table names
  */
-export function getAllTableNames(metadata: ReadonlyArray<DatasetSource>): Array<string> {
+export function getAllTableNames(metadata: ReadonlyArray<StudioModel.DatasetSource>): Array<string> {
   return metadata.map((dataset) => dataset.source)
 }

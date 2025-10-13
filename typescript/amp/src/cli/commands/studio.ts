@@ -1,53 +1,41 @@
-#!/usr/bin/env node
-
 import { createGrpcTransport } from "@connectrpc/connect-node"
-import { Arrow, ArrowFlight } from "@edgeandnode/amp"
-import * as Admin from "@edgeandnode/amp/api/Admin"
-import * as ConfigLoader from "@edgeandnode/amp/ConfigLoader"
-import * as ManifestContext from "@edgeandnode/amp/ManifestContext"
-import { Command, Options, ValidationError } from "@effect/cli"
-import {
-  FileSystem,
-  HttpApi,
-  HttpApiBuilder,
-  HttpApiEndpoint,
-  HttpApiError,
-  HttpApiGroup,
-  HttpApiScalar,
-  HttpApiSchema,
-  HttpMiddleware,
-  HttpRouter,
-  HttpServer,
-  HttpServerResponse,
-  OpenApi,
-  Path,
-  PlatformConfigProvider,
-} from "@effect/platform"
-import { NodeContext, NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as HttpApi from "@effect/platform/HttpApi"
+import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint"
+import * as HttpApiError from "@effect/platform/HttpApiError"
+import * as HttpApiGroup from "@effect/platform/HttpApiGroup"
+import * as HttpApiScalar from "@effect/platform/HttpApiScalar"
+import * as HttpApiSchema from "@effect/platform/HttpApiSchema"
+import * as HttpMiddleware from "@effect/platform/HttpMiddleware"
+import * as HttpRouter from "@effect/platform/HttpRouter"
+import * as HttpServer from "@effect/platform/HttpServer"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import * as OpenApi from "@effect/platform/OpenApi"
+import * as Path from "@effect/platform/Path"
 import { Table } from "apache-arrow"
-import {
-  Cause,
-  Chunk,
-  Config,
-  Console,
-  Data,
-  Effect,
-  Layer,
-  Logger,
-  LogLevel,
-  Option,
-  Schema,
-  Stream,
-  String,
-  Struct,
-} from "effect"
+import * as Cause from "effect/Cause"
+import * as Chunk from "effect/Chunk"
+import * as Console from "effect/Console"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+import * as Struct from "effect/Struct"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
-
-import { FoundryQueryableEventResolver, Model as StudioModel } from "../Studio/index.ts"
-import { adminUrl, configFile, flightUrl } from "./common.ts"
-import { prettyCause } from "./Utils.ts"
+import * as Admin from "../../api/Admin.ts"
+import * as ArrowFlight from "../../api/ArrowFlight.ts"
+import * as Arrow from "../../Arrow.ts"
+import * as ConfigLoader from "../../ConfigLoader.ts"
+import { FoundryQueryableEventResolver, Model as StudioModel } from "../../studio/index.ts"
+import { adminUrl, configFile, flightUrl } from "../common.ts"
 
 class AmpStudioApiRouter extends HttpApiGroup.make("AmpStudioApi")
   .add(
@@ -322,6 +310,7 @@ FROM (
           ))
     }),
 )
+
 const AmpStudioApiLayer = Layer.merge(
   HttpApiBuilder.middlewareCors({
     allowedMethods: ["GET", "POST", "OPTIONS"],
@@ -354,7 +343,7 @@ const StudioFileRouter = Effect.gen(function*() {
     // attempt the compiled dist output on build
     path.resolve(__dirname, "studio", "dist"),
     // attempt local dev mode as a fallback
-    path.resolve(__dirname, "..", "..", "..", "studio", "dist"),
+    path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist"),
   ]
   const findStudioDist = Effect.fnUntraced(function*() {
     return yield* Effect.findFirst(possibleStudioPaths, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
@@ -465,14 +454,8 @@ const Server = Effect.all({
   Layer.unwrapEffect,
 )
 
-const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
-const studio = Command.make("studio", {
+export const studio = Command.make("studio", {
   args: {
-    logs: Options.choice("logs", levels).pipe(
-      Options.withFallbackConfig(Config.string("AMP_LOG_LEVEL").pipe(Config.withDefault("info"))),
-      Options.withDescription("The log level to use"),
-      Options.map((value) => LogLevel.fromLiteral(String.capitalize(value) as LogLevel.Literal)),
-    ),
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
       Options.withDefault(1615),
@@ -541,33 +524,9 @@ const studio = Command.make("studio", {
   ),
   Command.provide(ConfigLoader.ConfigLoader.Default),
   Command.provide(FoundryQueryableEventResolver.layer),
-  Command.provide(({ args }) => ManifestContext.layerFromConfigFile(args.config)),
   Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
   Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
-  Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
-
-const cli = Command.run(studio, {
-  name: "Studio CLI",
-  version: "v0.0.1",
-})
-
-const layer = Layer.provideMerge(PlatformConfigProvider.layerDotEnvAdd(".env"), NodeContext.layer)
-
-const runnable = Effect.suspend(() => cli(process.argv)).pipe(
-  Effect.provide(layer),
-  Effect.tapErrorCause((cause) => {
-    const squashed = Cause.squash(cause)
-    // Command validation errors are already printed by @effect/cli.
-    if (ValidationError.isValidationError(squashed)) {
-      return Effect.void
-    }
-
-    return Console.error(prettyCause(cause))
-  }),
-)
-
-Effect.suspend(() => runnable).pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
 
 const openBrowser = (
   port: number,

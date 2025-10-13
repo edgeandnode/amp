@@ -1,30 +1,29 @@
 "use client"
 
+import { StudioModel } from "@edgeandnode/amp"
 import { Schema } from "effect"
 import { useCallback, useEffect, useReducer, useRef } from "react"
-import type { QueryableEvent } from "studio-cli/Studio/Model"
-import { QueryableEventStream } from "studio-cli/Studio/Model"
 
 import * as Constants from "../constants.js"
 
-const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(QueryableEventStream))
+const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(StudioModel.QueryableEventStream))
 
 export interface UseQueryableEventsQueryOptions {
   enabled?: boolean
-  onSuccess?: (data: ReadonlyArray<QueryableEvent>) => void
+  onSuccess?: (data: ReadonlyArray<StudioModel.QueryableEvent>) => void
   onError?: (error: Error) => void
   retry?: boolean
   retryDelay?: number
 }
 
 export interface State {
-  data: ReadonlyArray<QueryableEvent>
+  data: ReadonlyArray<StudioModel.QueryableEvent>
   error?: Error | null | undefined
   status: "idle" | "fetching" | "success" | "error"
 }
 export type Action =
   | { type: "FETCHING" }
-  | { type: "SUCCESS"; payload: ReadonlyArray<QueryableEvent> }
+  | { type: "SUCCESS"; payload: ReadonlyArray<StudioModel.QueryableEvent> }
   | { type: "ERROR"; payload: Error }
   | { type: "RESET" }
 
