@@ -26,7 +26,6 @@ pub use self::{
 #[tracing::instrument(skip(exe), err)]
 pub async fn insert<'c, E>(
     exe: E,
-    owner: &str,
     name: Name<'_>,
     version: Version<'_>,
     manifest_path: &str,
@@ -43,7 +42,7 @@ where
         .bind(name)
         .bind(version)
         .bind(manifest_path)
-        .bind(owner)
+        .bind("") // owner field will be removed
         .execute(exe)
         .await?;
 

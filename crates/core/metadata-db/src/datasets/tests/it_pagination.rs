@@ -61,12 +61,11 @@ async fn list_first_page_respects_limit_and_ordering() {
 
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
-        let owner = "test_owner";
         let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
-        datasets::insert(&mut *conn, owner, name, version, &manifest_path)
+        datasets::insert(&mut *conn, name, version, &manifest_path)
             .await
             .expect("should insert dataset");
     }
@@ -171,12 +170,11 @@ async fn list_next_page_uses_cursor() {
 
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
-        let owner = "test_owner";
         let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
-        datasets::insert(&mut *conn, owner, name, version, &manifest_path)
+        datasets::insert(&mut *conn, name, version, &manifest_path)
             .await
             .expect("should insert dataset");
     }
@@ -285,7 +283,6 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let dataset_name = Name::from_ref_unchecked("versioned_dataset");
 
     // Create 7 versions with semver edge cases to test both limit and ordering
@@ -308,15 +305,9 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&dataset_name, &version);
 
-        datasets::insert(
-            &mut *conn,
-            owner,
-            dataset_name.clone(),
-            version,
-            &manifest_path,
-        )
-        .await
-        .expect("should insert dataset");
+        datasets::insert(&mut *conn, dataset_name.clone(), version, &manifest_path)
+            .await
+            .expect("should insert dataset");
     }
 
     //* When
@@ -379,7 +370,6 @@ async fn list_versions_by_name_next_page_uses_cursor() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let dataset_name = Name::from_ref_unchecked("paginated_dataset");
 
     // Create 7 versions with specific structure:
@@ -404,15 +394,9 @@ async fn list_versions_by_name_next_page_uses_cursor() {
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&dataset_name, &version);
 
-        datasets::insert(
-            &mut *conn,
-            owner,
-            dataset_name.clone(),
-            version,
-            &manifest_path,
-        )
-        .await
-        .expect("should insert dataset");
+        datasets::insert(&mut *conn, dataset_name.clone(), version, &manifest_path)
+            .await
+            .expect("should insert dataset");
     }
 
     //* When

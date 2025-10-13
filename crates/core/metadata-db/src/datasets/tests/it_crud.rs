@@ -18,7 +18,6 @@ async fn insert_with_valid_data_succeeds() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("test_dataset");
     let version = "1.0.0"
         .parse::<Version>()
@@ -26,7 +25,7 @@ async fn insert_with_valid_data_succeeds() {
     let manifest_path = "test_dataset__1_0_0.json";
 
     //* When
-    let result = datasets::insert(&mut *conn, owner, name, version, manifest_path).await;
+    let result = datasets::insert(&mut *conn, name, version, manifest_path).await;
 
     //* Then
     assert!(
@@ -46,7 +45,6 @@ async fn insert_with_prerelease_version_succeeds() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("prerelease_dataset");
     let version = "1.0.0-alpha.1"
         .parse::<Version>()
@@ -54,14 +52,7 @@ async fn insert_with_prerelease_version_succeeds() {
     let manifest_path = "prerelease_dataset__1_0_0-alpha.1.json";
 
     //* When
-    let result = datasets::insert(
-        &mut *conn,
-        owner,
-        name.clone(),
-        version.clone(),
-        manifest_path,
-    )
-    .await;
+    let result = datasets::insert(&mut *conn, name.clone(), version.clone(), manifest_path).await;
 
     //* Then
     assert!(
@@ -87,7 +78,6 @@ async fn insert_with_duplicate_name_and_version_fails() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("duplicate_dataset");
     let version = "1.0.0"
         .parse::<Version>()
@@ -95,14 +85,8 @@ async fn insert_with_duplicate_name_and_version_fails() {
     let manifest_path = "duplicate_dataset__1_0_0.json";
 
     // Insert first dataset
-    let first_result = datasets::insert(
-        &mut *conn,
-        owner,
-        name.clone(),
-        version.clone(),
-        manifest_path,
-    )
-    .await;
+    let first_result =
+        datasets::insert(&mut *conn, name.clone(), version.clone(), manifest_path).await;
     assert!(
         first_result.is_ok(),
         "first dataset insertion should succeed"
@@ -110,7 +94,7 @@ async fn insert_with_duplicate_name_and_version_fails() {
 
     //* When
     // Try to insert with same name and version
-    let second_result = datasets::insert(&mut *conn, owner, name, version, manifest_path).await;
+    let second_result = datasets::insert(&mut *conn, name, version, manifest_path).await;
 
     //* Then
     assert!(
@@ -130,7 +114,6 @@ async fn get_by_name_and_version_with_details_returns_existing_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("existing_dataset");
     let version = "2.1.0"
         .parse::<Version>()
@@ -138,14 +121,8 @@ async fn get_by_name_and_version_with_details_returns_existing_dataset() {
     let manifest_path = "existing_dataset__2_1_0.json";
 
     // Insert dataset first
-    let insert_result = datasets::insert(
-        &mut *conn,
-        owner,
-        name.clone(),
-        version.clone(),
-        manifest_path,
-    )
-    .await;
+    let insert_result =
+        datasets::insert(&mut *conn, name.clone(), version.clone(), manifest_path).await;
     assert!(insert_result.is_ok(), "dataset insertion should succeed");
 
     //* When
@@ -158,7 +135,6 @@ async fn get_by_name_and_version_with_details_returns_existing_dataset() {
     assert!(dataset.is_some(), "dataset should exist");
 
     let dataset = dataset.expect("dataset should be found");
-    assert_eq!(dataset.owner, owner, "owner should match");
     assert_eq!(dataset.name, name, "name should match");
     assert_eq!(dataset.version.major, 2, "major version should match");
     assert_eq!(dataset.version.minor, 1, "minor version should match");
@@ -208,7 +184,6 @@ async fn exists_by_name_and_version_returns_true_for_existing_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("exists_dataset");
     let version = "1.5.2"
         .parse::<Version>()
@@ -216,14 +191,8 @@ async fn exists_by_name_and_version_returns_true_for_existing_dataset() {
     let manifest_path = "exists_dataset__1_5_2.json";
 
     // Insert dataset first
-    let insert_result = datasets::insert(
-        &mut *conn,
-        owner,
-        name.clone(),
-        version.clone(),
-        manifest_path,
-    )
-    .await;
+    let insert_result =
+        datasets::insert(&mut *conn, name.clone(), version.clone(), manifest_path).await;
     assert!(insert_result.is_ok(), "dataset insertion should succeed");
 
     //* When
@@ -271,7 +240,6 @@ async fn get_manifest_by_name_and_version_returns_manifest_for_existing_dataset(
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("manifest_dataset");
     let version = "3.0.1"
         .parse::<Version>()
@@ -279,14 +247,8 @@ async fn get_manifest_by_name_and_version_returns_manifest_for_existing_dataset(
     let manifest_path = "manifest_dataset__3_0_1.json";
 
     // Insert dataset first
-    let insert_result = datasets::insert(
-        &mut *conn,
-        owner,
-        name.clone(),
-        version.clone(),
-        manifest_path,
-    )
-    .await;
+    let insert_result =
+        datasets::insert(&mut *conn, name.clone(), version.clone(), manifest_path).await;
     assert!(insert_result.is_ok(), "dataset insertion should succeed");
 
     //* When
@@ -371,7 +333,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
         .await
         .expect("Failed to run migrations");
 
-    let owner = "test_owner";
     let name = Name::from_ref_unchecked("versioned_dataset");
 
     // Insert multiple versions
@@ -390,7 +351,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
 
     let insert1 = datasets::insert(
         &mut *conn,
-        owner,
         name.clone(),
         version_1_0_0,
         "versioned_dataset__1_0_0.json",
@@ -398,7 +358,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
     .await;
     let insert2 = datasets::insert(
         &mut *conn,
-        owner,
         name.clone(),
         version_1_2_0,
         "versioned_dataset__1_2_0.json",
@@ -406,7 +365,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
     .await;
     let insert3 = datasets::insert(
         &mut *conn,
-        owner,
         name.clone(),
         version_2_0_0,
         "versioned_dataset__2_0_0.json",
@@ -414,7 +372,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
     .await;
     let insert4 = datasets::insert(
         &mut *conn,
-        owner,
         name.clone(),
         version_1_10_0,
         "versioned_dataset__1_10_0.json",
@@ -439,7 +396,6 @@ async fn get_latest_version_by_name_returns_highest_version() {
         latest_dataset.name, "versioned_dataset",
         "dataset name should match"
     );
-    assert_eq!(latest_dataset.owner, owner, "dataset owner should match");
     assert_eq!(
         latest_dataset.version.major, 2,
         "latest version major should be 2"

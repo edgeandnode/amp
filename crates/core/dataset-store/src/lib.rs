@@ -56,8 +56,6 @@ pub use self::{
     manifests::StoreError,
 };
 
-const PLACEHOLDER_OWNER: &str = "no-owner";
-
 #[derive(Clone)]
 pub struct DatasetStore {
     metadata_db: MetadataDb,
@@ -127,12 +125,8 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
-        // Register dataset metadata in database
-        // TODO: Extract the dataset owner from the manifest
-        let owner = PLACEHOLDER_OWNER;
-
         self.metadata_db
-            .register_dataset(owner, name, version, manifest_path.as_ref())
+            .register_dataset(name, version, manifest_path.as_ref())
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 

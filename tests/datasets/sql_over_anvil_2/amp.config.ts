@@ -6,7 +6,6 @@ export default defineDataset(() => ({
   version: "0.0.0",
   dependencies: {
     anvil_rpc: {
-      owner: "graphprotocol",
       name: "anvil_rpc",
       version: "0.0.0",
     },

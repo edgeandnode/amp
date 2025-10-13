@@ -7,8 +7,6 @@ use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
 use tokio::sync::OnceCell;
 
-const PLACEHOLDER_OWNER: &str = "no-owner";
-
 /// Manages dataset manifest configurations combining ObjectStore and MetadataDb operations
 ///
 /// ## Object Store Agnostic Design
@@ -229,7 +227,7 @@ where
             // Register the dataset in the metadata database
             match self
                 .metadata_db
-                .register_dataset(PLACEHOLDER_OWNER, &name, &version, &path.to_string())
+                .register_dataset(&name, &version, &path.to_string())
                 .await
             {
                 Ok(()) => {

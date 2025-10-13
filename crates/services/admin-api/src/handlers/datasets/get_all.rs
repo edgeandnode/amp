@@ -157,8 +157,6 @@ pub struct DatasetRegistryInfo {
     /// The version of the dataset
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
-    /// The owner of the dataset
-    pub owner: String,
 }
 
 impl From<metadata_db::Dataset> for DatasetRegistryInfo {
@@ -166,7 +164,6 @@ impl From<metadata_db::Dataset> for DatasetRegistryInfo {
         Self {
             name: dataset.name.into(),
             version: dataset.version.into(),
-            owner: dataset.owner,
         }
     }
 }
