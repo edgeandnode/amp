@@ -27,6 +27,8 @@ jobs:
           - runner: namespace-profile-linux-arm64-build
             target: aarch64-unknown-linux-gnu
           - runner: namespace-profile-macos-arm64-build
+            target: x86_64-apple-darwin
+          - runner: namespace-profile-macos-arm64-build
             target: aarch64-apple-darwin
 
     steps:
@@ -42,7 +44,7 @@ jobs:
         run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampup -p ampsync
 
       - name: Sign binaries
-        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        if: contains(matrix.target, 'apple-darwin')
         run: |
           # Decode certificate (macOS uses -D, not --decode)
           echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -D > certificate.p12
@@ -81,7 +83,7 @@ jobs:
           rm certificate.p12
 
       - name: Notarize ampd
-        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        if: contains(matrix.target, 'apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
           product-path: target/${{ matrix.target }}/release/ampd
@@ -90,7 +92,7 @@ jobs:
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Notarize ampup
-        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        if: contains(matrix.target, 'apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
           product-path: target/${{ matrix.target }}/release/ampup
@@ -99,7 +101,7 @@ jobs:
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Notarize ampsync
-        if: startsWith(matrix.target, 'aarch64-apple-darwin')
+        if: contains(matrix.target, 'apple-darwin')
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
           product-path: target/${{ matrix.target }}/release/ampsync
@@ -152,16 +154,19 @@ jobs:
           # Copy and rename ampd binaries
           cp artifacts/x86_64-unknown-linux-gnu-ampd/ampd release/ampd-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampd/ampd release/ampd-linux-aarch64
+          cp artifacts/x86_64-apple-darwin-ampd/ampd release/ampd-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampd/ampd release/ampd-darwin-aarch64
 
           # Copy and rename ampup binaries
           cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
+          cp artifacts/x86_64-apple-darwin-ampup/ampup release/ampup-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampup/ampup release/ampup-darwin-aarch64
           
           # Copy and rename ampsync binaries
           cp artifacts/x86_64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-aarch64
+          cp artifacts/x86_64-apple-darwin-ampsync/ampsync release/ampsync-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampsync/ampsync release/ampsync-darwin-aarch64
 
           # Make all binaries executable
