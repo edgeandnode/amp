@@ -56,7 +56,7 @@ pub use self::{
     manifests::StoreError,
 };
 
-const PLACEHOLDER_OWNER: &'static str = "no-owner";
+const PLACEHOLDER_OWNER: &str = "no-owner";
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -132,7 +132,7 @@ impl DatasetStore {
         let owner = PLACEHOLDER_OWNER;
 
         self.metadata_db
-            .register_dataset(owner, name, version, &manifest_path.to_string())
+            .register_dataset(owner, name, version, manifest_path.as_ref())
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 
@@ -304,14 +304,11 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                let dataset = derived::dataset(manifest).map_err(|err| {
-                    GetDatasetError::DerivedCreationError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err.into(),
-                    }
-                })?;
-                dataset
+                derived::dataset(manifest).map_err(|err| GetDatasetError::DerivedCreationError {
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: err,
+                })?
             }
         };
 
@@ -631,7 +628,7 @@ impl DatasetStore {
         let (tables, _) = resolve_table_references(query, true)
             .map_err(|err| CatalogForSqlError::TableReferenceResolution { source: err.into() })?;
         let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err.into() })?;
+            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err })?;
 
         self.get_physical_catalog(tables, function_names, &env)
             .await
@@ -656,7 +653,7 @@ impl DatasetStore {
                 .await
                 .map_err(|err| GetPhysicalCatalogError::PhysicalTableRetrieval {
                     table: table.to_string(),
-                    source: err.into(),
+                    source: err,
                 })?
                 .ok_or(GetPhysicalCatalogError::TableNotSynced {
                     table: table.to_string(),
@@ -676,7 +673,7 @@ impl DatasetStore {
             PlanningCtxForSqlError::TableReferenceResolution { source: err.into() }
         })?;
         let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err.into() })?;
+            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err })?;
         let resolved_tables = self
             .get_logical_catalog(tables, function_names, &IsolatePool::dummy())
             .await?;
@@ -842,7 +839,7 @@ impl DatasetStore {
         let provider = if provider.url.scheme() == "ipc" {
             evm::provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
                 .await
-                .map_err(|err| EthCallForDatasetError::IpcConnection(err.into()))?
+                .map_err(EthCallForDatasetError::IpcConnection)?
         } else {
             evm::provider::new(provider.url, provider.rate_limit_per_minute)
         };

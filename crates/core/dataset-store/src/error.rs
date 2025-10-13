@@ -360,6 +360,7 @@ pub enum GetLogicalCatalogError {
 
 /// Errors specific to get_physical_catalog operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum GetPhysicalCatalogError {
     /// Failed to get the logical catalog.
     ///
@@ -389,6 +390,7 @@ pub enum GetPhysicalCatalogError {
 
 /// Errors specific to catalog_for_sql operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum CatalogForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -420,6 +422,7 @@ pub enum CatalogForSqlError {
 
 /// Errors specific to planning_ctx_for_sql operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum PlanningCtxForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///

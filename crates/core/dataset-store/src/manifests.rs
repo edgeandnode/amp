@@ -7,7 +7,7 @@ use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
 use tokio::sync::OnceCell;
 
-const PLACEHOLDER_OWNER: &'static str = "no-owner";
+const PLACEHOLDER_OWNER: &str = "no-owner";
 
 /// Manages dataset manifest configurations combining ObjectStore and MetadataDb operations
 ///
@@ -377,7 +377,7 @@ where
     match store.get_string(path.into_inner()).await {
         Ok(content) => Ok(Some(ManifestContent(content))),
         Err(err) if err.is_not_found() => Ok(None),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }
 
