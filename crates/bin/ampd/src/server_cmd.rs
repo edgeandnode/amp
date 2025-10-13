@@ -26,6 +26,29 @@ pub struct BoundAddrs {
 }
 
 pub async fn run(
+    config: Config,
+    metadata_db: MetadataDb,
+    flight_server: bool,
+    jsonl_server: bool,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
+) -> Result<(), Error> {
+    let config = Arc::new(config);
+
+    let (addrs, server) = run_servers(config, metadata_db, flight_server, jsonl_server, meter)
+        .await
+        .map_err(Error::ServerStart)?;
+
+    if flight_server {
+        tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
+    }
+    if jsonl_server {
+        tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
+    }
+
+    server.await.map_err(Error::ServerRuntime)
+}
+
+pub async fn run_servers(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     enable_flight: bool,
@@ -61,9 +84,9 @@ pub async fn run(
                 TcpIncoming::from_listener(listener, true, None)?,
                 shutdown_signal(),
             )
-            .map_err(|e| {
-                tracing::error!("Flight server error: {}", e);
-                e.into()
+            .map_err(|err| {
+                tracing::error!("Flight server error: {}", err);
+                err.into()
             })
             .boxed();
         services_futures.push(flight_server);
@@ -75,9 +98,9 @@ pub async fn run(
     if enable_jsonl {
         let (jsonl_addr, jsonl_server) = run_jsonl_server(service, config.addrs.jsonl_addr).await?;
         let jsonl_server = jsonl_server
-            .map_err(|e| {
-                tracing::error!("JSON lines server error: {}", e);
-                e
+            .map_err(|err| {
+                tracing::error!("JSON lines server error: {}", err);
+                err
             })
             .boxed();
         services_futures.push(jsonl_server);
@@ -164,4 +187,25 @@ async fn handle_jsonl_request(
     response
         .body(axum::body::Body::from_stream(stream))
         .unwrap()
+}
+
+/// Errors that can occur during server execution.
+///
+/// This error type covers all failure modes when running the query servers,
+/// which provide Arrow Flight RPC and JSON Lines query interfaces.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to start the query server.
+    ///
+    /// This occurs during the initialization phase when attempting to bind and
+    /// start the Arrow Flight RPC and/or JSON Lines servers.
+    #[error("Failed to start server: {0}")]
+    ServerStart(#[source] BoxError),
+
+    /// Query server encountered a runtime error.
+    ///
+    /// This occurs after the servers have started successfully but encounter
+    /// an error during operation.
+    #[error("Server runtime error: {0}")]
+    ServerRuntime(#[source] BoxError),
 }

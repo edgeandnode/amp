@@ -6,7 +6,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use ampd::server::BoundAddrs;
+use ampd::server_cmd::BoundAddrs;
 use common::{BoxError, BoxResult, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
@@ -61,7 +61,7 @@ impl DaemonServer {
         let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
-        let (server_addrs, server) = ampd::server::run(
+        let (server_addrs, server) = ampd::server_cmd::run_servers(
             config.clone(),
             metadb,
             enable_flight,

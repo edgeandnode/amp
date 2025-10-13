@@ -1,19 +1,18 @@
 use std::io;
 
 use common::manifest::common::schema_from_tables;
+use dataset_store::DatasetKind;
 use datasets_common::{manifest::Manifest, name::Name};
 
 pub async fn run(
+    name: Name,
+    kind: impl Into<DatasetKind>,
     network: String,
-    kind: String,
-    name: String,
     manifest: Option<String>,
     module: Option<String>,
     writer: &mut impl io::Write,
 ) -> Result<(), Error> {
-    let name = name.parse::<Name>().map_err(Error::InvalidName)?;
-    let kind = kind.parse().map_err(|_| Error::InvalidKind(kind.clone()))?;
-
+    let kind = kind.into();
     let schema = match kind {
         dataset_store::DatasetKind::EvmRpc => {
             schema_from_tables(&evm_rpc_datasets::tables::all(&network))
