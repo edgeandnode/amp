@@ -841,7 +841,6 @@ name = "ampd"
 version = "0.1.0"
 dependencies = [
  "arrow-flight",
- "axum 0.8.4",
  "clap",
  "common",
  "controller",
@@ -864,7 +863,6 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tonic 0.12.3",
- "tower-http",
  "tracing",
  "vergen-gitcl",
  "worker",
@@ -7127,10 +7125,12 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "prost 0.13.3",
+ "serde",
  "serde_json",
  "thiserror 2.0.16",
  "tokio",
  "tonic 0.12.3",
+ "tower-http",
  "tracing",
 ]
 

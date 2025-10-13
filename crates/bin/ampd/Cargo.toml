@@ -13,7 +13,6 @@ snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 arrow-flight.workspace = true
-axum.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }
 controller = { path = "../../services/controller" }
@@ -29,14 +28,13 @@ futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde_json.workspace = true
-server = { path = "../../services/server" }
+server = { path = "../../services/server", features = ["jsonl"] }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
 substreams-datasets = { path = "../../extractors/substreams" }
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
-tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"] }
 tracing.workspace = true
 worker = { path = "../../services/worker" }
 
