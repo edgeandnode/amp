@@ -1,6 +1,12 @@
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
+use common::{
+    BoxError, Dataset, catalog::physical::PhysicalTable, config::Config, utils::dependency_sort,
+};
+use dataset_store::DatasetStore;
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
@@ -10,13 +16,19 @@ use worker::{JobDescriptor, JobId, JobNotification, NodeId};
 pub struct Scheduler {
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    dataset_store: Arc<DatasetStore>,
 }
 
 impl Scheduler {
-    pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        metadata_db: MetadataDb,
+        dataset_store: Arc<DatasetStore>,
+    ) -> Self {
         Self {
             config,
             metadata_db,
+            dataset_store,
         }
     }
 
@@ -102,6 +114,44 @@ impl Scheduler {
             .map_err(StopJobError::MetadataDb)?;
 
         Ok(())
+    }
+
+    async fn dataset_dependencies(&self, dataset: &Dataset) -> Result<Vec<String>, BoxError> {
+        // TODO: We are currently ignoring dependency version constraints.
+
+        async fn direct_deps(
+            dataset_store: &Arc<DatasetStore>,
+            name: &str,
+        ) -> Result<Vec<String>, BoxError> {
+            let dataset = dataset_store
+                .get_dataset(name, None)
+                .await?
+                .ok_or_else(|| format!("dataset not found: {name}"))?;
+            if dataset.kind != "manifest" {
+                return Ok(vec![]);
+            }
+            let manifest = dataset_store
+                .get_derived_manifest(name, None)
+                .await?
+                .ok_or_else(|| format!("manifest not found for dataset: {name}"))?;
+            Ok(manifest
+                .dependencies
+                .values()
+                .map(|d| d.name.to_string())
+                .collect())
+        }
+
+        let mut deps: BTreeMap<String, Vec<String>> = Default::default();
+        let mut stack = BTreeSet::from_iter([dataset.name.to_string()]);
+        while let Some(name) = stack.pop_first() {
+            let direct_deps = direct_deps(&self.dataset_store, &name).await?;
+            for d in &direct_deps {
+                stack.insert(d.clone());
+            }
+            deps.insert(name, direct_deps);
+        }
+
+        dependency_sort(deps)
     }
 }
 

@@ -40,7 +40,7 @@ pub async fn serve(
         dataset_manifests_store.clone(),
     );
 
-    let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
+    let scheduler = Scheduler::new(config.clone(), metadata_db.clone(), dataset_store.clone());
 
     let ctx = Ctx {
         metadata_db,
