@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.17",
+  "version": "0.0.20",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -24,14 +24,15 @@
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map"
+    "dist/**/*.d.ts.map",
+    "dist/studio/dist/**/*"
   ],
   "scripts": {
     "build": "tsc -b --force tsconfig.build.json",
     "build:studio": "cd ../studio && pnpm run build",
     "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
     "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
-    "prepublish": "pnpm run build && pnpm run prepare-studio",
+    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio",
     "@edgeandnode/amp": "bun ./src/cli/bun.ts"
   },
   "publishConfig": {

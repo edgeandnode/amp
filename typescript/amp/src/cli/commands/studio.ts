@@ -222,78 +222,99 @@ const AmpStudioApiLive = HttpApiBuilder.group(
         .handle("Sources", () => resolver.sources())
         .handle("DefaultQuery", () =>
           Effect.gen(function*() {
-            // 1. Check for amp.config existence
-            const configPath = yield* loader.find()
-
-            if (Option.isSome(configPath)) {
-              // Found amp.config, try to build it
-              const manifest = yield* loader.build(configPath.value).pipe(
-                Effect.mapError(() => new HttpApiError.InternalServerError()),
-              )
-
-              // Get the first table from the manifest
-              const tables = Object.entries(manifest.tables)
-              if (tables.length > 0) {
-                const [tableName, table] = tables[0]
-                return {
-                  title: `SELECT ... ${tableName}`,
-                  query: table.input.sql.trim(),
-                }
-              }
-            }
-
-            // 2. Check if events can be derived from the QueryableEvents
-            const events = yield* resolver.events().pipe(
-              Effect.mapError(() => new HttpApiError.InternalServerError()),
+            // Strategy 1: Try amp.config - get first table
+            const tryConfigQuery = loader.find().pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail("NoConfig" as const),
+                  onSome: (configPath) =>
+                    loader.build(configPath).pipe(
+                      Effect.map((manifest) => {
+                        const tables = Object.entries(manifest.tables)
+                        return tables.length > 0
+                          ? Option.some({
+                            title: `SELECT ... ${tables[0][0]}`,
+                            query: tables[0][1].input.sql.trim(),
+                          })
+                          : Option.none()
+                      }),
+                      Effect.flatMap(
+                        Option.match({
+                          onNone: () => Effect.fail("NoTables" as const),
+                          onSome: Effect.succeed,
+                        }),
+                      ),
+                      Effect.tapErrorCause((cause) => Effect.logError("Failure building Config", Cause.pretty(cause))),
+                      Effect.catchAll(() => Effect.fail("ConfigError" as const)),
+                    ),
+                }),
+              ),
             )
 
-            if (!Chunk.isEmpty(events)) {
-              const firstEvent = Chunk.unsafeHead(events)
-              // Generate a query for the first event
-              const selectFields = firstEvent.params
-                .map((param) => `event['${param.name}'] as ${param.name}`)
-                .join(", ")
+            // Strategy 2: Try events - generate query for first event
+            const tryEventQuery = resolver.events().pipe(
+              Effect.flatMap((events) =>
+                Chunk.head(events).pipe(
+                  Option.match({
+                    onNone: () => Effect.fail("NoEvents" as const),
+                    onSome: (firstEvent) => {
+                      const selectFields = firstEvent.params
+                        .map((param) => `event['${param.name}'] as ${param.name}`)
+                        .join(", ")
 
-              const query = `SELECT 
-  block_hash, 
-  tx_hash, 
-  address, 
-  block_num, 
-  timestamp, 
+                      return Effect.succeed({
+                        title: `SELECT ... ${firstEvent.name}`,
+                        query: `SELECT
+  block_hash,
+  tx_hash,
+  address,
+  block_num,
+  timestamp,
   ${selectFields}
 FROM (
-  SELECT 
-    block_hash, 
-    tx_hash, 
-    block_num, 
-    timestamp, 
-    address, 
+  SELECT
+    block_hash,
+    tx_hash,
+    block_num,
+    timestamp,
+    address,
     evm_decode_log(topic1, topic2, topic3, data, '${firstEvent.signature}') as event
   FROM anvil.logs
   WHERE topic0 = evm_topic('${firstEvent.signature}')
-) as decoded`
+) as decoded`,
+                      })
+                    },
+                  }),
+                )
+              ),
+              Effect.tapErrorCause((cause) => Effect.logError("Failure resolving events", Cause.pretty(cause))),
+              Effect.catchAll(() => Effect.fail("EventError" as const)),
+            )
 
-              return {
-                title: `SELECT ... ${firstEvent.name}`,
-                query,
-              }
-            }
-
-            // 3. Use the first dataset source
-            const sources = yield* resolver.sources()
-            if (sources.length > 0) {
-              const firstSource = sources[0]
-              return {
-                title: `SELECT ... ${firstSource.source}`,
-                query: `SELECT * FROM ${firstSource.source} LIMIT 100`,
-              }
-            }
+            // Strategy 3: Use the first dataset source
+            const trySourceQuery = resolver.sources().pipe(
+              Effect.flatMap((sources) =>
+                sources.length > 0
+                  ? Effect.succeed({
+                    title: `SELECT ... ${sources[0].source}`,
+                    query: `SELECT * FROM ${sources[0].source} LIMIT 100`,
+                  })
+                  : Effect.fail("NoSources" as const)
+              ),
+            )
 
             // Fallback if nothing is available
-            return {
+            const fallbackQuery = Effect.succeed({
               title: "No default query available",
               query: "-- No datasets or events found",
-            }
+            })
+
+            // Chain strategies with orElse for clean fallback
+            return yield* tryConfigQuery.pipe(
+              Effect.orElse(() => tryEventQuery),
+              Effect.orElse(() => trySourceQuery),
+              Effect.orElse(() => fallbackQuery),
+            )
           }))
         .handle("Query", ({ payload }) =>
           flight.stream(payload.query).pipe(
@@ -340,9 +361,11 @@ const StudioFileRouter = Effect.gen(function*() {
   const __dirname = path.dirname(__filename)
 
   const possibleStudioPaths = [
-    // attempt the compiled dist output on build
-    path.resolve(__dirname, "studio", "dist"),
+    // attempt the compiled dist output on build (published package)
+    // from dist/cli/commands -> dist/studio/dist
+    path.resolve(__dirname, "..", "..", "studio", "dist"),
     // attempt local dev mode as a fallback
+    // from src/cli/commands -> typescript/studio/dist
     path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist"),
   ]
   const findStudioDist = Effect.fnUntraced(function*() {
