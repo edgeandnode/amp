@@ -34,7 +34,6 @@ import * as Admin from "../../api/Admin.ts"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
 import * as Arrow from "../../Arrow.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
-import * as ManifestContext from "../../ManifestContext.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../studio/index.ts"
 import { adminUrl, configFile, flightUrl } from "../common.ts"
 
@@ -344,7 +343,7 @@ const StudioFileRouter = Effect.gen(function*() {
     // attempt the compiled dist output on build
     path.resolve(__dirname, "studio", "dist"),
     // attempt local dev mode as a fallback
-    path.resolve(__dirname, "..", "..", "..", "studio", "dist"),
+    path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist"),
   ]
   const findStudioDist = Effect.fnUntraced(function*() {
     return yield* Effect.findFirst(possibleStudioPaths, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
@@ -525,7 +524,6 @@ export const studio = Command.make("studio", {
   ),
   Command.provide(ConfigLoader.ConfigLoader.Default),
   Command.provide(FoundryQueryableEventResolver.layer),
-  Command.provide(({ args }) => ManifestContext.layerFromConfigFile(args.config)),
   Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
   Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
 )
