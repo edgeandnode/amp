@@ -1,7 +1,6 @@
 import * as Schema from "effect/Schema"
 
 export class Dependency extends Schema.Class<Dependency>("Dependency")({
-  owner: Schema.String,
   name: Schema.String,
   version: Schema.String,
 }) {}
@@ -124,7 +123,6 @@ export class DatasetSchemaResponse extends Schema.Class<DatasetSchemaResponse>("
 export class DatasetRegistryInfo extends Schema.Class<DatasetRegistryInfo>("DatasetRegistryInfo")({
   name: DatasetName,
   version: DatasetVersion,
-  owner: Schema.String,
 }) {}
 
 /**

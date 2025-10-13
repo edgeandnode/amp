@@ -43,7 +43,6 @@ const list = Command.make("list", {
       yield* Console.table(response.datasets.map((dataset) => ({
         Name: dataset.name,
         Version: dataset.version,
-        Owner: dataset.owner,
       })))
 
       if (response.nextCursor) {

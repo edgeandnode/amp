@@ -8,7 +8,7 @@ use tests::testlib::ctx::TestCtxBuilder;
 async fn register_new_dataset_with_manifest_succeeds() {
     //* Given
     let ctx = TestCtx::setup("test_register_with_new_manifest").await;
-    let manifest = create_test_manifest("register_test_new", "1.0.0", "test_owner");
+    let manifest = create_test_manifest("register_test_new", "1.0.0");
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     let register_request = RegisterRequest {
@@ -118,7 +118,7 @@ async fn register_with_invalid_version_fails() {
 async fn register_with_missing_dependency_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_invalid_dependency").await;
-    let mut manifest = create_test_manifest("missing_dep", "1.0.0", "test_owner");
+    let mut manifest = create_test_manifest("missing_dep", "1.0.0");
     manifest.dependencies.clear();
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
@@ -146,7 +146,7 @@ async fn register_with_missing_dependency_fails() {
 async fn register_with_mismatched_manifest_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_manifest_validation_error").await;
-    let manifest = create_test_manifest("wrong_name", "2.0.0", "test_owner");
+    let manifest = create_test_manifest("wrong_name", "2.0.0");
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     // Request with different name and version than in manifest
@@ -189,7 +189,7 @@ async fn register_with_mismatched_manifest_fails() {
 async fn register_existing_dataset_with_manifest_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_dataset_already_exists").await;
-    let manifest = create_test_manifest("register_test_existing_dataset", "1.0.0", "test_owner");
+    let manifest = create_test_manifest("register_test_existing_dataset", "1.0.0");
 
     // Register dataset first to create existing state
     let register_resp = ctx.register_dataset(&manifest).await;
@@ -287,7 +287,7 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
     //* When
     // Register multiple versions of the same dataset
     for version in &versions {
-        let manifest = create_test_manifest("register_test_multi_version", version, "test_owner");
+        let manifest = create_test_manifest("register_test_multi_version", version);
         let manifest_json =
             serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
 
@@ -383,7 +383,7 @@ impl TestCtx {
     }
 }
 
-fn create_test_manifest(name: &str, version: &str, owner: &str) -> DerivedDatasetManifest {
+fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
     let manifest_json = indoc::formatdoc! {r#"
         {{
             "name": "{name}",
@@ -392,7 +392,6 @@ fn create_test_manifest(name: &str, version: &str, owner: &str) -> DerivedDatase
             "kind": "manifest",
             "dependencies": {{
                 "raw_mainnet": {{
-                    "owner": "{owner}",
                     "name": "eth_firehose",
                     "version": "0.0.1"
                 }}

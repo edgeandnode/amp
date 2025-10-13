@@ -6,7 +6,6 @@ export default defineDataset(() => ({
   version: "0.1.0",
   dependencies: {
     eth_rpc: {
-      owner: "graphprotocol",
       name: "eth_rpc",
       version: "0.0.0",
     },
