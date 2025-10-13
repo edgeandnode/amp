@@ -14,7 +14,7 @@ use common::{
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
-use datasets_derived::DATASET_KIND as DERIVED_DATASET_KIND;
+use datasets_derived::DerivedDatasetKind;
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
@@ -150,7 +150,7 @@ pub async fn dump_user_tables(
 
         let dataset = table.table().dataset();
 
-        if dataset.kind.as_str() != DERIVED_DATASET_KIND {
+        if dataset.kind != DerivedDatasetKind {
             return Err(format!(
                 "Unsupported dataset kind {} for table {}",
                 dataset.kind,

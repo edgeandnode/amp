@@ -8,7 +8,7 @@
 /// This constant defines the string representation used in dataset manifests
 /// and configuration files to identify datasets that extract blockchain data
 /// from Ethereum-compatible JSON-RPC endpoints.
-pub const DATASET_KIND: &str = "evm-rpc";
+const DATASET_KIND: &str = "evm-rpc";
 
 /// Type-safe representation of the EVM-RPC dataset kind.
 ///
@@ -22,6 +22,14 @@ pub const DATASET_KIND: &str = "evm-rpc";
     schemars(schema_with = "evm_rpc_dataset_kind_schema")
 )]
 pub struct EvmRpcDatasetKind;
+
+impl EvmRpcDatasetKind {
+    /// Returns the canonical string identifier for this dataset kind.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        DATASET_KIND
+    }
+}
 
 #[cfg(feature = "schemars")]
 fn evm_rpc_dataset_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -65,6 +73,42 @@ impl<'de> serde::Deserialize<'de> for EvmRpcDatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialEq<str> for EvmRpcDatasetKind {
+    fn eq(&self, other: &str) -> bool {
+        DATASET_KIND == other
+    }
+}
+
+impl PartialEq<EvmRpcDatasetKind> for str {
+    fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
+        self == DATASET_KIND
+    }
+}
+
+impl PartialEq<&str> for EvmRpcDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        DATASET_KIND == *other
+    }
+}
+
+impl PartialEq<EvmRpcDatasetKind> for &str {
+    fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
+        *self == DATASET_KIND
+    }
+}
+
+impl PartialEq<String> for EvmRpcDatasetKind {
+    fn eq(&self, other: &String) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<EvmRpcDatasetKind> for String {
+    fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
     }
 }
 
