@@ -8,7 +8,7 @@
 /// This constant defines the string representation used in dataset manifests
 /// and configuration files to identify datasets that extract blockchain data
 /// from Ethereum Beacon Chain endpoints.
-pub const DATASET_KIND: &str = "eth-beacon";
+const DATASET_KIND: &str = "eth-beacon";
 
 /// Type-safe representation of the Eth-Beacon dataset kind.
 ///
@@ -22,6 +22,14 @@ pub const DATASET_KIND: &str = "eth-beacon";
     schemars(schema_with = "eth_beacon_dataset_kind_schema")
 )]
 pub struct EthBeaconDatasetKind;
+
+impl EthBeaconDatasetKind {
+    /// Returns the canonical string identifier for this dataset kind.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        DATASET_KIND
+    }
+}
 
 #[cfg(feature = "schemars")]
 fn eth_beacon_dataset_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -65,6 +73,42 @@ impl<'de> serde::Deserialize<'de> for EthBeaconDatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialEq<str> for EthBeaconDatasetKind {
+    fn eq(&self, other: &str) -> bool {
+        DATASET_KIND == other
+    }
+}
+
+impl PartialEq<EthBeaconDatasetKind> for str {
+    fn eq(&self, _other: &EthBeaconDatasetKind) -> bool {
+        self == DATASET_KIND
+    }
+}
+
+impl PartialEq<&str> for EthBeaconDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        DATASET_KIND == *other
+    }
+}
+
+impl PartialEq<EthBeaconDatasetKind> for &str {
+    fn eq(&self, _other: &EthBeaconDatasetKind) -> bool {
+        *self == DATASET_KIND
+    }
+}
+
+impl PartialEq<String> for EthBeaconDatasetKind {
+    fn eq(&self, other: &String) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<EthBeaconDatasetKind> for String {
+    fn eq(&self, _other: &EthBeaconDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
     }
 }
 

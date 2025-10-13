@@ -14,7 +14,7 @@ mod proto;
 
 pub use self::{
     client::Client,
-    dataset_kind::{DATASET_KIND, SubstreamsDatasetKind, SubstreamsDatasetKindError},
+    dataset_kind::{SubstreamsDatasetKind, SubstreamsDatasetKindError},
 };
 use self::{proto::sf::substreams::v1::Package, tables::Tables};
 

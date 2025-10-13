@@ -14,7 +14,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::version::Version;
-use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, manifest::TableInput};
+use datasets_derived::{DerivedDatasetKind, manifest::TableInput};
 use dump::EndBlock;
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
@@ -187,15 +187,14 @@ pub async fn datasets_and_dependencies(
             return Err(format!("Dataset '{}' not found", dataset_name).into());
         };
 
-        let manifest = match dataset.kind.as_str() {
-            DERIVED_DATASET_KIND => store
+        let manifest = if dataset.kind == DerivedDatasetKind {
+            store
                 .get_derived_manifest(&dataset.name, dataset.version.as_ref())
                 .await?
-                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?,
-            _ => {
-                deps.insert(dataset.name.to_string(), vec![]);
-                continue;
-            }
+                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?
+        } else {
+            deps.insert(dataset.name.to_string(), vec![]);
+            continue;
         };
 
         let mut refs: Vec<String> = Default::default();

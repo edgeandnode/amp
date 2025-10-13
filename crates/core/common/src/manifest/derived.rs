@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use datafusion::sql::{parser, resolve::resolve_table_references};
-use datasets_derived::{DATASET_KIND, Manifest, manifest::TableInput};
+use datasets_derived::{DerivedDatasetKind, Manifest, manifest::TableInput};
 
 use crate::{
     BoxError, Dataset, Table as LogicalTable,
@@ -68,7 +68,7 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
         .collect();
 
     Ok(Dataset {
-        kind: DATASET_KIND.to_string(),
+        kind: DerivedDatasetKind.to_string(),
         network: manifest.network,
         name: manifest.name,
         version: Some(manifest.version),
