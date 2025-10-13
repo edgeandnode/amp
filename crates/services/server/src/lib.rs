@@ -1,3 +1,5 @@
+#[cfg(feature = "jsonl")]
+pub mod jsonl;
 pub mod metrics;
 pub mod service;
 
