@@ -3,7 +3,6 @@ members = [
     "crates/bin/ampd",
     "crates/bin/ampsync",
     "crates/bin/ampup",
-    "crates/bin/generate-manifest",
     "crates/client/amp-client",
     "crates/client/amp-debezium-client",
     "crates/core/common",

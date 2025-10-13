@@ -13,17 +13,15 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
-use datasets_derived::Manifest as DerivedManifest;
+use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
 };
 use evm_rpc_datasets::{
-    DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest,
-    ProviderConfig as EvmRpcProviderConfig,
+    EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
 };
-use firehose_datasets::{
-    DATASET_KIND as FIREHOSE_DATASET_KIND,
-    dataset::{Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig},
+use firehose_datasets::dataset::{
+    Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig,
 };
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -737,7 +735,7 @@ impl DatasetStore {
                 });
             };
 
-            if dataset.kind == EVM_RPC_DATASET_KIND {
+            if dataset.kind == EvmRpcDatasetKind {
                 let udf = self.eth_call_for_dataset(&dataset).await.map_err(|err| {
                     GetLogicalCatalogError::EthCallUdfCreation {
                         dataset: dataset_name.to_string(),
@@ -801,7 +799,7 @@ impl DatasetStore {
         let name = &dataset.name;
         let version = dataset.version.clone().unwrap_or_default();
 
-        if dataset.kind != EVM_RPC_DATASET_KIND {
+        if dataset.kind != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -992,16 +990,12 @@ pub async fn resolve_blocks_table(
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {
     let dataset = {
-        fn is_raw_dataset(kind: &str) -> bool {
-            [EVM_RPC_DATASET_KIND, FIREHOSE_DATASET_KIND].contains(&kind)
-        }
-
         let mut datasets: Vec<Dataset> = dataset_store
             .get_all_datasets()
             .await?
             .into_iter()
             .filter(|d| d.network == network)
-            .filter(|d| is_raw_dataset(d.kind.as_str()))
+            .filter(|d| d.kind != DerivedDatasetKind)
             .collect();
 
         if datasets.is_empty() {

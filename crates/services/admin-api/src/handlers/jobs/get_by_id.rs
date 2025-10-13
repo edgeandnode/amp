@@ -66,7 +66,7 @@ pub async fn handler(
         }
     };
 
-    match ctx.metadata_db.get_job_by_id_with_details(&id).await {
+    match ctx.metadata_db.get_job(&id).await {
         Ok(Some(job)) => Ok(Json(job.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {

@@ -8,7 +8,7 @@
 /// This constant defines the string representation used in dataset manifests
 /// and configuration files to identify datasets that extract blockchain data
 /// from Substreams endpoints.
-pub const DATASET_KIND: &str = "substreams";
+const DATASET_KIND: &str = "substreams";
 
 /// Type-safe representation of the Substreams dataset kind.
 ///
@@ -22,6 +22,14 @@ pub const DATASET_KIND: &str = "substreams";
     schemars(schema_with = "substreams_dataset_kind_schema")
 )]
 pub struct SubstreamsDatasetKind;
+
+impl SubstreamsDatasetKind {
+    /// Returns the canonical string identifier for this dataset kind.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        DATASET_KIND
+    }
+}
 
 #[cfg(feature = "schemars")]
 fn substreams_dataset_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -65,6 +73,42 @@ impl<'de> serde::Deserialize<'de> for SubstreamsDatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialEq<str> for SubstreamsDatasetKind {
+    fn eq(&self, other: &str) -> bool {
+        DATASET_KIND == other
+    }
+}
+
+impl PartialEq<SubstreamsDatasetKind> for str {
+    fn eq(&self, _other: &SubstreamsDatasetKind) -> bool {
+        self == DATASET_KIND
+    }
+}
+
+impl PartialEq<&str> for SubstreamsDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        DATASET_KIND == *other
+    }
+}
+
+impl PartialEq<SubstreamsDatasetKind> for &str {
+    fn eq(&self, _other: &SubstreamsDatasetKind) -> bool {
+        *self == DATASET_KIND
+    }
+}
+
+impl PartialEq<String> for SubstreamsDatasetKind {
+    fn eq(&self, other: &String) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<SubstreamsDatasetKind> for String {
+    fn eq(&self, _other: &SubstreamsDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
     }
 }
 

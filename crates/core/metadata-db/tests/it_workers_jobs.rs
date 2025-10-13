@@ -88,7 +88,7 @@ async fn pagination_traverses_all_jobs_ordered() {
 
     loop {
         let page = metadata_db
-            .list_jobs_with_details(page_size, cursor)
+            .list_jobs(page_size, cursor)
             .await
             .expect("Failed to list jobs");
 

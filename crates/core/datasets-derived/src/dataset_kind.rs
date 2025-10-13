@@ -8,7 +8,7 @@
 /// This constant defines the string representation used in dataset manifests
 /// and configuration files to identify datasets that contain derived transformations
 /// and SQL views over other datasets.
-pub const DATASET_KIND: &str = "manifest";
+const DATASET_KIND: &str = "manifest";
 
 /// Type-safe representation of the manifest dataset kind.
 ///
@@ -22,6 +22,14 @@ pub const DATASET_KIND: &str = "manifest";
     schemars(schema_with = "derived_dataset_kind_schema")
 )]
 pub struct DerivedDatasetKind;
+
+impl DerivedDatasetKind {
+    /// Returns the canonical string identifier for this dataset kind.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        DATASET_KIND
+    }
+}
 
 #[cfg(feature = "schemars")]
 fn derived_dataset_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -65,6 +73,42 @@ impl<'de> serde::Deserialize<'de> for DerivedDatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialEq<str> for DerivedDatasetKind {
+    fn eq(&self, other: &str) -> bool {
+        DATASET_KIND == other
+    }
+}
+
+impl PartialEq<DerivedDatasetKind> for str {
+    fn eq(&self, _other: &DerivedDatasetKind) -> bool {
+        self == DATASET_KIND
+    }
+}
+
+impl PartialEq<&str> for DerivedDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        DATASET_KIND == *other
+    }
+}
+
+impl PartialEq<DerivedDatasetKind> for &str {
+    fn eq(&self, _other: &DerivedDatasetKind) -> bool {
+        *self == DATASET_KIND
+    }
+}
+
+impl PartialEq<String> for DerivedDatasetKind {
+    fn eq(&self, other: &String) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<DerivedDatasetKind> for String {
+    fn eq(&self, _other: &DerivedDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
     }
 }
 

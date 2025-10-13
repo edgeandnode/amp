@@ -105,7 +105,7 @@ pub async fn handler(
     // Fetch jobs from metadata DB
     let jobs = ctx
         .metadata_db
-        .list_jobs_with_details(limit as i64, query.last_job_id.map(Into::into)) // SAFETY: limit is capped at 1000 by validation above
+        .list_jobs(limit as i64, query.last_job_id.map(Into::into)) // SAFETY: limit is capped at 1000 by validation above
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, "failed to list jobs");

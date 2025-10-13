@@ -16,6 +16,6 @@ mod dataset_kind;
 pub mod manifest;
 
 pub use self::{
-    dataset_kind::{DATASET_KIND, DerivedDatasetKind, DerivedDatasetKindError},
+    dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
     manifest::Manifest,
 };

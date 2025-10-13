@@ -29,7 +29,6 @@ evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
 firehose-datasets = { path = "../crates/extractors/firehose" }
 fs-err.workspace = true
 futures.workspace = true
-generate-manifest = { path = "../crates/bin/generate-manifest" }
 indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
@@ -52,4 +51,3 @@ toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 worker = { path = "../crates/services/worker" }
-

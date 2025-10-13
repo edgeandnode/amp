@@ -1,6 +1,5 @@
 use datasets_common::{name::Name, version::Version};
 
-pub use crate::dataset_kind::DATASET_KIND;
 use crate::dataset_kind::SubstreamsDatasetKind;
 
 #[derive(Debug, serde::Deserialize)]

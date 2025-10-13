@@ -14,7 +14,7 @@ mod proto;
 
 pub use client::Client;
 
-pub use self::dataset_kind::{DATASET_KIND, FirehoseDatasetKind, FirehoseDatasetKindError};
+pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

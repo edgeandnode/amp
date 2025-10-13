@@ -32,7 +32,7 @@ pub use self::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
         FileMetadataWithDetails, FooterBytes,
     },
-    jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+    jobs::{Job, JobId, JobStatus, JobStatusUpdateError},
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
         LocationWithDetails,
@@ -395,11 +395,11 @@ impl MetadataDb {
     ///
     /// Uses cursor-based pagination where `last_job_id` is the ID of the last job
     /// from the previous page. For the first page, pass `None` for `last_job_id`.
-    pub async fn list_jobs_with_details(
+    pub async fn list_jobs(
         &self,
         limit: i64,
         last_job_id: Option<JobId>,
-    ) -> Result<Vec<JobWithDetails>, Error> {
+    ) -> Result<Vec<Job>, Error> {
         match last_job_id {
             Some(job_id) => Ok(jobs::list_next_page(&*self.pool, limit, job_id).await?),
             None => Ok(jobs::list_first_page(&*self.pool, limit).await?),
@@ -454,14 +454,6 @@ impl MetadataDb {
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: impl Into<JobId>) -> Result<Option<Job>, Error> {
         Ok(jobs::get_by_id(&*self.pool, id.into()).await?)
-    }
-
-    /// Get a job by ID with full details including timestamps
-    pub async fn get_job_by_id_with_details(
-        &self,
-        id: impl Into<JobId>,
-    ) -> Result<Option<JobWithDetails>, Error> {
-        Ok(jobs::get_by_id_with_details(&*self.pool, id.into()).await?)
     }
 
     /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
