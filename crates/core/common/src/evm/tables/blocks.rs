@@ -18,7 +18,7 @@ pub fn table(network: String) -> Table {
     Table::new(TABLE_NAME.to_string(), SCHEMA.clone(), network)
 }
 
-pub const TABLE_NAME: &'static str = "blocks";
+pub const TABLE_NAME: &str = "blocks";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {

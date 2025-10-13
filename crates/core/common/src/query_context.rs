@@ -277,7 +277,7 @@ impl QueryContext {
         plan: &LogicalPlan,
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let mut range: Option<RangeInclusive<BlockNum>> = None;
-        for table in extract_table_references_from_plan(&plan)? {
+        for table in extract_table_references_from_plan(plan)? {
             range = match (range, self.get_synced_range_for_table(&table)?) {
                 (None, range) | (range, None) => range,
                 (Some(a), Some(b)) => block_range_intersection(a, b),
@@ -318,7 +318,7 @@ pub async fn sql_to_plan(
 }
 
 pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
-    forbid_underscore_prefixed_aliases(&plan).map_err(Error::InvalidPlan)?;
+    forbid_underscore_prefixed_aliases(plan).map_err(Error::InvalidPlan)?;
     read_only_check(plan)
 }
 
@@ -464,7 +464,7 @@ fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
 
     let transformed: StringArray = plan_column
         .iter()
-        .map(|value| value.map(|v| sanitize_parquet_paths(v)))
+        .map(|value| value.map(sanitize_parquet_paths))
         .collect();
 
     let mut columns: Vec<ArrayRef> = batch.columns().to_vec();

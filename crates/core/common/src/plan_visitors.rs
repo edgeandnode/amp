@@ -20,20 +20,16 @@ use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal};
 /// names are reserved for special columns.
 pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
     plan.apply(|node| {
-        match node {
-            LogicalPlan::Projection(projection) => {
-                for expr in projection.expr.iter() {
-                    if let Expr::Alias(alias) = expr {
-                        if alias.name.starts_with('_') {
-                            return plan_err!(
-                                "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
-                                alias.name
-                            );
-                        }
+        if let LogicalPlan::Projection(projection) = node {
+            for expr in projection.expr.iter() {
+                if let Expr::Alias(alias) = expr
+                    && alias.name.starts_with('_') {
+                        return plan_err!(
+                            "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
+                            alias.name
+                        );
                     }
-                }
             }
-            _ => {}
         }
         Ok(TreeNodeRecursion::Continue)
     })?;
@@ -255,11 +251,8 @@ pub fn extract_table_references_from_plan(
     let mut refs = BTreeSet::new();
 
     plan.apply(|node| {
-        match node {
-            LogicalPlan::TableScan(scan) => {
-                refs.insert(scan.table_name.clone());
-            }
-            _ => {}
+        if let LogicalPlan::TableScan(scan) = node {
+            refs.insert(scan.table_name.clone());
         }
 
         Ok(TreeNodeRecursion::Continue)
