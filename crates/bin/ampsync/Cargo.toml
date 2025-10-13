@@ -21,7 +21,7 @@ snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 admin-api = { path = "../../services/admin-api" }
-amp-client = { path = "../../client" }
+amp-client = { path = "../../client/amp-client" }
 anyhow.workspace = true
 arrow-array = { version = "55.2.0", default-features = false }
 arrow-schema = { version = "55.2.0" }

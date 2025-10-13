@@ -837,6 +837,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-debezium-client"
+version = "0.1.0"
+dependencies = [
+ "amp-client",
+ "async-stream",
+ "async-trait",
+ "common",
+ "futures",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "ampd"
 version = "0.1.0"
 dependencies = [

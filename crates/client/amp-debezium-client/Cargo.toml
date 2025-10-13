@@ -1,17 +1,20 @@
 [package]
-name = "amp-client"
+name = "amp-debezium-client"
 edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-arrow-flight.workspace = true
+amp-client = { path = "../amp-client" }
 async-stream.workspace = true
-bytes.workspace = true
-common = { path = "../core/common" }
+async-trait.workspace = true
+common = { path = "../../core/common" }
 futures.workspace = true
+hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+xxhash-rust = "0.8.15"
+
+[dev-dependencies]
 tokio.workspace = true
-tonic.workspace = true
