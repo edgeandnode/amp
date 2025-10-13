@@ -1,10 +1,11 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    sync::Arc,
+    ops::Deref,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
-use common::{Timestamp, catalog::physical::PhysicalTable};
+use common::{catalog::physical::PhysicalTable, config::ParquetConfig};
 use futures::{
     FutureExt, StreamExt, TryStreamExt, future,
     stream::{self, BoxStream},
@@ -13,17 +14,37 @@ use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
+    WriterProperties,
     compaction::{
-        AmpCompactorTaskType, CompactionProperties,
+        AmpCompactorTaskType,
         error::{CollectionResult, CollectorError},
     },
     consistency_check,
+    metrics::MetricsRegistry,
 };
+
+#[derive(Debug, Clone)]
+pub struct CollectorProperties {
+    pub active: Arc<AtomicBool>,
+    pub interval: Duration,
+    pub file_lock_duration: Duration,
+}
+
+impl<'a> From<&'a ParquetConfig> for CollectorProperties {
+    fn from(config: &'a ParquetConfig) -> Self {
+        CollectorProperties {
+            active: Arc::new(AtomicBool::new(config.collector.active)),
+            interval: config.collector.min_interval,
+            file_lock_duration: config.collector.deletion_lock_duration,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Collector {
     pub(super) table: Arc<PhysicalTable>,
-    pub(super) opts: Arc<CompactionProperties>,
+    pub(super) opts: Arc<WriterProperties>,
+    pub(super) metrics: Option<Arc<MetricsRegistry>>,
 }
 
 impl Debug for Collector {
@@ -43,21 +64,24 @@ impl Collector {
 
         let location_id = self.table.location_id();
 
-        let now = Timestamp::now();
-        let secs = now.0.as_secs() as i64;
-        let nsecs = now.0.subsec_nanos();
+        let expired_stream = metadata_db.stream_expired_files(location_id);
 
-        let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
-
-        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream, now)
+        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream)
             .await
         {
             Ok(output) if output.len() > 0 => {
-                output.update_manifest(&metadata_db).await.map_err(
-                    CollectorError::manifest_update_error(
+                if let Some(metrics) = &self.metrics {
+                    let dataset = self.table.dataset().name.as_str();
+                    let table_name = self.table.table_name();
+                    output.update_metrics(metrics, dataset, table_name);
+                }
+
+                output.update_manifest(metadata_db).await.map_err(|err| {
+                    CollectorError::file_metadata_delete(
                         [output.successes, output.not_found].concat(),
-                    ),
-                )?;
+                        err,
+                    )
+                })?;
 
                 if let Err(error) = consistency_check(&self.table)
                     .await
@@ -82,7 +106,7 @@ impl Display for Collector {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Garbage Collector {{ table: {}, opts: {} }}",
+            "Garbage Collector {{ table: {}, opts: {:?} }}",
             self.table.table_ref(),
             self.opts
         )
@@ -92,10 +116,16 @@ impl Display for Collector {
 impl AmpCompactorTaskType for Collector {
     type Error = CollectorError;
 
-    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+    fn new(
+        table: &Arc<PhysicalTable>,
+        _cache: &common::ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self {
         Collector {
             table: Arc::clone(table),
             opts: Arc::clone(opts),
+            metrics: metrics.clone(),
         }
     }
 
@@ -103,16 +133,20 @@ impl AmpCompactorTaskType for Collector {
         self.collect().boxed()
     }
 
-    fn interval(opts: &Arc<CompactionProperties>) -> Duration {
-        opts.collector_interval
+    fn interval(opts: &Arc<WriterProperties>) -> Duration {
+        opts.collector.interval
     }
 
-    fn active(opts: &Arc<CompactionProperties>) -> bool {
-        opts.collector_active
+    fn active(opts: &Arc<WriterProperties>) -> bool {
+        opts.collector
+            .active
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn deactivate(opts: &mut Arc<CompactionProperties>) {
-        Arc::make_mut(opts).collector_active = false;
+    fn deactivate(opts: &mut Arc<WriterProperties>) {
+        opts.collector
+            .active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -136,11 +170,10 @@ impl DeletionOutput {
         }
     }
 
-    #[tracing::instrument(skip_all, err, fields(table=%table.table_ref()))]
+    #[tracing::instrument(skip_all, fields(table=%table.table_ref()))]
     pub async fn try_from_manifest_stream<'a>(
         table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
-        now: Timestamp,
     ) -> CollectionResult<Self> {
         let (file_ids, file_paths) = expired_stream
             .map_err(CollectorError::file_stream_error)
@@ -150,21 +183,15 @@ impl DeletionOutput {
                        GcManifestRow {
                            file_id,
                            file_path: file_name,
-                           expiration,
                            ..
                        }| {
-                    if Duration::from_micros(expiration.and_utc().timestamp_micros() as u64)
-                        .saturating_sub(now.0)
-                        .is_zero()
-                    {
-                        let url = table
-                            .url()
-                            .join(&file_name)
-                            .map_err(CollectorError::parse_error(file_id))?;
+                    let url = table
+                        .url()
+                        .join(&file_name)
+                        .map_err(CollectorError::parse_error(file_id))?;
 
-                        file_ids.push(file_id);
-                        file_paths.push(Ok(Path::from(url.path())));
-                    }
+                    file_ids.push(file_id);
+                    file_paths.push(Ok(Path::from(url.path())));
 
                     Ok((file_ids, file_paths))
                 },
@@ -190,7 +217,7 @@ impl DeletionOutput {
             .await)
     }
 
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all)]
     pub async fn update_manifest(
         &self,
         metadata_db: &MetadataDb,
@@ -200,9 +227,30 @@ impl DeletionOutput {
         }
 
         let file_ids = [self.successes(), self.not_found()].concat();
-        tracing::debug!("Deleting {:?} from metadata-db", file_ids);
+        tracing::debug!(
+            "Deleting {:?} from metadata-db",
+            file_ids.iter().map(Deref::deref)
+        );
 
         metadata_db.delete_file_ids(&file_ids).await
+    }
+
+    fn update_metrics(&self, metrics: &Arc<MetricsRegistry>, dataset: &str, table: &str) {
+        metrics.inc_files_deleted(
+            self.successes().len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
+        metrics.inc_files_not_found(
+            self.not_found().len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
+        metrics.inc_files_failed_to_delete(
+            self.errors.len(),
+            dataset.to_string(),
+            table.to_string(),
+        );
     }
 
     pub fn len(&self) -> usize {
@@ -226,7 +274,7 @@ impl DeletionOutput {
     }
 
     fn insert_error(&mut self, file_id: FileId, err: ObjectStoreError) {
-        tracing::error!("Error deleting file {file_id}: {err}");
+        tracing::warn!("Error deleting file {file_id}: {err}");
         self.errors.push((file_id, Box::new(err)));
     }
 }

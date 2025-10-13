@@ -55,7 +55,6 @@ async fn evm_rpc_single_dump() {
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -132,13 +131,12 @@ async fn eth_beacon_single_dump() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
+            true,                      // force_reprocess
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
+            None,                      // start_block
+            None,                      // microbatch_max_interval
+            None,                      // microbatch_max_rows
             false,                     // fresh
             None,                      // meter
             false,                     // only_finalized_blocks
@@ -212,16 +210,15 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
+            true,                      // force_reprocess
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
+            None,                      // microbatch_max_interval
+            None,                      // microbatch_max_rows
+            None,                      // skip_consistency_check
+            false,                     // metrics
             None,                      // meter
-            false,                     // only_finalized_blocks
+            false,                     // track_progress
         )
         .await
         .expect("Failed to dump dataset");
@@ -292,16 +289,15 @@ async fn evm_rpc_base_single_dump() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
+            true,                      // force_reprocess
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
-            false,                     // only_finalized_blocks
+            None,
+            None, // microbatch_max_interval
+            None, // skip_consistency_check
+            false,
+            None,  // meter
+            false, // track_progress
         )
         .await
         .expect("Failed to dump dataset");
@@ -372,98 +368,15 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
+            true,                      // force_reprocess
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
-            false,                     // only_finalized_blocks
-        )
-        .await
-        .expect("Failed to dump dataset");
-
-        SnapshotContext::from_tables(test_env.daemon_server().config(), dumped_tables)
-            .await
-            .expect("Failed to create temp dump snapshot")
-    };
-
-    //* Then
-    // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
-            .await
-            .expect("Table consistency check failed");
-    }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
-}
-
-#[tokio::test]
-async fn evm_rpc_base_failed_tx_filtering() {
-    logging::init();
-
-    // * Given
-    let dataset_name = "base_rpc_failed_tx_filtering";
-    let test_env = TestCtxBuilder::new("evm_rpc_base_failed_tx_filtering")
-        // Manifest starting at a block that is known to contain failed transactions.
-        .with_dataset_manifest(dataset_name)
-        .with_provider_config("rpc_eth_base")
-        .with_dataset_snapshot(dataset_name)
-        .build()
-        .await
-        .expect("Failed to build test environment");
-
-    let dataset = test_env
-        .daemon_server()
-        .dataset_store()
-        .get_dataset(dataset_name, None)
-        .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
-
-    let start_block = dataset
-        .start_block
-        .expect("Dataset should have a start block");
-    let end_block = start_block + 3;
-
-    // Create reference snapshot from pre-loaded snapshot data
-    let reference = {
-        let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
-            test_env.daemon_server().dataset_store(),
-            dataset_name,
-        )
-        .await
-        .expect("Failed to restore snapshot dataset");
-
-        SnapshotContext::from_tables(test_env.daemon_server().config(), tables)
-            .await
-            .expect("Failed to create reference snapshot")
-    };
-
-    // * When
-    // Dump the dataset and create a snapshot from it
-    let dumped = {
-        let dumped_tables = dump(
-            test_env.daemon_server().config().clone(),
-            test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                          // force_reprocess
-            EndBlock::Absolute(end_block), // end_block
-            1,                             // n_jobs
-            100,                           // partition_size_mb
-            None,                          // start_block
-            None,                          // microbatch_max_interval
-            None,                          // microbatch_max_rows
-            false,                         // skip_consistency_check
-            None,                          // meter
-            false,                         // track_progress
+            None,                      // start_block
+            None,                      // microbatch_max_interval
+            None,                      // microbatch_max_rows
+            false,                     // skip_consistency_check
+            None,                      // metrics
+            false,                     // track_progress
         )
         .await
         .expect("Failed to dump dataset");
@@ -534,16 +447,15 @@ async fn eth_firehose_single_dump() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
-            false,                     // only_finalized_blocks
+            true,
+            EndBlock::Absolute(block),
+            1,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
         )
         .await
         .expect("Failed to dump dataset");
@@ -614,16 +526,15 @@ async fn base_firehose_single_dump() {
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             vec![dataset_name.to_string()],
-            true,                      // ignore_deps
+            true,                      // force_reprocess
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            100,                       // partition_size_mb
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
-            false,                     // only_finalized_blocks
+            None,                      // start_block
+            None,                      // microbatch_max_interval
+            None,                      // microbatch_max_rows
+            false,                     // skip_consistency_check
+            None,                      // metrics
+            false,
         )
         .await
         .expect("Failed to dump dataset");

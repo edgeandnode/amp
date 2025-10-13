@@ -23,7 +23,7 @@ use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_d
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{Store, query_context::QueryEnv, store::ObjectStoreUrl};
+use crate::{Store, metadata::Overflow, query_context::QueryEnv, store::ObjectStoreUrl};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -34,12 +34,11 @@ pub struct Config {
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: u64,
-    pub parquet: ParquetConfig,
     pub opentelemetry: Option<OpenTelemetryConfig>,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
-    pub compaction: CompactionConfig,
+    pub parquet: ParquetConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +54,188 @@ fn default_pool_size() -> u32 {
 
 fn default_auto_migrate() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParquetConfig {
+    #[serde(
+        default = "default_compression",
+        deserialize_with = "deserialize_compression"
+    )]
+    pub compression: Compression,
+    #[serde(default)]
+    pub bloom_filters: bool,
+    #[serde(default = "default_cache_size_mb")]
+    pub cache_size_mb: u64,
+    #[serde(default)]
+    pub compactor: CompactorConfig,
+    #[serde(alias = "garbage_collector", default)]
+    pub collector: CollectorConfig,
+    #[serde(
+        alias = "file_size",
+        flatten,
+        default = "SizeLimitConfig::default_upper_limit",
+        deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
+    )]
+    pub target_size: SizeLimitConfig,
+}
+
+impl Default for ParquetConfig {
+    fn default() -> Self {
+        Self {
+            compression: default_compression(),
+            bloom_filters: false,
+            cache_size_mb: default_cache_size_mb(),
+            compactor: CompactorConfig::default(),
+            collector: CollectorConfig::default(),
+            target_size: SizeLimitConfig::default_upper_limit(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CollectorConfig {
+    pub active: bool,
+    pub min_interval: Duration,
+    pub deletion_lock_duration: Duration,
+}
+
+impl Default for CollectorConfig {
+    fn default() -> Self {
+        Self {
+            active: false,
+            min_interval: Duration::from_secs(5), // 5 seconds
+            deletion_lock_duration: Duration::from_secs(30 * 60), // 30 minutes
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CompactorConfig {
+    pub active: bool,
+    #[serde(flatten)]
+    pub algorithm: CompactionAlgorithmConfig,
+    pub metadata_concurrency: usize,
+    pub write_concurrency: usize,
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub min_interval: Option<Duration>,
+}
+
+impl Default for CompactorConfig {
+    fn default() -> Self {
+        Self {
+            active: false,
+            algorithm: CompactionAlgorithmConfig::default(),
+            metadata_concurrency: 2,
+            write_concurrency: 2,
+            min_interval: Duration::from_secs(1).into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CompactionAlgorithmConfig {
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub cooldown_duration: Option<Duration>,
+    #[serde(
+        flatten,
+        default = "SizeLimitConfig::default_eager_limit",
+        deserialize_with = "SizeLimitConfig::deserialize_eager_limit"
+    )]
+    pub eager_compaction_limit: SizeLimitConfig,
+}
+
+impl Default for CompactionAlgorithmConfig {
+    fn default() -> Self {
+        Self {
+            cooldown_duration: Duration::from_secs(2).into(),
+            eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SizeLimitConfig {
+    pub file_count: u32,
+    pub generation: u64,
+    pub overflow: Overflow,
+    #[serde(skip)]
+    pub blocks: u64,
+    pub bytes: u64,
+    pub rows: u64,
+}
+
+impl Default for SizeLimitConfig {
+    fn default() -> Self {
+        Self {
+            file_count: 0,
+            generation: 0,
+            overflow: Overflow::default(),
+            blocks: 0,
+            bytes: 2 * 1024 * 1024 * 1024, // 2GB
+            rows: 0,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SizeLimitHelper {
+    pub overflow: Option<Overflow>,
+    pub bytes: Option<u64>,
+    pub rows: Option<u64>,
+}
+
+impl SizeLimitConfig {
+    fn default_eager_limit() -> Self {
+        Self {
+            bytes: 0,
+            blocks: 0,
+            ..Default::default()
+        }
+    }
+
+    fn deserialize_eager_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = SizeLimitHelper::deserialize(deserializer)?;
+
+        let mut this = Self::default_eager_limit();
+
+        helper
+            .overflow
+            .inspect(|overflow| this.overflow = *overflow);
+        helper.bytes.inspect(|bytes| this.bytes = *bytes);
+        helper.rows.inspect(|rows| this.rows = *rows);
+
+        Ok(this)
+    }
+
+    fn default_upper_limit() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    fn deserialize_upper_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = SizeLimitHelper::deserialize(deserializer)?;
+
+        let mut this = Self::default_upper_limit();
+
+        helper
+            .overflow
+            .inspect(|overflow| this.overflow = *overflow);
+        helper.bytes.inspect(|bytes| this.bytes = *bytes);
+        helper.rows.inspect(|rows| this.rows = *rows);
+
+        Ok(this)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,29 +257,6 @@ impl Default for MetadataDbConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ParquetConfig {
-    #[serde(
-        default = "default_compression",
-        deserialize_with = "deserialize_compression"
-    )]
-    pub compression: Compression,
-    #[serde(default)]
-    pub bloom_filters: bool,
-    #[serde(default = "default_cache_size_mb")]
-    pub cache_size_mb: u64,
-}
-
-impl Default for ParquetConfig {
-    fn default() -> Self {
-        Self {
-            compression: default_compression(),
-            bloom_filters: false,
-            cache_size_mb: default_cache_size_mb(),
-        }
-    }
-}
-
 fn default_compression() -> Compression {
     Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
 }
@@ -114,40 +272,6 @@ where
     use std::str::FromStr;
     let s = String::deserialize(deserializer)?;
     Compression::from_str(&s).map_err(serde::de::Error::custom)
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct CompactionConfig {
-    pub compactor_enabled: bool,
-    pub collector_enabled: bool,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub collector_interval_secs: u64,
-    pub compactor_interval_secs: u64,
-    pub file_lock_duration_secs: Option<u64>,
-    pub block_threshold: i64,
-    pub byte_threshold: i64,
-    pub row_threshold: i64,
-    pub min_file_count: usize,
-}
-
-impl Default for CompactionConfig {
-    fn default() -> Self {
-        Self {
-            compactor_enabled: false,
-            collector_enabled: false,
-            metadata_concurrency: 10,
-            write_concurrency: 1,
-            collector_interval_secs: 30 * 60,
-            compactor_interval_secs: 0,
-            file_lock_duration_secs: None,
-            block_threshold: -1,
-            byte_threshold: -1,
-            row_threshold: -1,
-            min_file_count: 2,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -190,11 +314,9 @@ pub struct ConfigFile {
     pub flight_addr: Option<String>,
     pub jsonl_addr: Option<String>,
     pub admin_api_addr: Option<String>,
-    #[serde(default)]
-    pub parquet: ParquetConfig,
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
-    pub compaction: CompactionConfig,
+    pub writer: ParquetConfig,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -291,13 +413,6 @@ impl Config {
             ));
         };
 
-        let mut compaction = config_file.compaction;
-
-        // Enforce minimum values for compaction config
-        compaction.metadata_concurrency = compaction.metadata_concurrency.max(1);
-        compaction.write_concurrency = compaction.write_concurrency.max(1);
-        compaction.min_file_count = compaction.min_file_count.max(2);
-
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
@@ -306,11 +421,10 @@ impl Config {
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
-            parquet: config_file.parquet,
+            parquet: config_file.writer,
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
-            compaction,
         })
     }
 

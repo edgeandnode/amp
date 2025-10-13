@@ -99,10 +99,7 @@ use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
 use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
-use crate::{
-    compaction::CompactionProperties, metrics, parquet_writer::ParquetWriterProperties,
-    raw_dataset_writer::RawDatasetWriter,
-};
+use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -115,9 +112,7 @@ pub async fn dump(
     n_jobs: u16,
     catalog: Catalog,
     tables: &[Arc<PhysicalTable>],
-    partition_size: u64,
-    parquet_opts: &ParquetWriterProperties,
-    compaction_opts: Arc<CompactionProperties>,
+    parquet_opts: Arc<WriterProperties>,
     end: EndBlock,
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -222,8 +217,6 @@ pub async fn dump(
                 catalog: catalog.clone(),
                 ranges,
                 parquet_opts: parquet_opts.clone(),
-                compaction_opts: Arc::clone(&compaction_opts),
-                partition_size,
                 missing_ranges_by_table: missing_ranges_by_table.clone(),
                 id: i as u32,
                 dataset_name: dataset_name.to_string(),
@@ -382,14 +375,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The block ranges to scan
     ranges: Vec<RangeInclusive<BlockNum>>,
     /// The Parquet writer properties
-    parquet_opts: ParquetWriterProperties,
-    /// The target size of each table partition file in bytes.
-    ///
-    /// This is measured as the estimated uncompressed size of the partition.
-    /// Once the size is reached, a new part file is created.
-    /// Note that different tables may have a different number of partitions for a same block range.
-    /// Lighter tables will have less parts than heavier tables.
-    partition_size: u64,
+    parquet_opts: Arc<WriterProperties>,
     /// The missing block ranges by table
     missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     /// The partition ID
@@ -398,8 +384,6 @@ struct DumpPartition<S: BlockStreamer> {
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     /// A progress reporter which logs the overall progress of all partitions.
     progress_reporter: Arc<ProgressReporter>,
-    /// Compaction properties
-    compaction_opts: Arc<CompactionProperties>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -460,8 +444,6 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.catalog.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
-            &self.compaction_opts,
-            self.partition_size,
             missing_ranges_by_table,
             self.metrics.clone(),
         )?;

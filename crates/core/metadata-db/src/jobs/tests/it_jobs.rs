@@ -280,7 +280,7 @@ async fn get_job_by_id_returns_job() {
 }
 
 #[tokio::test]
-async fn get_job_with_details_includes_timestamps() {
+async fn get_job_includes_timestamps() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
@@ -306,17 +306,17 @@ async fn get_job_with_details_includes_timestamps() {
         .expect("Failed to register job");
 
     //* When
-    let job_details = jobs::get_by_id_with_details(&mut *conn, job_id)
+    let job = jobs::get_by_id(&mut *conn, job_id)
         .await
-        .expect("Failed to get job with details")
+        .expect("Failed to get job")
         .expect("Job not found");
 
     //* Then
-    assert_eq!(job_details.id, job_id);
-    assert_eq!(job_details.node_id, worker_id);
-    assert_eq!(job_details.status, JobStatus::Scheduled);
-    assert_eq!(job_details.desc, job_desc);
-    assert!(job_details.created_at <= job_details.updated_at);
+    assert_eq!(job.id, job_id);
+    assert_eq!(job.node_id, worker_id);
+    assert_eq!(job.status, JobStatus::Scheduled);
+    assert_eq!(job.desc, job_desc);
+    assert!(job.created_at <= job.updated_at);
 }
 
 #[tokio::test]

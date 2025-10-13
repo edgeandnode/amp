@@ -30,7 +30,7 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 enum Command {
     Sync {
         /// The name of the dataset to sync into the configured postgres database.
-        #[arg(long, required = true, env = "DATASET_NAME")]
+        #[arg(long, required = true, env = "AMP_DATASET_NAME")]
         dataset_name: Name,
 
         /// The specific dataset version to pull the schema for.
@@ -40,7 +40,7 @@ enum Command {
         /// If not provided:
         /// - the latest version from the dataset versions endpoint schema is pulled.
         /// - the versions endpoint is polled from the admin-api and any newly found versions are fetched
-        #[arg(long, required = false, env = "DATASET_VERSION")]
+        #[arg(long, required = false, env = "AMP_DATASET_VERSION")]
         dataset_version: Option<Version>,
 
         /// Address of the amp arrow flight url.
@@ -57,7 +57,7 @@ enum Command {
         )]
         amp_admin_api_addr: String,
 
-        /// If no DATASET_VERSION value is provided, this is the time, in seconds, that we poll
+        /// If no AMP_DATASET_VERSION value is provided, this is the time, in seconds, that we poll
         /// the admin-api to fetch dataset versions.
         #[arg(long, default_value = "5", env = "VERSION_POLL_INTERVAL_SECS")]
         version_polling_interval_secs: u64,
@@ -135,7 +135,7 @@ struct Args {
 /// - Version polling (when enabled)
 /// - Graceful shutdown on signals
 ///
-/// Supports version polling: when DATASET_VERSION is not specified, polls for new versions
+/// Supports version polling: when AMP_DATASET_VERSION is not specified, polls for new versions
 /// and gracefully reloads when a new version is detected.
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
@@ -217,7 +217,7 @@ async fn main() -> Result<(), BoxError> {
             ampsync_db_engine.init_checkpoint_table().await?;
             info!("checkpoint_tracking_initialized");
 
-            // Set up version polling (only if DATASET_VERSION not specified)
+            // Set up version polling (only if AMP_DATASET_VERSION not specified)
             // Using watch channel - if multiple versions update before consumer processes,
             // only the latest version is retained (no need to process intermediate versions)
             let (version_change_tx, mut version_change_rx) =

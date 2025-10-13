@@ -8,7 +8,7 @@
 /// This constant defines the string representation used in dataset manifests
 /// and configuration files to identify datasets that extract blockchain data
 /// from Firehose endpoints.
-pub const DATASET_KIND: &str = "firehose";
+const DATASET_KIND: &str = "firehose";
 
 /// Type-safe representation of the Firehose dataset kind.
 ///
@@ -22,6 +22,14 @@ pub const DATASET_KIND: &str = "firehose";
     schemars(schema_with = "firehose_dataset_kind_schema")
 )]
 pub struct FirehoseDatasetKind;
+
+impl FirehoseDatasetKind {
+    /// Returns the canonical string identifier for this dataset kind.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        DATASET_KIND
+    }
+}
 
 #[cfg(feature = "schemars")]
 fn firehose_dataset_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -65,6 +73,42 @@ impl<'de> serde::Deserialize<'de> for FirehoseDatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialEq<str> for FirehoseDatasetKind {
+    fn eq(&self, other: &str) -> bool {
+        DATASET_KIND == other
+    }
+}
+
+impl PartialEq<FirehoseDatasetKind> for str {
+    fn eq(&self, _other: &FirehoseDatasetKind) -> bool {
+        self == DATASET_KIND
+    }
+}
+
+impl PartialEq<&str> for FirehoseDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        DATASET_KIND == *other
+    }
+}
+
+impl PartialEq<FirehoseDatasetKind> for &str {
+    fn eq(&self, _other: &FirehoseDatasetKind) -> bool {
+        *self == DATASET_KIND
+    }
+}
+
+impl PartialEq<String> for FirehoseDatasetKind {
+    fn eq(&self, other: &String) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<FirehoseDatasetKind> for String {
+    fn eq(&self, _other: &FirehoseDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
     }
 }
 

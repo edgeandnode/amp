@@ -850,14 +850,18 @@ dependencies = [
  "datasets-common",
  "datasets-derived",
  "dump",
+ "eth-beacon-datasets",
+ "evm-rpc-datasets",
+ "firehose-datasets",
  "futures",
- "generate-manifest",
  "metadata-db",
  "monitoring",
  "serde_json",
  "server",
  "snmalloc-rs",
  "static_assertions",
+ "substreams-datasets",
+ "thiserror 2.0.16",
  "tokio",
  "tonic 0.12.3",
  "tower-http",
@@ -4147,20 +4151,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42012b0f064e01aa58b545fe3727f90f7dd4020f4a3ea735b50344965f5a57e9"
 
 [[package]]
-name = "generate-manifest"
-version = "0.1.0"
-dependencies = [
- "common",
- "dataset-store",
- "datasets-common",
- "eth-beacon-datasets",
- "evm-rpc-datasets",
- "firehose-datasets",
- "serde_json",
- "substreams-datasets",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7139,6 +7129,7 @@ dependencies = [
  "prost 0.13.3",
  "serde_json",
  "thiserror 2.0.16",
+ "tokio",
  "tonic 0.12.3",
  "tracing",
 ]
@@ -7767,7 +7758,6 @@ dependencies = [
  "firehose-datasets",
  "fs-err",
  "futures",
- "generate-manifest",
  "indoc",
  "metadata-db",
  "monitoring",

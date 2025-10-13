@@ -10,7 +10,7 @@ mod dataset_kind;
 
 pub use self::{
     client::BeaconClient,
-    dataset_kind::{DATASET_KIND, EthBeaconDatasetKind, EthBeaconDatasetKindError},
+    dataset_kind::{EthBeaconDatasetKind, EthBeaconDatasetKindError},
 };
 
 #[derive(Debug, serde::Deserialize)]

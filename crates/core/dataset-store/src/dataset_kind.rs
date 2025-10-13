@@ -11,6 +11,12 @@
 //! - **Substreams**: Processing of Substreams packages with dynamic schema inference
 //! - **Derived**: Modern manifest-based dataset definitions
 
+use datasets_derived::DerivedDatasetKind;
+use eth_beacon_datasets::EthBeaconDatasetKind;
+use evm_rpc_datasets::EvmRpcDatasetKind;
+use firehose_datasets::FirehoseDatasetKind;
+use substreams_datasets::SubstreamsDatasetKind;
+
 /// Represents the different types of datasets supported by the system.
 ///
 /// Dataset kinds determine how data is extracted, processed, and served.
@@ -37,8 +43,7 @@ impl DatasetKind {
     /// Returns `true` if this dataset kind extracts raw data from blockchain sources.
     ///
     /// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) connect directly to blockchain
-    /// infrastructure, while derived datasets (`Derived`, `Sql`) process data from
-    /// other datasets.
+    /// infrastructure, while derived datasets (`Derived`) process data from other datasets.
     pub fn is_raw(&self) -> bool {
         matches!(
             self,
@@ -52,24 +57,60 @@ impl DatasetKind {
     /// and configuration files.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
-            Self::EthBeacon => eth_beacon_datasets::DATASET_KIND,
-            Self::Firehose => firehose_datasets::DATASET_KIND,
-            Self::Substreams => substreams_datasets::DATASET_KIND,
-            Self::Derived => datasets_derived::DATASET_KIND,
+            Self::EvmRpc => EvmRpcDatasetKind.as_str(),
+            Self::EthBeacon => EthBeaconDatasetKind.as_str(),
+            Self::Firehose => FirehoseDatasetKind.as_str(),
+            Self::Substreams => SubstreamsDatasetKind.as_str(),
+            Self::Derived => DerivedDatasetKind.as_str(),
         }
     }
 }
 
+/// Macro to generate `From` implementations for converting specific dataset kind
+/// types into `DatasetKind`.
+macro_rules! impl_from_for_kind {
+    ($kind_type:ty, $variant:path) => {
+        impl From<$kind_type> for DatasetKind {
+            fn from(_: $kind_type) -> Self {
+                $variant
+            }
+        }
+    };
+}
+
+impl_from_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
+impl_from_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
+impl_from_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
+impl_from_for_kind!(SubstreamsDatasetKind, DatasetKind::Substreams);
+impl_from_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
+
+/// Macro to generate bidirectional `PartialEq` implementations between
+/// `DatasetKind` and specific dataset kind types.
+macro_rules! impl_partial_eq_for_kind {
+    ($kind_type:ty, $variant:path) => {
+        impl PartialEq<$kind_type> for DatasetKind {
+            fn eq(&self, _other: &$kind_type) -> bool {
+                matches!(self, $variant)
+            }
+        }
+
+        impl PartialEq<DatasetKind> for $kind_type {
+            fn eq(&self, other: &DatasetKind) -> bool {
+                other.eq(self)
+            }
+        }
+    };
+}
+
+impl_partial_eq_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
+impl_partial_eq_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
+impl_partial_eq_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
+impl_partial_eq_for_kind!(SubstreamsDatasetKind, DatasetKind::Substreams);
+impl_partial_eq_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
+
 impl std::fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
-            Self::EthBeacon => f.write_str(eth_beacon_datasets::DATASET_KIND),
-            Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
-            Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
-            Self::Derived => f.write_str(datasets_derived::DATASET_KIND),
-        }
+        self.as_str().fmt(f)
     }
 }
 
@@ -78,13 +119,13 @@ impl std::str::FromStr for DatasetKind {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
-            eth_beacon_datasets::DATASET_KIND => Ok(Self::EthBeacon),
-            firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
-            substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
-            datasets_derived::DATASET_KIND => Ok(Self::Derived),
-            k => Err(UnsupportedKindError {
-                kind: k.to_string(),
+            s if s == EvmRpcDatasetKind => Ok(Self::EvmRpc),
+            s if s == EthBeaconDatasetKind => Ok(Self::EthBeacon),
+            s if s == FirehoseDatasetKind => Ok(Self::Firehose),
+            s if s == SubstreamsDatasetKind => Ok(Self::Substreams),
+            s if s == DerivedDatasetKind => Ok(Self::Derived),
+            _ => Err(UnsupportedKindError {
+                kind: s.to_string(),
             }),
         }
     }

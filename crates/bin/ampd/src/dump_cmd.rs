@@ -14,12 +14,104 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::version::Version;
-use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, manifest::TableInput};
+use datasets_derived::{
+    DerivedDatasetKind, Manifest as DerivedDatasetManifest, manifest::TableInput,
+};
 use dump::EndBlock;
 use metadata_db::MetadataDb;
-use monitoring::telemetry;
 use static_assertions::const_assert;
 
+#[allow(clippy::too_many_arguments)]
+pub async fn run(
+    mut config: Config,
+    metadata_db: MetadataDb,
+    datasets: Vec<String>,
+    ignore_deps: bool,
+    end_block: Option<EndBlock>,
+    n_jobs: u16,
+    partition_size_mb: Option<u64>,
+    run_every_mins: Option<u64>,
+    location: Option<String>,
+    fresh: bool,
+    only_finalized_blocks: bool,
+    metrics_meter: Option<&monitoring::telemetry::metrics::Meter>,
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    if let Some(size_mb) = partition_size_mb {
+        config.parquet.target_size.bytes = size_mb * 1024 * 1024;
+    }
+
+    if let Some(ref opentelemetry) = config.opentelemetry {
+        validate_export_interval(opentelemetry.metrics_export_interval);
+    }
+
+    // When --run-every-mins is set without end_block, default to "latest"
+    // Otherwise default to continuous mode
+    let end_block = end_block
+        .or(run_every_mins.and(Some(EndBlock::Latest)))
+        .unwrap_or(EndBlock::None);
+
+    if end_block == EndBlock::None && datasets.len() > 1 {
+        return Err(
+            "Continuous mode (no end_block) is not supported when dumping multiple datasets. \
+                    Please specify an end_block value or dump datasets individually."
+                .into(),
+        );
+    }
+
+    let mut datasets_to_dump = Vec::new();
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store = DatasetManifestsStore::new(
+            metadata_db.clone(),
+            config.dataset_defs_store.prefixed_store(),
+        );
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
+
+    for dataset in datasets {
+        if dataset.ends_with(".json") {
+            tracing::info!("Registering manifest: {}", dataset);
+
+            let manifest = fs::read_to_string(&dataset)?;
+            let manifest: DerivedDatasetManifest = serde_json::from_str(&manifest)?;
+            dataset_store
+                .register_manifest(&manifest.name, &manifest.version, &manifest)
+                .await
+                .map_err(|err| -> BoxError { err.to_string().into() })?;
+
+            datasets_to_dump.push(format!(
+                "{}__{}",
+                manifest.name,
+                manifest.version.to_underscore_version()
+            ));
+        } else {
+            datasets_to_dump.push(dataset);
+        }
+    }
+
+    dump(
+        config.into(),
+        metadata_db,
+        datasets_to_dump,
+        ignore_deps,
+        end_block,
+        n_jobs,
+        run_every_mins,
+        None,
+        location,
+        fresh,
+        metrics_meter,
+        only_finalized_blocks,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,
@@ -27,7 +119,6 @@ pub async fn dump(
     ignore_deps: bool,
     end_block: EndBlock,
     n_jobs: u16,
-    partition_size_mb: u64,
     run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
@@ -60,7 +151,6 @@ pub async fn dump(
             dataset_manifests_store,
         )
     };
-    let partition_size = partition_size_mb * 1024 * 1024;
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     if !ignore_deps {
@@ -89,7 +179,7 @@ pub async fn dump(
                 (dataset_name.as_str(), None)
             };
         let dataset = dataset_store
-            .get_dataset(&dataset_name, version.as_ref())
+            .get_dataset(dataset_name, version.as_ref())
             .await?
             .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
@@ -145,7 +235,6 @@ pub async fn dump(
                     ctx.clone(),
                     tables,
                     n_jobs,
-                    partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
@@ -163,7 +252,6 @@ pub async fn dump(
                     ctx.clone(),
                     tables,
                     n_jobs,
-                    partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
@@ -185,21 +273,19 @@ pub async fn datasets_and_dependencies(
     mut datasets: Vec<String>,
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
-    while !datasets.is_empty() {
-        let dataset_name = datasets.pop().unwrap();
+    while let Some(dataset_name) = datasets.pop() {
         let Some(dataset) = store.get_dataset(&dataset_name, None).await? else {
             return Err(format!("Dataset '{}' not found", dataset_name).into());
         };
 
-        let manifest = match dataset.kind.as_str() {
-            DERIVED_DATASET_KIND => store
+        let manifest = if dataset.kind == DerivedDatasetKind {
+            store
                 .get_derived_manifest(&dataset.name, dataset.version.as_ref())
                 .await?
-                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?,
-            _ => {
-                deps.insert(dataset.name.to_string(), vec![]);
-                continue;
-            }
+                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?
+        } else {
+            deps.insert(dataset.name.to_string(), vec![]);
+            continue;
         };
 
         let mut refs: Vec<String> = Default::default();
@@ -244,11 +330,11 @@ pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
         }
         None => {
             const_assert!(
-                telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL.as_secs()
+                monitoring::telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL.as_secs()
                     > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL.as_secs()
             );
             tracing::warn!(
-                default_metrics_export_interval = ?telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
+                default_metrics_export_interval = ?monitoring::telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
                 recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
                 "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
                 This could lead to less precise metrics."

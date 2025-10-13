@@ -4,13 +4,10 @@ use axum::{
     http::StatusCode,
 };
 use common::BoxError;
-use dataset_store::RegisterManifestError;
+use dataset_store::{DatasetKind, RegisterManifestError};
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
-use datasets_derived::{
-    DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest,
-    manifest::DependencyValidationError,
-};
-use evm_rpc_datasets::{DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest};
+use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
+use evm_rpc_datasets::Manifest as EvmRpcManifest;
 
 use crate::{
     ctx::Ctx,
@@ -143,14 +140,19 @@ pub async fn handler(
         .into());
     }
 
-    match manifest.kind.as_str() {
-        DERIVED_DATASET_KIND => {
+    let dataset_kind = manifest
+        .kind
+        .parse()
+        .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
+
+    match dataset_kind {
+        DatasetKind::Derived => {
             let manifest: DerivedDatasetManifest = serde_json::from_str(payload.manifest.as_str())
                 .map_err(|err| {
                     tracing::error!(
                         name = %payload.name,
                         version = %payload.version,
-                        kind = DERIVED_DATASET_KIND,
+                        kind = %dataset_kind,
                         error = ?err,
                         "Failed to parse derived dataset manifest JSON"
                     );
@@ -161,7 +163,7 @@ pub async fn handler(
                 tracing::error!(
                     name = %manifest.name,
                     version = %manifest.version,
-                    kind = DERIVED_DATASET_KIND,
+                    kind = %dataset_kind,
                     error = ?err,
                     "Manifest dependency validation failed"
                 );
@@ -175,7 +177,7 @@ pub async fn handler(
                     tracing::error!(
                         name = %manifest.name,
                         version = %manifest.version,
-                        kind = DERIVED_DATASET_KIND,
+                        kind = %dataset_kind,
                         error = ?err,
                         "Failed to register derived dataset manifest"
                     );
@@ -188,14 +190,14 @@ pub async fn handler(
                 manifest.version
             );
         }
-        EVM_RPC_DATASET_KIND => {
+        DatasetKind::EvmRpc => {
             // Validate evm-rpc dataset definition structure
             let manifest: EvmRpcManifest = serde_json::from_str(payload.manifest.as_str())
                 .map_err(|err| {
                     tracing::error!(
                         name = %payload.name,
                         version = %payload.version,
-                        kind = EVM_RPC_DATASET_KIND,
+                        kind = %dataset_kind,
                         error = ?err,
                         "Failed to parse evm-rpc dataset manifest JSON"
                     );
@@ -209,7 +211,7 @@ pub async fn handler(
                     tracing::error!(
                         name = %manifest.name,
                         version = %manifest.version,
-                        kind = EVM_RPC_DATASET_KIND,
+                        kind = %dataset_kind,
                         error = ?err,
                         "Failed to register evm-rpc dataset manifest"
                     );
@@ -223,7 +225,7 @@ pub async fn handler(
             );
         }
         _ => {
-            return Err(Error::UnsupportedDatasetKind(manifest.kind.clone()).into());
+            return Err(Error::UnsupportedDatasetKind(dataset_kind.to_string()).into());
         }
     }
 

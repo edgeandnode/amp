@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use common::{BoxError, catalog::physical::PhysicalTable};
 pub use dump::Ctx;
-use dump::{EndBlock, default_partition_size, metrics};
+use dump::{EndBlock, metrics};
 pub use metadata_db::JobStatus;
 
 use crate::JobCreationError;
@@ -120,7 +120,6 @@ impl Job {
                     ctx.clone(),
                     &tables,
                     1,
-                    default_partition_size(),
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,

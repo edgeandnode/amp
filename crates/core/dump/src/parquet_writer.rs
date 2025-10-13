@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
     BlockNum, BoxError, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
-        extract_footer_bytes_from_file,
-        parquet::{PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        Generation, extract_footer_bytes_from_file,
+        parquet::{
+            GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
+        },
         segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
@@ -17,6 +18,8 @@ use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::{debug, instrument, trace};
 use url::Url;
+
+use crate::WriterProperties;
 
 pub async fn commit_metadata(
     metadata_db: &MetadataDb,
@@ -61,7 +64,7 @@ pub struct ParquetFileWriter {
 impl ParquetFileWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        opts: ParquetWriterProperties,
+        opts: &WriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
         // TODO: We need to make file names unique when we start handling non-finalized blocks.
@@ -73,7 +76,8 @@ impl ParquetFileWriter {
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
         let object_writer = BufWriter::new(table.object_store(), file_path);
-        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
+        let writer =
+            AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.parquet.clone()))?;
         Ok(ParquetFileWriter {
             writer,
             file_url,
@@ -86,12 +90,13 @@ impl ParquetFileWriter {
         self.writer.write(batch).await
     }
 
-    #[must_use]
+    #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]
     #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
         parent_ids: Vec<FileId>,
+        generation: Generation,
     ) -> Result<ParquetFileWriterOutput, BoxError> {
         self.writer.flush().await?;
 
@@ -121,6 +126,10 @@ impl ParquetFileWriter {
         );
         self.writer
             .append_key_value_metadata(parent_file_id_metadata);
+
+        let generation_metadata =
+            KeyValue::new(GENERATION_METADATA_KEY.to_string(), generation.to_string());
+        self.writer.append_key_value_metadata(generation_metadata);
 
         self.writer.close().await?;
 

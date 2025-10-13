@@ -12,7 +12,7 @@ pub mod tables;
 
 pub use self::{
     client::JsonRpcClient,
-    dataset_kind::{DATASET_KIND, EvmRpcDatasetKind, EvmRpcDatasetKindError},
+    dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
 
 #[derive(thiserror::Error, Debug)]
