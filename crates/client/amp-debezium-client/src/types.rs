@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 use common::{BlockNum, arrow::array::RecordBatch};
 use serde::{Deserialize, Serialize};
@@ -41,7 +44,7 @@ pub enum DebeziumOp {
 /// A composite key identifying a unique record.
 ///
 /// Constructed from one or more primary key columns, hashed for efficient lookup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordKey(u128);
 
 impl RecordKey {
@@ -53,6 +56,12 @@ impl RecordKey {
     /// Get the raw hash value.
     pub fn hash(&self) -> u128 {
         self.0
+    }
+}
+
+impl Hash for RecordKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u128(self.0);
     }
 }
 

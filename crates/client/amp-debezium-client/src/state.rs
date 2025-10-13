@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{BuildHasherDefault, Hasher},
+};
 
 use amp_client::InvalidationRange;
 use async_trait::async_trait;
@@ -8,6 +11,31 @@ use crate::{
     error::Result,
     types::{RecordKey, StoredRecord},
 };
+
+/// Identity hasher for RecordKey.
+///
+/// Since RecordKey is already a hash (u128 from xxhash), we use an identity
+/// function as the hash function to avoid double-hashing.
+#[derive(Default)]
+struct RecordKeyHasher(u64);
+
+impl Hasher for RecordKeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, _bytes: &[u8]) {
+        unreachable!()
+    }
+
+    fn write_u128(&mut self, i: u128) {
+        // Use the lower 64 bits of the u128 hash as the HashMap hash
+        self.0 = i as u64;
+    }
+}
+
+/// Type alias for HashMap with identity hasher for RecordKey
+type RecordKeyMap<V> = HashMap<RecordKey, V, BuildHasherDefault<RecordKeyHasher>>;
 
 /// Trait for storing and retrieving records to support reorg handling.
 ///
@@ -47,8 +75,8 @@ pub trait StateStore: Send + Sync {
 /// Stores records in memory with a configurable block window for retention.
 /// Suitable for most use cases but does not persist across restarts.
 pub struct InMemoryStore {
-    /// Map from RecordKey to stored record
-    records: HashMap<RecordKey, StoredRecord>,
+    /// Map from RecordKey to stored record (using identity hasher)
+    records: RecordKeyMap<StoredRecord>,
 
     /// Maximum number of blocks to retain in memory (reorg window)
     reorg_window: u64,
@@ -71,7 +99,7 @@ impl InMemoryStore {
     /// ```
     pub fn new(reorg_window: u64) -> Self {
         Self {
-            records: HashMap::new(),
+            records: HashMap::default(),
             reorg_window,
             max_block: 0,
         }

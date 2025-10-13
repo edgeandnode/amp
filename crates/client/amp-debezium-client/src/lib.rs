@@ -16,8 +16,7 @@
 //!     let client = DebeziumClient::builder()
 //!         .amp_endpoint("http://localhost:1602")?
 //!         .primary_keys(vec!["block_num".to_string(), "log_index".to_string()])
-//!         .reorg_window(64) // Keep last 64 blocks for reorg detection
-//!         .state_store(InMemoryStore::new(64))
+//!         .state_store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
 //!         .build()
 //!         .await?;
 //!

@@ -25,10 +25,6 @@ pub struct DebeziumClient<S: StateStore> {
 
     /// State store for tracking emitted records
     state_store: S,
-
-    /// Block window to retain for reorg handling
-    #[allow(dead_code)]
-    reorg_window: u64,
 }
 
 impl<S: StateStore> DebeziumClient<S> {
@@ -42,7 +38,6 @@ impl<S: StateStore> DebeziumClient<S> {
     /// let client = DebeziumClient::builder()
     ///     .amp_endpoint("http://localhost:1602")?
     ///     .primary_keys(vec!["block_num".to_string(), "log_index".to_string()])
-    ///     .reorg_window(64)
     ///     .state_store(InMemoryStore::new(64))
     ///     .build()
     ///     .await?;
@@ -181,9 +176,6 @@ impl<S: StateStore> DebeziumClient<S> {
             records.push(debezium_record);
         }
 
-        // Prune old records outside reorg window (not critical for batch processing)
-        // Will be handled by periodic pruning based on max block
-
         Ok(records)
     }
 
@@ -221,7 +213,6 @@ impl<S: StateStore> DebeziumClient<S> {
 pub struct DebeziumClientBuilder<S: StateStore> {
     endpoint: Option<String>,
     primary_keys: Option<Vec<String>>,
-    reorg_window: Option<u64>,
     state_store: Option<S>,
 }
 
@@ -231,7 +222,6 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
         Self {
             endpoint: None,
             primary_keys: None,
-            reorg_window: None,
             state_store: None,
         }
     }
@@ -243,14 +233,11 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
     }
 
     /// Set the primary key column names.
+    ///
+    /// **Note**: The order of columns matters - keys will be hashed in the order provided.
+    /// Different orderings will produce different composite keys.
     pub fn primary_keys(mut self, keys: Vec<String>) -> Self {
         self.primary_keys = Some(keys);
-        self
-    }
-
-    /// Set the reorg window (number of blocks to retain).
-    pub fn reorg_window(mut self, blocks: u64) -> Self {
-        self.reorg_window = Some(blocks);
         self
     }
 
@@ -270,8 +257,6 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
             .primary_keys
             .ok_or_else(|| Error::Config("primary_keys are required".to_string()))?;
 
-        let reorg_window = self.reorg_window.unwrap_or(64);
-
         let state_store = self
             .state_store
             .ok_or_else(|| Error::Config("state_store is required".to_string()))?;
@@ -284,7 +269,6 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
             amp_client,
             pk_extractor,
             state_store,
-            reorg_window,
         })
     }
 }
