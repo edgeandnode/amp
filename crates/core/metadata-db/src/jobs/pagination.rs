@@ -2,13 +2,13 @@
 
 use sqlx::Executor;
 
-use super::{JobId, JobWithDetails};
+use super::{Job, JobId};
 
 /// List the first page of jobs
 ///
 /// Returns a paginated list of jobs ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
-pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<JobWithDetails>, sqlx::Error>
+pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = sqlx::Postgres>,
 {
@@ -38,15 +38,15 @@ pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
     last_job_id: JobId,
-) -> Result<Vec<JobWithDetails>, sqlx::Error>
+) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT 
-            id, 
-            node_id, 
-            status, 
+        SELECT
+            id,
+            node_id,
+            status,
             descriptor,
             created_at,
             updated_at

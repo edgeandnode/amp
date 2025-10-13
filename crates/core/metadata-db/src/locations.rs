@@ -98,7 +98,9 @@ where
             j.id          AS writer_job_id,
             j.node_id     AS writer_job_node_id,
             j.status      AS writer_job_status,
-            j.descriptor  AS writer_job_descriptor
+            j.descriptor  AS writer_job_descriptor,
+            j.created_at  AS writer_job_created_at,
+            j.updated_at  AS writer_job_updated_at
         FROM locations l
         LEFT JOIN jobs j ON l.writer = j.id
         WHERE l.id = $1
@@ -119,6 +121,8 @@ where
         writer_job_node_id: Option<NodeIdOwned>,
         writer_job_status: Option<JobStatus>,
         writer_job_descriptor: Option<JsonValue>,
+        writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
+        writer_job_updated_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
     }
 
     let Some(row) = sqlx::query_as::<_, Row>(query)
@@ -135,13 +139,19 @@ where
         row.writer_job_node_id,
         row.writer_job_status,
         row.writer_job_descriptor,
+        row.writer_job_created_at,
+        row.writer_job_updated_at,
     ) {
-        (Some(id), Some(node_id), Some(status), Some(desc)) => Some(Job {
-            id,
-            node_id,
-            status,
-            desc,
-        }),
+        (Some(id), Some(node_id), Some(status), Some(desc), Some(created_at), Some(updated_at)) => {
+            Some(Job {
+                id,
+                node_id,
+                status,
+                desc,
+                created_at,
+                updated_at,
+            })
+        }
         _ => None,
     };
 

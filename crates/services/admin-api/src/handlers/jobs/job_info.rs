@@ -30,8 +30,8 @@ pub struct JobInfo {
     pub descriptor: serde_json::Value,
 }
 
-impl From<metadata_db::JobWithDetails> for JobInfo {
-    fn from(value: metadata_db::JobWithDetails) -> Self {
+impl From<metadata_db::Job> for JobInfo {
+    fn from(value: metadata_db::Job) -> Self {
         Self {
             id: value.id.into(),
             created_at: value.created_at.to_rfc3339(),
