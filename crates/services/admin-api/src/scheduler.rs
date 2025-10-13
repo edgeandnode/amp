@@ -29,7 +29,7 @@ impl Scheduler {
         // Avoid re-scheduling jobs in a scheduled or running state.
         let existing_jobs = self
             .metadata_db
-            .get_jobs_by_dataset(&dataset.name, dataset.version.as_deref())
+            .get_jobs_by_dataset(dataset.name.clone(), dataset.version.clone())
             .await?;
         for job in existing_jobs {
             match job.status {

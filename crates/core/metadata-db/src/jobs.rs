@@ -3,7 +3,6 @@
 //! This module provides functionality for managing distributed job queues with state tracking
 //! and coordination between multiple worker nodes.
 
-use semver::Version;
 use sqlx::types::{
     JsonValue,
     chrono::{DateTime, Utc},
@@ -18,7 +17,10 @@ pub use self::{
     job_status::JobStatus,
     pagination::{list_first_page, list_next_page},
 };
-use crate::workers::{NodeId, NodeIdOwned};
+use crate::{
+    DatasetName, DatasetVersion,
+    workers::{NodeId, NodeIdOwned},
+};
 
 /// Insert a new job into the queue
 ///
@@ -191,8 +193,8 @@ where
 /// If `version` is `None`, all versions of the dataset are included.
 pub async fn get_jobs_by_dataset<'c, E>(
     exe: E,
-    dataset: &str,
-    version: Option<&Version>,
+    dataset: DatasetName<'_>,
+    version: Option<DatasetVersion<'_>>,
 ) -> Result<Vec<Job>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
@@ -212,7 +214,7 @@ where
     "#};
     let res = sqlx::query_as(query)
         .bind(dataset)
-        .bind(version.map(ToString::to_string).unwrap_or_default())
+        .bind(version.map(|v| v.to_string()).unwrap_or_default())
         .fetch_all(exe)
         .await?;
     Ok(res)
