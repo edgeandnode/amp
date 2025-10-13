@@ -315,9 +315,9 @@ impl SegmentSizeLimit {
     }
 
     pub fn is_unbounded(&self) -> bool {
-        self.0.blocks <= 0
-            && self.0.bytes <= 0
-            && self.0.rows <= 0
+        self.0.blocks == 0
+            && self.0.bytes == 0
+            && self.0.rows == 0
             && self.0.length == 0
             && self.0.generation.is_raw()
     }

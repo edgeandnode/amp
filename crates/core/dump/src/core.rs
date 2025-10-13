@@ -27,6 +27,7 @@ mod sql_dump;
 mod tasks;
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
+#[allow(clippy::too_many_arguments)]
 pub async fn dump_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],

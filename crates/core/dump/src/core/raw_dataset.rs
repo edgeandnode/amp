@@ -107,6 +107,7 @@ use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
 /// Returns `Ok(())` on successful completion or an error if any partition fails.
 /// On failure, all running partitions are terminated to prevent partial dumps.
 #[instrument(skip_all, fields(dataset = %dataset_name), err)]
+#[allow(clippy::too_many_arguments)]
 pub async fn dump(
     ctx: Ctx,
     n_jobs: u16,
