@@ -58,6 +58,7 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
 const AMP_CRATES: &[&str] = &[
     "admin_api",
     "amp_client",
+    "amp_debezium_client",
     "ampd",
     "ampsync",
     "ampup",
