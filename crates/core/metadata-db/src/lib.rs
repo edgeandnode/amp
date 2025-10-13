@@ -5,6 +5,7 @@ use futures::{
     future::BoxFuture,
     stream::{BoxStream, Stream},
 };
+use semver::Version;
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -423,6 +424,14 @@ impl MetadataDb {
             [JobStatus::Scheduled, JobStatus::Running],
         )
         .await?)
+    }
+
+    pub async fn get_jobs_by_dataset(
+        &self,
+        dataset_name: &str,
+        dataset_version: Option<&Version>,
+    ) -> Result<Vec<Job>, Error> {
+        Ok(jobs::get_jobs_by_dataset(&*self.pool, dataset_name, dataset_version).await?)
     }
 
     /// Given a worker [`WorkerNodeId`], return all the active jobs

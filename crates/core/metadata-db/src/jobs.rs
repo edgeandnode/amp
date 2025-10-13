@@ -3,6 +3,7 @@
 //! This module provides functionality for managing distributed job queues with state tracking
 //! and coordination between multiple worker nodes.
 
+use semver::Version;
 use sqlx::types::{
     JsonValue,
     chrono::{DateTime, Utc},
@@ -178,6 +179,40 @@ where
     let res = sqlx::query_as(query)
         .bind(node_id)
         .bind(statuses)
+        .fetch_all(exe)
+        .await?;
+    Ok(res)
+}
+
+/// Get jobs for a given dataset
+///
+/// Returns all jobs that write to locations belonging to the specified dataset.
+/// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
+/// If `version` is `None`, all versions of the dataset are included.
+pub async fn get_jobs_by_dataset<'c, E>(
+    exe: E,
+    dataset: &str,
+    version: Option<&Version>,
+) -> Result<Vec<Job>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT DISTINCT
+            j.id,
+            j.node_id,
+            j.status,
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        INNER JOIN locations l ON j.id = l.writer
+        WHERE l.dataset = $1 AND l.dataset_version = $2
+        ORDER BY j.id ASC
+    "#};
+    let res = sqlx::query_as(query)
+        .bind(dataset)
+        .bind(version.map(ToString::to_string).unwrap_or_default())
         .fetch_all(exe)
         .await?;
     Ok(res)
