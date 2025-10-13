@@ -89,14 +89,10 @@ pub async fn handler(
     };
 
     // Get current job status to validate it can be stopped
-    let job = ctx
-        .metadata_db
-        .get_job_by_id_with_details(&id)
-        .await
-        .map_err(|err| {
-            tracing::debug!(error=?err, job_id=?id, "failed to get job");
-            Error::MetadataDbError(err)
-        })?;
+    let job = ctx.metadata_db.get_job(&id).await.map_err(|err| {
+        tracing::debug!(error=?err, job_id=?id, "failed to get job");
+        Error::MetadataDbError(err)
+    })?;
 
     let job = match job {
         Some(job) => job,

@@ -146,30 +146,7 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id, node_id, status, descriptor
-        FROM jobs
-        WHERE id = $1
-    "#};
-    let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
-    Ok(res)
-}
-
-/// Get a job by ID with full details including timestamps
-pub async fn get_by_id_with_details<'c, E>(
-    exe: E,
-    id: JobId,
-) -> Result<Option<JobWithDetails>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
+        SELECT id, node_id, status, descriptor, created_at, updated_at
         FROM jobs
         WHERE id = $1
     "#};
@@ -191,7 +168,9 @@ where
             id,
             node_id,
             status,
-            descriptor
+            descriptor,
+            created_at,
+            updated_at
         FROM jobs
         WHERE node_id = $1 AND status = ANY($2)
         ORDER BY id ASC
@@ -272,23 +251,6 @@ where
 /// Represents a job with its metadata and associated node.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Job {
-    /// Unique identifier for the job
-    pub id: JobId,
-
-    /// ID of the worker node this job is scheduled for
-    pub node_id: NodeIdOwned,
-
-    /// Current status of the job
-    pub status: JobStatus,
-
-    /// Job description
-    #[sqlx(rename = "descriptor")]
-    pub desc: JsonValue,
-}
-
-/// Represents a job with its metadata and associated node.
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct JobWithDetails {
     /// Unique identifier for the job
     pub id: JobId,
 
