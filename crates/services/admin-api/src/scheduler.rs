@@ -26,6 +26,23 @@ impl Scheduler {
         dataset: Dataset,
         end_block: EndBlock,
     ) -> Result<JobId, ScheduleJobError> {
+        // Avoid re-scheduling jobs in a scheduled or running state.
+        let existing_jobs = self
+            .metadata_db
+            .get_jobs_by_dataset(dataset.name.clone(), dataset.version.clone())
+            .await?;
+        for job in existing_jobs {
+            match job.status {
+                JobStatus::Scheduled | JobStatus::Running => return Ok(job.id.into()),
+                JobStatus::Completed
+                | JobStatus::Stopped
+                | JobStatus::StopRequested
+                | JobStatus::Stopping
+                | JobStatus::Failed
+                | JobStatus::Unknown => (),
+            };
+        }
+
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
@@ -40,7 +57,6 @@ impl Scheduler {
         };
 
         let mut locations = Vec::new();
-
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table =
                 match PhysicalTable::get_active(&table, self.metadata_db.clone()).await? {

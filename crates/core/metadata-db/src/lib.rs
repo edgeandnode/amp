@@ -425,6 +425,19 @@ impl MetadataDb {
         .await?)
     }
 
+    pub async fn get_jobs_by_dataset(
+        &self,
+        dataset_name: impl Into<DatasetName<'_>>,
+        dataset_version: Option<impl Into<DatasetVersion<'_>>>,
+    ) -> Result<Vec<Job>, Error> {
+        Ok(jobs::get_jobs_by_dataset(
+            &*self.pool,
+            dataset_name.into(),
+            dataset_version.map(Into::into),
+        )
+        .await?)
+    }
+
     /// Given a worker [`WorkerNodeId`], return all the active jobs
     ///
     /// A job is considered active if it's in  on of the following non-terminal states:
