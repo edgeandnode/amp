@@ -62,7 +62,7 @@ async fn list_first_page_respects_limit_and_ordering() {
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
         let namespace = "test_namespace";
-        let name = Name::from_ref_unchecked(*name);
+        let name = Name::from_ref_unchecked(name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
@@ -172,7 +172,7 @@ async fn list_next_page_uses_cursor() {
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
         let namespace = "test_namespace";
-        let name = Name::from_ref_unchecked(*name);
+        let name = Name::from_ref_unchecked(name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
@@ -290,7 +290,7 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
 
     // Create 7 versions with semver edge cases to test both limit and ordering
     // Using versions that test proper semver ordering vs lexicographic
-    let mut versions = vec![
+    let mut versions = [
         "10.0.0", // #1: Highest version - tests 10 > 2
         "2.0.0",  // #2: Mid version - tests 2 > 1.10
         "1.10.0", // #3: Tests proper semver ordering vs lexicographic
@@ -385,7 +385,7 @@ async fn list_versions_by_name_next_page_uses_cursor() {
     // Create 7 versions with specific structure:
     // - Test cursor pagination with semver edge cases
     // - Cursor will be the first item (highest version)
-    let mut versions = vec![
+    let mut versions = [
         "10.0.0", // <- CURSOR (first/highest version)
         "2.0.0",  // #1: Before cursor
         "1.10.0", // #2: Before cursor
