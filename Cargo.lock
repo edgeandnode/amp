@@ -7757,6 +7757,7 @@ dependencies = [
  "admin-api",
  "alloy",
  "amp-client",
+ "amp-debezium-client",
  "ampd",
  "arrow-flight",
  "backon",

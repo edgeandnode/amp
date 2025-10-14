@@ -2,32 +2,41 @@ use std::sync::Arc;
 
 use amp_client::{ResponseBatchWithReorg, SqlClient};
 use async_stream::stream;
-use common::{arrow::array::RecordBatch, metadata::segments::ResumeWatermark};
-use futures::{Stream, StreamExt};
+use common::{
+    BlockNum,
+    arrow::array::RecordBatch,
+    metadata::segments::{BlockRange, ResumeWatermark},
+};
+use futures::{StreamExt, stream::BoxStream};
 
 use crate::{
     error::{Error, Result},
-    primary_key::PrimaryKeyExtractor,
     state::StateStore,
-    types::{DebeziumOp, DebeziumRecord, StoredRecord},
+    types::{DebeziumOp, DebeziumRecord},
 };
 
 /// A Debezium CDC-compliant streaming client for Amp.
 ///
 /// Wraps Amp's Arrow Flight client and transforms streaming query results
 /// into Debezium format with proper reorg handling.
+///
+/// # Configuration
+///
+/// The client requires:
+/// - **Amp endpoint**: The Arrow Flight server URL
+/// - **State store**: For tracking emitted batches and handling reorgs
+///
+/// Batches are treated as atomic units - during a reorg, all records from
+/// affected batches are retracted together.
 pub struct DebeziumClient<S: StateStore> {
     /// Underlying Amp SQL client
     amp_client: SqlClient,
 
-    /// Primary key extractor
-    pk_extractor: PrimaryKeyExtractor,
-
-    /// State store for tracking emitted records
+    /// State store for tracking emitted batches
     state_store: S,
 }
 
-impl<S: StateStore> DebeziumClient<S> {
+impl<S: StateStore + 'static> DebeziumClient<S> {
     /// Create a new builder for configuring the Debezium client.
     ///
     /// # Example
@@ -37,7 +46,6 @@ impl<S: StateStore> DebeziumClient<S> {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = DebeziumClient::builder()
     ///     .amp_endpoint("http://localhost:1602")?
-    ///     .primary_keys(vec!["block_num".to_string(), "log_index".to_string()])
     ///     .state_store(InMemoryStore::new(64))
     ///     .build()
     ///     .await?;
@@ -86,7 +94,7 @@ impl<S: StateStore> DebeziumClient<S> {
         mut self,
         query: &str,
         resume_watermark: Option<&ResumeWatermark>,
-    ) -> Result<impl Stream<Item = Result<DebeziumRecord>>> {
+    ) -> Result<BoxStream<'static, Result<DebeziumRecord>>> {
         // Execute the query through the Amp client
         let result_stream = self.amp_client.query(query, None, resume_watermark).await?;
 
@@ -99,7 +107,8 @@ impl<S: StateStore> DebeziumClient<S> {
                 match event {
                     Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
                         // Process batch and emit create records
-                        match self.handle_batch(data, metadata.ranges[0].network.clone()).await {
+                        // Pass all ranges from metadata
+                        match self.handle_batch(data, metadata.ranges).await {
                             Ok(records) => {
                                 for record in records {
                                     yield Ok(record);
@@ -125,9 +134,20 @@ impl<S: StateStore> DebeziumClient<S> {
                             }
                         }
                     }
-                    Ok(ResponseBatchWithReorg::Watermark(_watermark)) => {
-                        // Watermark received - could be used for checkpointing
-                        // For now, we just continue
+                    Ok(ResponseBatchWithReorg::Watermark(watermark)) => {
+                        // Prune old batches when watermark is received
+                        // Batches are deleted only when ALL their ranges are safe to prune
+                        // across all networks (conservative multi-network approach)
+                        let watermark_map: std::collections::BTreeMap<String, (BlockNum, [u8; 32])> = watermark.into();
+                        let watermarks: std::collections::BTreeMap<String, BlockNum> = watermark_map
+                            .into_iter()
+                            .map(|(network, (block_num, _))| (network, block_num))
+                            .collect();
+
+                        if let Err(e) = self.state_store.prune(&watermarks).await {
+                            yield Err(e);
+                            break;
+                        }
                     }
                     Err(e) => {
                         yield Err(e.into());
@@ -135,36 +155,31 @@ impl<S: StateStore> DebeziumClient<S> {
                     }
                 }
             }
-        })
+        }
+        .boxed())
     }
 
     /// Handle a batch of records, converting to Debezium create events.
     async fn handle_batch(
         &mut self,
         batch: RecordBatch,
-        _network: String,
+        ranges: Vec<BlockRange>,
     ) -> Result<Vec<DebeziumRecord>> {
         let mut records = Vec::new();
         let batch_arc = Arc::new(batch.clone());
 
+        // Store the batch with all its ranges for potential reorg handling
+        use crate::types::StoredBatch;
+        let stored_batch = StoredBatch {
+            batch: batch_arc.clone(),
+            ranges,
+        };
+        self.state_store.insert(stored_batch).await?;
+
+        // Emit create events for all rows
         for row_idx in 0..batch.num_rows() {
-            // Extract primary key
-            let key = self.pk_extractor.extract_key(&batch, row_idx)?;
-
-            // Extract block number for state management
-            let block_num = extract_block_num(&batch, row_idx)?;
-
             // Convert row to JSON
             let row_json = row_to_json(&batch, row_idx)?;
-
-            // Store in state for potential reorg handling
-            let stored_record = StoredRecord {
-                key,
-                batch: batch_arc.clone(),
-                row_idx,
-                block_num,
-            };
-            self.state_store.insert(stored_record).await?;
 
             // Create Debezium record
             let debezium_record = DebeziumRecord {
@@ -212,7 +227,6 @@ impl<S: StateStore> DebeziumClient<S> {
 /// Builder for configuring a DebeziumClient.
 pub struct DebeziumClientBuilder<S: StateStore> {
     endpoint: Option<String>,
-    primary_keys: Option<Vec<String>>,
     state_store: Option<S>,
 }
 
@@ -221,7 +235,6 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
     pub fn new() -> Self {
         Self {
             endpoint: None,
-            primary_keys: None,
             state_store: None,
         }
     }
@@ -230,15 +243,6 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
     pub fn amp_endpoint(mut self, endpoint: impl Into<String>) -> Result<Self> {
         self.endpoint = Some(endpoint.into());
         Ok(self)
-    }
-
-    /// Set the primary key column names.
-    ///
-    /// **Note**: The order of columns matters - keys will be hashed in the order provided.
-    /// Different orderings will produce different composite keys.
-    pub fn primary_keys(mut self, keys: Vec<String>) -> Self {
-        self.primary_keys = Some(keys);
-        self
     }
 
     /// Set the state store implementation.
@@ -253,21 +257,14 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
             .endpoint
             .ok_or_else(|| Error::Config("endpoint is required".to_string()))?;
 
-        let primary_keys = self
-            .primary_keys
-            .ok_or_else(|| Error::Config("primary_keys are required".to_string()))?;
-
         let state_store = self
             .state_store
             .ok_or_else(|| Error::Config("state_store is required".to_string()))?;
 
         let amp_client = SqlClient::new(&endpoint).await?;
 
-        let pk_extractor = PrimaryKeyExtractor::new(primary_keys);
-
         Ok(DebeziumClient {
             amp_client,
-            pk_extractor,
             state_store,
         })
     }
@@ -277,29 +274,6 @@ impl<S: StateStore> Default for DebeziumClientBuilder<S> {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Extract block number from a RecordBatch row.
-///
-/// Looks for a column named "block_num" or "_block_num_start".
-fn extract_block_num(batch: &RecordBatch, row_idx: usize) -> Result<u64> {
-    // Try common block number column names
-    for col_name in ["block_num", "_block_num_start", "block_number"] {
-        if let Some(column) = batch.column_by_name(col_name) {
-            // Assume it's an Int64 column
-            if let Some(arr) = column
-                .as_any()
-                .downcast_ref::<common::arrow::array::Int64Array>()
-            {
-                return Ok(arr.value(row_idx) as u64);
-            }
-        }
-    }
-
-    Err(Error::Config(
-        "Could not find block number column (tried: block_num, _block_num_start, block_number)"
-            .to_string(),
-    ))
 }
 
 /// Convert a RecordBatch row to JSON.
@@ -406,6 +380,14 @@ fn arrow_value_to_json(
         }
         DataType::LargeBinary => {
             let arr = column.as_any().downcast_ref::<LargeBinaryArray>().unwrap();
+            let val = arr.value(row_idx);
+            Ok(Value::String(format!("0x{}", hex::encode(val))))
+        }
+        DataType::FixedSizeBinary(_) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<common::arrow::array::FixedSizeBinaryArray>()
+                .unwrap();
             let val = arr.value(row_idx);
             Ok(Value::String(format!("0x{}", hex::encode(val))))
         }
