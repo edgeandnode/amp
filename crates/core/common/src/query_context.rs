@@ -42,7 +42,10 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    plan_visitors::{extract_table_references_from_plan, forbid_underscore_prefixed_aliases},
+    plan_visitors::{
+        extract_table_references_from_plan, forbid_duplicate_field_names,
+        forbid_underscore_prefixed_aliases,
+    },
 };
 
 #[derive(Error, Debug)]
@@ -413,6 +416,9 @@ async fn execute_plan(
         .create_physical_plan(&plan, &ctx.state())
         .await
         .map_err(Error::PlanningError)?;
+
+    forbid_duplicate_field_names(&physical_plan, &plan).map_err(Error::PlanningError)?;
+
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     match is_explain {

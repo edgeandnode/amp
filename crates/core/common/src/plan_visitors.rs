@@ -2,19 +2,20 @@ use std::{collections::BTreeSet, fmt, sync::Arc};
 
 use datafusion::{
     common::{
-        plan_err,
+        Column, plan_err,
         tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
     },
     datasource::TableType,
     error::DataFusionError,
-    logical_expr::{Filter, LogicalPlan, Projection, Sort, TableScan},
+    logical_expr::{Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
     optimizer::{OptimizerContext, OptimizerRule, push_down_filter::PushDownFilter},
+    physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
     sql::TableReference,
 };
 use tracing::instrument;
 
-use crate::{BoxError, SPECIAL_BLOCK_NUM, internal};
+use crate::{BoxError, SPECIAL_BLOCK_NUM};
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
 /// names are reserved for special columns.
@@ -36,6 +37,44 @@ pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), Data
     Ok(())
 }
 
+/// Ensures that there are no duplicate field names in the plan's schema.
+/// This includes fields that are qualified with different table names.
+/// For example, `table1.column` and `table2.column` would be considered duplicates
+/// because they both refer to `column`.
+pub fn forbid_duplicate_field_names(
+    physical_plan: &Arc<dyn ExecutionPlan>,
+    logical_plan: &LogicalPlan,
+) -> Result<(), DataFusionError> {
+    let schema = physical_plan.schema();
+    let mut duplicates: Vec<Vec<Column>> = Vec::new();
+    let mut seen = BTreeSet::new();
+    for field in schema.fields() {
+        let name = field.name();
+        if !seen.insert(name.as_str()) {
+            let sources = logical_plan.schema().columns_with_unqualified_name(name);
+            duplicates.push(sources);
+        }
+    }
+
+    if !duplicates.is_empty() {
+        return plan_err!(
+            "Duplicate field names detected in plan schema: [{}]. Please alias your columns to be unique.",
+            duplicates
+                .into_iter()
+                .map(|cols| {
+                    cols.into_iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    Ok(())
+}
+
 /// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
     plan.transform(|node| {
@@ -53,13 +92,11 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                     }
                 }
 
-                // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
                 projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
             LogicalPlan::Union(mut union) => {
-                // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
                 union.schema = prepend_special_block_num_field(&union.schema);
                 Ok(Transformed::yes(LogicalPlan::Union(union)))
             }
@@ -79,19 +116,16 @@ pub fn unproject_special_block_num_column(
         // Nothing to do.
         return Ok(plan);
     }
-    let exprs = fields
+    let expr = plan
+        .schema()
         .iter()
-        .filter(|f| f.name() != SPECIAL_BLOCK_NUM)
-        .map(|f| col(f.name()))
-        .collect();
-    let projection = Projection::try_new(exprs, Arc::new(plan)).map_err(|e| {
-        internal!(
-            "error while removing {} from projection: {}",
-            SPECIAL_BLOCK_NUM,
-            e
-        )
-    })?;
-    Ok(LogicalPlan::Projection(projection))
+        .filter(|(_, field)| field.name() != SPECIAL_BLOCK_NUM)
+        .map(Expr::from)
+        .collect::<Vec<_>>();
+
+    let builder = LogicalPlanBuilder::from(plan);
+
+    builder.project(expr)?.build()
 }
 
 /// Adds `where start <= _block_num and _block_num <= end` to the plan and runs filter pushdown.
@@ -295,6 +329,7 @@ mod tests {
         common::Column,
         datasource::{MemTable, provider_as_source},
         logical_expr::{JoinType, LogicalPlanBuilder},
+        physical_planner::PhysicalPlanner,
     };
 
     use super::*;
@@ -527,6 +562,66 @@ mod tests {
             qualifier.map(|q| q.to_string()),
             Some("foo".to_string()),
             "Qualified field should retain its qualifier"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_forbid_duplicate_field_names() {
+        // Create a logical plan with duplicate field names
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("value", DataType::Utf8, false),
+        ]));
+        let partition = array::RecordBatch::new_empty(schema.clone());
+
+        let table = Arc::new(MemTable::try_new(schema.clone(), vec![vec![partition]]).unwrap());
+
+        let a_scan = LogicalPlanBuilder::scan("a", provider_as_source(table.clone()), None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let b_scan = LogicalPlanBuilder::scan("b", provider_as_source(table), None)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let plan = LogicalPlanBuilder::from(a_scan)
+            .join(
+                b_scan,
+                JoinType::Inner,
+                (
+                    vec![Column::from_qualified_name("a.id")],
+                    vec![Column::from_qualified_name("b.id")],
+                ),
+                None,
+            )
+            .unwrap()
+            .project(vec![
+                col("a.id"),
+                col("a.value"),
+                col("b.value"), // This will create a duplicate "value" field
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let ctx = datafusion::prelude::SessionContext::new();
+        let state = ctx.state();
+        let physical_plan = datafusion::physical_planner::DefaultPhysicalPlanner::default()
+            .create_physical_plan(&plan, &state)
+            .await
+            .unwrap();
+        let result = forbid_duplicate_field_names(&physical_plan, &plan);
+
+        assert!(
+            result.is_err(),
+            "forbid_duplicate_field_names should fail with duplicate field names"
+        );
+
+        let err_msg = result.err().unwrap().to_string();
+        assert!(
+            err_msg.contains("Duplicate field names detected in plan schema"),
+            "Error message should indicate duplicate field names"
         );
     }
 }
