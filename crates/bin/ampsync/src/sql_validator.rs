@@ -28,9 +28,10 @@ pub fn validate_incremental_query(sql: &str) -> Result<(), BoxError> {
 
     for statement in &statements {
         if let DFStatement::Statement(stmt) = statement
-            && let Statement::Query(query) = stmt.as_ref() {
-                check_query_for_non_incremental_ops(query, &mut non_incremental_ops);
-            }
+            && let Statement::Query(query) = stmt.as_ref()
+        {
+            check_query_for_non_incremental_ops(query, &mut non_incremental_ops);
+        }
     }
 
     if !non_incremental_ops.is_empty() {
@@ -59,9 +60,10 @@ pub fn validate_incremental_query(sql: &str) -> Result<(), BoxError> {
 fn check_query_for_non_incremental_ops(query: &Query, ops: &mut Vec<NonIncrementalOp>) {
     // Check for recursive CTEs
     if let Some(with) = &query.with
-        && with.recursive {
-            ops.push(NonIncrementalOp::RecursiveQuery);
-        }
+        && with.recursive
+    {
+        ops.push(NonIncrementalOp::RecursiveQuery);
+    }
 
     // Check the main query body
     check_set_expr_for_non_incremental_ops(&query.body, ops);
@@ -112,9 +114,10 @@ fn check_select_for_non_incremental_ops(select: &Select, ops: &mut Vec<NonIncrem
     // Check GROUP BY (indicates aggregation)
     // Note: group_by is a GroupByExpr enum, not a Vec
     if let datafusion::sql::sqlparser::ast::GroupByExpr::Expressions(exprs, _) = &select.group_by
-        && !exprs.is_empty() {
-            ops.push(NonIncrementalOp::Aggregate);
-        }
+        && !exprs.is_empty()
+    {
+        ops.push(NonIncrementalOp::Aggregate);
+    }
 
     // Check HAVING (also indicates aggregation)
     if select.having.is_some() {
