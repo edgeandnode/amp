@@ -484,7 +484,7 @@ impl DaemonStateDirBuilder {
 ///
 /// Searches through the provided fixture directories in order, looking for the specified file.
 /// Returns the first canonicalized absolute path where the file exists as a regular file.
-fn resolve_fixture_source_file<'a>(fixture_dirs: &'a [&str], name: &Path) -> Option<PathBuf> {
+fn resolve_fixture_source_file(fixture_dirs: &[&str], name: &Path) -> Option<PathBuf> {
     fixture_dirs
         .iter()
         .map(|dir| Path::new(dir).join(name))
@@ -496,7 +496,7 @@ fn resolve_fixture_source_file<'a>(fixture_dirs: &'a [&str], name: &Path) -> Opt
 ///
 /// Searches through the provided fixture directories in order, looking for the specified directory.
 /// Returns the first canonicalized absolute path where the directory exists as a directory.
-fn resolve_fixture_source_dir<'a>(fixture_dirs: &'a [&str], name: &Path) -> Option<PathBuf> {
+fn resolve_fixture_source_dir(fixture_dirs: &[&str], name: &Path) -> Option<PathBuf> {
     fixture_dirs
         .iter()
         .map(|dir| Path::new(dir).join(name))

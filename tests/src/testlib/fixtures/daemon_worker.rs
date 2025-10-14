@@ -51,7 +51,7 @@ impl DaemonWorker {
             )
         };
 
-        let worker = Worker::new(config.clone(), metadb, node_id.clone().into(), meter);
+        let worker = Worker::new(config.clone(), metadb, node_id.clone(), meter);
 
         let worker_task = tokio::spawn(worker.run());
 
