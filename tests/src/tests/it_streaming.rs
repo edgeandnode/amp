@@ -1,5 +1,6 @@
 use monitoring::logging;
-use tests::{
+
+use crate::{
     run_spec,
     testlib::{ctx::TestCtxBuilder, helpers as test_helpers},
 };

@@ -8,12 +8,13 @@ use dump::EndBlock;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
-use tests::testlib::{
+use tokio::sync::mpsc;
+
+use crate::testlib::{
     ctx::{TestCtx, TestCtxBuilder},
     fixtures::{BlockInfo, DatasetPackage, FlightClient},
     helpers as test_helpers,
 };
-use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn rpc_reorg_prop() {

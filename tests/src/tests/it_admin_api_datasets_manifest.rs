@@ -3,7 +3,8 @@
 use datasets_common::{name::Name, version::Version};
 use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
-use tests::testlib::ctx::TestCtxBuilder;
+
+use crate::testlib::ctx::TestCtxBuilder;
 
 #[tokio::test]
 async fn get_dataset_version_manifest_with_valid_dataset_succeeds() {
@@ -208,7 +209,7 @@ async fn get_dataset_version_manifest_with_invalid_name_and_version_returns_bad_
 }
 
 struct TestCtx {
-    _ctx: tests::testlib::ctx::TestCtx,
+    _ctx: crate::testlib::ctx::TestCtx,
     client: reqwest::Client,
     admin_api_url: String,
 }
