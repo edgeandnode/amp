@@ -53,7 +53,7 @@ pub struct Watermark {
 /// Public interface for resuming a stream from a watermark.
 // TODO: unify with `Watermark` when adding support for multi-network streaming.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ResumeWatermark(BTreeMap<String, Watermark>);
+pub struct ResumeWatermark(pub BTreeMap<String, Watermark>);
 
 impl ResumeWatermark {
     pub fn from_ranges(ranges: Vec<BlockRange>) -> Self {

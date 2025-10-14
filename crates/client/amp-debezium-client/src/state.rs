@@ -1,88 +1,62 @@
-use std::{
-    collections::HashMap,
-    hash::{BuildHasherDefault, Hasher},
-};
-
 use amp_client::InvalidationRange;
 use async_trait::async_trait;
 use common::BlockNum;
 
 use crate::{
     error::Result,
-    types::{RecordKey, StoredRecord},
+    types::{RecordKey, StoredBatch, StoredRecord},
 };
 
-/// Identity hasher for RecordKey.
+/// Trait for storing and retrieving batches to support reorg handling.
 ///
-/// Since RecordKey is already a hash (u128 from xxhash), we use an identity
-/// function as the hash function to avoid double-hashing.
-#[derive(Default)]
-struct RecordKeyHasher(u64);
-
-impl Hasher for RecordKeyHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, _bytes: &[u8]) {
-        unreachable!()
-    }
-
-    fn write_u128(&mut self, i: u128) {
-        // Use the lower 64 bits of the u128 hash as the HashMap hash
-        self.0 = i as u64;
-    }
-}
-
-/// Type alias for HashMap with identity hasher for RecordKey
-type RecordKeyMap<V> = HashMap<RecordKey, V, BuildHasherDefault<RecordKeyHasher>>;
-
-/// Trait for storing and retrieving records to support reorg handling.
-///
-/// Implementations track emitted records so that when a reorg occurs,
-/// they can be retracted (emitted as delete operations in Debezium format).
+/// Implementations track emitted batches with their associated block ranges.
+/// A single batch can span multiple networks. When a reorg occurs on any network,
+/// all batches whose ranges intersect with that network's invalidation range are retracted.
 #[async_trait]
 pub trait StateStore: Send + Sync {
-    /// Insert a record into the state store.
+    /// Insert a batch with all its ranges and records.
     ///
     /// # Arguments
-    /// * `record` - The stored record with key, batch, row index, and block number
-    async fn insert(&mut self, record: StoredRecord) -> Result<()>;
+    /// * `batch` - The stored batch with ranges and all records
+    async fn insert(&mut self, batch: StoredBatch) -> Result<()>;
 
-    /// Retrieve all records within the given invalidation range.
+    /// Retrieve all records from batches whose ranges intersect with the given invalidation range.
     ///
     /// Used during reorg handling to find records that need to be retracted.
+    /// Returns ALL records from any batch that has a range overlapping the invalidation range.
     ///
     /// # Arguments
     /// * `range` - The invalidation range (network + block number range)
     ///
     /// # Returns
-    /// A vector of all stored records that fall within the range
+    /// A vector of all stored records from batches that overlap with the invalidation range
     async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>>;
 
-    /// Remove records with block numbers before the specified block.
+    /// Remove batches based on multi-network watermarks.
     ///
-    /// Used to maintain a sliding window of recent records and prevent
-    /// unbounded memory growth.
+    /// Used to maintain a sliding window of recent batches and prevent
+    /// unbounded memory growth. A batch is only deleted when ALL its ranges
+    /// are beyond their respective network's reorg window (conservative approach).
     ///
     /// # Arguments
-    /// * `before_block` - Remove records with block_num < this value
-    async fn prune(&mut self, before_block: BlockNum) -> Result<()>;
+    /// * `watermarks` - Map of network name to block number watermark
+    async fn prune(
+        &mut self,
+        watermarks: &std::collections::BTreeMap<String, BlockNum>,
+    ) -> Result<()>;
 }
 
-/// In-memory implementation of StateStore using HashMap.
+/// In-memory implementation of StateStore using Vec.
 ///
-/// Stores records in memory with a configurable block window for retention.
+/// Stores batches in a vector, appended as they arrive.
+/// Batches are mostly-ordered but may have rewinds due to reorgs.
 /// Suitable for most use cases but does not persist across restarts.
 pub struct InMemoryStore {
-    /// Map from RecordKey to stored record (using identity hasher)
-    records: RecordKeyMap<StoredRecord>,
+    /// All stored batches, appended in order as they arrive from the stream
+    batches: Vec<StoredBatch>,
 
     /// Maximum number of blocks to retain in memory (reorg window)
     reorg_window: u64,
-
-    /// The highest block number seen so far
-    max_block: BlockNum,
 }
 
 impl InMemoryStore {
@@ -99,59 +73,77 @@ impl InMemoryStore {
     /// ```
     pub fn new(reorg_window: u64) -> Self {
         Self {
-            records: HashMap::default(),
+            batches: Vec::new(),
             reorg_window,
-            max_block: 0,
         }
     }
 
-    /// Get the current number of records stored in memory.
+    /// Get the current number of batches stored in memory.
     pub fn len(&self) -> usize {
-        self.records.len()
+        self.batches.len()
     }
 
     /// Check if the store is empty.
     pub fn is_empty(&self) -> bool {
-        self.records.is_empty()
+        self.batches.is_empty()
     }
 }
 
 #[async_trait]
 impl StateStore for InMemoryStore {
-    async fn insert(&mut self, record: StoredRecord) -> Result<()> {
-        // Update max block
-        self.max_block = self.max_block.max(record.block_num);
-
-        // Insert the record
-        self.records.insert(record.key, record);
+    async fn insert(&mut self, batch: StoredBatch) -> Result<()> {
+        // Append batch as it arrives
+        self.batches.push(batch);
 
         Ok(())
     }
 
     async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>> {
-        let records = self
-            .records
-            .values()
-            .filter(|record| {
-                record.block_num >= *range.numbers.start()
-                    && record.block_num <= *range.numbers.end()
+        Ok(self
+            .batches
+            .iter()
+            .filter(|batch| {
+                batch.ranges.iter().any(|block_range| {
+                    block_range.network == range.network
+                        && block_range.numbers.start() <= range.numbers.end()
+                        && block_range.numbers.end() >= range.numbers.start()
+                })
             })
-            .cloned()
-            .collect();
-
-        Ok(records)
+            .flat_map(|batch| {
+                (0..batch.batch.num_rows()).map(|row_idx| StoredRecord {
+                    key: RecordKey::new(0),
+                    batch: batch.batch.clone(),
+                    row_idx,
+                })
+            })
+            .collect())
     }
 
-    async fn prune(&mut self, before_block: BlockNum) -> Result<()> {
-        // Calculate prune threshold based on reorg window
-        let prune_before = self.max_block.saturating_sub(self.reorg_window);
+    async fn prune(
+        &mut self,
+        watermarks: &std::collections::BTreeMap<String, BlockNum>,
+    ) -> Result<()> {
+        // Use retain to efficiently remove batches that should be pruned
+        // Batches are mostly-ordered but may have rewinds due to reorgs
+        self.batches.retain(|batch| {
+            // Check if this batch should be retained
+            for block_range in &batch.ranges {
+                if let Some(&watermark_block) = watermarks.get(&block_range.network) {
+                    // Calculate prune threshold: keep batches within reorg_window of watermark
+                    let prune_before = watermark_block.saturating_sub(self.reorg_window);
 
-        // Only prune if the requested block is older than our window
-        let prune_block = prune_before.min(before_block);
-
-        // Remove all records before the prune block
-        self.records
-            .retain(|_, record| record.block_num >= prune_block);
+                    // If this range ends after the prune threshold, keep this batch
+                    if *block_range.numbers.end() >= prune_before {
+                        return true;
+                    }
+                } else {
+                    // No watermark for this network, keep this batch
+                    return true;
+                }
+            }
+            // All ranges are prunable, don't keep this batch
+            false
+        });
 
         Ok(())
     }
@@ -161,12 +153,16 @@ impl StateStore for InMemoryStore {
 mod tests {
     use std::sync::Arc;
 
-    use common::arrow::{
-        array::{Int64Array, RecordBatch},
-        datatypes::{DataType, Field, Schema},
+    use common::{
+        arrow::{
+            array::{Int64Array, RecordBatch},
+            datatypes::{DataType, Field, Schema},
+        },
+        metadata::segments::BlockRange,
     };
 
     use super::*;
+    use crate::types::StoredBatch;
 
     fn create_test_batch() -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![Field::new(
@@ -183,16 +179,19 @@ mod tests {
         //* Given
         let mut store = InMemoryStore::new(64);
         let batch = Arc::new(create_test_batch());
-        let record = StoredRecord {
-            key: RecordKey::new(123),
+        let stored_batch = StoredBatch {
             batch: batch.clone(),
-            row_idx: 0,
-            block_num: 100,
+            ranges: vec![BlockRange {
+                network: "test".to_string(),
+                numbers: 100..=100,
+                hash: [0u8; 32].into(),
+                prev_hash: None,
+            }],
         };
 
         //* When
         store
-            .insert(record.clone())
+            .insert(stored_batch)
             .await
             .expect("insert should succeed");
 
@@ -207,15 +206,21 @@ mod tests {
         let mut store = InMemoryStore::new(64);
         let batch = Arc::new(create_test_batch());
 
-        // Insert records at different blocks
+        // Insert batches with different block ranges
         for block_num in [100, 105, 110, 115, 120] {
-            let record = StoredRecord {
-                key: RecordKey::new(block_num as u128),
+            let stored_batch = StoredBatch {
                 batch: batch.clone(),
-                row_idx: 0,
-                block_num,
+                ranges: vec![BlockRange {
+                    network: "test".to_string(),
+                    numbers: block_num..=block_num,
+                    hash: [0u8; 32].into(),
+                    prev_hash: None,
+                }],
             };
-            store.insert(record).await.expect("insert should succeed");
+            store
+                .insert(stored_batch)
+                .await
+                .expect("insert should succeed");
         }
 
         //* When
@@ -229,10 +234,8 @@ mod tests {
             .expect("get_in_range should succeed");
 
         //* Then
-        assert_eq!(records.len(), 3); // blocks 105, 110, 115
-        for record in records {
-            assert!(record.block_num >= 105 && record.block_num <= 115);
-        }
+        // Each batch has 3 rows, and we have 3 batches (105, 110, 115) overlapping
+        assert_eq!(records.len(), 9); // 3 batches * 3 rows each
     }
 
     #[tokio::test]
@@ -241,26 +244,37 @@ mod tests {
         let mut store = InMemoryStore::new(10); // Small window for testing
         let batch = Arc::new(create_test_batch());
 
-        // Insert records at blocks 0-20
+        // Insert batches at blocks 0-20
         for block_num in 0..=20 {
-            let record = StoredRecord {
-                key: RecordKey::new(block_num as u128),
+            let stored_batch = StoredBatch {
                 batch: batch.clone(),
-                row_idx: 0,
-                block_num,
+                ranges: vec![BlockRange {
+                    network: "test".to_string(),
+                    numbers: block_num..=block_num,
+                    hash: [0u8; 32].into(),
+                    prev_hash: None,
+                }],
             };
-            store.insert(record).await.expect("insert should succeed");
+            store
+                .insert(stored_batch)
+                .await
+                .expect("insert should succeed");
         }
 
         //* When
-        store.prune(15).await.expect("prune should succeed");
+        let mut watermarks = std::collections::BTreeMap::new();
+        watermarks.insert("test".to_string(), 15);
+        store
+            .prune(&watermarks)
+            .await
+            .expect("prune should succeed");
 
         //* Then
-        // Should only keep blocks within reorg_window (10) of max_block (20)
-        // So blocks 10-20 should remain (11 records)
-        assert_eq!(store.len(), 11);
+        // Should keep blocks within reorg_window (10) of watermark (15)
+        // prune_before = 15 - 10 = 5, so blocks 5-20 should remain (16 batches)
+        assert_eq!(store.len(), 16);
 
-        // Verify all remaining records are >= block 10
+        // Verify all remaining batch ranges end >= block 5
         let all_range = InvalidationRange {
             network: "test".to_string(),
             numbers: 0..=100,
@@ -270,8 +284,7 @@ mod tests {
             .await
             .expect("get_in_range should succeed");
 
-        for record in remaining {
-            assert!(record.block_num >= 10);
-        }
+        // Should have 16 batches * 3 rows each = 48 records from batch ranges 5..=20
+        assert_eq!(remaining.len(), 48);
     }
 }

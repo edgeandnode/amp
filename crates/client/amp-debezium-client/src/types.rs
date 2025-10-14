@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use common::{BlockNum, arrow::array::RecordBatch};
+use common::{arrow::array::RecordBatch, metadata::segments::BlockRange};
 use serde::{Deserialize, Serialize};
 
 /// A Debezium CDC (Change Data Capture) record.
@@ -67,7 +67,7 @@ impl Hash for RecordKey {
 
 /// A stored record with its associated metadata.
 ///
-/// Used by StateStore implementations to track emitted records for reorg handling.
+/// Returned during reorg handling to identify which records need to be retracted.
 #[derive(Debug, Clone)]
 pub struct StoredRecord {
     /// The primary key identifying this record
@@ -78,7 +78,18 @@ pub struct StoredRecord {
 
     /// The row index within the batch
     pub row_idx: usize,
+}
 
-    /// The block number this record is associated with
-    pub block_num: BlockNum,
+/// A batch of records with associated block ranges.
+///
+/// A single batch can contain data from multiple networks at different block ranges.
+/// When any network reorgs affecting any of the ranges, the entire batch is retracted.
+/// Records are extracted on-demand during reorg handling, not stored redundantly.
+#[derive(Debug, Clone)]
+pub struct StoredBatch {
+    /// The Arrow RecordBatch
+    pub batch: Arc<RecordBatch>,
+
+    /// Block ranges for all networks in this batch
+    pub ranges: Vec<BlockRange>,
 }
