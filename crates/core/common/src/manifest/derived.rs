@@ -48,7 +48,9 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
     let unsorted_tables = manifest
         .tables
         .into_iter()
-        .map(|(name, table)| LogicalTable::new(name, table.schema.arrow.into(), table.network))
+        .map(|(name, table)| {
+            LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
+        })
         .collect();
     let tables = sort_tables_by_dependencies(&manifest.name, unsorted_tables, &queries)?;
 

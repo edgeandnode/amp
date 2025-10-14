@@ -16,7 +16,7 @@ use datafusion::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    SPECIAL_BLOCK_NUM,
     metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
 };
 
@@ -751,7 +751,7 @@ impl Mul<i32> for SegmentSize {
 pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
     if let Some(column) = rg.columns().iter().find(|c| {
         let name = c.column_descr().name();
-        name == BLOCK_NUM || name == SPECIAL_BLOCK_NUM
+        name == SPECIAL_BLOCK_NUM
     }) && let Some(statistics) = column.statistics()
         && let Some(Ok(Some(max))) = statistics.max_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
         && let Some(Ok(Some(min))) = statistics.min_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
@@ -836,7 +836,7 @@ pub mod test {
     use std::sync::Arc;
 
     use crate::{
-        BLOCK_NUM, Timestamp,
+        Timestamp,
         metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         parquet::{
             basic::{Repetition, Type as PhysicalType},
@@ -1056,11 +1056,12 @@ pub mod test {
         );
 
         fn schema_descr() -> SchemaDescriptor {
-            let block_num = Type::primitive_type_builder(BLOCK_NUM, PhysicalType::INT64)
-                .with_repetition(Repetition::REQUIRED)
-                .build()
-                .unwrap()
-                .into();
+            let block_num =
+                Type::primitive_type_builder(crate::SPECIAL_BLOCK_NUM, PhysicalType::INT64)
+                    .with_repetition(Repetition::REQUIRED)
+                    .build()
+                    .unwrap()
+                    .into();
 
             let schema = Type::group_type_builder("schema")
                 .with_fields(vec![block_num])
@@ -1075,7 +1076,7 @@ pub mod test {
             let primitive_type = schema_descr.column(0).self_type_ptr();
             let max_def_level = schema_descr.column(0).max_def_level();
             let max_rep_level = schema_descr.column(0).max_rep_level();
-            let path = ColumnPath::new(vec![BLOCK_NUM.to_string()]);
+            let path = ColumnPath::new(vec![crate::SPECIAL_BLOCK_NUM.to_string()]);
             ColumnDescriptor::new(primitive_type, max_def_level, max_rep_level, path)
         }
 
