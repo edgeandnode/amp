@@ -192,7 +192,7 @@ impl MetadataDb {
             matches!(
                 err,
                 conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
-                if db_err.code().map_or(false, |code| code == "57P03")
+                if db_err.code().is_some_and(|code| code == "57P03")
             )
         }
 
@@ -962,7 +962,7 @@ impl MetadataDb {
         ";
 
         sqlx::query(sql)
-            .bind(file_ids.into_iter().map(|id| **id).collect::<Vec<_>>())
+            .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
             .execute(&*self.pool)
             .await?;
 

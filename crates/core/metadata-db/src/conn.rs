@@ -97,9 +97,7 @@ impl DbConn {
 
         fn is_db_starting_up(err: &sqlx::Error) -> bool {
             match err {
-                sqlx::Error::Database(db_err) => {
-                    db_err.code().map_or(false, |code| code == "57P03")
-                }
+                sqlx::Error::Database(db_err) => db_err.code().is_some_and(|code| code == "57P03"),
                 _ => false,
             }
         }
