@@ -11,6 +11,7 @@ use crate::{
 };
 
 /// Main entry point for build command - handles all build source combinations
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     install_dir: Option<PathBuf>,
     repo: Option<String>,
