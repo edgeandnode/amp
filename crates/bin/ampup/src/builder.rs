@@ -282,7 +282,7 @@ impl Builder {
                 }
 
                 // Check for git repository and extract commit hash
-                let git = GitRepo::new(&path);
+                let git = GitRepo::new(path);
                 let git_hash = git.get_commit_hash()?;
 
                 // If not a git repo and no custom name provided, error out
@@ -293,7 +293,7 @@ impl Builder {
                 // Generate version label and build
                 let version_label =
                     source.generate_version_label(git_hash.as_deref(), options.name.as_deref());
-                build_and_install(&self.version_manager, &path, &version_label, options.jobs)?;
+                build_and_install(&self.version_manager, path, &version_label, options.jobs)?;
 
                 Ok(())
             }
@@ -302,7 +302,7 @@ impl Builder {
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository with specific branch
-                let git = GitRepo::clone(&repo, temp_dir.path(), Some(branch.as_str())).await?;
+                let git = GitRepo::clone(repo, temp_dir.path(), Some(branch.as_str())).await?;
 
                 // Extract git commit hash, generate version label, and build
                 let git_hash = git.get_commit_hash()?;
@@ -322,8 +322,8 @@ impl Builder {
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository and checkout specific commit
-                let git = GitRepo::clone(&repo, temp_dir.path(), None).await?;
-                git.checkout_commit(&commit)?;
+                let git = GitRepo::clone(repo, temp_dir.path(), None).await?;
+                git.checkout_commit(commit)?;
 
                 // Extract git commit hash, generate version label, and build
                 let git_hash = git.get_commit_hash()?;
@@ -364,7 +364,7 @@ impl Builder {
                     tempfile::tempdir().context("Failed to create temporary directory")?;
 
                 // Clone repository (main branch)
-                let git = GitRepo::clone(&repo, temp_dir.path(), None).await?;
+                let git = GitRepo::clone(repo, temp_dir.path(), None).await?;
 
                 // Extract git commit hash, generate version label, and build
                 let git_hash = git.get_commit_hash()?;
