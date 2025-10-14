@@ -7,16 +7,13 @@ use std::{
 
 use common::{
     BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
-    query_context::parse_sql, store::ObjectStoreUrl, utils::dfs,
+    store::ObjectStoreUrl, utils::dfs,
 };
-use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::version::Version;
-use datasets_derived::{
-    DerivedDatasetKind, Manifest as DerivedDatasetManifest, manifest::TableInput,
-};
+use datasets_derived::{DerivedDatasetKind, Manifest as DerivedDatasetManifest};
 use dump::EndBlock;
 use metadata_db::MetadataDb;
 use static_assertions::const_assert;
@@ -278,33 +275,21 @@ pub async fn datasets_and_dependencies(
             return Err(format!("Dataset '{}' not found", dataset_name).into());
         };
 
-        let manifest = if dataset.kind == DerivedDatasetKind {
-            store
-                .get_derived_manifest(&dataset.name, dataset.version.as_ref())
-                .await?
-                .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?
-        } else {
+        if dataset.kind != DerivedDatasetKind {
             deps.insert(dataset.name.to_string(), vec![]);
             continue;
-        };
-
-        let mut refs: Vec<String> = Default::default();
-        for table in manifest.tables.values() {
-            // Extract SQL from table input
-            let sql = match &table.input {
-                TableInput::View(view) => &view.sql,
-            };
-            let query = parse_sql(sql)?;
-            let (tables, _) = resolve_table_references(&query, true)?;
-            refs.append(
-                &mut tables
-                    .iter()
-                    .filter_map(|t| t.schema())
-                    .filter(|schema| schema != &dataset.name)
-                    .map(ToString::to_string)
-                    .collect(),
-            );
         }
+
+        let manifest = store
+            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .await?
+            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
+
+        let refs: Vec<String> = manifest
+            .dependencies
+            .into_values()
+            .map(|d| d.name)
+            .collect();
         let mut untracked_refs = refs
             .iter()
             .filter(|r| deps.keys().all(|d| d != *r))
