@@ -27,11 +27,17 @@ pub enum Error {
     #[error("{0}")]
     Arrow(#[from] common::arrow::error::ArrowError),
     #[error("gRPC status error: {0}")]
-    Status(#[from] tonic::Status),
+    Status(#[from] Box<tonic::Status>),
     #[error("server error: {0}")]
     Server(String),
     #[error("JSON deserialization error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl From<tonic::Status> for Error {
+    fn from(value: tonic::Status) -> Self {
+        Self::from(Box::new(value))
+    }
 }
 
 pub struct ResultStream {
