@@ -234,14 +234,14 @@ impl CompactionGroup {
 
     #[tracing::instrument(skip_all, fields(files = self.len(), start = self.range().start(), end = self.range().end()))]
     pub async fn compact(self) -> CompactionResult<BlockNum> {
-        let start = self.range().start().clone();
+        let start = *self.range().start();
         let start_time = std::time::Instant::now();
         let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.collector.file_lock_duration;
 
         // Calculate input metrics before compaction
         let input_file_count = self.streams.len() as u64;
-        let input_bytes: u64 = self.streams.iter().map(|s| s.size.bytes as u64).sum();
+        let input_bytes: u64 = self.streams.iter().map(|s| s.size.bytes).sum();
 
         // Extract values before move
         let metrics = self.metrics.clone();
@@ -285,6 +285,10 @@ impl CompactionGroup {
 
     pub fn len(&self) -> usize {
         self.streams.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.streams.is_empty()
     }
 
     pub fn range(&self) -> RangeInclusive<BlockNum> {

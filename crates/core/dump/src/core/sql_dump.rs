@@ -119,6 +119,7 @@ use crate::{
 
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(dataset = %manifest.name), err)]
+#[allow(clippy::too_many_arguments)]
 pub async fn dump_table(
     ctx: Ctx,
     manifest: DerivedManifest,
@@ -184,7 +185,6 @@ pub async fn dump_table(
                 query_ctx
                     .max_end_block(&plan.clone().attach_to(&query_ctx)?)
                     .await
-                    .map_err(Into::into)
             })
             .await?;
 
@@ -259,6 +259,7 @@ pub async fn dump_table(
 }
 
 #[instrument(skip_all, err)]
+#[allow(clippy::too_many_arguments)]
 async fn dump_sql_query(
     ctx: &Ctx,
     env: &QueryEnv,

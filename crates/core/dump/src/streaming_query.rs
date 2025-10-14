@@ -173,6 +173,7 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     #[instrument(skip_all, err)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         query_env: QueryEnv,
         catalog: Catalog,
@@ -204,17 +205,16 @@ impl StreamingQuery {
             plan = plan.order_by_block_num();
 
             let ctx = PlanningContext::new(catalog.logical().clone());
-            let plan = ctx.optimize_plan(&plan).await?;
-            plan
+            ctx.optimize_plan(&plan).await?
         };
 
-        let tables: Vec<Arc<PhysicalTable>> = catalog.tables().iter().cloned().collect();
+        let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
-            .map(|w| w.to_watermark(&network))
+            .map(|w| w.to_watermark(network))
             .transpose()?;
         let streaming_query = Self {
             query_env,
@@ -347,7 +347,7 @@ impl StreamingQuery {
         };
         let start = direction.block();
         let Some(end) = self
-            .next_microbatch_end(&blocks_ctx, &start, common_watermark)
+            .next_microbatch_end(&blocks_ctx, start, common_watermark)
             .await?
         else {
             return Ok(None);
@@ -370,19 +370,17 @@ impl StreamingQuery {
         match &self.prev_watermark {
             // start stream
             None => {
-                let block = self
-                    .blocks_table_fetch(&ctx, self.start_block, None)
-                    .await?;
+                let block = self.blocks_table_fetch(ctx, self.start_block, None).await?;
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // continue stream
-            Some(prev) if self.blocks_table_contains(ctx, &prev).await? => {
-                let block = self.blocks_table_fetch(&ctx, prev.number + 1, None).await?;
+            Some(prev) if self.blocks_table_contains(ctx, prev).await? => {
+                let block = self.blocks_table_fetch(ctx, prev.number + 1, None).await?;
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // rewind stream due to reorg
             Some(prev) => {
-                let block = self.reorg_base(ctx, &prev).await?;
+                let block = self.reorg_base(ctx, prev).await?;
                 Ok(block.map(StreamDirection::ReorgFrom))
             }
         }
@@ -416,7 +414,7 @@ impl StreamingQuery {
         if number == common_watermark.number {
             Ok(Some(common_watermark))
         } else {
-            self.blocks_table_fetch(&ctx, number, None)
+            self.blocks_table_fetch(ctx, number, None)
                 .await
                 .map(|r| r.map(|r| r.watermark()))
         }
@@ -432,7 +430,7 @@ impl StreamingQuery {
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
                 let watermark = segment.range.watermark();
-                if self.blocks_table_contains(&ctx, &watermark).await? {
+                if self.blocks_table_contains(ctx, &watermark).await? {
                     latest_src_watermarks.push(watermark);
                     continue 'chain_loop;
                 }
