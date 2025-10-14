@@ -38,18 +38,6 @@ pub enum DebeziumOp {
     Delete,
 }
 
-/// A stored record with its associated metadata.
-///
-/// Returned during reorg handling to identify which records need to be retracted.
-#[derive(Debug, Clone)]
-pub struct StoredRecord {
-    /// The Arrow RecordBatch containing this record
-    pub batch: Arc<RecordBatch>,
-
-    /// The row index within the batch
-    pub row_idx: usize,
-}
-
 /// A batch of records with associated block ranges.
 ///
 /// A single batch can contain data from multiple networks at different block ranges.

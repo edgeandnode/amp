@@ -7,15 +7,15 @@
 //! ## Example
 //!
 //! ```no_run
-//! use amp_debezium::{DebeziumClient, DebeziumOp, InMemoryStore};
+//! use amp_debezium_client::{DebeziumClient, DebeziumOp, InMemoryStore};
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create a Debezium client
 //!     let client = DebeziumClient::builder()
-//!         .amp_endpoint("http://localhost:1602")?
-//!         .state_store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
+//!         .endpoint("http://localhost:1602")?
+//!         .store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
 //!         .build()
 //!         .await?;
 //!
@@ -98,4 +98,4 @@ pub mod types;
 pub use client::{DebeziumClient, DebeziumClientBuilder};
 pub use error::{Error, Result};
 pub use state::{InMemoryStore, StateStore};
-pub use types::{DebeziumOp, DebeziumRecord, StoredBatch, StoredRecord};
+pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};
