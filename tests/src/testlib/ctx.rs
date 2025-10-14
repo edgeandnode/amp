@@ -201,8 +201,7 @@ impl TestCtxBuilder {
             }
         }
 
-        self.provider_configs_to_preload
-            .extend(providers);
+        self.provider_configs_to_preload.extend(providers);
         self
     }
 
