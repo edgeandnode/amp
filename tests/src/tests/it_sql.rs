@@ -1,5 +1,5 @@
 use monitoring::logging;
-use tests::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn sql_tests() {

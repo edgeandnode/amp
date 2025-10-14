@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use monitoring::logging;
-use tests::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 #[ignore = "The intra-deps resolution functionality is broken. Enable this test once fixed"]

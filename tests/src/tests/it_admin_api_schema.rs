@@ -2,7 +2,7 @@
 
 use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
-use tests::testlib::ctx::TestCtxBuilder;
+use crate::testlib::ctx::TestCtxBuilder;
 
 #[tokio::test]
 async fn resolve_schema_with_valid_table_succeeds() {
@@ -147,7 +147,7 @@ async fn resolve_schema_with_non_existent_table_fails() {
 }
 
 struct TestCtx {
-    _ctx: tests::testlib::ctx::TestCtx,
+    _ctx: crate::testlib::ctx::TestCtx,
     client: reqwest::Client,
     schema_api_url: String,
 }

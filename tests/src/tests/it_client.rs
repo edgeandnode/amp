@@ -9,7 +9,7 @@ use common::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
+use crate::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
 use tokio::task::JoinHandle;
 
 #[tokio::test]

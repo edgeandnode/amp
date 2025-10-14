@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use dataset_store::DatasetKind;
 use datasets_common::{name::Name, version::Version};
-use tests::testlib::{self, fixtures::DatasetPackage};
+use crate::testlib::{self, fixtures::DatasetPackage};
 
 #[tokio::test]
 async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
