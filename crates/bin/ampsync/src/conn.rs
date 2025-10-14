@@ -38,7 +38,7 @@ impl DbConnPool {
             match err {
                 sqlx::Error::Database(db_err) => {
                     // PostgreSQL error codes for connection issues
-                    db_err.code().map_or(false, |code| {
+                    db_err.code().is_some_and(|code| {
                         matches!(
                             code.as_ref(),
                             "57P03" | // The database system is starting up

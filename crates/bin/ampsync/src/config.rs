@@ -46,6 +46,7 @@ impl AmpsyncConfig {
     ///     - database_name, database_host, database_user
     ///
     /// Fetches the Manifest instance from the admin-api
+    #[allow(clippy::too_many_arguments)]
     pub async fn from_cmd(
         dataset_name: Name,
         dataset_version: Option<Version>,
