@@ -99,29 +99,24 @@ impl StateStore for InMemoryStore {
     }
 
     async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>> {
-        let mut records = Vec::new();
-
-        // Iterate through all batches and check for overlaps
-        for stored_batch in &self.batches {
-            let overlaps = stored_batch.ranges.iter().any(|block_range| {
-                block_range.network == range.network
-                    && block_range.numbers.start() <= range.numbers.end()
-                    && block_range.numbers.end() >= range.numbers.start()
-            });
-
-            if overlaps {
-                // Extract ALL records from this batch on-demand
-                for row_idx in 0..stored_batch.batch.num_rows() {
-                    records.push(StoredRecord {
-                        key: RecordKey::new(0), // Key not needed for reorg handling
-                        batch: stored_batch.batch.clone(),
-                        row_idx,
-                    });
-                }
-            }
-        }
-
-        Ok(records)
+        Ok(self
+            .batches
+            .iter()
+            .filter(|batch| {
+                batch.ranges.iter().any(|block_range| {
+                    block_range.network == range.network
+                        && block_range.numbers.start() <= range.numbers.end()
+                        && block_range.numbers.end() >= range.numbers.start()
+                })
+            })
+            .flat_map(|batch| {
+                (0..batch.batch.num_rows()).map(|row_idx| StoredRecord {
+                    key: RecordKey::new(0),
+                    batch: batch.batch.clone(),
+                    row_idx,
+                })
+            })
+            .collect())
     }
 
     async fn prune(
