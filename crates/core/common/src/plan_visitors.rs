@@ -79,19 +79,16 @@ pub fn unproject_special_block_num_column(
         // Nothing to do.
         return Ok(plan);
     }
-    let exprs = fields
+    let expr = plan
+        .schema()
         .iter()
-        .filter(|f| f.name() != SPECIAL_BLOCK_NUM)
-        .map(|f| col(f.name()))
-        .collect();
-    let projection = Projection::try_new(exprs, Arc::new(plan)).map_err(|e| {
-        internal!(
-            "error while removing {} from projection: {}",
-            SPECIAL_BLOCK_NUM,
-            e
-        )
-    })?;
-    Ok(LogicalPlan::Projection(projection))
+        .filter(|(_, field)| field.name() != SPECIAL_BLOCK_NUM)
+        .map(Expr::from)
+        .collect::<Vec<_>>();
+
+    let builder = LogicalPlanBuilder::from(plan);
+
+    builder.project(expr)?.build()
 }
 
 /// Adds `where start <= _block_num and _block_num <= end` to the plan and runs filter pushdown.
