@@ -17,7 +17,6 @@ export default defineDataset(() => ({
   network: "mainnet",
   dependencies: {
     anvil: {
-      owner: "graphprotocol",
       name: "anvil",
       version: "0.1.0",
     },

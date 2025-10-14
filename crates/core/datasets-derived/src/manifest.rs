@@ -56,8 +56,6 @@ pub struct Manifest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Dependency {
-    /// Owner/organization of the dependency dataset
-    pub owner: String,
     /// Name of the dependency dataset
     pub name: String,
     /// Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`

@@ -6,7 +6,6 @@ export default defineDataset(() => ({
   version: "0.1.0",
   dependencies: {
     eth_firehose: {
-      owner: "graphprotocol",
       name: "eth_firehose",
       version: "0.0.0",
     },

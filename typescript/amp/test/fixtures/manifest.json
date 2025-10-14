@@ -6,8 +6,7 @@
   "dependencies": {
     "anvil": {
       "name": "anvil",
-      "version": "0.1.0",
-      "owner": "testing"
+      "version": "0.1.0"
     }
   },
   "tables": {
