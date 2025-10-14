@@ -4,8 +4,6 @@ use common::{BoxError, config::Config};
 use metadata_db::MetadataDb;
 use worker::Worker;
 
-use crate::server_cmd;
-
 pub async fn run(
     config: Config,
     metadata_db: MetadataDb,
@@ -32,7 +30,7 @@ pub async fn run(
 
     // Spawn server only if at least one query server is enabled
     let server_fut: Pin<Box<dyn Future<Output = _> + Send>> = if flight_server || jsonl_server {
-        let (addrs, fut) = server_cmd::run_servers(
+        let (addrs, fut) = server::serve(
             config.clone(),
             metadata_db.clone(),
             flight_server,
