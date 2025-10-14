@@ -268,13 +268,15 @@ impl<S: StateStore> Default for DebeziumClientBuilder<S> {
 /// Convert an entire RecordBatch to a JSON array using arrow-json.
 fn batch_to_json_array(batch: &RecordBatch) -> Result<Vec<serde_json::Value>> {
     let mut buf = Vec::new();
-    let mut writer = common::arrow::json::ArrayWriter::new(&mut buf);
+    let mut writer = common::arrow::json::LineDelimitedWriter::new(&mut buf);
     writer.write(batch)?;
-    writer.finish()?;
+    drop(writer);
 
-    let json_data = writer.into_inner();
-    let json_array: Vec<serde_json::Value> =
-        serde_json::from_slice(&json_data).map_err(Error::Json)?;
+    let json_str = String::from_utf8(buf)?;
 
-    Ok(json_array)
+    json_str
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).map_err(Error::Json))
+        .collect()
 }
