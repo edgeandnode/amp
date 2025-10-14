@@ -112,7 +112,7 @@ pub struct JobInfo {
 impl From<metadata_db::Job> for JobInfo {
     fn from(value: metadata_db::Job) -> Self {
         Self {
-            id: value.id.into(),
+            id: value.id,
             node_id: value.node_id.to_string(),
             status: value.status.to_string(),
             descriptor: value.desc,

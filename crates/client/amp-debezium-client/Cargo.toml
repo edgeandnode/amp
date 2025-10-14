@@ -10,11 +10,9 @@ async-stream.workspace = true
 async-trait.workspace = true
 common = { path = "../../core/common" }
 futures.workspace = true
-hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-xxhash-rust = "0.8.15"
 
 [dev-dependencies]
 tokio.workspace = true

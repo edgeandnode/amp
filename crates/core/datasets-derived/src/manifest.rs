@@ -36,8 +36,6 @@ pub struct Manifest {
     pub version: Version,
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
-    /// Network name, e.g., `mainnet`, `sepolia`
-    pub network: String,
 
     /// External dataset dependencies with version requirements
     #[serde(default)]

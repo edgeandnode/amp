@@ -65,7 +65,7 @@ async fn insert_creates_location_and_returns_id() {
     assert_eq!(row_bucket, Some("test-bucket".to_string()));
     assert_eq!(row_path, "/test/path/file.parquet");
     assert_eq!(row_url, url.as_str());
-    assert_eq!(row_active, true);
+    assert!(row_active);
 }
 
 #[tokio::test]
@@ -324,10 +324,10 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         .await
         .expect("Failed to check other location status");
 
-    assert_eq!(target1_active, false); // This was deactivated
-    assert_eq!(target2_active, true); // Different table, stays active 
-    assert_eq!(inactive_still_inactive, false); // Was already inactive
-    assert_eq!(other_still_active, true); // Different dataset, stays active
+    assert!(!target1_active); // This was deactivated
+    assert!(target2_active); // Different table, stays active 
+    assert!(!inactive_still_inactive); // Was already inactive
+    assert!(other_still_active); // Different dataset, stays active
 }
 
 #[tokio::test]
@@ -386,8 +386,8 @@ async fn mark_active_by_url_activates_specific_location() {
         .await
         .expect("Failed to check other location active status");
 
-    assert_eq!(target_active, true);
-    assert_eq!(other_still_inactive, false);
+    assert!(target_active);
+    assert!(!other_still_inactive);
 }
 
 #[tokio::test]
@@ -493,7 +493,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
         assert_eq!(location.dataset, "test-dataset");
         assert_eq!(location.dataset_version, "v1.0");
         assert!(location.table == "test-table1" || location.table == "test-table2");
-        assert_eq!(location.active, true);
+        assert!(location.active);
     }
 }
 
@@ -630,7 +630,7 @@ async fn get_by_id_returns_existing_location() {
     assert_eq!(location.dataset_version, "v1.0");
     assert_eq!(location.table, "test-table");
     assert_eq!(location.url, url);
-    assert_eq!(location.active, true);
+    assert!(location.active);
 }
 
 #[tokio::test]

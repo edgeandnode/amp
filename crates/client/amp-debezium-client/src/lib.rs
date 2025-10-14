@@ -7,16 +7,15 @@
 //! ## Example
 //!
 //! ```no_run
-//! use amp_debezium::{DebeziumClient, DebeziumOp, InMemoryStore};
+//! use amp_debezium_client::{DebeziumClient, DebeziumOp, InMemoryStore};
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create a Debezium client
 //!     let client = DebeziumClient::builder()
-//!         .amp_endpoint("http://localhost:1602")?
-//!         .primary_keys(vec!["block_num".to_string(), "log_index".to_string()])
-//!         .state_store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
+//!         .endpoint("http://localhost:1602")?
+//!         .store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
 //!         .build()
 //!         .await?;
 //!
@@ -71,22 +70,32 @@
 //! When a blockchain reorganization is detected:
 //!
 //! 1. The client receives a reorg signal from Amp with invalidation ranges
-//! 2. All records within the invalidated block range are retrieved from the state store
-//! 3. Delete events are emitted for each invalidated record
+//! 2. All batches whose ranges overlap the invalidated range are retrieved
+//! 3. Delete events are emitted for every record in those batches (batch-level granularity)
 //! 4. Subsequent batches will contain the new canonical data
 //!
-//! This ensures downstream systems can properly handle chain reorgs by retracting
-//! orphaned data before processing the new canonical chain.
+//! **Note:** Batches are treated as atomic units. If a reorg affects any network range
+//! within a batch, ALL records in that batch are retracted, even records from other
+//! networks or block ranges. This is a conservative approach that ensures correctness.
+//!
+//! ## Pruning
+//!
+//! Batches are pruned based on watermarks for each network:
+//!
+//! - Each network has its own watermark tracking progress
+//! - A batch is deleted only when ALL its ranges are beyond their network's reorg window
+//! - If even one network's range is still within its reorg window, the entire batch is kept
+//!
+//! This multi-network aware pruning ensures data is retained long enough for all chains,
+//! preventing premature deletion of data needed for slower chains.
 
 pub mod client;
 pub mod error;
-pub mod primary_key;
 pub mod state;
 pub mod types;
 
 // Re-export main types
 pub use client::{DebeziumClient, DebeziumClientBuilder};
 pub use error::{Error, Result};
-pub use primary_key::PrimaryKeyExtractor;
 pub use state::{InMemoryStore, StateStore};
-pub use types::{DebeziumOp, DebeziumRecord, RecordKey, StoredRecord};
+pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};

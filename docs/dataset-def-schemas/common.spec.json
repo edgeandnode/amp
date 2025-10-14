@@ -14,10 +14,13 @@
     },
     "network": {
       "description": "Network name, e.g., `mainnet`, `sepolia`",
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "schema": {
-      "description": "Dataset schema. Lists the tables defined by this dataset.\nOptional for TOML format, required for JSON format",
+      "description": "Dataset schema. Lists the tables defined by this dataset.",
       "anyOf": [
         {
           "$ref": "#/$defs/Schema"
@@ -35,8 +38,7 @@
   },
   "required": [
     "name",
-    "kind",
-    "network"
+    "kind"
   ],
   "$defs": {
     "DataType": {

@@ -845,19 +845,16 @@ dependencies = [
  "async-trait",
  "common",
  "futures",
- "hex",
  "serde",
  "serde_json",
  "thiserror 2.0.16",
  "tokio",
- "xxhash-rust",
 ]
 
 [[package]]
 name = "ampd"
 version = "0.1.0"
 dependencies = [
- "arrow-flight",
  "clap",
  "common",
  "controller",
@@ -869,7 +866,6 @@ dependencies = [
  "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
- "futures",
  "metadata-db",
  "monitoring",
  "serde_json",
@@ -879,7 +875,6 @@ dependencies = [
  "substreams-datasets",
  "thiserror 2.0.16",
  "tokio",
- "tonic 0.12.3",
  "tracing",
  "vergen-gitcl",
  "worker",
@@ -2187,7 +2182,6 @@ dependencies = [
  "object_store",
  "rand 0.9.2",
  "regex",
- "schemars 1.0.4",
  "serde",
  "serde_json",
  "stable-hash",
@@ -3285,6 +3279,7 @@ dependencies = [
  "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
+ "serde_json",
  "thiserror 2.0.16",
 ]
 
@@ -7757,6 +7752,7 @@ dependencies = [
  "admin-api",
  "alloy",
  "amp-client",
+ "amp-debezium-client",
  "ampd",
  "arrow-flight",
  "backon",

@@ -28,10 +28,10 @@ pub async fn dataset(manifest: Manifest) -> Result<Dataset, Error> {
         name: manifest.name,
         kind: manifest.kind.to_string(),
         version: Some(manifest.version),
+        network: Some(manifest.network),
         start_block: None,
         tables: tables.tables,
         functions: vec![],
-        network: manifest.network,
     })
 }
 

@@ -5,7 +5,6 @@ version.workspace = true
 license-file.workspace = true
 
 [features]
-schemars = ["dep:schemars", "datasets-common/schemars"]
 
 [dependencies]
 alloy.workspace = true
@@ -31,7 +30,6 @@ js-runtime = { path = "../js-runtime" }
 metadata-db = { path = "../metadata-db", features = ["temp-db"] }
 object_store.workspace = true
 regex.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }

@@ -359,7 +359,7 @@ pub fn inject_system_metadata(
 
         // Compute xxh3 128-bit hash (16 bytes) and append directly to builder
         let hash = xxh3_128(&hasher_input);
-        id_builder.append_value(&hash.to_le_bytes());
+        id_builder.append_value(hash.to_le_bytes());
     }
 
     // Create arrays for system columns

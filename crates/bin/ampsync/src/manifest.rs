@@ -245,7 +245,7 @@ pub async fn fetch_manifest_with_startup_poll(
                 }
                 .min(max_backoff_secs);
 
-                if attempt > 0 && attempt % 5 == 0 {
+                if attempt > 0 && attempt.is_multiple_of(5) {
                     tracing::info!(
                         attempt = attempt + 1,
                         retry_delay_secs = backoff_secs,

@@ -2,7 +2,8 @@ use admin_api::handlers::{datasets::register::RegisterRequest, error::ErrorRespo
 use datasets_common::{name::Name, version::Version};
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use reqwest::StatusCode;
-use tests::testlib::ctx::TestCtxBuilder;
+
+use crate::testlib::ctx::TestCtxBuilder;
 
 #[tokio::test]
 async fn register_new_dataset_with_manifest_succeeds() {
@@ -320,7 +321,7 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
 }
 
 struct TestCtx {
-    ctx: tests::testlib::ctx::TestCtx,
+    ctx: crate::testlib::ctx::TestCtx,
     client: reqwest::Client,
     admin_api_url: String,
 }
@@ -387,7 +388,6 @@ fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
     let manifest_json = indoc::formatdoc! {r#"
         {{
             "name": "{name}",
-            "network": "mainnet",
             "version": "{version}",
             "kind": "manifest",
             "dependencies": {{

@@ -4,7 +4,7 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    datasets::{self, Name, Version},
+    datasets::{self, Name, Namespace, Version},
 };
 
 #[tokio::test]
@@ -18,7 +18,7 @@ async fn insert_with_valid_data_succeeds() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("test_dataset");
     let version = "1.0.0"
         .parse::<Version>()
@@ -46,7 +46,7 @@ async fn insert_with_prerelease_version_succeeds() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("prerelease_dataset");
     let version = "1.0.0-alpha.1"
         .parse::<Version>()
@@ -87,7 +87,7 @@ async fn insert_with_duplicate_name_and_version_fails() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("duplicate_dataset");
     let version = "1.0.0"
         .parse::<Version>()
@@ -97,7 +97,7 @@ async fn insert_with_duplicate_name_and_version_fails() {
     // Insert first dataset
     let first_result = datasets::insert(
         &mut *conn,
-        namespace,
+        namespace.clone(),
         name.clone(),
         version.clone(),
         manifest_path,
@@ -130,7 +130,7 @@ async fn get_by_name_and_version_with_details_returns_existing_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("existing_dataset");
     let version = "2.1.0"
         .parse::<Version>()
@@ -207,7 +207,7 @@ async fn exists_by_name_and_version_returns_true_for_existing_dataset() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("exists_dataset");
     let version = "1.5.2"
         .parse::<Version>()
@@ -270,7 +270,7 @@ async fn get_manifest_by_name_and_version_returns_manifest_for_existing_dataset(
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("manifest_dataset");
     let version = "3.0.1"
         .parse::<Version>()
@@ -370,7 +370,7 @@ async fn get_latest_version_by_name_returns_highest_version() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let name = Name::from_ref_unchecked("versioned_dataset");
 
     // Insert multiple versions
@@ -389,7 +389,7 @@ async fn get_latest_version_by_name_returns_highest_version() {
 
     let insert1 = datasets::insert(
         &mut *conn,
-        namespace,
+        namespace.clone(),
         name.clone(),
         version_1_0_0,
         "versioned_dataset__1_0_0.json",
@@ -397,7 +397,7 @@ async fn get_latest_version_by_name_returns_highest_version() {
     .await;
     let insert2 = datasets::insert(
         &mut *conn,
-        namespace,
+        namespace.clone(),
         name.clone(),
         version_1_2_0,
         "versioned_dataset__1_2_0.json",
@@ -405,7 +405,7 @@ async fn get_latest_version_by_name_returns_highest_version() {
     .await;
     let insert3 = datasets::insert(
         &mut *conn,
-        namespace,
+        namespace.clone(),
         name.clone(),
         version_2_0_0,
         "versioned_dataset__2_0_0.json",

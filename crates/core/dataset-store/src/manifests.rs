@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::store::ObjectStoreExt;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
@@ -225,10 +225,13 @@ where
             }
 
             // Register the dataset in the metadata database
-            let namespace = "";
+            // TODO: Pass the actual namespace instead of using a placeholder
+            let namespace = "_"
+                .parse::<Namespace>()
+                .expect("'_' should be a valid namespace");
             match self
                 .metadata_db
-                .register_dataset(namespace, &name, &version, &path.to_string())
+                .register_dataset(&namespace, &name, &version, &path.to_string())
                 .await
             {
                 Ok(()) => {

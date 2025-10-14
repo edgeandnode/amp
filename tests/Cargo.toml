@@ -36,6 +36,7 @@ ampd = { path = "../crates/bin/ampd" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 amp-client = { path = "../crates/client/amp-client" }
+amp-debezium-client = { path = "../crates/client/amp-debezium-client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true

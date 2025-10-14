@@ -144,8 +144,7 @@ impl TestCtxBuilder {
             }
         }
 
-        self.dataset_manifests_to_preload
-            .extend(manifests.into_iter());
+        self.dataset_manifests_to_preload.extend(manifests);
         self
     }
 
@@ -202,8 +201,7 @@ impl TestCtxBuilder {
             }
         }
 
-        self.provider_configs_to_preload
-            .extend(providers.into_iter().map(Into::into));
+        self.provider_configs_to_preload.extend(providers);
         self
     }
 
@@ -264,8 +262,7 @@ impl TestCtxBuilder {
             }
         }
 
-        self.dataset_snapshots_to_preload
-            .extend(datasets.into_iter());
+        self.dataset_snapshots_to_preload.extend(datasets);
         self
     }
 

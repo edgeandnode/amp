@@ -12,7 +12,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version::Version,
+};
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
@@ -125,7 +127,10 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
-        let namespace = "";
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         self.metadata_db
             .register_dataset(namespace, name, version, manifest_path.as_ref())
             .await
@@ -475,17 +480,30 @@ impl DatasetStore {
             });
         }
 
-        let Some(config) = self.find_provider(kind, manifest.network.clone()).await else {
+        let Some(network) = manifest.network else {
+            tracing::warn!(
+                dataset_name = %dataset_name,
+                dataset_version = ?dataset_version,
+                dataset_kind = %kind,
+                "dataset is missing required 'network' field for raw dataset kind"
+            );
+            return Err(GetClientError::MissingNetwork {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+            });
+        };
+
+        let Some(config) = self.find_provider(kind, network.clone()).await else {
             tracing::warn!(
                 provider_kind = %manifest.kind,
-                provider_network = %manifest.network,
+                provider_network = %network,
                 "no providers available for the requested kind-network configuration"
             );
 
             return Err(GetClientError::ProviderNotFound {
                 name: dataset_name.to_string(),
                 dataset_kind: kind,
-                network: manifest.network,
+                network,
             });
         };
 
@@ -583,7 +601,7 @@ impl DatasetStore {
         'try_find_provider: for mut provider in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = crate::env_substitute::substitute_env_vars(value) {
+                if let Err(err) = env_substitute::substitute_env_vars(value) {
                     tracing::warn!(
                         provider_name = %provider.name,
                         provider_kind = %kind,
@@ -802,20 +820,32 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
+        let Some(network) = &dataset.network else {
+            tracing::warn!(
+                dataset_name = %name,
+                dataset_version = %version,
+                "dataset is missing required 'network' field for evm-rpc kind"
+            );
+            return Err(EthCallForDatasetError::MissingNetwork {
+                dataset_name: name.clone(),
+                dataset_version: version.clone(),
+            });
+        };
+
         let Some(config) = self
-            .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
+            .find_provider(DatasetKind::EvmRpc, network.clone())
             .await
         else {
             tracing::warn!(
                 dataset_name = %name,
                 dataset_version = %version,
                 provider_kind = %DatasetKind::EvmRpc,
-                provider_network = %dataset.network,
+                provider_network = %network,
                 "no providers available for the requested kind-network configuration"
             );
             return Err(EthCallForDatasetError::ProviderNotFound {
                 dataset_kind: DatasetKind::EvmRpc,
-                network: dataset.network.clone(),
+                network: network.clone(),
             });
         };
 
@@ -986,8 +1016,14 @@ pub async fn resolve_blocks_table(
             .get_all_datasets()
             .await?
             .into_iter()
-            .filter(|d| d.network == network)
             .filter(|d| d.kind != DerivedDatasetKind)
+            .filter(|d| {
+                let dataset_network = d
+                    .network
+                    .as_ref()
+                    .expect("network should be set for raw datasets");
+                dataset_network == network
+            })
             .collect();
 
         if datasets.is_empty() {
