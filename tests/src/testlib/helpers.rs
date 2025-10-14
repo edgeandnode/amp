@@ -51,7 +51,6 @@ pub async fn dump_dataset(
         false,
     )
     .await
-    .map_err(Into::into)
 }
 
 /// Run consistency check on a physical table.
@@ -89,15 +88,17 @@ pub async fn restore_dataset_snapshot(
             metadata_db.clone(),
         )
         .await?
-        .expect(&format!(
-            "Failed to restore snapshot table '{}.{}'. This is likely due to \
+        .unwrap_or_else(|| {
+            panic!(
+                "Failed to restore snapshot table '{}.{}'. This is likely due to \
             the dataset or table being deleted. \n\
             Create the dataset snapshot again by running \
             `cargo run -p tests -- bless {} <start_block> <end_block>`",
-            dataset_name,
-            table.name(),
-            dataset_name
-        ));
+                dataset_name,
+                table.name(),
+                dataset_name
+            )
+        });
 
         tables.push(physical_table.into());
     }
@@ -137,13 +138,13 @@ pub async fn assert_snapshot_block_ranges_eq(left: &SnapshotContext, right: &Sna
     let mut right_block_ranges: BTreeMap<String, Vec<BlockRange>> = BTreeMap::new();
 
     for table in right.physical_tables() {
-        let ranges = get_table_block_ranges(&table).await;
+        let ranges = get_table_block_ranges(table).await;
         right_block_ranges.insert(table.table_name().to_string(), ranges);
     }
 
     for table in left.physical_tables() {
         let table_name = table.table_name();
-        let mut expected_ranges = get_table_block_ranges(&table).await;
+        let mut expected_ranges = get_table_block_ranges(table).await;
         expected_ranges.sort_by_key(|r| *r.numbers.start());
 
         let Some(actual_ranges) = right_block_ranges.get_mut(table_name) else {

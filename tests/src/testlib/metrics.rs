@@ -118,18 +118,18 @@ pub fn find_counter(
             for metric in scope_metric.metrics() {
                 if metric.name() == name {
                     // Counters are u64 type
-                    if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
-                        if let Some(data_point) = sum.data_points().next() {
-                            return Some(CounterData {
-                                name: metric.name().to_string(),
-                                description: metric.description().to_string(),
-                                value: data_point.value(),
-                                attributes: data_point
-                                    .attributes()
-                                    .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                    .collect(),
-                            });
-                        }
+                    if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data()
+                        && let Some(data_point) = sum.data_points().next()
+                    {
+                        return Some(CounterData {
+                            name: metric.name().to_string(),
+                            description: metric.description().to_string(),
+                            value: data_point.value(),
+                            attributes: data_point
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect(),
+                        });
                     }
                 }
             }
@@ -187,32 +187,32 @@ pub fn find_gauge(
             for metric in scope_metric.metrics() {
                 if metric.name() == name {
                     // Try U64 gauge first
-                    if let AggregatedMetrics::U64(MetricData::Gauge(gauge)) = metric.data() {
-                        if let Some(data_point) = gauge.data_points().next() {
-                            return Some(GaugeData {
-                                name: metric.name().to_string(),
-                                description: metric.description().to_string(),
-                                value: opentelemetry::Value::I64(data_point.value() as i64),
-                                attributes: data_point
-                                    .attributes()
-                                    .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                    .collect(),
-                            });
-                        }
+                    if let AggregatedMetrics::U64(MetricData::Gauge(gauge)) = metric.data()
+                        && let Some(data_point) = gauge.data_points().next()
+                    {
+                        return Some(GaugeData {
+                            name: metric.name().to_string(),
+                            description: metric.description().to_string(),
+                            value: opentelemetry::Value::I64(data_point.value() as i64),
+                            attributes: data_point
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect(),
+                        });
                     }
                     // Try F64 gauge
-                    if let AggregatedMetrics::F64(MetricData::Gauge(gauge)) = metric.data() {
-                        if let Some(data_point) = gauge.data_points().next() {
-                            return Some(GaugeData {
-                                name: metric.name().to_string(),
-                                description: metric.description().to_string(),
-                                value: opentelemetry::Value::F64(data_point.value()),
-                                attributes: data_point
-                                    .attributes()
-                                    .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                    .collect(),
-                            });
-                        }
+                    if let AggregatedMetrics::F64(MetricData::Gauge(gauge)) = metric.data()
+                        && let Some(data_point) = gauge.data_points().next()
+                    {
+                        return Some(GaugeData {
+                            name: metric.name().to_string(),
+                            description: metric.description().to_string(),
+                            value: opentelemetry::Value::F64(data_point.value()),
+                            attributes: data_point
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect(),
+                        });
                     }
                 }
             }
@@ -234,21 +234,20 @@ pub fn find_histogram(
                 if metric.name() == name {
                     // Histograms are f64 type
                     if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data()
+                        && let Some(data_point) = histogram.data_points().next()
                     {
-                        if let Some(data_point) = histogram.data_points().next() {
-                            return Some(HistogramData {
-                                name: metric.name().to_string(),
-                                description: metric.description().to_string(),
-                                count: data_point.count(),
-                                sum: data_point.sum(),
-                                min: data_point.min(),
-                                max: data_point.max(),
-                                attributes: data_point
-                                    .attributes()
-                                    .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                    .collect(),
-                            });
-                        }
+                        return Some(HistogramData {
+                            name: metric.name().to_string(),
+                            description: metric.description().to_string(),
+                            count: data_point.count(),
+                            sum: data_point.sum(),
+                            min: data_point.min(),
+                            max: data_point.max(),
+                            attributes: data_point
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect(),
+                        });
                     }
                 }
             }
