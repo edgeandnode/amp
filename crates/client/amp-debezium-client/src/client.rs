@@ -138,10 +138,10 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
                         // Prune old batches when watermark is received
                         // Batches are deleted only when ALL their ranges are safe to prune
                         // across all networks (conservative multi-network approach)
-                        let watermark_map: std::collections::BTreeMap<String, (BlockNum, [u8; 32])> = watermark.into();
-                        let watermarks: std::collections::BTreeMap<String, BlockNum> = watermark_map
+                        let watermarks: std::collections::BTreeMap<String, BlockNum> = watermark
+                            .0
                             .into_iter()
-                            .map(|(network, (block_num, _))| (network, block_num))
+                            .map(|(network, watermark)| (network, watermark.number))
                             .collect();
 
                         if let Err(e) = self.state_store.prune(&watermarks).await {

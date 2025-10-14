@@ -9,9 +9,6 @@ use crate::{
     types::{RecordKey, StoredBatch, StoredRecord},
 };
 
-/// Unique identifier for a stored batch
-type BatchId = u64;
-
 /// Trait for storing and retrieving batches to support reorg handling.
 ///
 /// Implementations track emitted batches with their associated block ranges.
@@ -51,21 +48,14 @@ pub trait StateStore: Send + Sync {
     ) -> Result<()>;
 }
 
-/// In-memory implementation of StateStore using HashMap.
+/// In-memory implementation of StateStore using Vec.
 ///
-/// Stores batches indexed by (network, range) with a configurable retention window.
-/// A single batch can be indexed under multiple networks if it spans multiple chains.
+/// Stores batches in a vector, appended in order as they arrive.
+/// Block ranges are guaranteed to arrive in order from Amp.
 /// Suitable for most use cases but does not persist across restarts.
 pub struct InMemoryStore {
-    /// All stored batches, indexed by batch ID
-    batches: HashMap<BatchId, StoredBatch>,
-
-    /// Index: (network, range_end) -> set of batch IDs
-    /// We index by range_end for efficient pruning
-    network_index: HashMap<(String, BlockNum), Vec<BatchId>>,
-
-    /// Next batch ID to assign
-    next_batch_id: BatchId,
+    /// All stored batches, appended in order as they arrive from the stream
+    batches: Vec<StoredBatch>,
 
     /// Maximum number of blocks to retain in memory (reorg window)
     reorg_window: u64,
@@ -88,9 +78,7 @@ impl InMemoryStore {
     /// ```
     pub fn new(reorg_window: u64) -> Self {
         Self {
-            batches: HashMap::default(),
-            network_index: HashMap::default(),
-            next_batch_id: 0,
+            batches: Vec::new(),
             reorg_window,
             max_blocks: HashMap::default(),
         }
@@ -110,10 +98,6 @@ impl InMemoryStore {
 #[async_trait]
 impl StateStore for InMemoryStore {
     async fn insert(&mut self, batch: StoredBatch) -> Result<()> {
-        // Assign a unique ID to this batch
-        let batch_id = self.next_batch_id;
-        self.next_batch_id += 1;
-
         // Update max block for each network in the batch
         for block_range in &batch.ranges {
             let max_block = self
@@ -121,55 +105,33 @@ impl StateStore for InMemoryStore {
                 .entry(block_range.network.clone())
                 .or_insert(0);
             *max_block = (*max_block).max(*block_range.numbers.end());
-
-            // Index this batch by (network, range_end)
-            let key = (block_range.network.clone(), *block_range.numbers.end());
-            self.network_index
-                .entry(key)
-                .or_insert_with(Vec::new)
-                .push(batch_id);
         }
 
-        // Store the batch
-        self.batches.insert(batch_id, batch);
+        // Append batch in order
+        self.batches.push(batch);
 
         Ok(())
     }
 
     async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>> {
         let mut records = Vec::new();
-        let mut seen_batches = std::collections::HashSet::new();
 
-        // Find all batches that have a range for this network overlapping the invalidation range
-        for ((network, _range_end), batch_ids) in &self.network_index {
-            if network != &range.network {
-                continue;
-            }
+        // Iterate through all batches and check for overlaps
+        for stored_batch in &self.batches {
+            let overlaps = stored_batch.ranges.iter().any(|block_range| {
+                block_range.network == range.network
+                    && block_range.numbers.start() <= range.numbers.end()
+                    && block_range.numbers.end() >= range.numbers.start()
+            });
 
-            for &batch_id in batch_ids {
-                // Skip if we've already processed this batch
-                if !seen_batches.insert(batch_id) {
-                    continue;
-                }
-
-                // Check if this batch has a range overlapping the invalidation range
-                if let Some(stored_batch) = self.batches.get(&batch_id) {
-                    let overlaps = stored_batch.ranges.iter().any(|block_range| {
-                        block_range.network == range.network
-                            && block_range.numbers.start() <= range.numbers.end()
-                            && block_range.numbers.end() >= range.numbers.start()
+            if overlaps {
+                // Extract ALL records from this batch on-demand
+                for row_idx in 0..stored_batch.batch.num_rows() {
+                    records.push(StoredRecord {
+                        key: RecordKey::new(0), // Key not needed for reorg handling
+                        batch: stored_batch.batch.clone(),
+                        row_idx,
                     });
-
-                    if overlaps {
-                        // Extract ALL records from this batch on-demand
-                        for row_idx in 0..stored_batch.batch.num_rows() {
-                            records.push(StoredRecord {
-                                key: RecordKey::new(0), // Key not needed for reorg handling
-                                batch: stored_batch.batch.clone(),
-                                row_idx,
-                            });
-                        }
-                    }
                 }
             }
         }
@@ -181,12 +143,9 @@ impl StateStore for InMemoryStore {
         &mut self,
         watermarks: &std::collections::BTreeMap<String, BlockNum>,
     ) -> Result<()> {
-        let mut batches_to_remove = Vec::new();
-
-        // Find batches to remove: any batch where ALL its ranges are prunable
-        for (&batch_id, batch) in &self.batches {
-            let mut all_ranges_prunable = true;
-
+        // Find the first batch that should be retained
+        let split_point = self.batches.iter().position(|batch| {
+            // Check if this batch should be retained
             for block_range in &batch.ranges {
                 if let Some(&watermark_block) = watermarks.get(&block_range.network) {
                     if let Some(&max_block) = self.max_blocks.get(&block_range.network) {
@@ -194,38 +153,26 @@ impl StateStore for InMemoryStore {
                         let prune_before = max_block.saturating_sub(self.reorg_window);
                         let prune_block = prune_before.min(watermark_block);
 
-                        // If this range ends after the prune block, it's not prunable
+                        // If this range ends after the prune block, keep this batch
                         if *block_range.numbers.end() >= prune_block {
-                            all_ranges_prunable = false;
-                            break;
+                            return true;
                         }
                     }
                 } else {
-                    // No watermark for this network, don't prune
-                    all_ranges_prunable = false;
-                    break;
+                    // No watermark for this network, keep this batch
+                    return true;
                 }
             }
+            // All ranges are prunable, don't keep this batch
+            false
+        });
 
-            if all_ranges_prunable {
-                batches_to_remove.push(batch_id);
-            }
-        }
-
-        // Remove the batches
-        for batch_id in batches_to_remove {
-            if let Some(batch) = self.batches.remove(&batch_id) {
-                // Remove from network index
-                for block_range in &batch.ranges {
-                    let key = (block_range.network.clone(), *block_range.numbers.end());
-                    if let Some(batch_ids) = self.network_index.get_mut(&key) {
-                        batch_ids.retain(|&id| id != batch_id);
-                        if batch_ids.is_empty() {
-                            self.network_index.remove(&key);
-                        }
-                    }
-                }
-            }
+        if let Some(split_idx) = split_point {
+            // Drain all batches before split_idx
+            self.batches.drain(..split_idx);
+        } else {
+            // All batches are prunable, clear everything
+            self.batches.clear();
         }
 
         Ok(())
