@@ -6,10 +6,9 @@ use arrow::{
 };
 
 use crate::{
-    BLOCK_NUM, BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, RawTableRows,
-    SPECIAL_BLOCK_NUM, Table, Timestamp, TimestampArrayBuilder, arrow,
-    metadata::segments::BlockRange, timestamp_type,
+    BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    EvmAddress as Address, EvmAddressArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    Timestamp, TimestampArrayBuilder, arrow, metadata::segments::BlockRange, timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -24,7 +23,7 @@ pub const TABLE_NAME: &str = "logs";
 fn schema() -> Schema {
     let special_block_num = Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false);
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
-    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
+    let block_num = Field::new("block_num", DataType::UInt64, false);
     let timestamp = Field::new("timestamp", timestamp_type(), false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);

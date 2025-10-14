@@ -1,10 +1,10 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BLOCK_NUM, BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM,
-    Table, Timestamp, TimestampArrayBuilder,
+    BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    EVM_CURRENCY_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
+    EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table, Timestamp,
+    TimestampArrayBuilder,
     arrow::{
         array::{
             ArrayRef, BinaryBuilder, BooleanBuilder, Int32Builder, UInt32Builder, UInt64Builder,
@@ -26,7 +26,7 @@ pub const TABLE_NAME: &'static str = "calls";
 fn schema() -> Schema {
     let special_block_num = Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false);
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
-    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
+    let block_num = Field::new("block_num", DataType::UInt64, false);
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);

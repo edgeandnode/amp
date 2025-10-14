@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 use common::{
-    BLOCK_NUM, RawDatasetRows, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    RawDatasetRows, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
@@ -84,7 +84,7 @@ fn table_changes_to_rows(
         .iter()
         .filter_map(|column| {
             let col_name = column.name();
-            if col_name == BLOCK_NUM {
+            if col_name == "block_num" {
                 let mut builder = UInt64Builder::with_capacity(row_count);
                 builder.append_slice(&vec![block_num; row_count]);
                 return Some(Ok(Arc::new(builder.finish()) as Arc<dyn Array>));
@@ -273,13 +273,13 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
         Statement::CreateTable(CreateTable { name, columns, .. }) => {
             let fields = [
                 Field::new(SPECIAL_BLOCK_NUM, ArrowDataType::UInt64, false),
-                Field::new(BLOCK_NUM, ArrowDataType::UInt64, false),
+                Field::new("block_num", ArrowDataType::UInt64, false),
             ]
             .into_iter()
             .chain(
                 columns
                     .iter()
-                    .filter(|column| column.name.value != BLOCK_NUM)
+                    .filter(|column| column.name.value != "block_num")
                     .map(|column| {
                         let datatype = match column.data_type {
                             SqlDataType::Int(_) => ArrowDataType::Int32,

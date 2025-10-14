@@ -14,7 +14,7 @@ use datafusion::{
 };
 use tracing::instrument;
 
-use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal};
+use crate::{BoxError, SPECIAL_BLOCK_NUM, internal};
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
 /// names are reserved for special columns.
@@ -109,19 +109,9 @@ pub fn constrain_by_block_num(
         LogicalPlan::TableScan(TableScan { source, .. })
             if source.table_type() == TableType::Base && source.get_logical_plan().is_none() =>
         {
-            let column_name = if source
-                .schema()
-                .fields()
-                .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM)
-            {
-                SPECIAL_BLOCK_NUM
-            } else {
-                BLOCK_NUM
-            };
-            // `where start <= block_num and block_num <= end`
-            let mut predicate = col(column_name).lt_eq(lit(end));
-            predicate = predicate.and(lit(start).lt_eq(col(column_name)));
+            // `where start <= _block_num and _block_num <= end`
+            let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
+            predicate = predicate.and(lit(start).lt_eq(col(SPECIAL_BLOCK_NUM)));
 
             let with_filter = LogicalPlan::Filter(Filter::try_new(predicate, Arc::new(node))?);
             let with_pushdown =

@@ -9,7 +9,7 @@ use datasets_common::{name::Name, version::Version};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
+use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -110,7 +110,7 @@ impl Table {
         // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        &[SPECIAL_BLOCK_NUM, BLOCK_NUM, "timestamp"]
+        &[SPECIAL_BLOCK_NUM, "block_num", "timestamp"]
     }
 }
 
