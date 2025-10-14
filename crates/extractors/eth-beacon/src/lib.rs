@@ -47,9 +47,9 @@ pub fn dataset(manifest: Manifest) -> Dataset {
         name: manifest.name,
         version: Some(manifest.version),
         kind: manifest.kind.to_string(),
+        network: Some(manifest.network.clone()),
         start_block: Some(manifest.start_block),
-        tables: all_tables(manifest.network.clone()),
-        network: manifest.network,
+        tables: all_tables(manifest.network),
         functions: vec![],
     }
 }

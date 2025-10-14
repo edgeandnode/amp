@@ -260,6 +260,16 @@ pub enum GetClientError {
         kind: String,
     },
 
+    /// Dataset is missing the required 'network' field.
+    ///
+    /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, firehose, or substreams)
+    /// does not include the network field, which is required to determine the appropriate provider configuration.
+    #[error("Dataset '{name}' version '{}' is missing required 'network' field for raw dataset kind", version.as_deref().unwrap_or("latest"))]
+    MissingNetwork {
+        name: String,
+        version: Option<String>,
+    },
+
     /// No provider configuration found for the dataset kind and network combination.
     ///
     /// This occurs when:
@@ -540,6 +550,18 @@ pub enum ExtractDatasetFromFunctionNamesError {
 /// the eth_call user-defined function for EVM RPC datasets.
 #[derive(Debug, thiserror::Error)]
 pub enum EthCallForDatasetError {
+    /// Dataset is missing the required 'network' field.
+    ///
+    /// This occurs when an EVM RPC dataset definition does not include the network
+    /// field, which is required to determine the appropriate provider configuration.
+    #[error(
+        "Dataset '{dataset_name}' version '{dataset_version}' is missing required 'network' field for EvmRpc kind"
+    )]
+    MissingNetwork {
+        dataset_name: Name,
+        dataset_version: Version,
+    },
+
     /// No provider configuration found for the dataset kind and network combination.
     ///
     /// This occurs when:

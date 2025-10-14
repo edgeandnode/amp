@@ -388,7 +388,6 @@ fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
     let manifest_json = indoc::formatdoc! {r#"
         {{
             "name": "{name}",
-            "network": "mainnet",
             "version": "{version}",
             "kind": "manifest",
             "dependencies": {{

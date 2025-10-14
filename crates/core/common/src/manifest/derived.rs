@@ -69,7 +69,7 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
 
     Ok(Dataset {
         kind: DerivedDatasetKind.to_string(),
-        network: manifest.network,
+        network: None,
         name: manifest.name,
         version: Some(manifest.version),
         start_block: None,

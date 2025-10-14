@@ -28,10 +28,6 @@
       "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
-    "network": {
-      "description": "Network name, e.g., `mainnet`, `sepolia`",
-      "type": "string"
-    },
     "tables": {
       "description": "Table definitions mapped by table name",
       "type": "object",
@@ -48,8 +44,7 @@
   "required": [
     "name",
     "version",
-    "kind",
-    "network"
+    "kind"
   ],
   "$defs": {
     "ArrowSchema": {

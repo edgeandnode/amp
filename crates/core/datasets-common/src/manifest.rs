@@ -26,9 +26,8 @@ pub struct Manifest {
     /// Common values include: `manifest`, `evm-rpc`, `firehose`, `substreams`.
     pub kind: String,
     /// Network name, e.g., `mainnet`, `sepolia`
-    pub network: String,
+    pub network: Option<String>,
     /// Dataset schema. Lists the tables defined by this dataset.
-    /// Optional for TOML format, required for JSON format
     pub schema: Option<Schema>,
 }
 
@@ -37,6 +36,7 @@ impl std::fmt::Debug for Manifest {
         f.debug_struct("Manifest")
             .field("name", &self.name)
             .field("kind", &self.kind)
+            .field("version", &self.version)
             .field("network", &self.network)
             .field(
                 "schema",
