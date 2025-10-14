@@ -15,7 +15,12 @@ use crate::{
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
-    Table::new(TABLE_NAME.to_string(), SCHEMA.clone(), network)
+    Table::new(
+        TABLE_NAME.to_string(),
+        SCHEMA.clone(),
+        network,
+        vec!["block_num".to_string(), "timestamp".to_string()],
+    )
 }
 
 pub const TABLE_NAME: &str = "blocks";

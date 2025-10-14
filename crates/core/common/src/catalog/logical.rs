@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeSet, fmt, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
@@ -79,14 +79,18 @@ pub struct Table {
     name: String,
     schema: SchemaRef,
     network: String,
+    sorted_by: BTreeSet<String>,
 }
 
 impl Table {
-    pub fn new(name: String, schema: SchemaRef, network: String) -> Self {
+    pub fn new(name: String, schema: SchemaRef, network: String, sorted_by: Vec<String>) -> Self {
+        let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
+        sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
         Self {
             name,
             schema,
             network,
+            sorted_by,
         }
     }
 
@@ -103,14 +107,8 @@ impl Table {
     }
 
     /// Column names by which this table is naturally sorted.
-    pub const fn sorted_by(&self) -> &[&str] {
-        // Leveraging `order_exprs` can optimize away sorting for many query plans.
-        //
-        // TODO:
-        // - Make this less hardcoded to handle non-blockchain data.
-        // - Have a consistency check that the data really is sorted.
-        // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        &[SPECIAL_BLOCK_NUM, "block_num", "timestamp"]
+    pub fn sorted_by(&self) -> &BTreeSet<String> {
+        &self.sorted_by
     }
 }
 

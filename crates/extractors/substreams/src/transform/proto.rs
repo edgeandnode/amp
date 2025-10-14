@@ -228,6 +228,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
         field.name().to_string(),
         Arc::new(Schema::new(fields)),
         network.to_string(),
+        vec![],
     ))
 }
 

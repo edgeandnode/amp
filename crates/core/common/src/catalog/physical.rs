@@ -466,10 +466,11 @@ impl PhysicalTable {
             .fields()
             .iter()
             .filter_map(move |field| {
-                sorted_by
-                    .iter()
-                    .find(|name| *name == field.name())
-                    .map(|name| vec![SortExpr::new(col(*name), true, false)])
+                if sorted_by.contains(field.name()) {
+                    Some(vec![SortExpr::new(col(field.name()), true, false)])
+                } else {
+                    None
+                }
             })
             .collect()
     }

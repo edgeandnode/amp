@@ -309,6 +309,7 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
                 name.to_string(),
                 Arc::new(Schema::new(fields)),
                 network.to_string(),
+                vec![],
             ))
         }
         _ => None,
