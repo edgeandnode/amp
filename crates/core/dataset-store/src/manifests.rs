@@ -225,9 +225,10 @@ where
             }
 
             // Register the dataset in the metadata database
+            let namespace = "";
             match self
                 .metadata_db
-                .register_dataset(&name, &version, &path.to_string())
+                .register_dataset(namespace, &name, &version, &path.to_string())
                 .await
             {
                 Ok(()) => {

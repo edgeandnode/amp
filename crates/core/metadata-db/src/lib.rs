@@ -797,13 +797,20 @@ impl MetadataDb {
     #[instrument(skip(self), err)]
     pub async fn register_dataset(
         &self,
+        namespace: &str,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
         version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
-        datasets::insert(&*self.pool, name.into(), version.into(), manifest_path)
-            .await
-            .map_err(Into::into)
+        datasets::insert(
+            &*self.pool,
+            namespace,
+            name.into(),
+            version.into(),
+            manifest_path,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Check if a dataset exists for the given name and version

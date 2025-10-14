@@ -125,8 +125,9 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
+        let namespace = "";
         self.metadata_db
-            .register_dataset(name, version, manifest_path.as_ref())
+            .register_dataset(namespace, name, version, manifest_path.as_ref())
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 
