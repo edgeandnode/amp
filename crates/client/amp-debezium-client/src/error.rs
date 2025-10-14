@@ -11,10 +11,6 @@ pub enum Error {
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// Error extracting primary key from record
-    #[error("Primary key extraction error: {0}")]
-    PrimaryKey(String),
-
     /// Error with Arrow data types
     #[error("Arrow error: {0}")]
     Arrow(#[from] common::arrow::error::ArrowError),

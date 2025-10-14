@@ -1,7 +1,4 @@
-use std::{
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use common::{arrow::array::RecordBatch, metadata::segments::BlockRange};
 use serde::{Deserialize, Serialize};
@@ -41,38 +38,11 @@ pub enum DebeziumOp {
     Delete,
 }
 
-/// A composite key identifying a unique record.
-///
-/// Constructed from one or more primary key columns, hashed for efficient lookup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RecordKey(u128);
-
-impl RecordKey {
-    /// Create a new RecordKey from a 128-bit hash value.
-    pub fn new(hash: u128) -> Self {
-        Self(hash)
-    }
-
-    /// Get the raw hash value.
-    pub fn hash(&self) -> u128 {
-        self.0
-    }
-}
-
-impl Hash for RecordKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u128(self.0);
-    }
-}
-
 /// A stored record with its associated metadata.
 ///
 /// Returned during reorg handling to identify which records need to be retracted.
 #[derive(Debug, Clone)]
 pub struct StoredRecord {
-    /// The primary key identifying this record
-    pub key: RecordKey,
-
     /// The Arrow RecordBatch containing this record
     pub batch: Arc<RecordBatch>,
 

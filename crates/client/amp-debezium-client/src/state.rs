@@ -4,7 +4,7 @@ use common::BlockNum;
 
 use crate::{
     error::Result,
-    types::{RecordKey, StoredBatch, StoredRecord},
+    types::{StoredBatch, StoredRecord},
 };
 
 /// Trait for storing and retrieving batches to support reorg handling.
@@ -111,7 +111,6 @@ impl StateStore for InMemoryStore {
             })
             .flat_map(|batch| {
                 (0..batch.batch.num_rows()).map(|row_idx| StoredRecord {
-                    key: RecordKey::new(0),
                     batch: batch.batch.clone(),
                     row_idx,
                 })

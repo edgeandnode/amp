@@ -98,4 +98,4 @@ pub mod types;
 pub use client::{DebeziumClient, DebeziumClientBuilder};
 pub use error::{Error, Result};
 pub use state::{InMemoryStore, StateStore};
-pub use types::{DebeziumOp, DebeziumRecord, RecordKey, StoredBatch, StoredRecord};
+pub use types::{DebeziumOp, DebeziumRecord, StoredBatch, StoredRecord};
