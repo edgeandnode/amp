@@ -50,8 +50,8 @@ pub trait StateStore: Send + Sync {
 
 /// In-memory implementation of StateStore using Vec.
 ///
-/// Stores batches in a vector, appended in order as they arrive.
-/// Block ranges are guaranteed to arrive in order from Amp.
+/// Stores batches in a vector, appended as they arrive.
+/// Batches are mostly-ordered but may have rewinds due to reorgs.
 /// Suitable for most use cases but does not persist across restarts.
 pub struct InMemoryStore {
     /// All stored batches, appended in order as they arrive from the stream
@@ -143,8 +143,9 @@ impl StateStore for InMemoryStore {
         &mut self,
         watermarks: &std::collections::BTreeMap<String, BlockNum>,
     ) -> Result<()> {
-        // Find the first batch that should be retained
-        let split_point = self.batches.iter().position(|batch| {
+        // Use retain to efficiently remove batches that should be pruned
+        // Batches are mostly-ordered but may have rewinds due to reorgs
+        self.batches.retain(|batch| {
             // Check if this batch should be retained
             for block_range in &batch.ranges {
                 if let Some(&watermark_block) = watermarks.get(&block_range.network) {
@@ -166,14 +167,6 @@ impl StateStore for InMemoryStore {
             // All ranges are prunable, don't keep this batch
             false
         });
-
-        if let Some(split_idx) = split_point {
-            // Drain all batches before split_idx
-            self.batches.drain(..split_idx);
-        } else {
-            // All batches are prunable, clear everything
-            self.batches.clear();
-        }
 
         Ok(())
     }
