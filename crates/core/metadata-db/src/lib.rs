@@ -27,7 +27,8 @@ pub use self::{
     datasets::{
         Dataset, DatasetWithDetails, Name as DatasetName, NameOwned as DatasetNameOwned,
         Namespace as DatasetNamespace, NamespaceOwned as DatasetNamespaceOwned,
-        Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
+        Version as DatasetVersion, VersionHash as DatasetVersionHash,
+        VersionHashOwned as DatasetVersionHashOwned, VersionOwned as DatasetVersionOwned,
     },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,

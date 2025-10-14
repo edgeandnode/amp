@@ -11,6 +11,7 @@ mod name;
 mod namespace;
 mod pagination;
 mod version;
+mod version_hash;
 
 pub use self::{
     name::{Name, NameOwned},
@@ -20,6 +21,7 @@ pub use self::{
         list_versions_by_name_next_page,
     },
     version::{Version, VersionOwned},
+    version_hash::{VersionHash, VersionHashOwned},
 };
 
 /// Insert a new dataset registry entry
