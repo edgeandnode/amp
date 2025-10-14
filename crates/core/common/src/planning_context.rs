@@ -25,10 +25,7 @@ use tracing::instrument;
 use crate::{
     BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     metadata::segments::ResumeWatermark,
-    plan_visitors::{
-        IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num,
-        unproject_special_block_num_column,
-    },
+    plan_visitors::{IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num},
     query_context::{Error, TableProviderCodec},
     stream_helpers::is_streaming,
 };
@@ -242,10 +239,6 @@ impl DetachedLogicalPlan {
 
     pub fn order_by_block_num(self) -> Self {
         Self(order_by_block_num(self.0))
-    }
-
-    pub fn unproject_special_block_num_column(self) -> Result<Self, DataFusionError> {
-        Ok(Self(unproject_special_block_num_column(self.0)?))
     }
 
     pub fn apply<F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
