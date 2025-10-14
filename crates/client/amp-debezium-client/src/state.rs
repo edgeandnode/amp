@@ -1,11 +1,10 @@
+use std::sync::Arc;
+
 use amp_client::InvalidationRange;
 use async_trait::async_trait;
-use common::BlockNum;
+use common::{BlockNum, arrow::array::RecordBatch};
 
-use crate::{
-    error::Result,
-    types::{StoredBatch, StoredRecord},
-};
+use crate::{error::Result, types::StoredBatch};
 
 /// Trait for storing and retrieving batches to support reorg handling.
 ///
@@ -20,17 +19,18 @@ pub trait StateStore: Send + Sync {
     /// * `batch` - The stored batch with ranges and all records
     async fn insert(&mut self, batch: StoredBatch) -> Result<()>;
 
-    /// Retrieve all records from batches whose ranges intersect with the given invalidation range.
+    /// Retrieve all batches whose ranges intersect with the given invalidation range.
     ///
-    /// Used during reorg handling to find records that need to be retracted.
-    /// Returns ALL records from any batch that has a range overlapping the invalidation range.
+    /// Used during reorg handling to find batches that need to be retracted.
+    /// Returns batches where ANY range overlaps with the invalidation range.
+    /// ALL records from matching batches should be retracted (batch-level granularity).
     ///
     /// # Arguments
     /// * `range` - The invalidation range (network + block number range)
     ///
     /// # Returns
-    /// A vector of all stored records from batches that overlap with the invalidation range
-    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>>;
+    /// A vector of RecordBatch references for all batches that overlap
+    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<Arc<RecordBatch>>>;
 
     /// Remove batches based on multi-network watermarks.
     ///
@@ -67,7 +67,7 @@ impl InMemoryStore {
     ///
     /// # Example
     /// ```
-    /// use amp_debezium::InMemoryStore;
+    /// use amp_debezium_client::InMemoryStore;
     ///
     /// let store = InMemoryStore::new(64);
     /// ```
@@ -98,23 +98,19 @@ impl StateStore for InMemoryStore {
         Ok(())
     }
 
-    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<StoredRecord>> {
+    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<Arc<RecordBatch>>> {
         Ok(self
             .batches
             .iter()
             .filter(|batch| {
+                // Check if any range in this batch overlaps with the invalidation range
                 batch.ranges.iter().any(|block_range| {
                     block_range.network == range.network
                         && block_range.numbers.start() <= range.numbers.end()
                         && block_range.numbers.end() >= range.numbers.start()
                 })
             })
-            .flat_map(|batch| {
-                (0..batch.batch.num_rows()).map(|row_idx| StoredRecord {
-                    batch: batch.batch.clone(),
-                    row_idx,
-                })
-            })
+            .map(|batch| batch.batch.clone())
             .collect())
     }
 
@@ -227,14 +223,18 @@ mod tests {
             network: "test".to_string(),
             numbers: 105..=115,
         };
-        let records = store
+        let batches = store
             .get_in_range(&range)
             .await
             .expect("get_in_range should succeed");
 
         //* Then
-        // Each batch has 3 rows, and we have 3 batches (105, 110, 115) overlapping
-        assert_eq!(records.len(), 9); // 3 batches * 3 rows each
+        // We have 3 batches (105, 110, 115) overlapping with range 105..=115
+        assert_eq!(batches.len(), 3);
+        // Each batch has 3 rows
+        for batch in batches {
+            assert_eq!(batch.num_rows(), 3);
+        }
     }
 
     #[tokio::test]
@@ -273,17 +273,17 @@ mod tests {
         // prune_before = 15 - 10 = 5, so blocks 5-20 should remain (16 batches)
         assert_eq!(store.len(), 16);
 
-        // Verify all remaining batch ranges end >= block 5
+        // Verify all remaining batches
         let all_range = InvalidationRange {
             network: "test".to_string(),
             numbers: 0..=100,
         };
-        let remaining = store
+        let remaining_batches = store
             .get_in_range(&all_range)
             .await
             .expect("get_in_range should succeed");
 
-        // Should have 16 batches * 3 rows each = 48 records from batch ranges 5..=20
-        assert_eq!(remaining.len(), 48);
+        // Should have 16 batches from block ranges 5..=20
+        assert_eq!(remaining_batches.len(), 16);
     }
 }

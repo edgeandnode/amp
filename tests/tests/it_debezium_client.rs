@@ -243,9 +243,9 @@ async fn debezium_stream_basic_functionality() {
     // Create client
     let endpoint = test.ctx.daemon_server().flight_server_url();
     let client = DebeziumClient::builder()
-        .amp_endpoint(&endpoint)
+        .endpoint(&endpoint)
         .expect("Failed to set endpoint")
-        .state_store(InMemoryStore::new(64))
+        .store(InMemoryStore::new(64))
         .build()
         .await
         .expect("Failed to build client");
@@ -358,9 +358,9 @@ impl TestCtx {
         let endpoint = self.ctx.daemon_server().flight_server_url();
 
         DebeziumClient::builder()
-            .amp_endpoint(&endpoint)
+            .endpoint(&endpoint)
             .expect("Failed to set endpoint")
-            .state_store(InMemoryStore::new(64))
+            .store(InMemoryStore::new(64))
             .build()
             .await
             .expect("Failed to build debezium client")

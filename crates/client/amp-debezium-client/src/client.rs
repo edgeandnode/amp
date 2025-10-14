@@ -33,7 +33,7 @@ pub struct DebeziumClient<S: StateStore> {
     amp_client: SqlClient,
 
     /// State store for tracking emitted batches
-    state_store: S,
+    store: S,
 }
 
 impl<S: StateStore + 'static> DebeziumClient<S> {
@@ -41,12 +41,12 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
     ///
     /// # Example
     /// ```no_run
-    /// use amp_debezium::{DebeziumClient, InMemoryStore};
+    /// use amp_debezium_client::{DebeziumClient, InMemoryStore};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = DebeziumClient::builder()
-    ///     .amp_endpoint("http://localhost:1602")?
-    ///     .state_store(InMemoryStore::new(64))
+    ///     .endpoint("http://localhost:1602")?
+    ///     .store(InMemoryStore::new(64))
     ///     .build()
     ///     .await?;
     /// # Ok(())
@@ -67,7 +67,7 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
     ///
     /// # Example
     /// ```no_run
-    /// # use amp_debezium::{DebeziumClient, InMemoryStore};
+    /// # use amp_debezium_client::{DebeziumClient, InMemoryStore};
     /// # async fn example(client: DebeziumClient<InMemoryStore>) -> Result<(), Box<dyn std::error::Error>> {
     /// use futures::StreamExt;
     ///
@@ -78,10 +78,10 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
     ///
     /// while let Some(record) = stream.next().await {
     ///     match record? {
-    ///         record if record.op == amp_debezium::DebeziumOp::Create => {
+    ///         record if record.op == amp_debezium_client::DebeziumOp::Create => {
     ///             println!("New record: {:?}", record.after);
     ///         }
-    ///         record if record.op == amp_debezium::DebeziumOp::Delete => {
+    ///         record if record.op == amp_debezium_client::DebeziumOp::Delete => {
     ///             println!("Retracted record: {:?}", record.before);
     ///         }
     ///         _ => {}
@@ -144,7 +144,7 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
                             .map(|(network, watermark)| (network, watermark.number))
                             .collect();
 
-                        if let Err(e) = self.state_store.prune(&watermarks).await {
+                        if let Err(e) = self.store.prune(&watermarks).await {
                             yield Err(e);
                             break;
                         }
@@ -174,7 +174,7 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
             batch: batch_arc.clone(),
             ranges,
         };
-        self.state_store.insert(stored_batch).await?;
+        self.store.insert(stored_batch).await?;
 
         // Emit create events for all rows
         for row_idx in 0..batch.num_rows() {
@@ -202,21 +202,25 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
         let mut records = Vec::new();
 
         for range in invalidation {
-            // Retrieve all records in the invalidation range
-            let stored_records = self.state_store.get_in_range(&range).await?;
+            // Retrieve all batches whose ranges overlap with the invalidation range
+            // Note: Batch-level granularity - ALL records from affected batches are retracted
+            let affected_batches = self.store.get_in_range(&range).await?;
 
-            for stored in stored_records {
-                // Convert stored record to JSON
-                let row_json = row_to_json(&stored.batch, stored.row_idx)?;
+            for batch in affected_batches {
+                // Emit delete events for all rows in this batch
+                for row_idx in 0..batch.num_rows() {
+                    // Convert row to JSON
+                    let row_json = row_to_json(&batch, row_idx)?;
 
-                // Create Debezium delete record
-                let debezium_record = DebeziumRecord {
-                    before: Some(row_json),
-                    after: None,
-                    op: DebeziumOp::Delete,
-                };
+                    // Create Debezium delete record
+                    let debezium_record = DebeziumRecord {
+                        before: Some(row_json),
+                        after: None,
+                        op: DebeziumOp::Delete,
+                    };
 
-                records.push(debezium_record);
+                    records.push(debezium_record);
+                }
             }
         }
 
@@ -227,7 +231,7 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
 /// Builder for configuring a DebeziumClient.
 pub struct DebeziumClientBuilder<S: StateStore> {
     endpoint: Option<String>,
-    state_store: Option<S>,
+    store: Option<S>,
 }
 
 impl<S: StateStore> DebeziumClientBuilder<S> {
@@ -235,19 +239,19 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
     pub fn new() -> Self {
         Self {
             endpoint: None,
-            state_store: None,
+            store: None,
         }
     }
 
     /// Set the Amp server endpoint.
-    pub fn amp_endpoint(mut self, endpoint: impl Into<String>) -> Result<Self> {
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Result<Self> {
         self.endpoint = Some(endpoint.into());
         Ok(self)
     }
 
     /// Set the state store implementation.
-    pub fn state_store(mut self, store: S) -> Self {
-        self.state_store = Some(store);
+    pub fn store(mut self, store: S) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -257,16 +261,13 @@ impl<S: StateStore> DebeziumClientBuilder<S> {
             .endpoint
             .ok_or_else(|| Error::Config("endpoint is required".to_string()))?;
 
-        let state_store = self
-            .state_store
-            .ok_or_else(|| Error::Config("state_store is required".to_string()))?;
+        let store = self
+            .store
+            .ok_or_else(|| Error::Config("store is required".to_string()))?;
 
         let amp_client = SqlClient::new(&endpoint).await?;
 
-        Ok(DebeziumClient {
-            amp_client,
-            state_store,
-        })
+        Ok(DebeziumClient { amp_client, store })
     }
 }
 
