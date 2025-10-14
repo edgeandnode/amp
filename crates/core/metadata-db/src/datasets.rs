@@ -1,18 +1,20 @@
 //! Dataset registry resource management
 //!
 //! This module provides database operations for the `registry` table,
-//! which stores dataset registration information including owner, name,
+//! which stores dataset registration information including namespace, name,
 //! version, and manifest data.
 
 use futures::stream::Stream;
 use sqlx::{Executor, Postgres};
 
 mod name;
+mod namespace;
 mod pagination;
 mod version;
 
 pub use self::{
     name::{Name, NameOwned},
+    namespace::{Namespace, NamespaceOwned},
     pagination::{
         list_first_page, list_next_page, list_versions_by_name_first_page,
         list_versions_by_name_next_page,
@@ -26,7 +28,7 @@ pub use self::{
 #[tracing::instrument(skip(exe), err)]
 pub async fn insert<'c, E>(
     exe: E,
-    namespace: &str,
+    namespace: Namespace<'_>,
     name: Name<'_>,
     version: Version<'_>,
     manifest_path: &str,
@@ -145,7 +147,7 @@ where
 
 /// Stream all datasets from the registry
 ///
-/// Returns a stream of all dataset records with basic information (owner, name, version),
+/// Returns a stream of all dataset records with basic information (namespace, name, version),
 /// ordered by dataset name first, then by version.
 pub fn stream<'e, E>(executor: E) -> impl Stream<Item = Result<Dataset, sqlx::Error>> + 'e
 where
@@ -166,8 +168,9 @@ where
 /// Dataset registry entry with basic information
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Dataset {
-    /// Dataset owner identifier
-    pub owner: String,
+    /// Dataset namespace identifier
+    #[sqlx(rename = "owner")]
+    pub namespace: String,
     /// Dataset name
     #[sqlx(rename = "dataset")]
     pub name: NameOwned,
@@ -178,8 +181,9 @@ pub struct Dataset {
 /// Dataset registry entry representing a dataset registration
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DatasetWithDetails {
-    /// Dataset owner identifier
-    pub owner: String,
+    /// Dataset namespace identifier
+    #[sqlx(rename = "owner")]
+    pub namespace: String,
     /// Dataset name
     #[sqlx(rename = "dataset")]
     pub name: NameOwned,

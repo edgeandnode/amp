@@ -12,7 +12,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version::Version,
+};
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
@@ -125,7 +127,10 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
-        let namespace = "";
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         self.metadata_db
             .register_dataset(namespace, name, version, manifest_path.as_ref())
             .await
@@ -583,7 +588,7 @@ impl DatasetStore {
         'try_find_provider: for mut provider in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = crate::env_substitute::substitute_env_vars(value) {
+                if let Err(err) = env_substitute::substitute_env_vars(value) {
                     tracing::warn!(
                         provider_name = %provider.name,
                         provider_kind = %kind,

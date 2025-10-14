@@ -26,6 +26,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
         Dataset, DatasetWithDetails, Name as DatasetName, NameOwned as DatasetNameOwned,
+        Namespace as DatasetNamespace, NamespaceOwned as DatasetNamespaceOwned,
         Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
     },
     files::{
@@ -792,19 +793,19 @@ impl MetadataDb {
 impl MetadataDb {
     /// Register a new dataset in the registry
     ///
-    /// Creates a new dataset entry with the specified owner, name, version, and manifest.
+    /// Creates a new dataset entry with the specified namespace, name, version, and manifest.
     /// The combination of dataset name and version must be unique across all datasets.
     #[instrument(skip(self), err)]
     pub async fn register_dataset(
         &self,
-        namespace: &str,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
         version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
         datasets::insert(
             &*self.pool,
-            namespace,
+            namespace.into(),
             name.into(),
             version.into(),
             manifest_path,
@@ -870,7 +871,7 @@ impl MetadataDb {
 
     /// Stream all datasets from the registry
     ///
-    /// Returns a stream of all dataset records with basic information (owner, name, version),
+    /// Returns a stream of all dataset records with basic information (namespace, name, version),
     /// ordered by dataset name first, then by version.
     pub fn stream_all_datasets(&self) -> impl Stream<Item = Result<Dataset, Error>> + '_ {
         datasets::stream(&*self.pool).map(|result| result.map_err(Error::DbError))

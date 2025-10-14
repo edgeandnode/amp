@@ -5,7 +5,7 @@ use rand::seq::SliceRandom;
 
 use crate::{
     conn::DbConn,
-    datasets::{self, Name, Version, VersionOwned},
+    datasets::{self, Name, Namespace, Version, VersionOwned},
 };
 
 #[tokio::test]
@@ -61,12 +61,12 @@ async fn list_first_page_respects_limit_and_ordering() {
 
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
-        let namespace = "test_namespace";
-        let name = Name::from_ref_unchecked(name);
+        let namespace = Namespace::from_ref_unchecked("test_namespace");
+        let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
-        datasets::insert(&mut *conn, namespace, name, version, &manifest_path)
+        datasets::insert(&mut *conn, namespace.clone(), name, version, &manifest_path)
             .await
             .expect("should insert dataset");
     }
@@ -171,12 +171,12 @@ async fn list_next_page_uses_cursor() {
 
     // Insert datasets into the database
     for (name, version_str) in datasets.iter() {
-        let namespace = "test_namespace";
-        let name = Name::from_ref_unchecked(name);
+        let namespace = Namespace::from_ref_unchecked("test_namespace");
+        let name = Name::from_ref_unchecked(*name);
         let version = test_version(version_str);
         let manifest_path = test_manifest_path(&name, &version);
 
-        datasets::insert(&mut *conn, namespace, name, version, &manifest_path)
+        datasets::insert(&mut *conn, namespace.clone(), name, version, &manifest_path)
             .await
             .expect("should insert dataset");
     }
@@ -285,7 +285,7 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let dataset_name = Name::from_ref_unchecked("versioned_dataset");
 
     // Create 7 versions with semver edge cases to test both limit and ordering
@@ -310,7 +310,7 @@ async fn list_versions_by_name_first_page_respects_limit_and_order() {
 
         datasets::insert(
             &mut *conn,
-            namespace,
+            namespace.clone(),
             dataset_name.clone(),
             version,
             &manifest_path,
@@ -379,7 +379,7 @@ async fn list_versions_by_name_next_page_uses_cursor() {
         .await
         .expect("Failed to run migrations");
 
-    let namespace = "test_namespace";
+    let namespace = Namespace::from_ref_unchecked("test_namespace");
     let dataset_name = Name::from_ref_unchecked("paginated_dataset");
 
     // Create 7 versions with specific structure:
@@ -406,7 +406,7 @@ async fn list_versions_by_name_next_page_uses_cursor() {
 
         datasets::insert(
             &mut *conn,
-            namespace,
+            namespace.clone(),
             dataset_name.clone(),
             version,
             &manifest_path,

@@ -3280,6 +3280,7 @@ dependencies = [
  "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
+ "serde_json",
  "thiserror 2.0.16",
 ]
 
