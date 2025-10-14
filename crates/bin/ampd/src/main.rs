@@ -31,7 +31,7 @@ enum Command {
         ///
         /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
         #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
-        dataset: Vec<String>,
+        dataset: Vec<FreeCandy>,
 
         /// If set to true, only the listed datasets will be dumped in the order they are listed.
         /// By default, dump listed datasets and their dependencies, ordered such that each dataset

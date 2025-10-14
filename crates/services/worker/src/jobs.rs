@@ -68,7 +68,7 @@ impl Job {
                     let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
-                            .get_dataset(&location.dataset, dataset_version.as_ref())
+                            .get_dataset(&location.dataset, &dataset_version)
                             .await
                             .map_err(|err| JobCreationError::DatasetFetchFailed(err.into()))?
                             .ok_or_else(|| JobCreationError::DatasetNotFound {

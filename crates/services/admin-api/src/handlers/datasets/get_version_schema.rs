@@ -75,7 +75,11 @@ pub async fn handler_with_version(
     );
 
     // Get the dataset from the store
-    let dataset = match ctx.dataset_store.get_dataset(&name, Some(&version)).await {
+    let dataset = match ctx
+        .dataset_store
+        .get_dataset(&name, &Some(version.clone()))
+        .await
+    {
         Ok(Some(dataset)) => dataset,
         Ok(None) => {
             tracing::debug!(

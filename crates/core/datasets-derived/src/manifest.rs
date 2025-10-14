@@ -54,10 +54,11 @@ pub struct Manifest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Dependency {
+    pub namespace: String,
     /// Name of the dependency dataset
     pub name: String,
-    /// Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`
-    pub version: VersionReq,
+    /// Semver version
+    pub version: Version,
 }
 
 /// Table definition within a derived dataset.

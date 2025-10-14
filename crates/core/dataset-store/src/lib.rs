@@ -157,7 +157,7 @@ impl DatasetStore {
     pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&Version>>,
+        version: impl Into<&Option<Version>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
         let name = &name
             .parse::<Name>()
@@ -332,7 +332,7 @@ impl DatasetStore {
 
         let mut datasets = Vec::new();
         for (name, version) in list {
-            match self.get_dataset(&name, &version).await? {
+            match self.get_dataset(&name, &Some(version.clone())).await? {
                 Some(dataset) => datasets.push(dataset),
                 None => {
                     tracing::warn!(
