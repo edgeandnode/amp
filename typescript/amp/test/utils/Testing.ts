@@ -11,6 +11,61 @@ import * as Layer from "effect/Layer"
 import * as Fixtures from "./Fixtures.ts"
 
 /**
+ * Waits for a job to complete by polling its status.
+ *
+ * @param jobIdStr The job ID as a string returned from dump operations (can be plain number or JSON like {"job_id":1})
+ * @param maxAttempts Maximum number of polling attempts (default: 30)
+ * @param intervalMs Polling interval in milliseconds (default: 200ms)
+ * @returns An effect that yields the completed JobInfo or fails if the job errors or times out
+ */
+export const waitForJobCompletion = (
+  jobIdStr: string,
+  maxAttempts = 30,
+  intervalMs = 200,
+) =>
+  Effect.gen(function*() {
+    const admin = yield* Admin.Admin
+
+    // Parse job ID - handle both plain number strings and JSON objects like {"job_id":1}
+    let jobId: number
+    try {
+      const parsed = JSON.parse(jobIdStr)
+      if (typeof parsed === "object" && parsed !== null && "job_id" in parsed) {
+        jobId = parsed.job_id
+      } else {
+        jobId = parsed
+      }
+    } catch {
+      // If JSON parse fails, try to parse as plain number
+      jobId = parseInt(jobIdStr, 10)
+    }
+
+    if (isNaN(jobId)) {
+      return yield* Effect.die(new Error(`Invalid job ID: ${jobIdStr}`))
+    }
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const job = yield* admin.getJobById(jobId)
+
+      if (job.status === "COMPLETED") {
+        return job
+      } else if (job.status === "ERROR") {
+        return yield* Effect.fail(new Error(`Job ${jobId} failed with ERROR status`))
+      } else if (job.status === "STOPPED") {
+        return yield* Effect.fail(new Error(`Job ${jobId} was stopped`))
+      }
+
+      // Job is still running, wait before next attempt
+      if (attempt < maxAttempts - 1) {
+        yield* Effect.sleep(`${intervalMs} millis`)
+      }
+    }
+
+    // Timed out
+    return yield* Effect.fail(new Error(`Job ${jobId} did not complete within ${maxAttempts * intervalMs}ms`))
+  })
+
+/**
  * Creates a test environment layer that connects to externally managed infrastructure.
  *
  * This layer reads connection URLs from environment variables and creates client layers
