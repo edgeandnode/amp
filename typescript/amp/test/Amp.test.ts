@@ -32,12 +32,12 @@ Testing.layer((it) => {
 
       // Register and dump the root dataset.
       yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
-      yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
+      const jobId = yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
         endBlock: String(block),
       })
 
-      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
-      yield* Effect.sleep("1 second")
+      // Wait for the job to complete
+      yield* Testing.waitForJobCompletion(jobId)
 
       const response = yield* admin.getDataset(Anvil.dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
@@ -89,12 +89,12 @@ Testing.layer((it) => {
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
       yield* admin.registerDataset(dataset.name, dataset.version, dataset)
 
-      yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
+      const jobId = yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
         endBlock: String(block),
       })
 
-      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
-      yield* Effect.sleep("1 second")
+      // Wait for the job to complete
+      yield* Testing.waitForJobCompletion(jobId)
 
       const response = yield* admin.getDataset(dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)

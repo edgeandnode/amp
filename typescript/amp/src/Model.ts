@@ -273,7 +273,7 @@ export const JobId = Schema.Number.pipe(
   }),
 )
 
-export const JobStatus = Schema.Literal("TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
+export const JobStatus = Schema.Literal("RUNNING", "TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
   Schema.annotations({
     title: "JobStatus",
     description: "the status of a job",
