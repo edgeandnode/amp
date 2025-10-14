@@ -17,7 +17,7 @@ pub struct Dataset {
     pub name: Name,
     pub version: Option<Version>,
     pub kind: String,
-    pub network: String,
+    pub network: Option<String>,
     pub start_block: Option<BlockNum>,
     pub tables: Vec<Table>,
     pub functions: Vec<Function>,

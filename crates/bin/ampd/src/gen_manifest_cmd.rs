@@ -50,7 +50,7 @@ pub async fn run(
         name,
         version: Default::default(),
         kind: kind.to_string(),
-        network,
+        network: Some(network),
         schema: Some(schema),
     })
     .map_err(Error::Serialization)?;
