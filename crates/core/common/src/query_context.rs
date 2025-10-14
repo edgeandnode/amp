@@ -322,7 +322,6 @@ pub async fn sql_to_plan(
 
 pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
     forbid_underscore_prefixed_aliases(plan).map_err(Error::InvalidPlan)?;
-    forbid_duplicate_field_names(plan).map_err(Error::InvalidPlan)?;
     read_only_check(plan)
 }
 
@@ -417,6 +416,9 @@ async fn execute_plan(
         .create_physical_plan(&plan, &ctx.state())
         .await
         .map_err(Error::PlanningError)?;
+
+    forbid_duplicate_field_names(&physical_plan, &plan).map_err(Error::PlanningError)?;
+
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     match is_explain {
