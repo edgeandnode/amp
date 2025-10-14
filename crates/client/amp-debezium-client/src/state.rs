@@ -19,18 +19,18 @@ pub trait StateStore: Send + Sync {
     /// * `batch` - The stored batch with ranges and all records
     async fn insert(&mut self, batch: StoredBatch) -> Result<()>;
 
-    /// Retrieve all batches whose ranges intersect with the given invalidation range.
+    /// Retrieve all batches whose ranges intersect with any of the given invalidation ranges.
     ///
     /// Used during reorg handling to find batches that need to be retracted.
-    /// Returns batches where ANY range overlaps with the invalidation range.
+    /// Returns batches where ANY range overlaps with ANY invalidation range.
     /// ALL records from matching batches should be retracted (batch-level granularity).
     ///
     /// # Arguments
-    /// * `range` - The invalidation range (network + block number range)
+    /// * `ranges` - The invalidation ranges (network + block number ranges)
     ///
     /// # Returns
     /// A vector of RecordBatch references for all batches that overlap
-    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<Arc<RecordBatch>>>;
+    async fn get_in_ranges(&self, ranges: &[InvalidationRange]) -> Result<Vec<Arc<RecordBatch>>>;
 
     /// Remove batches based on multi-network watermarks.
     ///
@@ -98,16 +98,18 @@ impl StateStore for InMemoryStore {
         Ok(())
     }
 
-    async fn get_in_range(&self, range: &InvalidationRange) -> Result<Vec<Arc<RecordBatch>>> {
+    async fn get_in_ranges(&self, ranges: &[InvalidationRange]) -> Result<Vec<Arc<RecordBatch>>> {
         Ok(self
             .batches
             .iter()
             .filter(|batch| {
-                // Check if any range in this batch overlaps with the invalidation range
+                // Check if any range in this batch overlaps with any invalidation range
                 batch.ranges.iter().any(|block_range| {
-                    block_range.network == range.network
-                        && block_range.numbers.start() <= range.numbers.end()
-                        && block_range.numbers.end() >= range.numbers.start()
+                    ranges.iter().any(|inv_range| {
+                        block_range.network == inv_range.network
+                            && block_range.numbers.start() <= inv_range.numbers.end()
+                            && block_range.numbers.end() >= inv_range.numbers.start()
+                    })
                 })
             })
             .map(|batch| batch.batch.clone())
@@ -219,14 +221,14 @@ mod tests {
         }
 
         //* When
-        let range = InvalidationRange {
+        let ranges = vec![InvalidationRange {
             network: "test".to_string(),
             numbers: 105..=115,
-        };
+        }];
         let batches = store
-            .get_in_range(&range)
+            .get_in_ranges(&ranges)
             .await
-            .expect("get_in_range should succeed");
+            .expect("get_in_ranges should succeed");
 
         //* Then
         // We have 3 batches (105, 110, 115) overlapping with range 105..=115
@@ -274,14 +276,14 @@ mod tests {
         assert_eq!(store.len(), 16);
 
         // Verify all remaining batches
-        let all_range = InvalidationRange {
+        let all_ranges = vec![InvalidationRange {
             network: "test".to_string(),
             numbers: 0..=100,
-        };
+        }];
         let remaining_batches = store
-            .get_in_range(&all_range)
+            .get_in_ranges(&all_ranges)
             .await
-            .expect("get_in_range should succeed");
+            .expect("get_in_ranges should succeed");
 
         // Should have 16 batches from block ranges 5..=20
         assert_eq!(remaining_batches.len(), 16);

@@ -165,7 +165,6 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
         batch: RecordBatch,
         ranges: Vec<BlockRange>,
     ) -> Result<Vec<DebeziumRecord>> {
-        let mut records = Vec::new();
         let batch_arc = Arc::new(batch.clone());
 
         // Store the batch with all its ranges for potential reorg handling
@@ -176,20 +175,18 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
         };
         self.store.insert(stored_batch).await?;
 
-        // Emit create events for all rows
-        for row_idx in 0..batch.num_rows() {
-            // Convert row to JSON
-            let row_json = row_to_json(&batch, row_idx)?;
+        // Convert entire batch to JSON array once
+        let json_rows = batch_to_json_array(&batch)?;
 
-            // Create Debezium record
-            let debezium_record = DebeziumRecord {
+        // Emit create events for all rows
+        let records = json_rows
+            .into_iter()
+            .map(|row_json| DebeziumRecord {
                 before: None,
                 after: Some(row_json),
                 op: DebeziumOp::Create,
-            };
-
-            records.push(debezium_record);
-        }
+            })
+            .collect();
 
         Ok(records)
     }
@@ -199,32 +196,23 @@ impl<S: StateStore + 'static> DebeziumClient<S> {
         &mut self,
         invalidation: Vec<amp_client::InvalidationRange>,
     ) -> Result<Vec<DebeziumRecord>> {
-        let mut records = Vec::new();
+        // Retrieve all affected batches at once
+        let affected_batches = self.store.get_in_ranges(&invalidation).await?;
+        let affected_records = affected_batches
+            .iter()
+            .map(|batch| batch_to_json_array(batch))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten();
 
-        for range in invalidation {
-            // Retrieve all batches whose ranges overlap with the invalidation range
-            // Note: Batch-level granularity - ALL records from affected batches are retracted
-            let affected_batches = self.store.get_in_range(&range).await?;
-
-            for batch in affected_batches {
-                // Emit delete events for all rows in this batch
-                for row_idx in 0..batch.num_rows() {
-                    // Convert row to JSON
-                    let row_json = row_to_json(&batch, row_idx)?;
-
-                    // Create Debezium delete record
-                    let debezium_record = DebeziumRecord {
-                        before: Some(row_json),
-                        after: None,
-                        op: DebeziumOp::Delete,
-                    };
-
-                    records.push(debezium_record);
-                }
-            }
-        }
-
-        Ok(records)
+        // Convert all records to delete events
+        Ok(affected_records
+            .map(|row_json| DebeziumRecord {
+                before: Some(row_json),
+                after: None,
+                op: DebeziumOp::Delete,
+            })
+            .collect())
     }
 }
 
@@ -277,156 +265,16 @@ impl<S: StateStore> Default for DebeziumClientBuilder<S> {
     }
 }
 
-/// Convert a RecordBatch row to JSON.
-fn row_to_json(batch: &RecordBatch, row_idx: usize) -> Result<serde_json::Value> {
-    use serde_json::{Map, Value};
+/// Convert an entire RecordBatch to a JSON array using arrow-json.
+fn batch_to_json_array(batch: &RecordBatch) -> Result<Vec<serde_json::Value>> {
+    let mut buf = Vec::new();
+    let mut writer = common::arrow::json::ArrayWriter::new(&mut buf);
+    writer.write(batch)?;
+    writer.finish()?;
 
-    let mut map = Map::new();
+    let json_data = writer.into_inner();
+    let json_array: Vec<serde_json::Value> =
+        serde_json::from_slice(&json_data).map_err(Error::Json)?;
 
-    for (col_idx, field) in batch.schema().fields().iter().enumerate() {
-        let column = batch.column(col_idx);
-        let field_name = field.name().clone();
-
-        // Convert Arrow value to JSON
-        let json_value = arrow_value_to_json(column.as_ref(), row_idx)?;
-        map.insert(field_name, json_value);
-    }
-
-    Ok(Value::Object(map))
-}
-
-/// Convert an Arrow array value at a specific row to a JSON value.
-fn arrow_value_to_json(
-    column: &dyn common::arrow::array::Array,
-    row_idx: usize,
-) -> Result<serde_json::Value> {
-    use common::arrow::{
-        array::{
-            BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array,
-            Int16Array, Int32Array, Int64Array, LargeBinaryArray, LargeStringArray, StringArray,
-            TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-            TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
-        },
-        datatypes::{DataType, TimeUnit},
-    };
-    use serde_json::Value;
-
-    if column.is_null(row_idx) {
-        return Ok(Value::Null);
-    }
-
-    match column.data_type() {
-        DataType::Boolean => {
-            let arr = column.as_any().downcast_ref::<BooleanArray>().unwrap();
-            Ok(Value::Bool(arr.value(row_idx)))
-        }
-        DataType::Int8 => {
-            let arr = column.as_any().downcast_ref::<Int8Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int16 => {
-            let arr = column.as_any().downcast_ref::<Int16Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int32 => {
-            let arr = column.as_any().downcast_ref::<Int32Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int64 => {
-            let arr = column.as_any().downcast_ref::<Int64Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt8 => {
-            let arr = column.as_any().downcast_ref::<UInt8Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt16 => {
-            let arr = column.as_any().downcast_ref::<UInt16Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt32 => {
-            let arr = column.as_any().downcast_ref::<UInt32Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt64 => {
-            let arr = column.as_any().downcast_ref::<UInt64Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Float32 => {
-            let arr = column.as_any().downcast_ref::<Float32Array>().unwrap();
-            let val = arr.value(row_idx);
-            Ok(serde_json::Number::from_f64(val as f64)
-                .map(Value::Number)
-                .unwrap_or(Value::Null))
-        }
-        DataType::Float64 => {
-            let arr = column.as_any().downcast_ref::<Float64Array>().unwrap();
-            let val = arr.value(row_idx);
-            Ok(serde_json::Number::from_f64(val)
-                .map(Value::Number)
-                .unwrap_or(Value::Null))
-        }
-        DataType::Utf8 => {
-            let arr = column.as_any().downcast_ref::<StringArray>().unwrap();
-            Ok(Value::String(arr.value(row_idx).to_string()))
-        }
-        DataType::LargeUtf8 => {
-            let arr = column.as_any().downcast_ref::<LargeStringArray>().unwrap();
-            Ok(Value::String(arr.value(row_idx).to_string()))
-        }
-        DataType::Binary => {
-            let arr = column.as_any().downcast_ref::<BinaryArray>().unwrap();
-            let val = arr.value(row_idx);
-            Ok(Value::String(format!("0x{}", hex::encode(val))))
-        }
-        DataType::LargeBinary => {
-            let arr = column.as_any().downcast_ref::<LargeBinaryArray>().unwrap();
-            let val = arr.value(row_idx);
-            Ok(Value::String(format!("0x{}", hex::encode(val))))
-        }
-        DataType::FixedSizeBinary(_) => {
-            let arr = column
-                .as_any()
-                .downcast_ref::<common::arrow::array::FixedSizeBinaryArray>()
-                .unwrap();
-            let val = arr.value(row_idx);
-            Ok(Value::String(format!("0x{}", hex::encode(val))))
-        }
-        DataType::Date32 => {
-            let arr = column.as_any().downcast_ref::<Date32Array>().unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Timestamp(TimeUnit::Second, _) => {
-            let arr = column
-                .as_any()
-                .downcast_ref::<TimestampSecondArray>()
-                .unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Timestamp(TimeUnit::Millisecond, _) => {
-            let arr = column
-                .as_any()
-                .downcast_ref::<TimestampMillisecondArray>()
-                .unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            let arr = column
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            let arr = column
-                .as_any()
-                .downcast_ref::<TimestampNanosecondArray>()
-                .unwrap();
-            Ok(Value::Number(arr.value(row_idx).into()))
-        }
-        other => Err(Error::Config(format!(
-            "Unsupported data type for JSON conversion: {:?}",
-            other
-        ))),
-    }
+    Ok(json_array)
 }
