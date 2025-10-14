@@ -130,6 +130,7 @@ impl<'de> serde::Deserialize<'de> for Namespace {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetNamespaceOwned> for Namespace {
     fn from(value: metadata_db::DatasetNamespaceOwned) -> Self {
         // Convert to string and validate - this should always pass since DatasetNamespace
@@ -138,6 +139,7 @@ impl From<metadata_db::DatasetNamespaceOwned> for Namespace {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<Namespace> for metadata_db::DatasetNamespaceOwned {
     fn from(value: Namespace) -> Self {
         // SAFETY: Namespace is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
@@ -145,6 +147,7 @@ impl From<Namespace> for metadata_db::DatasetNamespaceOwned {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl<'a> From<&'a Namespace> for metadata_db::DatasetNamespace<'a> {
     fn from(value: &'a Namespace) -> Self {
         // SAFETY: Namespace is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.

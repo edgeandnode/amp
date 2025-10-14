@@ -67,18 +67,21 @@ impl AsRef<semver::Version> for Version {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetVersionOwned> for Version {
     fn from(value: metadata_db::DatasetVersionOwned) -> Self {
         Self(value.into_inner())
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<Version> for metadata_db::DatasetVersionOwned {
     fn from(value: Version) -> Self {
         metadata_db::DatasetVersion::from_owned(value.0)
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl<'a> From<&'a Version> for metadata_db::DatasetVersion<'a> {
     fn from(value: &'a Version) -> Self {
         metadata_db::DatasetVersion::from_ref(&value.0)
