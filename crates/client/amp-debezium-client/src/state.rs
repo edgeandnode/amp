@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use amp_client::InvalidationRange;
 use async_trait::async_trait;
 use common::BlockNum;
@@ -59,9 +57,6 @@ pub struct InMemoryStore {
 
     /// Maximum number of blocks to retain in memory (reorg window)
     reorg_window: u64,
-
-    /// The highest block number seen per network
-    max_blocks: HashMap<String, BlockNum>,
 }
 
 impl InMemoryStore {
@@ -80,7 +75,6 @@ impl InMemoryStore {
         Self {
             batches: Vec::new(),
             reorg_window,
-            max_blocks: HashMap::default(),
         }
     }
 
@@ -98,16 +92,7 @@ impl InMemoryStore {
 #[async_trait]
 impl StateStore for InMemoryStore {
     async fn insert(&mut self, batch: StoredBatch) -> Result<()> {
-        // Update max block for each network in the batch
-        for block_range in &batch.ranges {
-            let max_block = self
-                .max_blocks
-                .entry(block_range.network.clone())
-                .or_insert(0);
-            *max_block = (*max_block).max(*block_range.numbers.end());
-        }
-
-        // Append batch in order
+        // Append batch as it arrives
         self.batches.push(batch);
 
         Ok(())
@@ -149,15 +134,12 @@ impl StateStore for InMemoryStore {
             // Check if this batch should be retained
             for block_range in &batch.ranges {
                 if let Some(&watermark_block) = watermarks.get(&block_range.network) {
-                    if let Some(&max_block) = self.max_blocks.get(&block_range.network) {
-                        // Calculate prune threshold based on reorg window
-                        let prune_before = max_block.saturating_sub(self.reorg_window);
-                        let prune_block = prune_before.min(watermark_block);
+                    // Calculate prune threshold: keep batches within reorg_window of watermark
+                    let prune_before = watermark_block.saturating_sub(self.reorg_window);
 
-                        // If this range ends after the prune block, keep this batch
-                        if *block_range.numbers.end() >= prune_block {
-                            return true;
-                        }
+                    // If this range ends after the prune threshold, keep this batch
+                    if *block_range.numbers.end() >= prune_before {
+                        return true;
                     }
                 } else {
                     // No watermark for this network, keep this batch
