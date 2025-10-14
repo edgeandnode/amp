@@ -88,14 +88,25 @@
 //!
 //! This multi-network aware pruning ensures data is retained long enough for all chains,
 //! preventing premature deletion of data needed for slower chains.
+//!
+//! ## Storage Backends
+//!
+//! Two state store implementations are available:
+//!
+//! - **`InMemoryStore`** (default) - Fast, in-memory storage using Vec. Does not persist across restarts.
+//! - **`RocksDbStore`** (feature = "rocksdb") - Persistent disk storage. Survives restarts.
+//!
+//! Enable RocksDB backend with: `cargo add amp-debezium-client --features rocksdb`
 
 pub mod client;
 pub mod error;
-pub mod state;
+pub mod stores;
 pub mod types;
 
 // Re-export main types
 pub use client::{DebeziumClient, DebeziumClientBuilder};
 pub use error::{Error, Result};
-pub use state::{InMemoryStore, StateStore};
+#[cfg(feature = "rocksdb")]
+pub use stores::RocksDbStore;
+pub use stores::{InMemoryStore, StateStore};
 pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};

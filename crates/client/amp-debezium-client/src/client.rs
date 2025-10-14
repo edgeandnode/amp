@@ -11,7 +11,7 @@ use futures::{StreamExt, stream::BoxStream};
 
 use crate::{
     error::{Error, Result},
-    state::StateStore,
+    stores::StateStore,
     types::{DebeziumOp, DebeziumRecord},
 };
 
