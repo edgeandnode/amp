@@ -42,7 +42,7 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    plan_visitors::{extract_table_references_from_plan, forbid_underscore_prefixed_aliases},
+    plan_visitors::{extract_table_references_from_plan, forbid_duplicate_field_names, forbid_underscore_prefixed_aliases},
 };
 
 #[derive(Error, Debug)]
@@ -319,6 +319,7 @@ pub async fn sql_to_plan(
 
 pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
     forbid_underscore_prefixed_aliases(plan).map_err(Error::InvalidPlan)?;
+    forbid_duplicate_field_names(plan).map_err(Error::InvalidPlan)?;
     read_only_check(plan)
 }
 

@@ -1,20 +1,19 @@
-use std::{collections::BTreeSet, fmt, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, fmt, sync::Arc};
 
 use datafusion::{
     common::{
-        plan_err,
-        tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
+        plan_err, qualified_name, tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion}
     },
     datasource::TableType,
     error::DataFusionError,
-    logical_expr::{Filter, LogicalPlan, Projection, Sort, TableScan},
+    logical_expr::{Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
     optimizer::{OptimizerContext, OptimizerRule, push_down_filter::PushDownFilter},
     prelude::{Expr, col, lit},
     sql::TableReference,
 };
 use tracing::instrument;
 
-use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal};
+use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM};
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
 /// names are reserved for special columns.
@@ -36,6 +35,36 @@ pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), Data
     Ok(())
 }
 
+/// Ensures that there are no duplicate field names in the plan's schema.
+/// This includes fields that are qualified with different table names.
+/// For example, `table1.column` and `table2.column` would be considered duplicates
+/// because they both refer to `column`.
+pub fn forbid_duplicate_field_names(plan: &LogicalPlan) -> Result<(), DataFusionError> {
+    let df_schema = plan.schema();
+    let mut columns: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for (qualifier, field) in df_schema.iter() {
+        let qualified_name = qualified_name(qualifier, field.name());
+        columns.entry(field.name().to_string())
+            .or_default()
+            .push(qualified_name);
+    }
+
+    let duplicates: Vec<String> = columns.into_values()
+        .filter(|names| names.len() > 1)
+        .map(|names| names.join(" and "))
+        .collect();
+
+    if !duplicates.is_empty() {
+        return plan_err!(
+            "Duplicate field names detected in plan schema: [{}]. Please alias your columns to be unique.",
+            duplicates.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
 /// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
     plan.transform(|node| {
@@ -53,13 +82,11 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                     }
                 }
 
-                // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
                 projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
             LogicalPlan::Union(mut union) => {
-                // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
                 union.schema = prepend_special_block_num_field(&union.schema);
                 Ok(Transformed::yes(LogicalPlan::Union(union)))
             }
@@ -534,6 +561,34 @@ mod tests {
             qualifier.map(|q| q.to_string()),
             Some("foo".to_string()),
             "Qualified field should retain its qualifier"
+        );
+    }
+
+    #[test]
+    fn test_forbid_duplicate_field_names() {
+        // Create a logical plan with duplicate field names
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![
+                col("id"),
+                col("value"),
+                col("value"), // Duplicate field name
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Check for duplicate field names
+        let result = forbid_duplicate_field_names(&plan);
+
+        assert!(
+            result.is_err(),
+            "forbid_duplicate_field_names should fail with duplicate field names"
+        );
+
+        let err_msg = result.err().unwrap().to_string();
+        assert!(
+            err_msg.contains("Duplicate field names detected in plan schema"),
+            "Error message should indicate duplicate field names"
         );
     }
 }
