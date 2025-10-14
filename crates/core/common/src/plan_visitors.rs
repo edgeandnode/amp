@@ -1,8 +1,13 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use datafusion::{
     common::{
-        plan_err, qualified_name, tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion}
+        plan_err, qualified_name,
+        tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
     },
     datasource::TableType,
     error::DataFusionError,
@@ -45,12 +50,14 @@ pub fn forbid_duplicate_field_names(plan: &LogicalPlan) -> Result<(), DataFusion
 
     for (qualifier, field) in df_schema.iter() {
         let qualified_name = qualified_name(qualifier, field.name());
-        columns.entry(field.name().to_string())
+        columns
+            .entry(field.name().to_string())
             .or_default()
             .push(qualified_name);
     }
 
-    let duplicates: Vec<String> = columns.into_values()
+    let duplicates: Vec<String> = columns
+        .into_values()
         .filter(|names| names.len() > 1)
         .map(|names| names.join(" and "))
         .collect();
