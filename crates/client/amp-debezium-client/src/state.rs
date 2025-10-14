@@ -270,11 +270,11 @@ mod tests {
             .expect("prune should succeed");
 
         //* Then
-        // Should only keep blocks within reorg_window (10) of max_block (20)
-        // So blocks 10-20 should remain (11 batches)
-        assert_eq!(store.len(), 11);
+        // Should keep blocks within reorg_window (10) of watermark (15)
+        // prune_before = 15 - 10 = 5, so blocks 5-20 should remain (16 batches)
+        assert_eq!(store.len(), 16);
 
-        // Verify all remaining batch ranges end >= block 10
+        // Verify all remaining batch ranges end >= block 5
         let all_range = InvalidationRange {
             network: "test".to_string(),
             numbers: 0..=100,
@@ -284,7 +284,7 @@ mod tests {
             .await
             .expect("get_in_range should succeed");
 
-        // Should have 11 batches * 3 rows each = 33 records from batch ranges 10..=20
-        assert_eq!(remaining.len(), 33);
+        // Should have 16 batches * 3 rows each = 48 records from batch ranges 5..=20
+        assert_eq!(remaining.len(), 48);
     }
 }
