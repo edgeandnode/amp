@@ -248,7 +248,7 @@ impl DetachedLogicalPlan {
         Ok(Self(unproject_special_block_num_column(self.0)?))
     }
 
-    pub fn apply<'n, F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
+    pub fn apply<F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
     where
         F: FnMut(&LogicalPlan) -> Result<TreeNodeRecursion, DataFusionError>,
     {

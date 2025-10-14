@@ -30,6 +30,12 @@ pub struct EvmDecodeType {
     signature: Signature,
 }
 
+impl Default for EvmDecodeType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmDecodeType {
     pub fn new() -> Self {
         let signature = Signature::exact(

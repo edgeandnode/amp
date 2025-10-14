@@ -388,6 +388,12 @@ pub struct EvmDecodeLog {
     signature: Signature,
 }
 
+impl Default for EvmDecodeLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmDecodeLog {
     pub fn new() -> Self {
         let signature = Signature::exact(
@@ -510,6 +516,12 @@ pub struct EvmTopic {
     signature: Signature,
 }
 
+impl Default for EvmTopic {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmTopic {
     const RETURN_TYPE: DataType = DataType::FixedSizeBinary(32);
 
@@ -571,7 +583,7 @@ fn append_sol_value_to_builder(
     builder: &mut dyn ArrayBuilder,
     value: DynSolValue,
 ) -> Result<(), DataFusionError> {
-    fn primitive_int<'a>(
+    fn primitive_int(
         builder: &mut dyn ArrayBuilder,
         s: Signed<256, 4>,
         bits: usize,
@@ -631,7 +643,7 @@ fn append_sol_value_to_builder(
         Ok(())
     }
 
-    fn primitive_uint<'a>(
+    fn primitive_uint(
         builder: &mut dyn ArrayBuilder,
         u: Unsigned,
         bits: usize,
@@ -954,7 +966,7 @@ fn scalar_to_sol_value(
                 }
                 Ok(DynSolValue::Array(sol_items))
             }
-            _ => return plan_err!("cannot convert list to solidity type {}", sol_type),
+            _ => plan_err!("cannot convert list to solidity type {}", sol_type),
         },
         ScalarValue::FixedSizeList(items) => match sol_type {
             DynSolType::FixedArray(ty, sz) => {
@@ -974,11 +986,11 @@ fn scalar_to_sol_value(
                 Ok(DynSolValue::FixedArray(sol_items))
             }
             _ => {
-                return plan_err!(
+                plan_err!(
                     "cannot convert fixed size list of size {} to solidity type {}",
                     items.len(),
                     sol_type
-                );
+                )
             }
         },
         ScalarValue::Struct(items) => match sol_type {
@@ -993,19 +1005,19 @@ fn scalar_to_sol_value(
                 }
                 let mut sol_items = Vec::new();
                 for (col, ty) in columns.iter().zip(tys) {
-                    let sol_value = array_to_sol_value(col, &ty, 0)?;
+                    let sol_value = array_to_sol_value(col, ty, 0)?;
                     sol_items.push(sol_value);
                 }
                 Ok(DynSolValue::Tuple(sol_items))
             }
-            _ => return plan_err!("cannot convert struct to solidity type {}", sol_type),
+            _ => plan_err!("cannot convert struct to solidity type {}", sol_type),
         },
         _ => {
-            return plan_err!(
+            plan_err!(
                 "Unsupported type {} for Solidity type {}",
                 arrow_value.data_type(),
                 sol_type
-            );
+            )
         }
     }
 }
@@ -1170,10 +1182,10 @@ fn array_to_sol_value(
                 }
             }
             _ => {
-                return plan_err!(
+                plan_err!(
                     "cannot convert fixed size binary to solidity type {}",
                     sol_type
-                );
+                )
             }
         },
         DataType::Utf8 => {
@@ -1198,7 +1210,7 @@ fn array_to_sol_value(
                 }
                 Ok(DynSolValue::Array(sol_items))
             }
-            _ => return plan_err!("cannot convert list to solidity type {}", sol_type),
+            _ => plan_err!("cannot convert list to solidity type {}", sol_type),
         },
         DataType::FixedSizeList(_, arrow_sz) => match sol_type {
             DynSolType::FixedArray(ty, sz) => {
@@ -1222,11 +1234,11 @@ fn array_to_sol_value(
                 Ok(DynSolValue::FixedArray(sol_items))
             }
             _ => {
-                return plan_err!(
+                plan_err!(
                     "cannot convert fixed size list of size {} to solidity type {}",
                     arrow_sz,
                     sol_type
-                );
+                )
             }
         },
         DataType::Struct(_) => match sol_type {
@@ -1242,19 +1254,19 @@ fn array_to_sol_value(
                 }
                 let mut sol_items = Vec::new();
                 for (col, ty) in columns.iter().zip(tys) {
-                    let sol_value = array_to_sol_value(col, &ty, idx)?;
+                    let sol_value = array_to_sol_value(col, ty, idx)?;
                     sol_items.push(sol_value);
                 }
                 Ok(DynSolValue::Tuple(sol_items))
             }
-            _ => return plan_err!("cannot convert struct to solidity type {}", sol_type),
+            _ => plan_err!("cannot convert struct to solidity type {}", sol_type),
         },
         _ => {
-            return plan_err!(
+            plan_err!(
                 "Unsupported type {} for Solidity type {}",
                 ary.data_type(),
                 sol_type
-            );
+            )
         }
     }
 }

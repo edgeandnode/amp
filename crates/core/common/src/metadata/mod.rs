@@ -99,7 +99,7 @@ pub async fn amp_metadata_from_parquet_file(
             )))?;
 
     let parquet_meta_key_value_pair = key_value_metadata
-        .into_iter()
+        .iter()
         .find(|key_value| key_value.key.as_str() == PARQUET_METADATA_KEY)
         .ok_or(crate::ArrowError::ParquetError(format!(
             "Missing key: {} in file metadata for file {}",

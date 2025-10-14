@@ -158,7 +158,7 @@ impl AsyncScalarUDFImpl for EthCall {
                     gas_price: None,
                     value: None,
                     input: TransactionInput {
-                        input: input_data.map(|i| alloy::primitives::Bytes::copy_from_slice(i)),
+                        input: input_data.map(Bytes::copy_from_slice),
                         data: None,
                     },
                     // `eth_call` does not require any other fields.
@@ -172,7 +172,7 @@ impl AsyncScalarUDFImpl for EthCall {
                     result_builder
                         .field_builder::<BinaryBuilder>(0)
                         .unwrap()
-                        .append_value(bytes.to_vec());
+                        .append_value(&bytes);
                     result_builder
                         .field_builder::<StringBuilder>(1)
                         .unwrap()
@@ -223,7 +223,7 @@ impl AsyncScalarUDFImpl for EthCall {
                     result_builder
                         .field_builder::<StringBuilder>(1)
                         .unwrap()
-                        .append_value(format!("unexpected rpc error"));
+                        .append_value("unexpected rpc error");
                     result_builder.append(true);
                 }
             }

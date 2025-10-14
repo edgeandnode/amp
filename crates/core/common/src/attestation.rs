@@ -17,6 +17,12 @@ use stable_hash::{FieldAddress, StableHash as _, StableHasher};
 #[derive(Debug)]
 pub struct AttestationHasherUDF(Signature);
 
+impl Default for AttestationHasherUDF {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AttestationHasherUDF {
     pub fn new() -> Self {
         Self(Signature::variadic_any(Volatility::Immutable))

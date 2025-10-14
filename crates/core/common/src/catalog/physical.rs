@@ -216,10 +216,10 @@ impl PhysicalTable {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: dataset_version.as_deref(),
-            table: &table.name(),
+            table: table.name(),
         };
 
-        let path = make_location_path(dataset_name, &table.name());
+        let path = make_location_path(dataset_name, table.name());
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
             .register_location(table_id, data_store.bucket(), &path, &url, false)
@@ -261,7 +261,7 @@ impl PhysicalTable {
         let table_id = TableId {
             dataset: &table.dataset().name,
             dataset_version: dataset_version.as_deref(),
-            table: &table.name(),
+            table: table.name(),
         };
 
         let prefix = format!("{}/{}/", &dataset_name, table.name());
@@ -291,7 +291,7 @@ impl PhysicalTable {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: dataset_version.as_deref(),
-            table: &table.name(),
+            table: table.name(),
         };
 
         let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? else {
@@ -348,10 +348,10 @@ impl PhysicalTable {
             .register_location(*table_id, data_store.bucket(), prefix, url, false)
             .await?;
 
-        metadata_db.set_active_location(*table_id, &url).await?;
+        metadata_db.set_active_location(*table_id, url).await?;
 
         let object_store = data_store.object_store();
-        let mut file_stream = object_store.list(Some(&path));
+        let mut file_stream = object_store.list(Some(path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
             let (file_name, amp_meta, footer) =

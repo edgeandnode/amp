@@ -152,7 +152,7 @@ pub struct RawDatasetRows(Vec<RawTableRows>);
 impl RawDatasetRows {
     pub fn new(rows: Vec<RawTableRows>) -> Self {
         assert!(!rows.is_empty());
-        assert!(rows.iter().skip(1).all(|r| &r.range == &rows[0].range));
+        assert!(rows.iter().skip(1).all(|r| r.range == rows[0].range));
         Self(rows)
     }
 

@@ -322,6 +322,7 @@ pub struct ConfigFile {
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 
 #[derive(Error, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ConfigError {
     #[error("IO error at {0}: {1}")]
     Io(PathBuf, std::io::Error),
@@ -387,8 +388,7 @@ impl Config {
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
 
         let metadata_db = if config_file.metadata_db.url.is_some() {
-            let db_config = config_file.metadata_db.clone();
-            db_config
+            config_file.metadata_db.clone()
         } else if let Some(url) = config_file.metadata_db_url {
             MetadataDbConfig {
                 url: Some(url),
@@ -498,6 +498,7 @@ impl Default for Addrs {
 }
 
 impl Addrs {
+    #[allow(clippy::result_large_err)]
     pub fn from_config_file(
         config_file: &ConfigFile,
         default_addrs: Addrs,
