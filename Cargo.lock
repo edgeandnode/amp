@@ -845,7 +845,6 @@ dependencies = [
  "async-trait",
  "common",
  "futures",
- "hex",
  "serde",
  "serde_json",
  "thiserror 2.0.16",

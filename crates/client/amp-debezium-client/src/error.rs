@@ -9,6 +9,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("Arrow error: {0}")]
     Arrow(#[from] common::arrow::error::ArrowError),
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
     #[error("Configuration error: {0}")]
     Config(String),
     #[error("State store error: {0}")]
