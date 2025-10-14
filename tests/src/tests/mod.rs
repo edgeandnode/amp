@@ -10,6 +10,7 @@ mod it_functions;
 mod it_gen_manifest;
 mod it_non_incremental;
 mod it_reorg;
+mod it_resume_store;
 mod it_sql;
 mod it_sql_dataset_batch_size;
 mod it_streaming;

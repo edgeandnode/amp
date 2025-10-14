@@ -1,6 +1,7 @@
 //! Rust client library for Amp
 
 mod decode;
+pub mod stores;
 
 use std::{
     ops::RangeInclusive,
@@ -18,6 +19,7 @@ use common::{
 };
 use futures::{Stream, StreamExt as _, stream::BoxStream};
 use serde::Deserialize;
+pub use stores::{InMemoryResumeStore, ResumeStore};
 use tonic::{Streaming, transport::Endpoint};
 
 #[derive(thiserror::Error, Debug)]
@@ -220,6 +222,104 @@ pub fn with_reorg(
                     data: batch.data,
                     metadata: batch.metadata,
                 });
+            }
+        }
+    }
+    .boxed()
+}
+
+/// Wrap a ResponseBatchWithReorg stream to automatically store resume watermarks.
+///
+/// This function intercepts `Watermark` events from the stream and stores them
+/// in the provided `ResumeStore`, allowing for automatic watermark management
+/// and query resumption.
+///
+/// # Arguments
+/// * `id` - Unique identifier for this query (used to store/retrieve watermarks)
+/// * `store` - The resume store implementation to use for persistence
+/// * `stream` - The input stream of ResponseBatchWithReorg events
+///
+/// # Returns
+/// A boxed stream that passes through all events unchanged while storing watermarks
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use amp_client::{
+///     Error, InMemoryResumeStore, ResponseBatchWithReorg, ResumeStore, with_reorg,
+///     with_resume_store,
+/// };
+/// use futures::StreamExt;
+///
+/// # async fn example(stream: amp_client::ResultStream) -> Result<(), Error> {
+/// let mut store = InMemoryResumeStore::new();
+/// let reorg_stream = with_reorg(stream);
+/// let mut resumable_stream = with_resume_store("my_query", store.clone(), reorg_stream);
+///
+/// while let Some(result) = resumable_stream.next().await {
+///     match result? {
+///         ResponseBatchWithReorg::Batch { data, metadata } => {
+///             println!("Received batch: {:#?}", metadata.ranges);
+///         }
+///         ResponseBatchWithReorg::Watermark(watermark) => {
+///             // Watermark is automatically stored in the store
+///             println!("Watermark stored: {:#?}", watermark);
+///         }
+///         ResponseBatchWithReorg::Reorg { invalidation } => {
+///             println!("Reorg detected: {:#?}", invalidation);
+///         }
+///     }
+/// }
+///
+/// // Later, retrieve the watermark for resumption
+/// let watermark = store.get("my_query").await?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn with_resume_store<S>(
+    id: impl Into<String>,
+    mut store: S,
+    mut stream: BoxStream<'static, Result<ResponseBatchWithReorg, Error>>,
+) -> BoxStream<'static, Result<ResponseBatchWithReorg, Error>>
+where
+    S: ResumeStore + 'static,
+{
+    let id = id.into();
+    stream! {
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(ResponseBatchWithReorg::Watermark(ref watermark)) => {
+                    // NOTE: This is not transactionally safe. In case of a crash between storing
+                    // the watermark and downstream processing completing, the watermark is saved
+                    // but downstream state updates may be incomplete. On resume, the server will
+                    // not re-emit this watermark, potentially leaving downstream in an inconsistent
+                    // state.
+                    //
+                    // Trade-off: We prioritize resume capability (not losing stream position) over
+                    // transactional consistency. This assumes downstream processing is idempotent
+                    // and can handle replays gracefully.
+                    //
+                    // TODO: For full transactional safety, would need:
+                    // - Two-phase commit between watermark storage and downstream state updates
+                    // - Single transaction encompassing both operations
+                    // - Write-ahead log for downstream operations
+
+                    // Store the watermark first but yield watermark before propagating any errors.
+                    let store_result = store.set_watermark(&id, watermark.clone()).await;
+
+                    // Always yield the watermark so downstream consumers can act on it.
+                    yield result;
+
+                    // Propagate storage errors after yielding the watermark.
+                    if let Err(e) = store_result {
+                        yield Err(e);
+                        break;
+                    }
+                }
+                _ => {
+                    // Pass through all other events unchanged.
+                    yield result;
+                }
             }
         }
     }
