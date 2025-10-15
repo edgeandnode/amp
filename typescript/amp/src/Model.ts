@@ -350,3 +350,7 @@ export class BlockRange extends Schema.Class<BlockRange>("BlockRange")({
 export class RecordBatchMetadata extends Schema.Class<RecordBatchMetadata>("RecordBatchMetadata")({
   ranges: Schema.Array(BlockRange),
 }) {}
+
+export class DumpResponse extends Schema.Class<DumpResponse>("DumpResponse")({
+  job_id: JobId,
+}) {}

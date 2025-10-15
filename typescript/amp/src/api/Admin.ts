@@ -59,7 +59,7 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}
   .addError(Error.UnexpectedJobStatus)
   .addError(Error.SchedulerError)
   .addError(Error.MetadataDbError)
-  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .addSuccess(Model.DumpResponse)
   .setPayload(
     Schema.Struct({
       endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
@@ -79,7 +79,7 @@ const dumpDatasetVersion = HttpApiEndpoint.post(
   .addError(Error.UnexpectedJobStatus)
   .addError(Error.SchedulerError)
   .addError(Error.MetadataDbError)
-  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .addSuccess(Model.DumpResponse)
   .setPayload(
     Schema.Struct({
       endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
@@ -558,7 +558,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
     options?: {
       endBlock?: string | null | undefined
     } | undefined,
-  ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
+  ) => Effect.Effect<Model.DumpResponse, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**
    * Dump a dataset with a specific version.
@@ -574,7 +574,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
     options?: {
       endBlock?: string | null | undefined
     } | undefined,
-  ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
+  ) => Effect.Effect<Model.DumpResponse, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**
    * Get a dataset by name.

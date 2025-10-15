@@ -582,3 +582,29 @@ export class RegistrationFailed extends Schema.Class<RegistrationFailed>("Regist
 ) {
   readonly _tag = "RegistrationFailed" as const
 }
+
+/**
+ * PlanningError - Query planning failure.
+ *
+ * Causes:
+ * - Invalid SQL syntax in query
+ * - Referenced tables or datasets don't exist
+ * - Type mismatches in query
+ * - Unsupported SQL features
+ * - Schema inference failures
+ *
+ * Applies to:
+ * - Query execution operations
+ * - Schema inference operations
+ */
+export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
+  {
+    code: Schema.Literal("PLANNING_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "PlanningError" as const
+}
