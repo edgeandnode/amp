@@ -1,0 +1,19 @@
+# Sample Firehose Provider Configuration
+#
+# Firehose providers connect to StreamingFast Firehose gRPC endpoints for high-throughput
+# blockchain data streaming. Firehose provides real-time blockchain data with high performance
+# and reliability.
+
+# Provider type - must be "firehose" for Firehose providers
+kind = "firehose"
+
+# Blockchain network identifier (e.g., "mainnet", "goerli", "polygon", "base")
+network = "mainnet"
+
+# Firehose gRPC endpoint URL
+url = "${FIREHOSE_ETH_MAINNET_URL}"
+
+# Authentication token for the Firehose endpoint (optional)
+# Required if your Firehose endpoint requires authentication
+# Default: no authentication
+token = "${FIREHOSE_ETH_MAINNET_TOKEN}"
