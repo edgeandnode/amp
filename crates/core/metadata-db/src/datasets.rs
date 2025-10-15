@@ -10,8 +10,8 @@ use sqlx::{Executor, Postgres};
 mod name;
 mod namespace;
 mod pagination;
-mod version;
 mod version_hash;
+mod version_tag;
 
 pub use self::{
     name::{Name, NameOwned},
@@ -20,8 +20,8 @@ pub use self::{
         list_first_page, list_next_page, list_versions_by_name_first_page,
         list_versions_by_name_next_page,
     },
-    version::{Version, VersionOwned},
     version_hash::{VersionHash, VersionHashOwned},
+    version_tag::{VersionTag, VersionTagOwned},
 };
 
 /// Insert a new dataset registry entry
@@ -32,7 +32,7 @@ pub async fn insert<'c, E>(
     exe: E,
     namespace: Namespace<'_>,
     name: Name<'_>,
-    version: Version<'_>,
+    version: VersionTag<'_>,
     manifest_path: &str,
 ) -> Result<(), sqlx::Error>
 where
@@ -58,7 +58,7 @@ where
 pub async fn get_by_name_and_version_with_details<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: Version<'_>,
+    version: VersionTag<'_>,
 ) -> Result<Option<DatasetWithDetails>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -86,7 +86,7 @@ where
 pub async fn exists_by_name_and_version<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: Version<'_>,
+    version: VersionTag<'_>,
 ) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -106,7 +106,7 @@ where
 pub async fn get_manifest_path_by_name_and_version<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: Version<'_>,
+    version: VersionTag<'_>,
 ) -> Result<Option<String>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -177,7 +177,7 @@ pub struct Dataset {
     #[sqlx(rename = "dataset")]
     pub name: NameOwned,
     /// Dataset version
-    pub version: VersionOwned,
+    pub version: VersionTagOwned,
 }
 
 /// Dataset registry entry representing a dataset registration
@@ -190,7 +190,7 @@ pub struct DatasetWithDetails {
     #[sqlx(rename = "dataset")]
     pub name: NameOwned,
     /// Dataset version
-    pub version: VersionOwned,
+    pub version: VersionTagOwned,
     /// Dataset manifest content
     #[sqlx(rename = "manifest")]
     pub manifest_path: String,

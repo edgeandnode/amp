@@ -5,7 +5,7 @@ use rand::seq::SliceRandom;
 
 use crate::{
     conn::DbConn,
-    datasets::{self, Name, Namespace, Version, VersionOwned},
+    datasets::{self, Name, Namespace, VersionTag, VersionTagOwned},
 };
 
 #[tokio::test]
@@ -467,11 +467,11 @@ async fn list_versions_by_name_next_page_uses_cursor() {
 }
 
 /// Helper to parse version strings
-fn test_version(version: &str) -> VersionOwned {
+fn test_version(version: &str) -> VersionTagOwned {
     version.parse().expect("should parse valid version")
 }
 
 /// Helper to generate manifest path strings from the dataset name and version
-fn test_manifest_path(name: &Name<'_>, version: &Version<'_>) -> String {
+fn test_manifest_path(name: &Name<'_>, version: &VersionTag<'_>) -> String {
     format!("{}__{}.json", name, version.to_string().replace('.', "-"))
 }
