@@ -385,9 +385,6 @@ impl SegmentSizeLimit {
     pub fn is_live(&self, segment: &SegmentSize) -> TestResult {
         let (size_exceeded, length_exceeded, generation_exceeded) =
             Self::is_exceeded(self, segment);
-        println!(
-            "Size Check: {size_exceeded:?}, Length Check: {length_exceeded:?}, Generation Check: {generation_exceeded:?}"
-        );
         // A segment is considered live if it does not exceed size limits,
         // length limits, and generation limits (if any are set).
         size_exceeded
