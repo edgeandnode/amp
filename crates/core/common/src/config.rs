@@ -39,6 +39,7 @@ pub struct Config {
     pub addrs: Addrs,
     pub config_path: PathBuf,
     pub parquet: ParquetConfig,
+    pub poll_interval: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,10 @@ fn default_pool_size() -> u32 {
 
 fn default_auto_migrate() -> bool {
     true
+}
+
+fn default_poll_interval_secs() -> Option<Duration> {
+    Some(Duration::from_secs(1))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -317,6 +322,11 @@ pub struct ConfigFile {
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub writer: ParquetConfig,
+    #[serde(
+        default = "default_poll_interval_secs",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub poll_interval_secs: Option<Duration>,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -425,6 +435,9 @@ impl Config {
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
+            poll_interval: config_file
+                .poll_interval_secs
+                .unwrap_or(Duration::from_secs(1)),
         })
     }
 

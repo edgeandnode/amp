@@ -29,6 +29,12 @@ metadata_db_url = "postgres://<pg_url>"
 # Size of the connection pool (default: 10)
 # pool_size = 10
 
+# Interval (in seconds) for polling the blockchain for new blocks during dump operations.
+# This controls how often the system checks for new blocks when running in continuous mode.
+# Lower values provide more responsive updates but may increase load on the blockchain provider.
+# (default: 1 second)
+# poll_interval_secs = 1.0
+
 # How much memory the server can use in MB. Setting this to 0, the default, means unlimited.
 # max_mem_mb = 0
 
@@ -110,7 +116,9 @@ metadata_db_url = "postgres://<pg_url>"
 # The interval at which to run the garbage collector (default: 5 seconds)
 # [writer.collector.min_interval]
 # secs = 5
+# nanos = 0
 
 # The duration for which to hold a deletion lock on compacted files (default: 30 minutes, minimum: 200 milliseconds)
 # [writer.collector.deletion_lock_duration]
 # secs = 1800
+# nanos = 0
