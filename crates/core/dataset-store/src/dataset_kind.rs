@@ -8,19 +8,17 @@
 //! The system supports several different dataset kinds:
 //! - **EVM RPC**: Direct connection to Ethereum-compatible JSON-RPC endpoints
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
-//! - **Substreams**: Processing of Substreams packages with dynamic schema inference
 //! - **Derived**: Modern manifest-based dataset definitions
 
 use datasets_derived::DerivedDatasetKind;
 use eth_beacon_datasets::EthBeaconDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
-use substreams_datasets::SubstreamsDatasetKind;
 
 /// Represents the different types of datasets supported by the system.
 ///
 /// Dataset kinds determine how data is extracted, processed, and served.
-/// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) extract data directly
+/// Raw datasets (`EvmRpc`, `Firehose`) extract data directly
 /// from blockchain sources, while derived datasets (`Derived`)
 /// transform data from other datasets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,8 +29,6 @@ pub enum DatasetKind {
     EthBeacon,
     /// StreamingFast Firehose dataset for high-throughput blockchain streaming.
     Firehose,
-    /// Substreams dataset for processing custom blockchain transformations.
-    Substreams,
     /// Derived dataset.
     ///
     /// Modern dataset definition using structured configuration.
@@ -42,13 +38,10 @@ pub enum DatasetKind {
 impl DatasetKind {
     /// Returns `true` if this dataset kind extracts raw data from blockchain sources.
     ///
-    /// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) connect directly to blockchain
+    /// Raw datasets (`EvmRpc`, `Firehose`) connect directly to blockchain
     /// infrastructure, while derived datasets (`Derived`) process data from other datasets.
     pub fn is_raw(&self) -> bool {
-        matches!(
-            self,
-            Self::EvmRpc | Self::EthBeacon | Self::Firehose | Self::Substreams
-        )
+        matches!(self, Self::EvmRpc | Self::EthBeacon | Self::Firehose)
     }
 
     /// Returns the string representation of this dataset kind.
@@ -60,7 +53,6 @@ impl DatasetKind {
             Self::EvmRpc => EvmRpcDatasetKind.as_str(),
             Self::EthBeacon => EthBeaconDatasetKind.as_str(),
             Self::Firehose => FirehoseDatasetKind.as_str(),
-            Self::Substreams => SubstreamsDatasetKind.as_str(),
             Self::Derived => DerivedDatasetKind.as_str(),
         }
     }
@@ -81,7 +73,6 @@ macro_rules! impl_from_for_kind {
 impl_from_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
 impl_from_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
 impl_from_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
-impl_from_for_kind!(SubstreamsDatasetKind, DatasetKind::Substreams);
 impl_from_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
 
 /// Macro to generate bidirectional `PartialEq` implementations between
@@ -105,7 +96,6 @@ macro_rules! impl_partial_eq_for_kind {
 impl_partial_eq_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
 impl_partial_eq_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
 impl_partial_eq_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
-impl_partial_eq_for_kind!(SubstreamsDatasetKind, DatasetKind::Substreams);
 impl_partial_eq_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
 
 impl std::fmt::Display for DatasetKind {
@@ -122,7 +112,6 @@ impl std::str::FromStr for DatasetKind {
             s if s == EvmRpcDatasetKind => Ok(Self::EvmRpc),
             s if s == EthBeaconDatasetKind => Ok(Self::EthBeacon),
             s if s == FirehoseDatasetKind => Ok(Self::Firehose),
-            s if s == SubstreamsDatasetKind => Ok(Self::Substreams),
             s if s == DerivedDatasetKind => Ok(Self::Derived),
             _ => Err(UnsupportedKindError {
                 kind: s.to_string(),

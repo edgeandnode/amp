@@ -93,7 +93,7 @@ pub enum GetDatasetError {
     /// - Required fields are missing or have incorrect types
     ///
     /// Can happen during parsing of the common manifest or any dataset-specific
-    /// manifest type (EVM RPC, Firehose, Substreams, Derived, SQL).
+    /// manifest type (EVM RPC, Firehose, Derived, SQL).
     #[error("Failed to parse manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
     ManifestParseError {
         name: String,
@@ -105,35 +105,12 @@ pub enum GetDatasetError {
     ///
     /// This occurs when the `kind` field in the manifest contains a value that
     /// doesn't match any of the supported dataset types (evm-rpc, eth-beacon,
-    /// firehose, substreams, derived, sql).
+    /// firehose, derived, sql).
     #[error("Unsupported dataset kind '{kind}' for dataset '{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
     UnsupportedKind {
         name: String,
         version: Option<String>,
         kind: String,
-    },
-
-    /// The schema in the Substreams manifest doesn't match the inferred schema.
-    ///
-    /// This occurs specifically for Substreams datasets when the schema defined in
-    /// the manifest differs from the schema automatically inferred from the dataset's
-    /// table definitions.
-    #[error("Schema mismatch for Substreams dataset '{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
-    SchemaMismatch {
-        name: String,
-        version: Option<String>,
-    },
-
-    /// Failed to create a Substreams dataset instance.
-    ///
-    /// This occurs during the asynchronous initialization of a Substreams dataset,
-    /// which may fail due to issues with the Substreams package, connection problems,
-    /// or invalid configuration.
-    #[error("Failed to create Substreams dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SubstreamsCreationError {
-        name: String,
-        version: Option<String>,
-        source: firehose_datasets::Error,
     },
 
     /// Failed to create a Derived dataset instance.
@@ -194,7 +171,7 @@ pub enum GetDerivedManifestError {
     /// The dataset kind is not SQL or Derived.
     ///
     /// This occurs when trying to get a dataset as a SQL dataset but the manifest
-    /// indicates a different kind (e.g., evm-rpc, firehose, substreams).
+    /// indicates a different kind (e.g., evm-rpc, firehose).
     /// Only SQL and Derived dataset kinds can be retrieved as SQL datasets.
     #[error("Dataset '{name}' version '{}' has unsupported kind '{kind}' for SQL dataset retrieval (expected 'sql' or 'derived')", version.as_deref().unwrap_or("latest"))]
     UnsupportedKind {
@@ -238,22 +215,12 @@ pub enum GetClientError {
         source: ManifestParseError,
     },
 
-    /// Failed to parse the dataset-specific manifest file content.
-    ///
-    /// This occurs when parsing the specific manifest for Substreams datasets fails.
-    #[error("Failed to parse Substreams manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    SubstreamsManifestParseError {
-        name: String,
-        version: Option<String>,
-        source: ManifestParseError,
-    },
-
     /// The dataset kind is not a raw dataset type.
     ///
     /// This occurs when trying to get a client for a dataset that is not a raw data source.
-    /// Only raw dataset kinds (evm-rpc, eth-beacon, firehose, substreams) can have clients retrieved.
+    /// Only raw dataset kinds (evm-rpc, eth-beacon, firehose) can have clients retrieved.
     /// SQL and Derived datasets cannot have clients as they are views over other datasets.
-    #[error("Dataset '{name}' version '{}' has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc, eth-beacon, firehose, or substreams)", version.as_deref().unwrap_or("latest"))]
+    #[error("Dataset '{name}' version '{}' has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc, eth-beacon, or firehose)", version.as_deref().unwrap_or("latest"))]
     UnsupportedKind {
         name: String,
         version: Option<String>,
@@ -262,7 +229,7 @@ pub enum GetClientError {
 
     /// Dataset is missing the required 'network' field.
     ///
-    /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, firehose, or substreams)
+    /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, or firehose)
     /// does not include the network field, which is required to determine the appropriate provider configuration.
     #[error("Dataset '{name}' version '{}' is missing required 'network' field for raw dataset kind", version.as_deref().unwrap_or("latest"))]
     MissingNetwork {
@@ -288,7 +255,7 @@ pub enum GetClientError {
     /// Failed to parse the provider configuration.
     ///
     /// This occurs when the provider configuration cannot be deserialized into the
-    /// expected type for the dataset kind (EvmRpc, EthBeacon, Firehose, or Substreams).
+    /// expected type for the dataset kind (EvmRpc, EthBeacon, or Firehose).
     #[error("Failed to parse provider configuration for dataset '{name}': {source}")]
     ProviderConfigParseError {
         name: String,
@@ -314,13 +281,6 @@ pub enum GetClientError {
         name: String,
         source: firehose_datasets::Error,
     },
-
-    /// Failed to create a Substreams client.
-    ///
-    /// This occurs during initialization of the Substreams client, which may fail due to
-    /// invalid package references, connection issues, or authentication failures.
-    #[error("Failed to create Substreams client for dataset '{name}': {source}")]
-    SubstreamsClientError { name: String, source: BoxError },
 }
 
 /// Errors specific to get_logical_catalog operations

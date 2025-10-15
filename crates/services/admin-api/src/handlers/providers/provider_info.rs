@@ -21,7 +21,7 @@ pub struct ProviderInfo {
     /// The name/identifier of the provider
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: NonEmptyString,
-    /// The type of provider (e.g., "evm-rpc", "firehose", "substreams")
+    /// The type of provider (e.g., "evm-rpc", "firehose")
     #[serde_as(as = "serde_with::DisplayFromStr")]
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub kind: dataset_store::DatasetKind,

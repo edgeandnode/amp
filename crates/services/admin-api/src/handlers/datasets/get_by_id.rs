@@ -219,7 +219,7 @@ pub struct DatasetInfo {
     /// The version of the dataset using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
-    /// The kind/type of dataset (e.g., "evm-rpc", "firehose", "substreams", "sql")
+    /// The kind/type of dataset (e.g., "evm-rpc", "firehose", "sql")
     pub kind: String,
     /// List of tables contained in the dataset with their details
     pub tables: Vec<TableInfo>,

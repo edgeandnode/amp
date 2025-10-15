@@ -51,7 +51,7 @@ use crate::{
 /// This handler supports derived and evm-rpc dataset registration:
 /// - **Derived dataset** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
 /// - **EVM-RPC dataset** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
-/// - **Other raw datasets** (firehose, substreams, etc.) are **not supported** and will return an error
+/// - **Other raw datasets** (firehose, etc.) are **not supported** and will return an error
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
 /// Both dataset types are registered using the same underlying `register_manifest` method to ensure consistency.

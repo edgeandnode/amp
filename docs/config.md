@@ -8,7 +8,7 @@ Configuring datasets to be extracted and served requires three different object 
 
 - `dataset_defs_dir`: Contains the dataset definitions. This is the input to the extraction process.
 - `providers_dir`: Auxiliary to the dataset definitions, configures providers for external services
-  like Firehose and Substreams.
+  like Firehose.
 - `data_dir`: Where the actual dataset parquet tables are stored once extracted. Can be initially empty.
 
 Although the initial setup with three directories may seem cumbersome, it allows for a highly
@@ -71,8 +71,8 @@ and also as the catalog schema name in the SQL interface. So if you have a datas
 will by default be placed under `<data_dir>/foobar/` and tables will be refered to in SQL as
 `foobar.table`.
 
-Conceptually there are raw datasets, which are extracted from external systems such Firehose and
-Substreams, and then there are datasets defined as views on other datasets.
+Conceptually there are raw datasets, which are extracted from external systems such as Firehose,
+and then there are datasets defined as views on other datasets.
 
 ## Raw datasets
 
@@ -80,7 +80,6 @@ Details for the raw datasets currently implemented:
 
 - EVM RPC [dataset docs](../crates/extractors/evm-rpc/README.md)
 - Firehose [dataset docs](../crates/extractors/firehose/README.md)
-- Substreams [dataset docs](../crates/extractors/substreams/README.md)
 
 ### Generating Raw Dataset Manifests
 
@@ -99,10 +98,6 @@ ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
 # Generate manifest for Firehose dataset
 ampd generate-manifest --network mainnet --kind firehose --name eth_firehose
 
-# Generate manifest for Substreams dataset
-ampd generate-manifest --network mainnet --kind substreams --name uniswap_v3 \
-  --manifest https://example.com/substreams.yaml --module map_pools
-
 # Output to file
 ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
   -o ./dataset_defs_dir/eth_mainnet.json
@@ -111,12 +106,10 @@ ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
 #### Parameters
 
 - `--network`: Network name (e.g., mainnet, goerli, polygon)
-- `--kind`: Dataset type (evm-rpc, firehose, substreams, eth-beacon)
+- `--kind`: Dataset type (evm-rpc, firehose, eth-beacon)
 - `--name`: Dataset name (must be a valid dataset identifier)
 - `--out`: Optional output file path (defaults to stdout)
 - `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc, firehose, and eth-beacon datasets.
-- `--manifest`: Substreams manifest URL (required for substreams kind)
-- `--module`: Substreams module name (required for substreams kind)
 
 The generated manifest includes the complete schema definition with all tables and columns for the specified dataset type and network.
 
@@ -133,7 +126,6 @@ The `kind` field in a provider configuration must be one of the following:
 - **`evm-rpc`**: Ethereum-compatible JSON-RPC endpoints (supports HTTP, WebSocket, and IPC connections)
 - **`firehose`**: Firehose gRPC endpoints
 - **`eth-beacon`**: Ethereum Beacon Chain (consensus layer) REST API endpoints
-- **`substreams`**: Substreams gRPC endpoints
 
 Each kind has its own set of required and optional configuration fields.
 
@@ -154,7 +146,5 @@ Complete sample configuration files for each provider kind are available in the 
 - **[firehose.sample.toml](providers/firehose.sample.toml)** - Configuration for StreamingFast Firehose gRPC endpoints. Includes fields for gRPC URL and authentication token.
 
 - **[eth-beacon.sample.toml](providers/eth-beacon.sample.toml)** - Configuration for Ethereum Beacon Chain REST API endpoints. Includes fields for API URL, concurrent request limits, and rate limiting.
-
-- **[substreams.sample.toml](providers/substreams.sample.toml)** - Configuration for StreamingFast Substreams gRPC endpoints. Includes fields for gRPC URL and authentication token.
 
 These sample files document all available configuration fields for each provider kind, including both required and optional parameters with their default values.

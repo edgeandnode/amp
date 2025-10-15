@@ -7,7 +7,6 @@ pub(crate) enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
     EthBeacon(eth_beacon_datasets::BeaconClient),
     Firehose(firehose_datasets::Client),
-    Substreams(substreams_datasets::Client),
 }
 
 impl BlockStreamer for BlockStreamClient {
@@ -38,12 +37,6 @@ impl BlockStreamer for BlockStreamClient {
                         yield item;
                     }
                 }
-                Self::Substreams(client) => {
-                    let stream = client.block_stream(start_block, end_block).await;
-                    for await item in stream {
-                        yield item;
-                    }
-                }
             }
         }
     }
@@ -53,7 +46,6 @@ impl BlockStreamer for BlockStreamClient {
             Self::EvmRpc(client) => client.latest_block().await,
             Self::EthBeacon(client) => client.latest_block().await,
             Self::Firehose(client) => client.latest_block().await,
-            Self::Substreams(client) => client.latest_block().await,
         }
     }
 
@@ -62,7 +54,6 @@ impl BlockStreamer for BlockStreamClient {
             Self::EvmRpc(client) => client.provider_name(),
             Self::EthBeacon(client) => client.provider_name(),
             Self::Firehose(client) => client.provider_name(),
-            Self::Substreams(client) => client.provider_name(),
         }
     }
 }

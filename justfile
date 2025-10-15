@@ -185,10 +185,8 @@ gen: \
     gen-derived-dataset-manifest-schema \
     gen-evm-rpc-dataset-manifest-schema \
     gen-firehose-dataset-manifest-schema \
-    gen-substreams-dataset-manifest-schema \
     gen-admin-api-openapi-spec
 # TODO: Uncomment to enable protobuf bindings generation
-#    gen-substreams-datasets-proto \
 #    gen-firehose-datasets-proto \
 
 ### JSON Schema generation
@@ -223,13 +221,6 @@ gen-firehose-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
 
-# Generate the Substreams dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-gen-substreams-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-substreams-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-substreams-gen-*/out/schema.json | head -1) {{DEST_DIR}}/substreams.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/substreams.spec.json"
-
 ### OpenAPI specification generation
 
 OPENAPI_SCHEMAS_DIR := "docs/openapi-specs"
@@ -242,10 +233,6 @@ gen-admin-api-openapi-spec DEST_DIR=OPENAPI_SCHEMAS_DIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/admin.spec.json"
 
 ### Protobuf bindings generation
-
-# Generate Substreams protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
-gen-substreams-datasets-proto:
-    RUSTFLAGS="--cfg gen_proto" cargo build -p substreams-datasets
 
 # Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
 gen-firehose-datasets-proto:

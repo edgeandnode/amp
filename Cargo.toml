@@ -22,8 +22,6 @@ members = [
     "crates/extractors/eth-beacon",
     "crates/extractors/firehose",
     "crates/extractors/firehose/gen",
-    "crates/extractors/substreams",
-    "crates/extractors/substreams/gen",
     "crates/services/admin-api",
     "crates/services/admin-api/gen",
     "crates/services/controller",

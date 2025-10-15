@@ -1,8 +1,8 @@
 # Dump
 
-A CLI to dump extractor interfaces to parquet files. Currently supports dumping EVM Firehose to a simplified schema and Substreams with schema inferred from the manifest.
+A CLI to dump extractor interfaces to parquet files. Currently supports dumping EVM Firehose to a simplified schema.
 
-First, you will need to setup your config file and point `AMP_CONFIG` to it. Please refer to [config.md](../../../docs/config.md) and [the sample config](../../../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../../extractors/firehose/example_config/) or [substreams](../../extractors/substreams/example_config/) datasets.
+First, you will need to setup your config file and point `AMP_CONFIG` to it. Please refer to [config.md](../../../docs/config.md) and [the sample config](../../../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../../extractors/firehose/example_config/) datasets.
 
 Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as you can simply refer to the dataset by name. An example usage to dump first four million blocks of a dataset named `eth_firehose`, running two parallel jobs:
 
@@ -38,8 +38,7 @@ All configuration can be set through env vars instead of the CLI.
 
 - **DUMP_END_BLOCK**
   - Description: Specifies the block number to end at, inclusive.
-  - Default: For Firehose datasets, 100 blocks behind chain head. For Substreams, the latest final
-    block. For SQL datasets, the latest block that has been scanned by all dependencies.
+  - Default: For Firehose datasets, 100 blocks behind chain head. For SQL datasets, the latest block that has been scanned by all dependencies.
   - Example: `DUMP_END_BLOCK=10000000`
 
 - **DUMP_N_JOBS**
