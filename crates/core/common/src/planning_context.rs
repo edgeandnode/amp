@@ -26,7 +26,7 @@ use crate::{
     BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     metadata::segments::ResumeWatermark,
     plan_visitors::{IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num},
-    query_context::{Error, TableProviderCodec},
+    query_context::{Error, TableProviderCodec, default_catalog_name},
     stream_helpers::is_streaming,
 };
 
@@ -58,8 +58,13 @@ pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
 
 impl PlanningContext {
     pub fn new(catalog: LogicalCatalog) -> Self {
+        let session_config = SessionConfig::from_env().unwrap().set(
+            "datafusion.catalog.default_catalog",
+            &default_catalog_name(),
+        );
+
         Self {
-            session_config: SessionConfig::from_env().unwrap(),
+            session_config,
             catalog,
         }
     }

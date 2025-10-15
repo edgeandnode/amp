@@ -22,6 +22,7 @@ use datafusion::{
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
+    scalar::ScalarValue,
     sql::{TableReference, parser},
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
@@ -47,6 +48,10 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
 };
+
+pub fn default_catalog_name() -> ScalarValue {
+    ScalarValue::Utf8(Some("amp".to_string()))
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -142,7 +147,10 @@ impl QueryContext {
     ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
-        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
+        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?.set(
+            "datafusion.catalog.default_catalog",
+            &default_catalog_name(),
+        );
 
         let opts = session_config.options_mut();
 
