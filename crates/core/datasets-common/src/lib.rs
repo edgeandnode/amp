@@ -7,6 +7,7 @@ pub mod fqn;
 pub mod manifest;
 pub mod name;
 pub mod namespace;
+pub mod reference;
 pub mod version;
 pub mod version_hash;
 pub mod version_tag;
