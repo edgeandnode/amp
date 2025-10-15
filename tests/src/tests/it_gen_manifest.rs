@@ -1,6 +1,5 @@
 use ampd::gen_manifest_cmd;
-use common::manifest::common::schema_from_tables;
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name};
+use datasets_common::name::Name;
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
@@ -16,33 +15,32 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
         .expect("should parse valid dataset name");
     let kind = EvmRpcDatasetKind;
     let network = "mainnet".to_string();
-    let expected_schema = schema_from_tables(&evm_rpc_datasets::tables::all(&network));
 
     //* When
     let mut out = Vec::new();
-    let result =
-        gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, None, &mut out).await;
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        None,
+        None,
+        None,
+        &mut out,
+    )
+    .await;
 
     //* Then
     assert!(
         result.is_ok(),
         "manifest generation should succeed with valid EVM RPC parameters"
     );
-    let manifest: CommonManifest =
+    let manifest: evm_rpc_datasets::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(
-        manifest.network,
-        Some(network),
-        "network should match input"
-    );
+    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
-    assert_eq!(
-        manifest.schema.expect("schema should be present"),
-        expected_schema,
-        "schema should match expected builtin schema"
-    );
+    assert_eq!(manifest.start_block, 0, "start_block should default to 0");
 }
 
 #[tokio::test]
@@ -54,33 +52,32 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
         .expect("should parse valid dataset name");
     let kind = FirehoseDatasetKind;
     let network = "mainnet".to_string();
-    let expected_schema = schema_from_tables(&firehose_datasets::evm::tables::all(&network));
 
     //* When
     let mut out = Vec::new();
-    let result =
-        gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, None, &mut out).await;
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        None,
+        None,
+        None,
+        &mut out,
+    )
+    .await;
 
     //* Then
     assert!(
         result.is_ok(),
         "manifest generation should succeed with valid Firehose parameters"
     );
-    let manifest: CommonManifest =
+    let manifest: firehose_datasets::dataset::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(
-        manifest.network,
-        Some(network),
-        "network should match input"
-    );
+    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
-    assert_eq!(
-        manifest.schema.expect("schema should be present"),
-        expected_schema,
-        "schema should match expected builtin schema"
-    );
+    assert_eq!(manifest.start_block, 0, "start_block should default to 0");
 }
 
 #[tokio::test]
@@ -95,29 +92,15 @@ async fn gen_manifest_cmd_run_with_substreams_kind_generates_valid_manifest() {
     let manifest_url = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
     let module_name = "map_events".to_string();
 
-    // Prepare expected schema
-    let dataset_def = substreams_datasets::dataset::Manifest {
-        name: name.clone(),
-        version: Default::default(),
-        kind,
-        network: network.clone(),
-        manifest: manifest_url.clone(),
-        module: module_name.clone(),
-    };
-    let expected_schema = schema_from_tables(
-        &substreams_datasets::tables(dataset_def)
-            .await
-            .expect("should fetch substreams tables"),
-    );
-
     //* When
     let mut out = Vec::new();
     let result = gen_manifest_cmd::run(
         name.clone(),
         kind,
         network.clone(),
-        Some(manifest_url),
-        Some(module_name),
+        None,
+        Some(manifest_url.clone()),
+        Some(module_name.clone()),
         &mut out,
     )
     .await;
@@ -127,20 +110,19 @@ async fn gen_manifest_cmd_run_with_substreams_kind_generates_valid_manifest() {
         result.is_ok(),
         "manifest generation should succeed with valid Substreams parameters"
     );
-    let manifest: CommonManifest =
+    let manifest: substreams_datasets::dataset::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(
-        manifest.network,
-        Some(network),
-        "network should match input"
-    );
+    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(
-        manifest.schema.expect("schema should be present"),
-        expected_schema,
-        "schema should match expected substreams schema"
+        manifest.manifest, manifest_url,
+        "manifest URL should match input"
+    );
+    assert_eq!(
+        manifest.module, module_name,
+        "module name should match input"
     );
 }
 
@@ -156,7 +138,7 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(name, kind, network, None, None, &mut out).await;
+    let result = gen_manifest_cmd::run(name, kind, network, None, None, None, &mut out).await;
 
     //* Then
     assert!(
@@ -169,5 +151,127 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
         error_message.contains("doesn't support dataset generation"),
         "error should indicate derived datasets are not supported, got: {}",
         error_message
+    );
+}
+
+#[tokio::test]
+async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
+    //* Given
+    logging::init();
+    let name = "eth_rpc"
+        .parse::<Name>()
+        .expect("should parse valid dataset name");
+    let kind = EvmRpcDatasetKind;
+    let network = "mainnet".to_string();
+    let start_block = 1000000u64;
+
+    //* When
+    let mut out = Vec::new();
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        Some(start_block),
+        None,
+        None,
+        &mut out,
+    )
+    .await;
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "manifest generation should succeed with start_block parameter"
+    );
+    let manifest: evm_rpc_datasets::Manifest =
+        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
+
+    assert_eq!(
+        manifest.start_block, start_block,
+        "start_block should match input"
+    );
+    assert_eq!(manifest.name, name, "name should match input");
+    assert_eq!(manifest.network, network, "network should match input");
+}
+
+#[tokio::test]
+async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
+    //* Given
+    logging::init();
+    let name = "firehose"
+        .parse::<Name>()
+        .expect("should parse valid dataset name");
+    let kind = FirehoseDatasetKind;
+    let network = "mainnet".to_string();
+
+    //* When
+    let mut out = Vec::new();
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        None,
+        None,
+        None,
+        &mut out,
+    )
+    .await;
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "manifest generation should succeed without start_block parameter"
+    );
+    let manifest: firehose_datasets::dataset::Manifest =
+        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
+
+    assert_eq!(manifest.start_block, 0, "start_block should default to 0");
+    assert_eq!(manifest.name, name, "name should match input");
+    assert_eq!(manifest.network, network, "network should match input");
+}
+
+#[tokio::test]
+async fn gen_manifest_cmd_run_substreams_does_not_include_start_block() {
+    //* Given
+    logging::init();
+    let name = "substreams"
+        .parse::<Name>()
+        .expect("should parse valid dataset name");
+    let kind = SubstreamsDatasetKind;
+    let network = "mainnet".to_string();
+    let manifest_url = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
+    let module_name = "map_events".to_string();
+
+    //* When - passing start_block but it should be ignored for substreams
+    let mut out = Vec::new();
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        Some(1000000),
+        Some(manifest_url.clone()),
+        Some(module_name.clone()),
+        &mut out,
+    )
+    .await;
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "manifest generation should succeed for substreams"
+    );
+    let manifest: substreams_datasets::dataset::Manifest =
+        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
+
+    // Verify the manifest structure - substreams manifests don't have start_block field
+    assert_eq!(manifest.name, name, "name should match input");
+    assert_eq!(manifest.network, network, "network should match input");
+    assert_eq!(
+        manifest.manifest, manifest_url,
+        "manifest URL should match input"
+    );
+    assert_eq!(
+        manifest.module, module_name,
+        "module name should match input"
     );
 }

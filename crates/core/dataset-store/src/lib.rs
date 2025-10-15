@@ -115,6 +115,11 @@ impl DatasetStore {
     {
         // Check for existing datasets with the same name and version
         if self.is_registered(name, version).await? {
+            tracing::error!(
+                dataset_name = %name,
+                dataset_version = %version,
+                "Trying to register an already registered manifest with a version"
+            );
             return Err(RegisterManifestError::DatasetExists {
                 name: name.clone(),
                 version: version.clone(),

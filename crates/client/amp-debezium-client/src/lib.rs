@@ -7,17 +7,15 @@
 //! ## Example
 //!
 //! ```no_run
-//! use amp_debezium_client::{DebeziumClient, DebeziumOp, InMemoryStore};
+//! use amp_client::SqlClient;
+//! use amp_debezium_client::{DebeziumClient, DebeziumOp};
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create a Debezium client
-//!     let client = DebeziumClient::builder()
-//!         .endpoint("http://localhost:1602")?
-//!         .store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
-//!         .build()
-//!         .await?;
+//!     // Create a Debezium client (defaults to InMemoryStore with 64-block reorg window)
+//!     let amp_client = SqlClient::new("http://localhost:1602").await?;
+//!     let client = DebeziumClient::new(amp_client, None);
 //!
 //!     // Execute a streaming query
 //!     let mut stream = client
@@ -88,14 +86,25 @@
 //!
 //! This multi-network aware pruning ensures data is retained long enough for all chains,
 //! preventing premature deletion of data needed for slower chains.
+//!
+//! ## Storage Backends
+//!
+//! Two state store implementations are available:
+//!
+//! - **`InMemoryStore`** (default) - Fast, in-memory storage using Vec. Does not persist across restarts.
+//! - **`LmdbStore`** (feature = "lmdb") - Persistent disk storage. Survives restarts.
+//!
+//! Enable LMDB backend with: `cargo add amp-debezium-client --features lmdb`
 
 pub mod client;
 pub mod error;
-pub mod state;
+pub mod stores;
 pub mod types;
 
 // Re-export main types
-pub use client::{DebeziumClient, DebeziumClientBuilder};
+pub use client::DebeziumClient;
 pub use error::{Error, Result};
-pub use state::{InMemoryStore, StateStore};
+#[cfg(feature = "lmdb")]
+pub use stores::LmdbStore;
+pub use stores::{InMemoryStore, StateStore};
 pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};

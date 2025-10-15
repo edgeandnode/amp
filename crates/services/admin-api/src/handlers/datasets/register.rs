@@ -113,6 +113,11 @@ pub async fn handler(
 
     // Check if dataset already exists with this name and version
     if dataset_exists {
+        tracing::error!(
+            "Dataset '{}' version '{}' already exists",
+            payload.name,
+            payload.version
+        );
         return Err(Error::DatasetAlreadyExists(
             payload.name.to_string(),
             payload.version.to_string(),
@@ -161,8 +166,8 @@ pub async fn handler(
 
             manifest.validate_dependencies().map_err(|err| {
                 tracing::error!(
-                    name = %manifest.name,
-                    version = %manifest.version,
+                    name = %payload.name,
+                    version = %payload.version,
                     kind = %dataset_kind,
                     error = ?err,
                     "Manifest dependency validation failed"
@@ -171,12 +176,12 @@ pub async fn handler(
             })?;
 
             ctx.dataset_store
-                .register_manifest(&manifest.name, &manifest.version, &manifest)
+                .register_manifest(&payload.name, &payload.version, &manifest)
                 .await
                 .map_err(|err| {
                     tracing::error!(
-                        name = %manifest.name,
-                        version = %manifest.version,
+                        name = %payload.name,
+                        version = %payload.version,
                         kind = %dataset_kind,
                         error = ?err,
                         "Failed to register derived dataset manifest"
@@ -186,8 +191,8 @@ pub async fn handler(
 
             tracing::info!(
                 "Registered manifest for derived dataset '{}' version '{}'",
-                manifest.name,
-                manifest.version
+                payload.name,
+                payload.version
             );
         }
         DatasetKind::EvmRpc => {
@@ -205,12 +210,12 @@ pub async fn handler(
                 })?;
 
             ctx.dataset_store
-                .register_manifest(&manifest.name, &manifest.version, &manifest)
+                .register_manifest(&payload.name, &payload.version, &manifest)
                 .await
                 .map_err(|err| {
                     tracing::error!(
-                        name = %manifest.name,
-                        version = %manifest.version,
+                        name = %payload.name,
+                        version = %payload.version,
                         kind = %dataset_kind,
                         error = ?err,
                         "Failed to register evm-rpc dataset manifest"
@@ -220,8 +225,8 @@ pub async fn handler(
 
             tracing::info!(
                 "Registered manifest for evm-rpc dataset '{}' version '{}'",
-                manifest.name,
-                manifest.version
+                payload.name,
+                payload.version
             );
         }
         _ => {

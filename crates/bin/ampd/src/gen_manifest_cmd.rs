@@ -1,60 +1,72 @@
 use std::io;
 
-use common::manifest::common::schema_from_tables;
 use dataset_store::DatasetKind;
-use datasets_common::{manifest::Manifest, name::Name};
+use datasets_common::name::Name;
 
 pub async fn run(
     name: Name,
     kind: impl Into<DatasetKind>,
     network: String,
+    start_block: Option<u64>,
     manifest: Option<String>,
     module: Option<String>,
     writer: &mut impl io::Write,
 ) -> Result<(), Error> {
     let kind = kind.into();
-    let schema = match kind {
+
+    let dataset_bytes = match kind {
         dataset_store::DatasetKind::EvmRpc => {
-            schema_from_tables(&evm_rpc_datasets::tables::all(&network))
+            let manifest = evm_rpc_datasets::Manifest {
+                name,
+                version: Default::default(),
+                kind: kind.as_str().parse().expect("kind is valid"),
+                network,
+                start_block: start_block.unwrap_or(0),
+            };
+            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::EthBeacon => {
-            schema_from_tables(&eth_beacon_datasets::all_tables(network.clone()))
+            let manifest = eth_beacon_datasets::Manifest {
+                name,
+                version: Default::default(),
+                kind: kind.as_str().parse().expect("kind is valid"),
+                network,
+                start_block: start_block.unwrap_or(0),
+            };
+            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::Firehose => {
-            schema_from_tables(&firehose_datasets::evm::tables::all(&network))
+            let manifest = firehose_datasets::dataset::Manifest {
+                name,
+                version: Default::default(),
+                kind: kind.as_str().parse().expect("kind is valid"),
+                network,
+                start_block: start_block.unwrap_or(0),
+            };
+            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::Substreams => {
-            let (Some(manifest), Some(module)) = (manifest, module) else {
+            let (Some(manifest_url), Some(module_name)) = (manifest, module) else {
                 return Err(Error::MissingSubstreamsArgs);
             };
             let manifest = substreams_datasets::dataset::Manifest {
-                name: name.clone(),
+                name,
                 version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
-                network: network.clone(),
-                manifest,
-                module,
+                network,
+                manifest: manifest_url,
+                module: module_name,
             };
-            schema_from_tables(
-                &substreams_datasets::tables(manifest)
-                    .await
-                    .map_err(Error::SubstreamsTables)?,
-            )
+            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::Derived => {
             return Err(Error::DerivedNotSupported);
         }
     };
 
-    let dataset = serde_json::to_vec(&Manifest {
-        name,
-        version: Default::default(),
-        kind: kind.to_string(),
-        network: Some(network),
-        schema: Some(schema),
-    })
-    .map_err(Error::Serialization)?;
-    writer.write_all(&dataset).map_err(Error::WriteOutput)?;
+    writer
+        .write_all(&dataset_bytes)
+        .map_err(Error::WriteOutput)?;
 
     Ok(())
 }
