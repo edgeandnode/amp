@@ -38,7 +38,7 @@
     },
     "version": {
       "description": "Dataset version, e.g., `1.0.0`",
-      "$ref": "#/$defs/Version"
+      "$ref": "#/$defs/VersionTag"
     }
   },
   "required": [
@@ -203,12 +203,12 @@
         "arrow"
       ]
     },
-    "Version": {
-      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
-      "type": "string"
-    },
     "VersionReq": {
       "description": "Semver version requirement wrapper with JSON schema support.\n\nUsed for specifying dependency version constraints in derived datasets.",
+      "type": "string"
+    },
+    "VersionTag": {
+      "description": "Semver version tag wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset version tagging.",
       "type": "string"
     },
     "View": {
