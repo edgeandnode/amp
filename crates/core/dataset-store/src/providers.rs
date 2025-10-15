@@ -8,7 +8,7 @@
 //!
 //! All provider configurations must define at least:
 //! - `name`: A unique identifier for the provider configuration
-//! - `kind`: The type of provider (e.g., "evm-rpc", "firehose", "substreams")
+//! - `kind`: The type of provider (e.g., "evm-rpc", "firehose")
 //! - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 //!
 //! Additional fields depend on the provider type.
@@ -275,7 +275,7 @@ pub struct ProviderConfig {
     /// Unique name of the provider configuration
     #[serde(default)]
     pub name: String,
-    /// The type of provider (e.g., "evm-rpc", "firehose", "substreams")
+    /// The type of provider (e.g., "evm-rpc", "firehose")
     pub kind: DatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     pub network: String,

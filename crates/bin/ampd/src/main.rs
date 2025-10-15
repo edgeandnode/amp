@@ -127,14 +127,6 @@ enum Command {
         /// The starting block number for the dataset. Defaults to 0.
         #[arg(long, env = "GM_START_BLOCK")]
         start_block: Option<u64>,
-
-        /// Substreams package manifest URL, required for DatasetKind::Substreams.
-        #[arg(long, env = "GM_SS_MANIFEST_URL")]
-        manifest: Option<String>,
-
-        /// Substreams output module name, required for DatasetKind::Substreams.
-        #[arg(long, env = "GM_SS_MODULE")]
-        module: Option<String>,
     },
     /// Run migrations on the metadata database
     Migrate,
@@ -319,8 +311,6 @@ async fn main_inner() -> Result<(), BoxError> {
             name,
             out,
             start_block,
-            manifest,
-            module,
         } => {
             let name = name.parse()?;
             let kind = kind.parse::<DatasetKind>()?;
@@ -333,12 +323,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                gen_manifest_cmd::run(name, kind, network, start_block, manifest, module, &mut out)
-                    .await
+                gen_manifest_cmd::run(name, kind, network, start_block, &mut out).await
             } else {
                 let mut out = std::io::stdout();
-                gen_manifest_cmd::run(name, kind, network, start_block, manifest, module, &mut out)
-                    .await
+                gen_manifest_cmd::run(name, kind, network, start_block, &mut out).await
             };
 
             monitoring::deinit(metrics_provider, tracing_provider)?;

@@ -29,7 +29,6 @@ serde_json.workspace = true
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
-substreams-datasets = { path = "../../extractors/substreams" }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

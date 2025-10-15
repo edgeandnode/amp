@@ -79,7 +79,7 @@ ampd dump --dataset eth_mainnet --run-every-mins 30
 
 1. **Initialization**: Loads dataset definitions and resolves dependencies
 2. **Progress Check**: Reads metadata DB to find last extracted block
-3. **Extraction**: Pulls data from source (RPC, Firehose, Substreams, etc.)
+3. **Extraction**: Pulls data from source (RPC, Firehose, etc.)
 4. **Writing**: Writes Parquet files to configured data directory
 5. **Metadata Update**: Records progress and file metadata in database
 6. **Completion**: Exits when end block reached or stopped
@@ -88,7 +88,6 @@ ampd dump --dataset eth_mainnet --run-every-mins 30
 
 - **EVM RPC**: Ethereum-compatible JSON-RPC endpoints
 - **Firehose**: StreamingFast Firehose protocol
-- **Substreams**: Substreams packages with dynamic schemas
 - **Eth Beacon**: Ethereum Beacon Chain (consensus layer)
 - **SQL Datasets**: Derived datasets via SQL transformations over other datasets
 

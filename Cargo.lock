@@ -867,7 +867,6 @@ dependencies = [
  "server",
  "snmalloc-rs",
  "static_assertions",
- "substreams-datasets",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -3395,7 +3394,6 @@ dependencies = [
  "rand 0.9.2",
  "serde",
  "serde_json",
- "substreams-datasets",
  "thiserror 2.0.17",
  "tokio",
  "toml 0.8.23",
@@ -3464,15 +3462,6 @@ dependencies = [
  "firehose-datasets",
  "schemars 1.0.4",
  "serde_json",
-]
-
-[[package]]
-name = "datasets-substreams-gen"
-version = "0.1.0"
-dependencies = [
- "schemars 1.0.4",
- "serde_json",
- "substreams-datasets",
 ]
 
 [[package]]
@@ -6556,16 +6545,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-reflect"
-version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
-dependencies = [
- "prost 0.13.3",
- "prost-types",
-]
-
-[[package]]
 name = "prost-types"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7958,33 +7937,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "substreams-datasets"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "chrono",
- "common",
- "datafusion",
- "datasets-common",
- "firehose-datasets",
- "futures",
- "monitoring",
- "prost 0.13.3",
- "prost-build",
- "prost-reflect",
- "reqwest",
- "schemars 1.0.4",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokio",
- "tonic 0.12.3",
- "tonic-build",
- "tracing",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8119,7 +8071,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "server",
- "substreams-datasets",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",

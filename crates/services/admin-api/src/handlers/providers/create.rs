@@ -20,7 +20,7 @@ use crate::{
 /// ## Request Body
 /// - JSON object containing provider configuration with required fields:
 ///   - `name`: The unique identifier for the provider
-///   - `kind`: The type of provider (e.g., "evm-rpc", "firehose", "substreams")
+///   - `kind`: The type of provider (e.g., "evm-rpc", "firehose")
 ///   - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 ///   - Additional provider-specific configuration fields as needed
 ///

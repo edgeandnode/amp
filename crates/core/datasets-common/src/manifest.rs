@@ -23,7 +23,7 @@ pub struct Manifest {
     pub version: Version,
     /// Dataset kind. See specific dataset definitions for supported values.
     ///
-    /// Common values include: `manifest`, `evm-rpc`, `firehose`, `substreams`.
+    /// Common values include: `manifest`, `evm-rpc`, `firehose`.
     pub kind: String,
     /// Network name, e.g., `mainnet`, `sepolia`
     pub network: Option<String>,

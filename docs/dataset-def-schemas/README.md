@@ -9,7 +9,6 @@ be supported:
 - for `evm-rpc` datasets, see [evm-rpc.spec.json](./evm-rpc.spec.json)
 - for `firehose` datasets, see [firehose.spec.json](./firehose.spec.json)
 - for `manifest` datasets, see [derived.spec.json](./derived.spec.json)
-- for `substreams` datasets, see [substreams.spec.json](./substreams.spec.json)
 
 The `manifest` datasets are also referred to as "user datasets", whereas the other
 types are also referred to as "raw datasets". Unlike raw datasets, which extract
