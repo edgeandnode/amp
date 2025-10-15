@@ -192,7 +192,7 @@ jobs:
           token: ${{ secrets.PUBLISH_RELEASE_TOKEN }}
 
   containerize:
-    name: Containerize ampd
+    name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest
     needs: build
     permissions:
@@ -205,14 +205,10 @@ jobs:
         include:
           - binary: ampd
             name: amp
-            source: https://github.com/edgeandnode/amp
-            url: https://github.com/edgeandnode/amp
             title: Amp
             description: A tool for building and managing blockchain datasets
           - binary: ampsync
             name: ampsync
-            source: https://github.com/edgeandnode/amp
-            url: https://github.com/edgeandnode/amp
             title: Ampsync
             description: Syncing engine that listens to the stream changes from the amp-client streaming layer to store changes in a configured database
 
@@ -252,14 +248,14 @@ jobs:
             type=ref,event=tag
             type=sha
           labels: |
-            org.opencontainers.image.source=${{ matrix.source }}
-            org.opencontainers.image.url=${{ matrix.url }}
+            org.opencontainers.image.source=https://github.com/edgeandnode/amp
+            org.opencontainers.image.url=https://github.com/edgeandnode/amp
             org.opencontainers.image.vendor=Edge & Node
             org.opencontainers.image.title=${{ matrix.title }}
             org.opencontainers.image.description=${{ matrix.description }}
           annotations: |
-            manifest:org.opencontainers.image.source=${{ matrix.source }}
-            manifest:org.opencontainers.image.url=${{ matrix.source }}
+            manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
+            manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
             manifest:org.opencontainers.image.vendor=Edge & Node
             manifest:org.opencontainers.image.title=${{ matrix.title }}
             manifest:org.opencontainers.image.description=${{ matrix.description }}
