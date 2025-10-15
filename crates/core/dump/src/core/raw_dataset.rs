@@ -142,7 +142,7 @@ pub async fn dump(
         ResolvedEndBlock::Block(block) => Some(block),
     };
 
-    let mut timer = tokio::time::interval(Duration::from_secs(1));
+    let mut timer = tokio::time::interval(ctx.config.poll_interval);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         timer.tick().await;
