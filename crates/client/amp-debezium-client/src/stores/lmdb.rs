@@ -145,7 +145,7 @@ impl StateStore for LmdbStore {
     async fn get_in_ranges(&self, ranges: &[InvalidationRange]) -> Result<Vec<Arc<RecordBatch>>> {
         let rtxn = self.env.read_txn()?;
 
-        let mut batch_ids = std::collections::HashSet::new();
+        let mut batch_ids = std::collections::BTreeSet::new();
 
         // Collect all batch IDs that overlap with any invalidation range
         for inv_range in ranges {
