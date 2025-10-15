@@ -87,7 +87,7 @@ fn env_filter_and_log_level() -> (EnvFilter, String) {
     let directive_string = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
     let mut env_filter = log_filter.parse(&directive_string).unwrap();
 
-    let log_level = std::env::var(AMP_LOG_ENV_VAR).unwrap_or_else(|_| "debug".to_string());
+    let log_level = std::env::var(AMP_LOG_ENV_VAR).unwrap_or_else(|_| "info".to_string());
 
     for crate_name in AMP_CRATES {
         // Add directives for each crate in AMP_CRATES, if not overriden by RUST_LOG
