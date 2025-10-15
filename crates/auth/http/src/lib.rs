@@ -38,22 +38,9 @@ pub use model::{
 ///     Ok(Json(result))
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub struct AuthAnyhowError(anyhow::Error);
-
-impl From<anyhow::Error> for AuthAnyhowError {
-    fn from(err: anyhow::Error) -> Self {
-        Self(err)
-    }
-}
-
-impl std::fmt::Display for AuthAnyhowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::error::Error for AuthAnyhowError {}
 
 #[derive(Debug, Error)]
 pub enum AuthError {
