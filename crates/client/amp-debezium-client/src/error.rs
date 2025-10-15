@@ -15,6 +15,15 @@ pub enum Error {
     Config(String),
     #[error("State store error: {0}")]
     StateStore(String),
+    #[cfg(feature = "lmdb")]
+    #[error("LMDB error: {0}")]
+    Lmdb(#[from] heed::Error),
+    #[cfg(feature = "lmdb")]
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] bincode::error::EncodeError),
+    #[cfg(feature = "lmdb")]
+    #[error("Deserialization error: {0}")]
+    Deserialization(#[from] bincode::error::DecodeError),
 }
 
 /// Result type alias for amp-debezium operations.

@@ -115,3 +115,41 @@ ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
 
 The generated manifest includes the complete schema definition with all tables and columns for the specified dataset type and network.
 
+# Providers
+
+Providers are external data source configurations that raw datasets connect to for extracting blockchain data. Each provider is configured as a separate TOML file in the `providers_dir` directory.
+
+Environment variable substitution is supported using `${VAR_NAME}` syntax for any field value.
+
+## Provider Kinds
+
+The `kind` field in a provider configuration must be one of the following:
+
+- **`evm-rpc`**: Ethereum-compatible JSON-RPC endpoints (supports HTTP, WebSocket, and IPC connections)
+- **`firehose`**: Firehose gRPC endpoints
+- **`eth-beacon`**: Ethereum Beacon Chain (consensus layer) REST API endpoints
+- **`substreams`**: Substreams gRPC endpoints
+
+Each kind has its own set of required and optional configuration fields.
+
+## Provider Configuration Structure
+
+All provider configurations must define:
+- `kind`: The provider type (must be one of the four kinds listed above)
+- `network`: The blockchain network identifier (e.g., "mainnet", "goerli", "polygon")
+
+Additional fields vary by provider kind. The provider name is derived from the filename (without the `.toml` extension), though it can be explicitly set with a `name` field.
+
+## Sample Provider Configurations
+
+Complete sample configuration files for each provider kind are available in the [docs/providers/](providers/) directory:
+
+- **[evm-rpc.sample.toml](providers/evm-rpc.sample.toml)** - Configuration for Ethereum-compatible JSON-RPC endpoints. Includes fields for URL (HTTP/WebSocket/IPC), concurrent request limits, RPC batching, rate limiting, and receipt fetching options.
+
+- **[firehose.sample.toml](providers/firehose.sample.toml)** - Configuration for StreamingFast Firehose gRPC endpoints. Includes fields for gRPC URL and authentication token.
+
+- **[eth-beacon.sample.toml](providers/eth-beacon.sample.toml)** - Configuration for Ethereum Beacon Chain REST API endpoints. Includes fields for API URL, concurrent request limits, and rate limiting.
+
+- **[substreams.sample.toml](providers/substreams.sample.toml)** - Configuration for StreamingFast Substreams gRPC endpoints. Includes fields for gRPC URL and authentication token.
+
+These sample files document all available configuration fields for each provider kind, including both required and optional parameters with their default values.

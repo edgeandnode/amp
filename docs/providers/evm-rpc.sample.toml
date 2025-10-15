@@ -1,0 +1,36 @@
+# Sample EVM RPC Provider Configuration
+#
+# EVM RPC providers connect to Ethereum-compatible JSON-RPC endpoints for extracting blockchain data.
+# This provider type supports IPC, WebSocket, and HTTP/HTTPS connections.
+
+# Provider type - must be "evm-rpc" for EVM RPC providers
+kind = "evm-rpc"
+
+# Blockchain network identifier (e.g., "mainnet", "goerli", "polygon", "base")
+network = "mainnet"
+
+# RPC endpoint URL. Supported schemes:
+# - http:// or https:// for HTTP connections
+# - ws:// or wss:// for WebSocket connections
+# - ipc:// for IPC socket connections
+url = "${RPC_ETH_MAINNET_URL}"
+
+# Maximum number of concurrent requests to the RPC endpoint (optional)
+# Default: 1024
+# concurrent_request_limit = 1024
+
+# Maximum number of JSON-RPC requests to batch together in a single call (optional)
+# Set to 0 to disable batching
+# Default: 0 (no batching)
+# rpc_batch_size = 0
+
+# Rate limit in requests per minute (optional)
+# When set, limits the number of requests made to the RPC endpoint to avoid rate limiting
+# Default: no rate limit
+# rate_limit_per_minute = 600
+
+# Whether to fetch transaction receipts individually or in bulk (optional)
+# - true: Use eth_getTransactionReceipt for each transaction (slower, more compatible)
+# - false: Use eth_getBlockReceipts to fetch all receipts for a block at once (faster, requires support)
+# Default: false
+# fetch_receipts_per_tx = false
