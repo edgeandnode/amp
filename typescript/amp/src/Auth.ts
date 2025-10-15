@@ -4,14 +4,18 @@ import * as HttpApiMiddleware from "@effect/platform/HttpApiMiddleware"
 import * as HttpApiSecurity from "@effect/platform/HttpApiSecurity"
 import * as HttpBody from "@effect/platform/HttpBody"
 import * as HttpClient from "@effect/platform/HttpClient"
+import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
 import { type AuthTokenClaims, PrivyClient, type User } from "@privy-io/server-auth"
 import * as Cause from "effect/Cause"
+import * as Config from "effect/Config"
+import type * as ConfigError from "effect/ConfigError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import type { ParseError } from "effect/ParseResult"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as os from "node:os"
@@ -82,40 +86,80 @@ const AUTH_APP_SECRET = Schema.Config("AUTH_APP_SECRET", Schema.Redacted(Schema.
 const AUTH_TOKEN_STORAGE_KEY = "amp_cli_auth"
 const DEFAULT_AUTH_ORIGIN = new URL("http://localhost:3001")
 
-export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService", {
-  dependencies: [
-    FetchHttpClient.layer,
-    KeyValueStore.layerFileSystem(path.join(os.homedir(), ".amp-cli-config")),
-  ],
-  effect: Effect.gen(function*() {
+export const TypeId: unique symbol = Symbol.for("@edgeandnode/amp/PrivyClientService")
+export type TypeId = typeof TypeId
+
+export interface PrivyClientServiceConfig {
+  appId: Redacted.Redacted<string>
+  appSecret: Redacted.Redacted<string>
+}
+export class PrivyClientService extends Context.Tag("Amp/PrivyClientService")<PrivyClientService, {
+  readonly [TypeId]: TypeId
+  readonly client: PrivyClient
+  /**
+   * Uses the IDaas client to verify the access token is valid and not expired, etc.
+   * @param token the redacted access token
+   * @throws {AuthTokenInvalidError} thrown if the verifyAuthToken call throws an error
+   */
+  readonly verifyAuthToken: (token: Redacted.Redacted<string>) => Effect.Effect<AuthPayload, AuthTokenInvalidError>
+  /**
+   * Refresh the users access token within the lifespan of the refresh token.
+   * This fn allows us to have safe, short-lived access tokens with refresh tokens and refresh the access tokens as needed.
+   * @param accessToken the current, even if expired, access token
+   * @param refreshToken the current refresh token
+   * @param origin the origin of the auth platform @default http://localhost:3001
+   * @returns The refreshed access token and refresh token
+   * @throws {AuthTokenExpiredError} thrown if the refresh token has expired and can therefore not be used to refresh the access token
+   * @throws {HttpClientError.HttpClientError} thrown if the POST request to refresh the access token fails
+   * @throws {HttpBody.HttpBodyError} thrown if parsing the request body fails
+   * @throws {ParseError} thrown if decoding the JSON response from the refresh token call fails
+   */
+  readonly refreshAccessToken: (storedAuth: AuthStorageSchema, origin?: string | URL | undefined) => Effect.Effect<
+    AuthStorageSchema,
+    AuthTokenExpiredError | HttpClientError.HttpClientError | HttpBody.HttpBodyError | ParseError
+  >
+  /**
+   * Fetch the user by their id from the IDaaS
+   * @param userId IDaaS id of the user to fetch
+   * @returns the found User
+   * @throws {UserNotFoundError} if no user exists in the IDaaS with the given id
+   */
+  readonly fetchUser: (userId: string) => Effect.Effect<User, UserNotFoundError>
+  /**
+   * Fetch the user by their id from the IDaaS.
+   * Parse the display name based on their connected account type
+   * @param userIdOrClaims the user id/claims (which contains the user id) to fetch the display name for
+   * @returns the authenticated user display name
+   * @throws {UserNotFoundError} thrown if no user found by the id from the IDaaS
+   */
+  readonly fetchUserDisplayName: (
+    userIdOrClaims: string | AuthPayload | AuthTokenClaims,
+  ) => Effect.Effect<string, UserNotFoundError, never>
+}>() {}
+export function makePrivyClientService(config: PrivyClientServiceConfig) {
+  return Effect.gen(function*() {
     const client = yield* HttpClient.HttpClient
-    const kv = (yield* KeyValueStore.KeyValueStore).forSchema(AuthStorageSchema)
 
-    const [appId, appSecret] = yield* Effect.all([
-      AUTH_APP_ID.pipe(Effect.map(Redacted.value)),
-      AUTH_APP_SECRET.pipe(Effect.map(Redacted.value)),
-    ])
+    const appId = Redacted.value(config.appId)
+    const appSecret = Redacted.value(config.appSecret)
 
-    const authClient = new PrivyClient(appId, appSecret)
+    const privyClient = new PrivyClient(appId, appSecret)
 
-    const getUserById = (id: string) =>
+    const fetchUser = (id: string) =>
       Effect.tryPromise({
         async try() {
-          return await authClient.getUserById(id)
+          return await privyClient.getUserById(id)
         },
         catch(error) {
           return new UserNotFoundError({ id, cause: error })
         },
       })
-    const getUserByIdCache = Effect.fn("GetUserById")(function*(id: string) {
-      return yield* Effect.withRequestCaching(true)(getUserById(id))
-    })
 
     const verifyAuthToken = (token: Redacted.Redacted<string>) =>
       Effect.tryPromise({
         async try() {
           const accessToken = Redacted.value(token)
-          const claims = await authClient.verifyAuthToken(accessToken)
+          const claims = await privyClient.verifyAuthToken(accessToken)
 
           return AuthPayload.make({
             userId: claims.userId,
@@ -166,11 +210,57 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         userId: storedAuth.userId,
       })
 
-      // Update the KV store with the refreshed tokens
-      yield* kv.set(AUTH_TOKEN_STORAGE_KEY, refreshedAuth)
-
       return refreshedAuth
     })
+
+    return {
+      [TypeId]: TypeId,
+      client: privyClient,
+      verifyAuthToken,
+      refreshAccessToken,
+      fetchUser,
+      fetchUserDisplayName: Effect.fn("FetchAuthenticatedUserDisplayName")(function*(
+        userIdOrClaims: string | AuthTokenClaims | AuthPayload,
+      ) {
+        const userId = typeof userIdOrClaims === "string" ? userIdOrClaims : userIdOrClaims.userId
+        return yield* fetchUser(userId).pipe(Effect.map((user) => getUserDisplayName(user)[1]))
+      }),
+    } as const
+  })
+}
+export function privyClientLayerConfig(
+  config: Config.Config.Wrap<PrivyClientServiceConfig>,
+): Layer.Layer<PrivyClientService, ConfigError.ConfigError, HttpClient.HttpClient> {
+  return Layer.scopedContext(
+    Config.unwrap(config).pipe(
+      Effect.flatMap(makePrivyClientService),
+      Effect.map((client) => Context.make(PrivyClientService, client)),
+    ),
+  )
+}
+const PrivyClientServiceLive = privyClientLayerConfig({
+  appId: AUTH_APP_ID,
+  appSecret: AUTH_APP_SECRET,
+}).pipe(
+  Layer.provide(FetchHttpClient.layer),
+)
+
+export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService", {
+  dependencies: [
+    KeyValueStore.layerFileSystem(path.join(os.homedir(), ".amp-cli-config")),
+    PrivyClientServiceLive,
+  ],
+  effect: Effect.gen(function*() {
+    const privyClient = yield* PrivyClientService
+    const kv = (yield* KeyValueStore.KeyValueStore).forSchema(AuthStorageSchema)
+
+    const refreshAccessToken = (
+      storedAuth: AuthStorageSchema,
+      origin: URL | string = DEFAULT_AUTH_ORIGIN,
+    ) =>
+      privyClient.refreshAccessToken(storedAuth, origin).pipe(
+        Effect.tap((refreshedAuth) => kv.set(AUTH_TOKEN_STORAGE_KEY, refreshedAuth)),
+      )
 
     const maybeGetToken = kv.get(AUTH_TOKEN_STORAGE_KEY)
 
@@ -198,8 +288,8 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     })
 
     return {
-      getUserById: getUserByIdCache,
-      verifyAuthToken,
+      getUserById: privyClient.fetchUser,
+      verifyAuthToken: privyClient.verifyAuthToken,
       refreshAccessToken,
       get,
       getRequired,
@@ -213,12 +303,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
           return Effect.fail(sysErr)
         }),
       ),
-      fetchUserDisplayName: Effect.fn("FetchAuthenticatedUserDisplayName")(function*(
-        userIdOrClaims: string | AuthTokenClaims | AuthPayload,
-      ) {
-        const userId = typeof userIdOrClaims === "string" ? userIdOrClaims : userIdOrClaims.userId
-        return yield* getUserByIdCache(userId).pipe(Effect.map((user) => getUserDisplayName(user)[1]))
-      }),
+      fetchUserDisplayName: privyClient.fetchUserDisplayName,
       // Util function to wrap fetching the auth state from the KV store,
       // and if present:
       // - refreshes the access token
@@ -231,7 +316,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         if (Option.isNone(authOpt)) {
           return Option.none<string>()
         }
-        const displayName = yield* getUserByIdCache(authOpt.value.userId).pipe(
+        const displayName = yield* privyClient.fetchUser(authOpt.value.userId).pipe(
           Effect.map((user) => getUserDisplayName(user)[1]),
         )
         return Option.some(displayName)
