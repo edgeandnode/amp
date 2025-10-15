@@ -6,7 +6,7 @@ license-file.workspace = true
 
 [features]
 default = []
-rocksdb = ["dep:rocksdb", "dep:bincode"]
+lmdb = ["dep:heed", "dep:bincode"]
 
 [dependencies]
 amp-client = { path = "../amp-client" }
@@ -18,8 +18,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
-# Optional dependencies for RocksDB backend
-rocksdb = { version = "0.22", optional = true }
+# Optional dependencies for LMDB backend
+heed = { version = "0.20", optional = true }
 bincode = { workspace = true, optional = true }
 
 [dev-dependencies]

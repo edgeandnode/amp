@@ -48,9 +48,9 @@ pub trait StateStore: Send + Sync {
 
 mod memory;
 
-#[cfg(feature = "rocksdb")]
-mod rocksdb;
+#[cfg(feature = "lmdb")]
+mod lmdb;
 
+#[cfg(feature = "lmdb")]
+pub use lmdb::LmdbStore;
 pub use memory::InMemoryStore;
-#[cfg(feature = "rocksdb")]
-pub use rocksdb::RocksDbStore;

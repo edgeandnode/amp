@@ -52,9 +52,9 @@ pub struct StoredBatch {
     pub ranges: Vec<BlockRange>,
 }
 
-#[cfg(feature = "rocksdb")]
+#[cfg(feature = "lmdb")]
 impl StoredBatch {
-    /// Serialize to bytes for RocksDB storage using Arrow IPC format.
+    /// Serialize to bytes for LMDB storage using Arrow IPC format.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         use common::arrow::ipc::writer::StreamWriter;
 
@@ -78,7 +78,7 @@ impl StoredBatch {
         Ok(result)
     }
 
-    /// Deserialize from bytes stored in RocksDB.
+    /// Deserialize from bytes stored in LMDB.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
         use common::arrow::ipc::reader::StreamReader;
 

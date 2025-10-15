@@ -15,13 +15,13 @@ pub enum Error {
     Config(String),
     #[error("State store error: {0}")]
     StateStore(String),
-    #[cfg(feature = "rocksdb")]
-    #[error("RocksDB error: {0}")]
-    RocksDb(#[from] rocksdb::Error),
-    #[cfg(feature = "rocksdb")]
+    #[cfg(feature = "lmdb")]
+    #[error("LMDB error: {0}")]
+    Lmdb(#[from] heed::Error),
+    #[cfg(feature = "lmdb")]
     #[error("Serialization error: {0}")]
     Serialization(#[from] bincode::error::EncodeError),
-    #[cfg(feature = "rocksdb")]
+    #[cfg(feature = "lmdb")]
     #[error("Deserialization error: {0}")]
     Deserialization(#[from] bincode::error::DecodeError),
 }

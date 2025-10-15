@@ -1,12 +1,12 @@
-//! Integration tests for RocksDB state store.
+//! Integration tests for LMDB state store.
 //!
-//! These tests verify the RocksDB backend works correctly with the StateStore trait,
+//! These tests verify the LMDB backend works correctly with the StateStore trait,
 //! including persistence across restarts and multi-network scenarios.
 
 use std::sync::Arc;
 
 use amp_client::InvalidationRange;
-use amp_debezium_client::{RocksDbStore, StateStore, StoredBatch};
+use amp_debezium_client::{LmdbStore, StateStore, StoredBatch};
 use common::{
     arrow::{
         array::{Int64Array, RecordBatch, StringArray},
@@ -32,10 +32,10 @@ fn create_test_batch(block_nums: Vec<i64>) -> RecordBatch {
 }
 
 #[tokio::test]
-async fn rocksdb_basic_operations() {
+async fn lmdb_basic_operations() {
     //* Given - A RocksDB store with test data
     let temp_dir = TempDir::new().unwrap();
-    let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
 
     let batch = Arc::new(create_test_batch(vec![100, 101, 102]));
     let stored_batch = StoredBatch {
@@ -63,10 +63,10 @@ async fn rocksdb_basic_operations() {
 }
 
 #[tokio::test]
-async fn rocksdb_multi_network_storage() {
+async fn lmdb_multi_network_storage() {
     //* Given - A RocksDB store with data from multiple networks
     let temp_dir = TempDir::new().unwrap();
-    let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
 
     // Insert batch spanning multiple networks
     let batch = Arc::new(create_test_batch(vec![100, 200]));
@@ -111,12 +111,12 @@ async fn rocksdb_multi_network_storage() {
 }
 
 #[tokio::test]
-async fn rocksdb_persistence_with_multiple_batches() {
+async fn lmdb_persistence_with_multiple_batches() {
     //* Given - Multiple batches stored in RocksDB
     let temp_dir = TempDir::new().unwrap();
 
     {
-        let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+        let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
 
         for block_num in [100u64, 200, 300] {
             let batch = Arc::new(create_test_batch(vec![block_num as i64]));
@@ -134,7 +134,7 @@ async fn rocksdb_persistence_with_multiple_batches() {
     }
 
     //* When - Reopen database and query
-    let store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+    let store = LmdbStore::new(temp_dir.path(), 64).unwrap();
     let ranges = vec![InvalidationRange {
         network: "ethereum".to_string(),
         numbers: 100..=300,
@@ -149,10 +149,10 @@ async fn rocksdb_persistence_with_multiple_batches() {
 }
 
 #[tokio::test]
-async fn rocksdb_prune_respects_multi_network_watermarks() {
+async fn lmdb_prune_respects_multi_network_watermarks() {
     //* Given - Batches with ranges from multiple networks
     let temp_dir = TempDir::new().unwrap();
-    let mut store = RocksDbStore::new(temp_dir.path(), 10).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path(), 10).unwrap();
 
     // Insert a batch spanning two networks
     for block_num in 0u64..=20u64 {
@@ -203,10 +203,10 @@ async fn rocksdb_prune_respects_multi_network_watermarks() {
 }
 
 #[tokio::test]
-async fn rocksdb_range_overlap_detection() {
+async fn lmdb_range_overlap_detection() {
     //* Given - Multiple overlapping batches
     let temp_dir = TempDir::new().unwrap();
-    let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
 
     // Insert batches with overlapping ranges
     for start_block in [100u64, 105, 110, 115, 120] {

@@ -94,9 +94,9 @@
 //! Two state store implementations are available:
 //!
 //! - **`InMemoryStore`** (default) - Fast, in-memory storage using Vec. Does not persist across restarts.
-//! - **`RocksDbStore`** (feature = "rocksdb") - Persistent disk storage. Survives restarts.
+//! - **`LmdbStore`** (feature = "lmdb") - Persistent disk storage. Survives restarts.
 //!
-//! Enable RocksDB backend with: `cargo add amp-debezium-client --features rocksdb`
+//! Enable LMDB backend with: `cargo add amp-debezium-client --features lmdb`
 
 pub mod client;
 pub mod error;
@@ -106,7 +106,7 @@ pub mod types;
 // Re-export main types
 pub use client::{DebeziumClient, DebeziumClientBuilder};
 pub use error::{Error, Result};
-#[cfg(feature = "rocksdb")]
-pub use stores::RocksDbStore;
+#[cfg(feature = "lmdb")]
+pub use stores::LmdbStore;
 pub use stores::{InMemoryStore, StateStore};
 pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};

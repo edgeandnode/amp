@@ -4,7 +4,11 @@ use amp_client::InvalidationRange;
 use async_trait::async_trait;
 use bincode::{config, decode_from_slice, encode_to_vec};
 use common::{BlockNum, arrow::array::RecordBatch};
-use rocksdb::{ColumnFamilyDescriptor, DB, Options, WriteBatch};
+use heed::{
+    Database, Env, EnvOpenOptions,
+    byteorder::BigEndian,
+    types::{Bytes, U64},
+};
 
 use super::StateStore;
 use crate::{
@@ -12,56 +16,59 @@ use crate::{
     types::StoredBatch,
 };
 
-/// RocksDB-backed persistent implementation of StateStore.
+/// LMDB-backed persistent implementation of StateStore.
 ///
 /// Stores batches durably on disk for reorg handling that survives restarts.
-/// Uses two column families:
+/// Uses two databases:
 /// - `batches`: Stores serialized StoredBatch data keyed by batch_id
 /// - `index`: Maps (network, block_num) -> Vec<batch_id> for fast range queries
-pub struct RocksDbStore {
-    db: Arc<DB>,
+pub struct LmdbStore {
+    env: Arc<Env>,
+    batches_db: Database<U64<BigEndian>, Bytes>,
+    index_db: Database<Bytes, Bytes>,
     reorg_window: u64,
     next_batch_id: u64,
 }
 
-const CF_BATCHES: &str = "batches";
-const CF_INDEX: &str = "index";
-
-impl RocksDbStore {
-    /// Create a new RocksDB-backed state store.
+impl LmdbStore {
+    /// Create a new LMDB-backed state store.
     ///
     /// # Arguments
-    /// * `path` - Directory path for RocksDB storage
+    /// * `path` - Directory path for LMDB storage
     /// * `reorg_window` - Number of blocks to retain
     ///
     /// # Example
     /// ```no_run
-    /// use amp_debezium_client::RocksDbStore;
+    /// use amp_debezium_client::LmdbStore;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let store = RocksDbStore::new("/path/to/db", 64)?;
+    /// let store = LmdbStore::new("/path/to/db", 64)?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn new(path: impl AsRef<Path>, reorg_window: u64) -> Result<Self> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
+        std::fs::create_dir_all(&path)
+            .map_err(|e| Error::StateStore(format!("Failed to create directory: {}", e)))?;
 
-        let batches_cf = ColumnFamilyDescriptor::new(CF_BATCHES, Options::default());
-        let index_cf = ColumnFamilyDescriptor::new(CF_INDEX, Options::default());
+        let env = unsafe {
+            EnvOpenOptions::new()
+                .map_size(10 * 1024 * 1024 * 1024) // 10 GB
+                .max_dbs(2)
+                .open(path)?
+        };
 
-        let db = DB::open_cf_descriptors(&opts, path, vec![batches_cf, index_cf])?;
+        let mut wtxn = env.write_txn()?;
+        let batches_db = env.create_database(&mut wtxn, Some("batches"))?;
+        let index_db = env.create_database(&mut wtxn, Some("index"))?;
+        wtxn.commit()?;
 
         // Determine next_batch_id by finding the highest existing ID
         let next_batch_id = {
-            let batches_cf_handle = db.cf_handle(CF_BATCHES).unwrap();
-            let mut iter = db.raw_iterator_cf(batches_cf_handle);
-            iter.seek_to_last();
+            let rtxn = env.read_txn()?;
+            let mut iter = batches_db.rev_iter(&rtxn)?;
 
-            if iter.valid() {
-                let key = iter.key().unwrap();
-                let last_id = u64::from_be_bytes(key.try_into().unwrap());
+            if let Some(result) = iter.next() {
+                let (last_id, _) = result?;
                 last_id + 1
             } else {
                 0
@@ -69,7 +76,9 @@ impl RocksDbStore {
         };
 
         Ok(Self {
-            db: Arc::new(db),
+            env: Arc::new(env),
+            batches_db,
+            index_db,
             reorg_window,
             next_batch_id,
         })
@@ -88,23 +97,19 @@ impl RocksDbStore {
 }
 
 #[async_trait]
-impl StateStore for RocksDbStore {
+impl StateStore for LmdbStore {
     async fn insert(&mut self, batch: StoredBatch) -> Result<()> {
         let batch_id = self.next_batch_id;
         self.next_batch_id += 1;
 
-        let batch_key = batch_id.to_be_bytes();
         let batch_value = batch
             .to_bytes()
             .map_err(|e| Error::StateStore(format!("Failed to serialize batch: {}", e)))?;
 
-        let batches_cf = self.db.cf_handle(CF_BATCHES).unwrap();
-        let index_cf = self.db.cf_handle(CF_INDEX).unwrap();
-
-        let mut write_batch = WriteBatch::default();
+        let mut wtxn = self.env.write_txn()?;
 
         // Store the batch
-        write_batch.put_cf(batches_cf, batch_key, batch_value);
+        self.batches_db.put(&mut wtxn, &batch_id, &batch_value)?;
 
         // Update index for all block ranges in this batch
         for block_range in &batch.ranges {
@@ -114,10 +119,10 @@ impl StateStore for RocksDbStore {
 
                 // Read existing batch IDs for this key
                 let mut batch_ids: Vec<u64> = self
-                    .db
-                    .get_cf(index_cf, &index_key)?
+                    .index_db
+                    .get(&wtxn, &index_key)?
                     .map(|bytes| {
-                        decode_from_slice(&bytes, config::standard())
+                        decode_from_slice(bytes, config::standard())
                             .map(|(v, _)| v)
                             .unwrap_or_default()
                     })
@@ -128,18 +133,17 @@ impl StateStore for RocksDbStore {
 
                 // Write updated list
                 let index_value = encode_to_vec(&batch_ids, config::standard())?;
-                write_batch.put_cf(index_cf, index_key, index_value);
+                self.index_db.put(&mut wtxn, &index_key, &index_value)?;
             }
         }
 
-        self.db.write(write_batch)?;
+        wtxn.commit()?;
 
         Ok(())
     }
 
     async fn get_in_ranges(&self, ranges: &[InvalidationRange]) -> Result<Vec<Arc<RecordBatch>>> {
-        let batches_cf = self.db.cf_handle(CF_BATCHES).unwrap();
-        let index_cf = self.db.cf_handle(CF_INDEX).unwrap();
+        let rtxn = self.env.read_txn()?;
 
         let mut batch_ids = std::collections::HashSet::new();
 
@@ -148,8 +152,8 @@ impl StateStore for RocksDbStore {
             for block_num in *inv_range.numbers.start()..=*inv_range.numbers.end() {
                 let index_key = Self::range_to_index_key(&inv_range.network, block_num);
 
-                if let Some(bytes) = self.db.get_cf(index_cf, &index_key)? {
-                    let (ids, _): (Vec<u64>, _) = decode_from_slice(&bytes, config::standard())?;
+                if let Some(bytes) = self.index_db.get(&rtxn, &index_key)? {
+                    let (ids, _): (Vec<u64>, _) = decode_from_slice(bytes, config::standard())?;
                     batch_ids.extend(ids);
                 }
             }
@@ -158,9 +162,8 @@ impl StateStore for RocksDbStore {
         // Fetch all unique batches
         let mut result = Vec::new();
         for batch_id in batch_ids {
-            let batch_key = batch_id.to_be_bytes();
-            if let Some(batch_bytes) = self.db.get_cf(batches_cf, batch_key)? {
-                let stored_batch = StoredBatch::from_bytes(&batch_bytes).map_err(|e| {
+            if let Some(batch_bytes) = self.batches_db.get(&rtxn, &batch_id)? {
+                let stored_batch = StoredBatch::from_bytes(batch_bytes).map_err(|e| {
                     Error::StateStore(format!("Failed to deserialize batch: {}", e))
                 })?;
                 result.push(stored_batch.batch);
@@ -174,74 +177,72 @@ impl StateStore for RocksDbStore {
         &mut self,
         watermarks: &std::collections::BTreeMap<String, BlockNum>,
     ) -> Result<()> {
-        let batches_cf = self.db.cf_handle(CF_BATCHES).unwrap();
-        let index_cf = self.db.cf_handle(CF_INDEX).unwrap();
-
-        let mut write_batch = WriteBatch::default();
         let mut batch_ids_to_delete = Vec::new();
 
-        // Iterate through all batches
-        let iter = self
-            .db
-            .iterator_cf(batches_cf, rocksdb::IteratorMode::Start);
+        // Iterate through all batches in a read transaction
+        {
+            let rtxn = self.env.read_txn()?;
+            let iter = self.batches_db.iter(&rtxn)?;
 
-        for item in iter {
-            let (key, value) = item?;
-            let batch_id = u64::from_be_bytes(key.as_ref().try_into().unwrap());
-            let stored_batch = StoredBatch::from_bytes(&value)
-                .map_err(|e| Error::StateStore(format!("Failed to deserialize batch: {}", e)))?;
+            for item in iter {
+                let (batch_id, value) = item?;
+                let stored_batch = StoredBatch::from_bytes(value).map_err(|e| {
+                    Error::StateStore(format!("Failed to deserialize batch: {}", e))
+                })?;
 
-            // Check if all ranges in this batch are prunable
-            let mut all_prunable = true;
+                // Check if all ranges in this batch are prunable
+                let mut all_prunable = true;
 
-            for block_range in &stored_batch.ranges {
-                if let Some(&watermark_block) = watermarks.get(&block_range.network) {
-                    let prune_before = watermark_block.saturating_sub(self.reorg_window);
+                for block_range in &stored_batch.ranges {
+                    if let Some(&watermark_block) = watermarks.get(&block_range.network) {
+                        let prune_before = watermark_block.saturating_sub(self.reorg_window);
 
-                    // If this range ends after the prune threshold, keep this batch
-                    if *block_range.numbers.end() >= prune_before {
+                        // If this range ends after the prune threshold, keep this batch
+                        if *block_range.numbers.end() >= prune_before {
+                            all_prunable = false;
+                            break;
+                        }
+                    } else {
+                        // No watermark for this network, keep this batch
                         all_prunable = false;
                         break;
                     }
-                } else {
-                    // No watermark for this network, keep this batch
-                    all_prunable = false;
-                    break;
                 }
-            }
 
-            if all_prunable {
-                batch_ids_to_delete.push((batch_id, stored_batch));
+                if all_prunable {
+                    batch_ids_to_delete.push((batch_id, stored_batch));
+                }
             }
         }
 
-        // Delete prunable batches and their index entries
+        // Delete prunable batches and their index entries in a write transaction
+        let mut wtxn = self.env.write_txn()?;
+
         for (batch_id, stored_batch) in batch_ids_to_delete {
-            let batch_key = batch_id.to_be_bytes();
-            write_batch.delete_cf(batches_cf, batch_key);
+            self.batches_db.delete(&mut wtxn, &batch_id)?;
 
             // Remove from index
             for block_range in &stored_batch.ranges {
                 for block_num in *block_range.numbers.start()..=*block_range.numbers.end() {
                     let index_key = Self::range_to_index_key(&block_range.network, block_num);
 
-                    if let Some(bytes) = self.db.get_cf(index_cf, &index_key)? {
+                    if let Some(bytes) = self.index_db.get(&wtxn, &index_key)? {
                         let (mut batch_ids, _): (Vec<u64>, _) =
-                            decode_from_slice(&bytes, config::standard())?;
+                            decode_from_slice(bytes, config::standard())?;
                         batch_ids.retain(|&id| id != batch_id);
 
                         if batch_ids.is_empty() {
-                            write_batch.delete_cf(index_cf, &index_key);
+                            self.index_db.delete(&mut wtxn, &index_key)?;
                         } else {
                             let index_value = encode_to_vec(&batch_ids, config::standard())?;
-                            write_batch.put_cf(index_cf, index_key, index_value);
+                            self.index_db.put(&mut wtxn, &index_key, &index_value)?;
                         }
                     }
                 }
             }
         }
 
-        self.db.write(write_batch)?;
+        wtxn.commit()?;
 
         Ok(())
     }
@@ -276,7 +277,7 @@ mod tests {
     async fn insert_and_retrieve_records() {
         //* Given
         let temp_dir = TempDir::new().unwrap();
-        let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+        let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
         let batch = Arc::new(create_test_batch());
         let stored_batch = StoredBatch {
             batch: batch.clone(),
@@ -308,7 +309,7 @@ mod tests {
     async fn get_records_in_range() {
         //* Given
         let temp_dir = TempDir::new().unwrap();
-        let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+        let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
         let batch = Arc::new(create_test_batch());
 
         // Insert batches with different block ranges
@@ -351,7 +352,7 @@ mod tests {
     async fn prune_removes_old_records() {
         //* Given
         let temp_dir = TempDir::new().unwrap();
-        let mut store = RocksDbStore::new(temp_dir.path(), 10).unwrap();
+        let mut store = LmdbStore::new(temp_dir.path(), 10).unwrap();
         let batch = Arc::new(create_test_batch());
 
         // Insert batches at blocks 0-20
@@ -402,7 +403,7 @@ mod tests {
 
         // Insert data and close
         {
-            let mut store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+            let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
             let stored_batch = StoredBatch {
                 batch: batch.clone(),
                 ranges: vec![BlockRange {
@@ -416,7 +417,7 @@ mod tests {
         }
 
         //* When - Reopen the database
-        let store = RocksDbStore::new(temp_dir.path(), 64).unwrap();
+        let store = LmdbStore::new(temp_dir.path(), 64).unwrap();
 
         //* Then - Data should still be accessible
         let ranges = vec![InvalidationRange {
