@@ -2,7 +2,7 @@ use datasets_common::{name::Name, version::Version};
 
 use crate::dataset_kind::SubstreamsDatasetKind;
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset name

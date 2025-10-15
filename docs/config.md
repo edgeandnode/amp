@@ -92,6 +92,10 @@ The `generate-manifest` command provides a convenient way to generate manifest J
 # Generate manifest for EVM RPC dataset
 ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet
 
+# Generate manifest for EVM RPC dataset with custom start block
+ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
+  --start-block 1000000
+
 # Generate manifest for Firehose dataset
 ampd generate-manifest --network mainnet --kind firehose --name eth_firehose
 
@@ -110,6 +114,7 @@ ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
 - `--kind`: Dataset type (evm-rpc, firehose, substreams, eth-beacon)
 - `--name`: Dataset name (must be a valid dataset identifier)
 - `--out`: Optional output file path (defaults to stdout)
+- `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc, firehose, and eth-beacon datasets.
 - `--manifest`: Substreams manifest URL (required for substreams kind)
 - `--module`: Substreams module name (required for substreams kind)
 
