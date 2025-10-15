@@ -130,6 +130,7 @@ impl<'de> serde::Deserialize<'de> for Name {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetNameOwned> for Name {
     fn from(value: metadata_db::DatasetNameOwned) -> Self {
         // Convert to string and validate - this should always pass since DatasetName
@@ -138,6 +139,7 @@ impl From<metadata_db::DatasetNameOwned> for Name {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<Name> for metadata_db::DatasetNameOwned {
     fn from(value: Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
@@ -145,6 +147,7 @@ impl From<Name> for metadata_db::DatasetNameOwned {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
     fn from(value: &'a Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.

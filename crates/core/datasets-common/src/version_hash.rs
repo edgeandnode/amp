@@ -130,6 +130,7 @@ impl<'de> serde::Deserialize<'de> for VersionHash {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetVersionHashOwned> for VersionHash {
     fn from(value: metadata_db::DatasetVersionHashOwned) -> Self {
         // Convert to string - Database values are trusted to uphold invariants
@@ -137,6 +138,7 @@ impl From<metadata_db::DatasetVersionHashOwned> for VersionHash {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<VersionHash> for metadata_db::DatasetVersionHashOwned {
     fn from(value: VersionHash) -> Self {
         // SAFETY: VersionHash is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
@@ -144,6 +146,7 @@ impl From<VersionHash> for metadata_db::DatasetVersionHashOwned {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl<'a> From<&'a VersionHash> for metadata_db::DatasetVersionHash<'a> {
     fn from(value: &'a VersionHash) -> Self {
         // SAFETY: VersionHash is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
