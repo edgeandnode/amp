@@ -16,6 +16,7 @@ import * as LogLevel from "effect/LogLevel"
 import * as String from "effect/String"
 import * as Utils from "../Utils.ts"
 
+import { auth } from "./commands/auth/index.ts"
 import { build } from "./commands/build.ts"
 import { codegen } from "./commands/codegen.ts"
 import { datasets } from "./commands/datasets.ts"
@@ -39,7 +40,7 @@ const amp = Command.make("amp", {
   },
 }).pipe(
   Command.withDescription("The Amp Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register, studio]),
+  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register, studio, auth]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
