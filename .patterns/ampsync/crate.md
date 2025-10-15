@@ -131,7 +131,7 @@ ampsync/src/
 **Anti-Pattern Example (❌ DON'T DO THIS):**
 
 ```rust
-// main.rs - TOO MUCH LOGIC
+// lib - TOO MUCH LOGIC
 pub async fn main() {
     // ❌ Database operations embedded in main
     let pool = create_pool().await?;
@@ -150,7 +150,7 @@ pub async fn main() {
 **Correct Pattern (✅ DO THIS):**
 
 ```rust
-// main.rs - ORCHESTRATION ONLY
+// lib - ORCHESTRATION ONLY
 pub async fn main() {
     let config = AmpsyncConfig::from_env()?;
     let db_engine = AmpsyncDbEngine::new(&config).await?;
