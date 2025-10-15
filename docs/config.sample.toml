@@ -96,11 +96,12 @@ metadata_db_url = "postgres://<pg_url>"
 # The maximum number of concurrent compaction write operations (default: 2)
 # write_concurrency = 2
 
-# The interval at which to run the compactor (default: 1 second)
-# min_interval = 1
+# The interval (in seconds) at which to run the compactor (default: 1 second)
+# min_interval = 1.0
 
 # Compaction algorithm configuration
-# cooldown_duration = 5  # Base cooldown duration in seconds (default: 5 seconds)
+# Base cooldown duration (in seconds) (default: 1024 seconds)
+# cooldown_duration = 1024.0
 
 # Eager compaction limits (when to compact eagerly)
 # overflow = 1 # Overflow configuration (default: 1)
@@ -113,12 +114,8 @@ metadata_db_url = "postgres://<pg_url>"
 # Enable or disable the collector (default: false)
 # active = false
 
-# The interval at which to run the garbage collector (default: 5 seconds)
-# [writer.collector.min_interval]
-# secs = 5
-# nanos = 0
+# The interval (in seconds) at which to run the garbage collector (default: 5 seconds)
+# min_interval = 5.0
 
-# The duration for which to hold a deletion lock on compacted files (default: 30 minutes, minimum: 200 milliseconds)
-# [writer.collector.deletion_lock_duration]
-# secs = 1800
-# nanos = 0
+# The duration (in seconds) for which to hold a deletion lock on compacted files (default: 1800 seconds = 30 minutes)
+# deletion_lock_duration = 1800.0
