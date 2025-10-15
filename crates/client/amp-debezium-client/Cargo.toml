@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
+[features]
+default = []
+lmdb = ["dep:heed", "dep:bincode"]
+
 [dependencies]
 amp-client = { path = "../amp-client" }
 async-stream.workspace = true
@@ -14,5 +18,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+# Optional dependencies for LMDB backend
+heed = { version = "0.20", optional = true }
+bincode = { workspace = true, optional = true }
+
 [dev-dependencies]
 tokio.workspace = true
+tempfile.workspace = true

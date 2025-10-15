@@ -4,13 +4,24 @@ import * as tsResolver from "eslint-import-resolver-typescript"
 import importPlugin from "eslint-plugin-import-x"
 import simpleImportSort from "eslint-plugin-simple-import-sort"
 import sortDestructureKeys from "eslint-plugin-sort-destructure-keys"
-import { defineConfig } from "eslint/config"
+import { defineConfig, globalIgnores } from "eslint/config"
 import tseslint from "typescript-eslint"
 
-export default defineConfig(
-  {
-    ignores: ["crates/", "target/", "**/dist", "**/build", "**/docs", "**/.tsbuildinfo", "**/*.md"],
-  },
+export default defineConfig([
+  globalIgnores([
+    "crates/",
+    "target/",
+    "local/",
+    "**/lib/",
+    "**/dist/",
+    "**/build/",
+    "**/cache/",
+    "**/out/",
+    "**/broadcast/",
+    "**/docs/",
+    "**/.tsbuildinfo/",
+    "**/*.md",
+  ]),
   eslint.configs.recommended,
   tseslint.configs.strict,
   importPlugin.flatConfigs.recommended,
@@ -115,6 +126,6 @@ export default defineConfig(
     },
   },
   {
-    files: ["typescript/*/src/**/*", "typescript/*/scripts/**/*", "typescript/*/test/**/*"],
+    files: ["typescript/**/*"],
   },
-)
+])

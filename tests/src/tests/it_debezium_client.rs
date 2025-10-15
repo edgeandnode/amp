@@ -242,13 +242,10 @@ async fn debezium_stream_basic_functionality() {
 
     // Create client
     let endpoint = test.ctx.daemon_server().flight_server_url();
-    let client = DebeziumClient::builder()
-        .endpoint(&endpoint)
-        .expect("Failed to set endpoint")
-        .store(InMemoryStore::new(64))
-        .build()
+    let amp_client = amp_client::SqlClient::new(&endpoint)
         .await
-        .expect("Failed to build client");
+        .expect("Failed to create amp client");
+    let client = DebeziumClient::new(amp_client, InMemoryStore::new(64));
 
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
     let mut stream = client
@@ -354,15 +351,12 @@ impl TestCtx {
     }
 
     /// Create a new DebeziumClient for this test context.
-    async fn new_debezium_client(&self) -> DebeziumClient<InMemoryStore> {
+    async fn new_debezium_client(&self) -> DebeziumClient {
         let endpoint = self.ctx.daemon_server().flight_server_url();
-
-        DebeziumClient::builder()
-            .endpoint(&endpoint)
-            .expect("Failed to set endpoint")
-            .store(InMemoryStore::new(64))
-            .build()
+        let amp_client = amp_client::SqlClient::new(&endpoint)
             .await
-            .expect("Failed to build debezium client")
+            .expect("Failed to create amp client");
+
+        DebeziumClient::new(amp_client, InMemoryStore::new(64))
     }
 }

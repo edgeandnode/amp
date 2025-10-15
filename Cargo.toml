@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/arrow-to-postgres",
+    "crates/auth/http",
     "crates/bin/ampd",
     "crates/bin/ampsync",
     "crates/bin/ampup",
@@ -24,7 +26,6 @@ members = [
     "crates/extractors/substreams/gen",
     "crates/services/admin-api",
     "crates/services/admin-api/gen",
-    "crates/services/arrow-to-postgres",
     "crates/services/controller",
     "crates/services/server",
     "crates/services/worker",

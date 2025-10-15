@@ -36,20 +36,24 @@ export const DatasetKind = Schema.Literal("manifest", "sql", "substreams", "fire
 )
 
 export const DatasetVersion = Schema.String.pipe(
-  Schema.pattern(/^\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
+  Schema.pattern(
+    /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/,
+  ),
   Schema.annotations({
     title: "Version",
     description: "a semantic version number (e.g. \"4.1.3\")",
-    examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123"],
+    examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123", "1.0.0+1234567890"],
   }),
 )
 
 export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
-  Schema.pattern(/^\w+@\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
+  Schema.pattern(
+    /^\w+@(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/,
+  ),
   Schema.annotations({
     title: "NameAndVersion",
     description: "the name and version of the dataset",
-    examples: ["uniswap@1.0.0"],
+    examples: ["uniswap@1.0.0", "uniswap@1.0.0+1234567890"],
   }),
 )
 

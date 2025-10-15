@@ -105,22 +105,33 @@ fn semver_to_zero_padded_string<const COMPONENT_WIDTH: usize>(version: &semver::
     let minor = format!("{:0width$}", version.minor, width = COMPONENT_WIDTH);
     let patch = format!("{:0width$}", version.patch, width = COMPONENT_WIDTH);
 
-    if version.pre.is_empty() {
-        format!("{}.{}.{}", major, minor, patch)
+    let base = format!("{}.{}.{}", major, minor, patch);
+
+    if !version.pre.is_empty() && !version.build.is_empty() {
+        format!("{}-{}+{}", base, version.pre, version.build)
+    } else if !version.pre.is_empty() {
+        format!("{}-{}", base, version.pre)
+    } else if !version.build.is_empty() {
+        format!("{}+{}", base, version.build)
     } else {
-        format!("{}.{}.{}-{}", major, minor, patch, version.pre)
+        base
     }
 }
 
 /// Converts a string to a clean semver string by removing leading zeros.
 fn string_to_clean_semver(s: &str) -> String {
+    // Split on '+' to separate build metadata (e.g., "1.2.3-alpha+build")
+    let mut build_parts = s.splitn(2, '+');
+    let version_and_pre = build_parts.next().unwrap_or(s);
+    let build_part = build_parts.next();
+
     // Split on '-' to separate version from prerelease (e.g., "1.2.3-alpha")
-    let mut parts = s.splitn(2, '-');
-    let version_part = parts.next().unwrap_or(s);
-    let prerelease_part = parts.next();
+    let mut parts = version_and_pre.splitn(2, '-');
+    let version_part = parts.next().unwrap_or(version_and_pre);
+    let pre_part = parts.next();
 
     // Remove leading zeros from each version component
-    let cleaned_version = version_part
+    let base = version_part
         .split('.')
         .map(|component| component.trim_start_matches('0'))
         .map(|component| if component.is_empty() { "0" } else { component })
@@ -128,9 +139,11 @@ fn string_to_clean_semver(s: &str) -> String {
         .join(".");
 
     // Reconstruct the full version string
-    match prerelease_part {
-        Some(prerelease) => format!("{}-{}", cleaned_version, prerelease),
-        None => cleaned_version,
+    match (pre_part, build_part) {
+        (Some(pre), Some(build)) => format!("{}-{}+{}", base, pre, build),
+        (Some(pre), None) => format!("{}-{}", base, pre),
+        (None, Some(build)) => format!("{}+{}", base, build),
+        (None, None) => base,
     }
 }
 
@@ -451,5 +464,208 @@ mod tests {
         assert_eq!(version.major, 0, "should parse major version as 0");
         assert_eq!(version.minor, 0, "should parse minor version as 0");
         assert_eq!(version.patch, 0, "should parse patch version as 0");
+    }
+
+    #[test]
+    fn to_zero_padded_string_with_build_metadata_includes_build() {
+        //* Given
+        let semver = "1.2.3+20230615"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+        let version = VersionTag::from_ref(&semver);
+
+        //* When
+        let result = version.to_zero_padded_string();
+
+        //* Then
+        assert_eq!(
+            result, "0001.0002.0003+20230615",
+            "should include build metadata after padded version"
+        );
+    }
+
+    #[test]
+    fn to_zero_padded_string_with_prerelease_and_build_includes_both() {
+        //* Given
+        let semver = "1.2.3-alpha+20230615"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+        let version = VersionTag::from_ref(&semver);
+
+        //* When
+        let result = version.to_zero_padded_string();
+
+        //* Then
+        assert_eq!(
+            result, "0001.0002.0003-alpha+20230615",
+            "should include both prerelease and build metadata"
+        );
+    }
+
+    #[test]
+    fn from_str_with_build_metadata_succeeds() {
+        //* Given
+        let with_build = "1.2.3+build123";
+
+        //* When
+        let result = with_build.parse::<VersionTag>();
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "parsing version with build metadata should succeed"
+        );
+        let version = result.expect("should return valid version");
+        assert_eq!(version.major, 1, "should parse major version correctly");
+        assert_eq!(version.minor, 2, "should parse minor version correctly");
+        assert_eq!(version.patch, 3, "should parse patch version correctly");
+        assert_eq!(
+            version.build.as_str(),
+            "build123",
+            "should parse build metadata correctly"
+        );
+    }
+
+    #[test]
+    fn from_str_with_zero_padded_build_metadata_succeeds() {
+        //* Given
+        let padded_with_build = "0001.0002.0003+build123";
+
+        //* When
+        let result = padded_with_build.parse::<VersionTag>();
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "parsing zero-padded version with build metadata should succeed"
+        );
+        let version = result.expect("should return valid version");
+        assert_eq!(version.major, 1, "should parse major version correctly");
+        assert_eq!(version.minor, 2, "should parse minor version correctly");
+        assert_eq!(version.patch, 3, "should parse patch version correctly");
+        assert_eq!(
+            version.build.as_str(),
+            "build123",
+            "should parse build metadata correctly"
+        );
+    }
+
+    #[test]
+    fn from_str_with_prerelease_and_build_metadata_succeeds() {
+        //* Given
+        let complex = "1.2.3-alpha+build123";
+
+        //* When
+        let result = complex.parse::<VersionTag>();
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "parsing version with prerelease and build metadata should succeed"
+        );
+        let version = result.expect("should return valid version");
+        assert_eq!(version.major, 1, "should parse major version correctly");
+        assert_eq!(version.minor, 2, "should parse minor version correctly");
+        assert_eq!(version.patch, 3, "should parse patch version correctly");
+        assert_eq!(
+            version.pre.as_str(),
+            "alpha",
+            "should parse prerelease correctly"
+        );
+        assert_eq!(
+            version.build.as_str(),
+            "build123",
+            "should parse build metadata correctly"
+        );
+    }
+
+    #[test]
+    fn from_str_with_zero_padded_prerelease_and_build_succeeds() {
+        //* Given
+        let padded_complex = "0001.0002.0003-alpha+build123";
+
+        //* When
+        let result = padded_complex.parse::<VersionTag>();
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "parsing zero-padded version with prerelease and build should succeed"
+        );
+        let version = result.expect("should return valid version");
+        assert_eq!(version.major, 1, "should parse major version correctly");
+        assert_eq!(version.minor, 2, "should parse minor version correctly");
+        assert_eq!(version.patch, 3, "should parse patch version correctly");
+        assert_eq!(
+            version.pre.as_str(),
+            "alpha",
+            "should parse prerelease correctly"
+        );
+        assert_eq!(
+            version.build.as_str(),
+            "build123",
+            "should parse build metadata correctly"
+        );
+    }
+
+    #[test]
+    fn to_zero_padded_string_with_build_sorts_by_version_not_build() {
+        //* Given
+        let semver_1_2_3_z = "1.2.3+zzz"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+        let semver_1_2_3_a = "1.2.3+aaa"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+        let semver_1_2_4_a = "1.2.4+aaa"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+
+        let version_1_2_3_z = VersionTag::from_ref(&semver_1_2_3_z);
+        let version_1_2_3_a = VersionTag::from_ref(&semver_1_2_3_a);
+        let version_1_2_4_a = VersionTag::from_ref(&semver_1_2_4_a);
+
+        //* When
+        let padded_1_2_3_z = version_1_2_3_z.to_zero_padded_string();
+        let padded_1_2_3_a = version_1_2_3_a.to_zero_padded_string();
+        let padded_1_2_4_a = version_1_2_4_a.to_zero_padded_string();
+
+        //* Then
+        assert!(
+            padded_1_2_3_z < padded_1_2_4_a,
+            "version 1.2.3+zzz should be lexicographically less than 1.2.4+aaa"
+        );
+        assert!(
+            padded_1_2_3_a < padded_1_2_4_a,
+            "version 1.2.3+aaa should be lexicographically less than 1.2.4+aaa"
+        );
+        // Note: Build metadata affects lexicographical ordering but not semver precedence
+        assert!(
+            padded_1_2_3_z > padded_1_2_3_a,
+            "1.2.3+zzz should sort after 1.2.3+aaa lexicographically"
+        );
+    }
+
+    #[test]
+    fn version_tag_with_different_build_metadata_are_not_equal() {
+        //* Given
+        let semver_a = "1.2.3+build123"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+        let semver_b = "1.2.3+build456"
+            .parse::<semver::Version>()
+            .expect("valid semver");
+
+        let version_a = VersionTag::from_owned(semver_a);
+        let version_b = VersionTag::from_owned(semver_b);
+
+        //* When
+        let result = version_a != version_b;
+
+        //* Then
+        assert!(
+            result,
+            "versions with different build metadata are considered distinct in VersionTag"
+        );
     }
 }

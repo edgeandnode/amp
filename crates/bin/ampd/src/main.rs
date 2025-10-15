@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::{dev_cmd, dump_cmd, gen_manifest_cmd, migrate_cmd, server_cmd, worker_cmd};
+use ampd::{dev_cmd, dump_cmd, gen_manifest_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
 use dataset_store::DatasetKind;
 use dump::EndBlock;
@@ -124,6 +124,10 @@ enum Command {
         #[arg(short, long, env = "GM_OUT")]
         out: Option<PathBuf>,
 
+        /// The starting block number for the dataset. Defaults to 0.
+        #[arg(long, env = "GM_START_BLOCK")]
+        start_block: Option<u64>,
+
         /// Substreams package manifest URL, required for DatasetKind::Substreams.
         #[arg(long, env = "GM_SS_MANIFEST_URL")]
         manifest: Option<String>,
@@ -134,6 +138,12 @@ enum Command {
     },
     /// Run migrations on the metadata database
     Migrate,
+    /// Restore dataset snapshots from storage
+    Restore {
+        /// The name or names of the datasets to restore (comma-separated).
+        #[arg(long, required = true, value_delimiter = ',')]
+        dataset: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -308,6 +318,7 @@ async fn main_inner() -> Result<(), BoxError> {
             kind,
             name,
             out,
+            start_block,
             manifest,
             module,
         } => {
@@ -322,10 +333,12 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                gen_manifest_cmd::run(name, kind, network, manifest, module, &mut out).await
+                gen_manifest_cmd::run(name, kind, network, start_block, manifest, module, &mut out)
+                    .await
             } else {
-                let mut stdout = std::io::stdout();
-                gen_manifest_cmd::run(name, kind, network, manifest, module, &mut stdout).await
+                let mut out = std::io::stdout();
+                gen_manifest_cmd::run(name, kind, network, start_block, manifest, module, &mut out)
+                    .await
             };
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
@@ -340,6 +353,20 @@ async fn main_inner() -> Result<(), BoxError> {
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let result = migrate_cmd::run(config).await;
+
+            monitoring::deinit(metrics_provider, tracing_provider)?;
+
+            result?;
+            Ok(())
+        }
+        Command::Restore { dataset: datasets } => {
+            let config = load_config(config_path.as_ref(), false).await?;
+            let metadata_db = config.metadata_db().await?;
+
+            let (tracing_provider, metrics_provider, _metrics_meter) =
+                monitoring::init(config.opentelemetry.as_ref())?;
+
+            let result = restore_cmd::run(config.into(), metadata_db, datasets).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
