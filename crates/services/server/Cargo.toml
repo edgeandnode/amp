@@ -4,10 +4,6 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-# JSON Lines (JSONL) server support for HTTP-based query interface
-jsonl = ["dep:serde", "dep:tower-http"]
-
 [dependencies]
 arrow-flight.workspace = true
 async-stream.workspace = true
@@ -22,10 +18,9 @@ futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
-serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tonic.workspace = true
-tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"], optional = true }
+tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"] }
 tracing.workspace = true

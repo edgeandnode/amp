@@ -9,8 +9,9 @@ use common::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
 use tokio::task::JoinHandle;
+
+use crate::testlib::{self, fixtures::BlockInfo, helpers as test_helpers};
 
 #[tokio::test]
 async fn query_with_reorg_stream_returns_correct_control_messages() {

@@ -99,6 +99,30 @@ impl<'a> PartialEq<Name<'a>> for &str {
     }
 }
 
+impl<'a> PartialEq<str> for Name<'a> {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl<'a> PartialEq<Name<'a>> for str {
+    fn eq(&self, other: &Name<'a>) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<String> for Name<'a> {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl<'a> PartialEq<Name<'a>> for String {
+    fn eq(&self, other: &Name<'a>) -> bool {
+        self == other.as_str()
+    }
+}
+
 impl<'a> std::fmt::Display for Name<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)

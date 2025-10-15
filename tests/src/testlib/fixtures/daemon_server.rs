@@ -6,12 +6,12 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use ampd::server_cmd::BoundAddrs;
 use common::{BoxError, BoxResult, config::Config};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
+use server::BoundAddrs;
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon server instances in tests.
@@ -61,7 +61,7 @@ impl DaemonServer {
         let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
-        let (server_addrs, server) = ampd::server_cmd::run_servers(
+        let (server_addrs, server) = server::serve(
             config.clone(),
             metadb,
             enable_flight,

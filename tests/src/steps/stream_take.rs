@@ -30,9 +30,8 @@ impl Step {
         tracing::debug!("Taking {} rows from stream '{}'", self.take, self.stream);
 
         let actual_result = client.take_from_stream(&self.stream, self.take).await;
-        let result = self.results.assert_eq(actual_result);
 
-        result
+        self.results.assert_eq(actual_result)
     }
 }
 
@@ -95,8 +94,7 @@ impl SqlTestResult {
                 if !actual_error.to_string().contains(expected_substring) {
                     panic!(
                         "Expected substring: \"{}\"\nActual error: \"{}\"",
-                        expected_substring,
-                        actual_error.to_string()
+                        expected_substring, actual_error
                     );
                 }
             }

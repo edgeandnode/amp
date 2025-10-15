@@ -25,11 +25,8 @@ use tracing::instrument;
 use crate::{
     BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     metadata::segments::ResumeWatermark,
-    plan_visitors::{
-        IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num,
-        unproject_special_block_num_column,
-    },
-    query_context::{Error, TableProviderCodec},
+    plan_visitors::{IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num},
+    query_context::{Error, TableProviderCodec, default_catalog_name},
     stream_helpers::is_streaming,
 };
 
@@ -61,8 +58,13 @@ pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
 
 impl PlanningContext {
     pub fn new(catalog: LogicalCatalog) -> Self {
+        let session_config = SessionConfig::from_env().unwrap().set(
+            "datafusion.catalog.default_catalog",
+            &default_catalog_name(),
+        );
+
         Self {
-            session_config: SessionConfig::from_env().unwrap(),
+            session_config,
             catalog,
         }
     }
@@ -244,11 +246,7 @@ impl DetachedLogicalPlan {
         Self(order_by_block_num(self.0))
     }
 
-    pub fn unproject_special_block_num_column(self) -> Result<Self, DataFusionError> {
-        Ok(Self(unproject_special_block_num_column(self.0)?))
-    }
-
-    pub fn apply<'n, F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
+    pub fn apply<F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
     where
         F: FnMut(&LogicalPlan) -> Result<TreeNodeRecursion, DataFusionError>,
     {

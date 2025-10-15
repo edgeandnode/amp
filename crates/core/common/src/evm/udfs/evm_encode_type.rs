@@ -19,6 +19,12 @@ pub struct EvmEncodeType {
     signature: Signature,
 }
 
+impl Default for EvmEncodeType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmEncodeType {
     pub fn new() -> Self {
         Self {

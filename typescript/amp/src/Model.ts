@@ -1,7 +1,6 @@
 import * as Schema from "effect/Schema"
 
 export class Dependency extends Schema.Class<Dependency>("Dependency")({
-  owner: Schema.String,
   name: Schema.String,
   version: Schema.String,
 }) {}
@@ -124,7 +123,6 @@ export class DatasetSchemaResponse extends Schema.Class<DatasetSchemaResponse>("
 export class DatasetRegistryInfo extends Schema.Class<DatasetRegistryInfo>("DatasetRegistryInfo")({
   name: DatasetName,
   version: DatasetVersion,
-  owner: Schema.String,
 }) {}
 
 /**
@@ -275,7 +273,7 @@ export const JobId = Schema.Number.pipe(
   }),
 )
 
-export const JobStatus = Schema.Literal("TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
+export const JobStatus = Schema.Literal("RUNNING", "TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
   Schema.annotations({
     title: "JobStatus",
     description: "the status of a job",
@@ -351,4 +349,8 @@ export class BlockRange extends Schema.Class<BlockRange>("BlockRange")({
 
 export class RecordBatchMetadata extends Schema.Class<RecordBatchMetadata>("RecordBatchMetadata")({
   ranges: Schema.Array(BlockRange),
+}) {}
+
+export class DumpResponse extends Schema.Class<DumpResponse>("DumpResponse")({
+  job_id: JobId,
 }) {}

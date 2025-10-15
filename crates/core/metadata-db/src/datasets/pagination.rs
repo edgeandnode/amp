@@ -5,7 +5,7 @@ use sqlx::{Executor, Postgres};
 use super::{
     Dataset,
     name::Name,
-    version::{Version, VersionOwned},
+    version_tag::{VersionTag, VersionTagOwned},
 };
 
 /// List the first page of datasets
@@ -38,7 +38,7 @@ where
 pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
-    (last_dataset, last_version): (Name<'_>, Version<'_>),
+    (last_dataset, last_version): (Name<'_>, VersionTag<'_>),
 ) -> Result<Vec<Dataset>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -71,7 +71,7 @@ pub async fn list_versions_by_name_first_page<'c, E>(
     exe: E,
     name: Name<'_>,
     limit: i64,
-) -> Result<Vec<VersionOwned>, sqlx::Error>
+) -> Result<Vec<VersionTagOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -100,8 +100,8 @@ pub async fn list_versions_by_name_next_page<'c, E>(
     exe: E,
     name: Name<'_>,
     limit: i64,
-    last_version: Version<'_>,
-) -> Result<Vec<VersionOwned>, sqlx::Error>
+    last_version: VersionTag<'_>,
+) -> Result<Vec<VersionTagOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {

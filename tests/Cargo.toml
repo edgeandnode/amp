@@ -35,7 +35,8 @@ monitoring = { path = "../crates/core/monitoring" }
 ampd = { path = "../crates/bin/ampd" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-amp-client = { path = "../crates/client" }
+amp-client = { path = "../crates/client/amp-client" }
+amp-debezium-client = { path = "../crates/client/amp-debezium-client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true
@@ -43,6 +44,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+server = { path = "../crates/services/server" }
 substreams-datasets = { path = "../crates/extractors/substreams" }
 tempfile.workspace = true
 thiserror.workspace = true

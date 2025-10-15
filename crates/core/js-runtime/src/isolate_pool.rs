@@ -92,6 +92,12 @@ pub struct IsolatePool {
     pool: Pool<IsolateThread>,
 }
 
+impl Default for IsolatePool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IsolatePool {
     pub fn new() -> Self {
         let size = num_cpus::get();
@@ -105,7 +111,7 @@ impl IsolatePool {
     }
 
     /// Invoke a JavaScript function on the first available isolate.
-    pub async fn invoke_batch<'a, R: FromV8 + 'static>(
+    pub async fn invoke_batch<R: FromV8 + 'static>(
         &self,
         filename: &str,
         script: &str,

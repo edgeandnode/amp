@@ -1169,17 +1169,12 @@
         "description": "Represents dataset information for API responses from the metadata database registry",
         "required": [
           "name",
-          "version",
-          "owner"
+          "version"
         ],
         "properties": {
           "name": {
             "type": "string",
             "description": "The name of the dataset"
-          },
-          "owner": {
-            "type": "string",
-            "description": "The owner of the dataset"
           },
           "version": {
             "type": "string",

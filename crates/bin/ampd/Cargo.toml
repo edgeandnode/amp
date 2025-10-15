@@ -12,7 +12,6 @@ default = ["snmalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
-arrow-flight.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }
 controller = { path = "../../services/controller" }
@@ -24,17 +23,15 @@ dump = { path = "../../core/dump" }
 eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
-futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde_json.workspace = true
-server = { path = "../../services/server", features = ["jsonl"] }
+server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
 substreams-datasets = { path = "../../extractors/substreams" }
 thiserror.workspace = true
 tokio.workspace = true
-tonic.workspace = true
 tracing.workspace = true
 worker = { path = "../../services/worker" }
 

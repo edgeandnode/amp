@@ -10,7 +10,7 @@ use common::{
 };
 
 pub fn table(network: String) -> Table {
-    Table::new("blocks".to_string(), schema().into(), network)
+    Table::new("blocks".to_string(), schema().into(), network, vec![])
 }
 
 pub fn schema() -> Schema {

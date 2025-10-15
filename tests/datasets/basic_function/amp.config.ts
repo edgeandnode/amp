@@ -6,7 +6,6 @@ export default defineDataset((ctx) => ({
   version: "0.1.0",
   dependencies: {
     mainnet: {
-      owner: "graphprotocol",
       name: "mainnet",
       version: "0.0.0",
     },

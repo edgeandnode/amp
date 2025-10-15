@@ -28,10 +28,6 @@
       "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
-    "network": {
-      "description": "Network name, e.g., `mainnet`, `sepolia`",
-      "type": "string"
-    },
     "tables": {
       "description": "Table definitions mapped by table name",
       "type": "object",
@@ -42,14 +38,13 @@
     },
     "version": {
       "description": "Dataset version, e.g., `1.0.0`",
-      "$ref": "#/$defs/Version"
+      "$ref": "#/$defs/VersionTag"
     }
   },
   "required": [
     "name",
     "version",
-    "kind",
-    "network"
+    "kind"
   ],
   "$defs": {
     "ArrowSchema": {
@@ -80,17 +75,12 @@
           "description": "Name of the dependency dataset",
           "type": "string"
         },
-        "owner": {
-          "description": "Owner/organization of the dependency dataset",
-          "type": "string"
-        },
         "version": {
           "description": "Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`",
           "$ref": "#/$defs/VersionReq"
         }
       },
       "required": [
-        "owner",
         "name",
         "version"
       ]
@@ -213,12 +203,12 @@
         "arrow"
       ]
     },
-    "Version": {
-      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
-      "type": "string"
-    },
     "VersionReq": {
       "description": "Semver version requirement wrapper with JSON schema support.\n\nUsed for specifying dependency version constraints in derived datasets.",
+      "type": "string"
+    },
+    "VersionTag": {
+      "description": "Semver version tag wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset version tagging.",
       "type": "string"
     },
     "View": {

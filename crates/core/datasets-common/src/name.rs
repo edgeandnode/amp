@@ -130,6 +130,7 @@ impl<'de> serde::Deserialize<'de> for Name {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetNameOwned> for Name {
     fn from(value: metadata_db::DatasetNameOwned) -> Self {
         // Convert to string and validate - this should always pass since DatasetName
@@ -138,6 +139,7 @@ impl From<metadata_db::DatasetNameOwned> for Name {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl From<Name> for metadata_db::DatasetNameOwned {
     fn from(value: Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
@@ -145,6 +147,7 @@ impl From<Name> for metadata_db::DatasetNameOwned {
     }
 }
 
+#[cfg(feature = "metadata-db")]
 impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
     fn from(value: &'a Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
@@ -153,6 +156,7 @@ impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
 }
 
 /// Validates that a dataset name follows the required format:
+/// - Must start with a lowercase letter or underscore
 /// - Must be lowercase
 /// - Can only contain letters, underscores, and numbers
 pub fn validate_dataset_name(name: &str) -> Result<(), NameError> {
@@ -160,13 +164,24 @@ pub fn validate_dataset_name(name: &str) -> Result<(), NameError> {
         return Err(NameError::Empty);
     }
 
+    // Check first character: must be lowercase letter or underscore
+    if let Some(first_char) = name.chars().next()
+        && !(first_char.is_ascii_lowercase() || first_char == '_')
+    {
+        return Err(NameError::InvalidCharacter {
+            character: first_char,
+            value: name.to_string(),
+        });
+    }
+
+    // Check remaining characters: must be lowercase letter, underscore, or digit
     if let Some(c) = name
         .chars()
         .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
     {
         return Err(NameError::InvalidCharacter {
             character: c,
-            name: name.to_string(),
+            value: name.to_string(),
         });
     }
 
@@ -180,8 +195,8 @@ pub enum NameError {
     #[error("name cannot be empty")]
     Empty,
     /// Dataset name contains invalid character
-    #[error("invalid character '{character}' in name '{name}'")]
-    InvalidCharacter { character: char, name: String },
+    #[error("invalid character '{character}' in name '{value}'")]
+    InvalidCharacter { character: char, value: String },
 }
 
 #[cfg(test)]
@@ -241,6 +256,19 @@ mod tests {
         assert!(matches!(
             result,
             Err(NameError::InvalidCharacter { character: '#', .. })
+        ));
+
+        // Numbers at the beginning are not allowed
+        let result = validate_dataset_name("123dataset");
+        assert!(matches!(
+            result,
+            Err(NameError::InvalidCharacter { character: '1', .. })
+        ));
+
+        let result = validate_dataset_name("0_my_dataset");
+        assert!(matches!(
+            result,
+            Err(NameError::InvalidCharacter { character: '0', .. })
         ));
     }
 }

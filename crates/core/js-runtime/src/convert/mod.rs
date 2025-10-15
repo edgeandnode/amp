@@ -66,7 +66,7 @@ impl<R: FromV8> FromV8 for Option<R> {
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self, BoxError> {
         if value.is_null_or_undefined() {
-            return Ok(None);
+            Ok(None)
         } else {
             Ok(Some(R::from_v8(scope, value)?))
         }
@@ -192,8 +192,8 @@ impl ToV8 for i256 {
 
         let mut words = [0u64; 4];
 
-        for i in 0..4 {
-            words[i] = ((magnitude >> (i as u8 * 64)) & i256::from_i128(0xFFFF_FFFF_FFFF_FFFF))
+        for (i, word) in words.iter_mut().enumerate() {
+            *word = ((magnitude >> (i as u8 * 64)) & i256::from_i128(0xFFFF_FFFF_FFFF_FFFF))
                 .to_u64()
                 .unwrap();
         }
@@ -228,7 +228,7 @@ impl<T: ToV8 + Sync> ToV8 for &[T] {
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
         let elems = self
             .iter()
-            .map(|e| e.to_v8(scope).into())
+            .map(|e| e.to_v8(scope))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(v8::Array::new_with_elements(scope, &elems).into())
     }
@@ -300,9 +300,10 @@ impl ToV8 for ScalarValue {
 
             // Fractional decimals
             ScalarValue::Decimal128(_, _, _) | ScalarValue::Decimal256(_, _, _) => {
-                Err(BoxError::from(format!(
+                Err(BoxError::from(
                     "fractional Decimal128 or Decimal256 not yet supported in functions"
-                )))
+                        .to_string(),
+                ))
             }
 
             // TODOs
@@ -430,9 +431,9 @@ fn scalar_value_from_v8<'s>(
 
             Ok(builder.build()?)
         }
-        V8Value::Array(_) => Err(BoxError::from(format!(
-            "Array is not yet supported in JS functions",
-        ))),
+        V8Value::Array(_) => Err(BoxError::from(
+            "Array is not yet supported in JS functions".to_string(),
+        )),
         V8Value::TypedArray(_) => Err(BoxError::from(
             "TypedArray is not yet supported in JS functions",
         )),

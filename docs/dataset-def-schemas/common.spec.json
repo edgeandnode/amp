@@ -14,10 +14,13 @@
     },
     "network": {
       "description": "Network name, e.g., `mainnet`, `sepolia`",
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "schema": {
-      "description": "Dataset schema. Lists the tables defined by this dataset.\nOptional for TOML format, required for JSON format",
+      "description": "Dataset schema. Lists the tables defined by this dataset.",
       "anyOf": [
         {
           "$ref": "#/$defs/Schema"
@@ -29,14 +32,13 @@
     },
     "version": {
       "description": "Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`",
-      "$ref": "#/$defs/Version",
+      "$ref": "#/$defs/VersionTag",
       "default": "0.0.0"
     }
   },
   "required": [
     "name",
-    "kind",
-    "network"
+    "kind"
   ],
   "$defs": {
     "DataType": {
@@ -59,8 +61,8 @@
         }
       }
     },
-    "Version": {
-      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
+    "VersionTag": {
+      "description": "Semver version tag wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset version tagging.",
       "type": "string"
     }
   }

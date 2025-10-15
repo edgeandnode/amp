@@ -4,10 +4,19 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
+
+[features]
+default = ["metadata-db"]
+
 [dependencies]
 datafusion = { workspace = true }
-metadata-db = { path = "../metadata-db" }
+hex = { workspace = true }
+metadata-db = { path = "../metadata-db", optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true }
 semver = { workspace = true }
+sha2 = "0.10"
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json.workspace = true

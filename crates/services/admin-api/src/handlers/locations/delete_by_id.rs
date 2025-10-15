@@ -108,7 +108,7 @@ pub async fn handler(
         .metadata_db
         .get_location_by_id_with_details(location_id)
         .await
-        .map_err(|err| Error::MetadataDbError(err.into()))?
+        .map_err(Error::MetadataDbError)?
         .ok_or_else(|| {
             tracing::debug!(location_id = %location_id, "Location not found");
             Error::NotFound { id: location_id }
@@ -225,7 +225,7 @@ pub async fn handler(
         .metadata_db
         .delete_location_by_id(location_id)
         .await
-        .map_err(|err| Error::MetadataDbError(err.into()))?;
+        .map_err(Error::MetadataDbError)?;
     tracing::info!(
         location_id = %location_id,
         "Successfully deleted location files and metadata"

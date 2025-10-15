@@ -41,8 +41,7 @@ impl Step {
                 &self.query,
                 self.streaming_options
                     .as_ref()
-                    .map(|s| s.at_least_rows)
-                    .flatten(),
+                    .and_then(|s| s.at_least_rows),
             )
             .await;
 

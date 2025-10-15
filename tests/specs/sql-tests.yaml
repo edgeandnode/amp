@@ -471,10 +471,15 @@
   results: |
     [{"_block_num": 15000000}]
 
-- name: implicit_cross_join
+- name: implicit_cross_join_duplicate_field_names
   query: select * from eth_rpc.blocks, eth_rpc.logs limit 1
+  failure: |
+    Duplicate field names detected in plan schema: [eth_rpc.blocks._block_num and eth_rpc.logs._block_num, eth_rpc.blocks.block_num and eth_rpc.logs.block_num, eth_rpc.blocks.timestamp and eth_rpc.logs.timestamp]. Please alias your columns to be unique.
+
+- name: implicit_cross_join
+  query: select logs.* from eth_rpc.blocks, eth_rpc.logs logs limit 1
   results: |
-    [{"_block_num":15000000,"address":"c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2","base_fee_per_gas":14156477044,"block_hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","block_num":15000000,"data":"0000000000000000000000000000000000000000000000005ea0a1fe55143c0d","difficulty":13832157637341064,"extra_data":"6575726f70652d77657374312d686c7378","gas_limit":30000000,"gas_used":29998802,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","log_index":0,"logs_bloom":"ffbbdeffdff0ba9fdc9eebfcffd5dbfa32fffec9cdf5ee517bdf837bfdfefbebff2f576d94e77ffae6efffccf9dfeb979fabe75fff6ffdf5af57e4af17ff2db7cdcf1d56d95f54ebfdbffedff4b5f7e7d6dbeffbad7e7f4c3fab3dedafedfd797f7fd7d9bf6b6dc7fffefa8ddfbdfe7b7a71cff25c6ecf389a5defffefcf75c45bbf5335bbfff1b73ac86f6b7fd3b7afffeffdf3f9fb77baffa6f7c9ffd7dfbfffdbf1ff9febffa73efbefffdfdbcecf77fff7ade9fecfbf7debfefe7effdf7ba77ef733957daed8af7fc52f775ed6df9d7ee77ba5bb3cdbfb5fbfbefbff2c455a7fbd69feeadfffb2e7bee37dfedcdfcdeed5efbdbcbbe3e46bfbfb7ae979ff","miner":"ea674fdde714fd979de3edf0f56aa9716b898ec8","mix_hash":"f715cb8fc0d9d92b9661627f80b2f3640f0d5529ec5c0f8b9e6a742abca4ae0b","nonce":11581608188404422748,"ommers_hash":"1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347","parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138","receipt_root":"a10e7dc9233c1e0929f799567c2a65c618b98413dfdb460e905f3158e1c2cefa","state_root":"4d2d9f3456f4fea7969fc6553404baa494569c6810eb3baf6ef0df47e3bc0b00","timestamp":"2022-06-21T02:28:20Z","topic0":"ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","topic1":"00000000000000000000000006729eb2424da47898f935267bd4a62940de5105","topic2":"000000000000000000000000beefbabeea323f07c59926295205d3b7a17e8638","transactions_root":"930c5bc61ca43f7ba1c73106765d5f22f10177ae8992345ad00e92a049ae0bf2","tx_hash":"beb3d09a644dc0772719f498172af05ed8cd337aaf83c2b5aee43be34fcb9dfb","tx_index":2}]
+    [{"_block_num":15000000,"address":"c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2","block_hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","block_num":15000000,"data":"0000000000000000000000000000000000000000000000005ea0a1fe55143c0d","log_index":0,"timestamp":"2022-06-21T02:28:20Z","topic0":"ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","topic1":"00000000000000000000000006729eb2424da47898f935267bd4a62940de5105","topic2":"000000000000000000000000beefbabeea323f07c59926295205d3b7a17e8638","tx_hash":"beb3d09a644dc0772719f498172af05ed8cd337aaf83c2b5aee43be34fcb9dfb","tx_index":2}]
 
 - name: select_alias_starting_with_underscore
   query: |
@@ -493,7 +498,7 @@
 - name: basic_explain
   query: EXPLAIN select block_num FROM eth_rpc.blocks
   results: |
-    [{"plan":"Projection: _block_num, eth_rpc.blocks.block_num\n  TableScan: eth_rpc.blocks projection=[_block_num, block_num]","plan_type":"logical_plan"},{"plan":"DataSourceExec: file_groups={1 group: [[015000000-82eebeea2cd27638.parquet]]}, projection=[_block_num, block_num], output_orderings=[[_block_num@0 ASC NULLS LAST], [block_num@1 ASC NULLS LAST]], file_type=parquet, predicate=true\n","plan_type":"physical_plan"}]
+    [{"plan":"TableScan: eth_rpc.blocks projection=[block_num]","plan_type":"logical_plan"},{"plan":"DataSourceExec: file_groups={1 group: [[015000000-82eebeea2cd27638.parquet]]}, projection=[block_num], output_ordering=[block_num@0 ASC NULLS LAST], file_type=parquet, predicate=true\n","plan_type":"physical_plan"}]
 
 - name: select_empty
   query: SELECT block_num FROM eth_rpc.blocks WHERE eth_rpc.blocks.block_num > 90000000000;

@@ -113,7 +113,7 @@ impl Scheduler {
 
         // Notify the worker about the stop request
         self.metadata_db
-            .send_job_notification(node_id.to_owned(), &JobNotification::stop(job_id.clone()))
+            .send_job_notification(node_id.to_owned(), &JobNotification::stop(*job_id))
             .await
             .map_err(StopJobError::MetadataDb)?;
 

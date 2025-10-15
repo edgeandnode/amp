@@ -88,6 +88,12 @@ pub struct EvmDecodeParams {
     signature: Signature,
 }
 
+impl Default for EvmDecodeParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmDecodeParams {
     pub fn new() -> Self {
         let signature = Signature::exact(
@@ -232,7 +238,7 @@ impl EvmDecodeParams {
                             for (field, (param, ty)) in
                                 izip!(decoded, &call.input_types).enumerate()
                             {
-                                FieldBuilder::new(&mut builder, &ty, field).append_value(param)?;
+                                FieldBuilder::new(&mut builder, ty, field).append_value(param)?;
                             }
                             builder.append(true);
                         }
@@ -279,6 +285,12 @@ pub struct EvmEncodeParams {
     signature: Signature,
 }
 
+impl Default for EvmEncodeParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvmEncodeParams {
     pub fn new() -> Self {
         let signature = Signature::variadic_any(Volatility::Immutable);
@@ -308,7 +320,7 @@ impl ScalarUDFImpl for EvmEncodeParams {
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::error::Result<ColumnarValue> {
         let args = args.args;
-        if args.len() < 1 {
+        if args.is_empty() {
             return plan_err!(
                 "{}: expected at least 1 argument (Solidity function signature), but got {}",
                 self.name(),
@@ -343,8 +355,8 @@ impl ScalarUDFImpl for EvmEncodeParams {
             let mut sol_values = Vec::new();
             for (arg, sol_ty) in args.iter().zip(call.input_types.iter()) {
                 let sol_value = match arg {
-                    ColumnarValue::Scalar(scalar) => scalar_to_sol_value(scalar.clone(), &sol_ty)?,
-                    ColumnarValue::Array(ary) => array_to_sol_value(ary, &sol_ty, i)?,
+                    ColumnarValue::Scalar(scalar) => scalar_to_sol_value(scalar.clone(), sol_ty)?,
+                    ColumnarValue::Array(ary) => array_to_sol_value(ary, sol_ty, i)?,
                 };
                 sol_values.push(sol_value);
             }

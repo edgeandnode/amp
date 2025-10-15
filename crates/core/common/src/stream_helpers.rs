@@ -10,13 +10,9 @@ pub fn is_streaming(stmt: &Statement) -> bool {
                     datafusion::sql::sqlparser::ast::Query {
                         settings: Some(settings),
                         ..
-                    } => settings
-                        .iter()
-                        .find(|&s| {
-                            s.key.value.to_lowercase() == "stream"
-                                && s.value == Value::Boolean(true)
-                        })
-                        .is_some(),
+                    } => settings.iter().any(|s| {
+                        s.key.value.to_lowercase() == "stream" && s.value == Value::Boolean(true)
+                    }),
                     _ => false,
                 }
             }

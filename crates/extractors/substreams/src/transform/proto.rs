@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 use common::{
-    BLOCK_NUM, RawDatasetRows, RawTableRows, Table,
+    RawDatasetRows, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
@@ -76,7 +76,7 @@ fn message_to_rows(
         .iter()
         .filter_map(|column| {
             let col_name = column.name();
-            if col_name == BLOCK_NUM {
+            if col_name == SPECIAL_BLOCK_NUM {
                 let mut builder = UInt64Builder::with_capacity(row_count);
                 builder.append_slice(&vec![block_num; row_count]);
                 return Some(Ok(Arc::new(builder.finish()) as Arc<dyn Array>));
@@ -192,9 +192,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
     let typename = field.field_descriptor_proto().type_name();
     let message = pool.get_message_by_name(typename).unwrap();
     let mut fields = Vec::with_capacity(message.fields().len() + 1);
-    if message.get_field_by_name(BLOCK_NUM).is_none() {
-        fields.push(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false));
-    }
+    fields.push(Field::new(SPECIAL_BLOCK_NUM, ArrowDataType::UInt64, false));
     fields.extend(
         message
             .fields()
@@ -218,7 +216,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
                     datatype = ArrowDataType::Utf8;
                 }
                 // block_num always UInt64
-                if f.name() == BLOCK_NUM {
+                if f.name() == "block_num" {
                     datatype = ArrowDataType::UInt64;
                 }
                 Field::new(f.name(), datatype, false)
@@ -230,6 +228,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
         field.name().to_string(),
         Arc::new(Schema::new(fields)),
         network.to_string(),
+        vec![],
     ))
 }
 
@@ -310,7 +309,7 @@ mod tests {
                 DataType::Boolean,
             ),
             (
-                BLOCK_NUM,
+                "_block_num",
                 vec![Value::U64(42), Value::U64(42), Value::U64(42)],
                 DataType::UInt64,
             ),
@@ -332,7 +331,7 @@ mod tests {
             .map(|(i, _)| {
                 let mut dynamic_message = DynamicMessage::new(message_descriptor.clone());
                 fields.iter().for_each(|field| {
-                    if field.0 == BLOCK_NUM {
+                    if field.0 == "_block_num" {
                         return;
                     }
                     let field_descriptor = message_descriptor.get_field_by_name(field.0).unwrap();

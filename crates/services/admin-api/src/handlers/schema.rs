@@ -64,18 +64,18 @@ pub async fn handler(
         is_sql_dataset,
     }): Json<OutputSchemaRequest>,
 ) -> Result<Json<OutputSchemaResponse>, ErrorResponse> {
-    let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParseError)?;
+    let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParse)?;
 
     let query_ctx = ctx
         .dataset_store
         .planning_ctx_for_sql(&stmt)
         .await
-        .map_err(Error::DatasetStoreError)?;
+        .map_err(Error::DatasetStore)?;
 
     let schema = query_ctx
         .sql_output_schema(stmt)
         .await
-        .map_err(Error::PlanningError)?;
+        .map_err(Error::Planning)?;
 
     let schema = if is_sql_dataset {
         // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
@@ -144,7 +144,7 @@ enum Error {
     /// - Unsupported SQL features are used
     /// - Query parsing fails for other reasons
     #[error("SQL parse error: {0}")]
-    SqlParseError(QueryContextError),
+    SqlParse(QueryContextError),
     /// Dataset store error while loading datasets
     ///
     /// This occurs when:
@@ -152,7 +152,7 @@ enum Error {
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("Dataset store error: {0}")]
-    DatasetStoreError(#[from] dataset_store::PlanningCtxForSqlError),
+    DatasetStore(#[from] dataset_store::PlanningCtxForSqlError),
     /// Planning error while determining output schema
     ///
     /// This occurs when:
@@ -160,23 +160,23 @@ enum Error {
     /// - Type inference fails for the query
     /// - Schema determination encounters errors
     #[error("Planning error: {0}")]
-    PlanningError(QueryContextError),
+    Planning(QueryContextError),
 }
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
-            Error::SqlParseError(_) => "SQL_PARSE_ERROR",
-            Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
-            Error::PlanningError(_) => "PLANNING_ERROR",
+            Error::SqlParse(_) => "SQL_PARSE_ERROR",
+            Error::DatasetStore(_) => "DATASET_STORE_ERROR",
+            Error::Planning(_) => "PLANNING_ERROR",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::SqlParseError(_) => StatusCode::BAD_REQUEST,
-            Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::PlanningError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SqlParse(_) => StatusCode::BAD_REQUEST,
+            Error::DatasetStore(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Planning(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

@@ -26,7 +26,9 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
         Dataset, DatasetWithDetails, Name as DatasetName, NameOwned as DatasetNameOwned,
-        Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
+        Namespace as DatasetNamespace, NamespaceOwned as DatasetNamespaceOwned,
+        VersionHash as DatasetVersionHash, VersionHashOwned as DatasetVersionHashOwned,
+        VersionTag as DatasetVersionTag, VersionTagOwned as DatasetVersionTagOwned,
     },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
@@ -192,7 +194,7 @@ impl MetadataDb {
             matches!(
                 err,
                 conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
-                if db_err.code().map_or(false, |code| code == "57P03")
+                if db_err.code().is_some_and(|code| code == "57P03")
             )
         }
 
@@ -428,7 +430,7 @@ impl MetadataDb {
     pub async fn get_jobs_by_dataset(
         &self,
         dataset_name: impl Into<DatasetName<'_>>,
-        dataset_version: Option<impl Into<DatasetVersion<'_>>>,
+        dataset_version: Option<impl Into<DatasetVersionTag<'_>>>,
     ) -> Result<Vec<Job>, Error> {
         Ok(jobs::get_jobs_by_dataset(
             &*self.pool,
@@ -792,19 +794,19 @@ impl MetadataDb {
 impl MetadataDb {
     /// Register a new dataset in the registry
     ///
-    /// Creates a new dataset entry with the specified owner, name, version, and manifest.
+    /// Creates a new dataset entry with the specified namespace, name, version, and manifest.
     /// The combination of dataset name and version must be unique across all datasets.
     #[instrument(skip(self), err)]
     pub async fn register_dataset(
         &self,
-        owner: &str,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+        version: impl Into<DatasetVersionTag<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
         datasets::insert(
             &*self.pool,
-            owner,
+            namespace.into(),
             name.into(),
             version.into(),
             manifest_path,
@@ -819,7 +821,7 @@ impl MetadataDb {
     pub async fn dataset_exists(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersion<'_>>,
+        version: impl Into<DatasetVersionTag<'_>>,
     ) -> Result<bool, Error> {
         datasets::exists_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
@@ -833,7 +835,7 @@ impl MetadataDb {
     pub async fn get_dataset_with_details(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersion<'_>>,
+        version: impl Into<DatasetVersionTag<'_>>,
     ) -> Result<Option<DatasetWithDetails>, Error> {
         datasets::get_by_name_and_version_with_details(&*self.pool, name.into(), version.into())
             .await
@@ -847,7 +849,7 @@ impl MetadataDb {
     pub async fn get_dataset_manifest_path(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersion<'_>>,
+        version: impl Into<DatasetVersionTag<'_>>,
     ) -> Result<Option<String>, Error> {
         datasets::get_manifest_path_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
@@ -870,7 +872,7 @@ impl MetadataDb {
 
     /// Stream all datasets from the registry
     ///
-    /// Returns a stream of all dataset records with basic information (owner, name, version),
+    /// Returns a stream of all dataset records with basic information (namespace, name, version),
     /// ordered by dataset name first, then by version.
     pub fn stream_all_datasets(&self) -> impl Stream<Item = Result<Dataset, Error>> + '_ {
         datasets::stream(&*self.pool).map(|result| result.map_err(Error::DbError))
@@ -887,7 +889,7 @@ impl MetadataDb {
     ) -> Result<Vec<Dataset>, Error>
     where
         N: Into<DatasetName<'a>>,
-        V: Into<DatasetVersion<'a>>,
+        V: Into<DatasetVersionTag<'a>>,
     {
         let res = match last_dataset {
             Some((name, version)) => {
@@ -907,10 +909,10 @@ impl MetadataDb {
         name: N,
         limit: i64,
         last_version: Option<V>,
-    ) -> Result<Vec<DatasetVersionOwned>, Error>
+    ) -> Result<Vec<DatasetVersionTagOwned>, Error>
     where
         N: Into<DatasetName<'a>>,
-        V: Into<DatasetVersion<'a>>,
+        V: Into<DatasetVersionTag<'a>>,
     {
         let res = match last_version {
             Some(version) => {
@@ -962,7 +964,7 @@ impl MetadataDb {
         ";
 
         sqlx::query(sql)
-            .bind(file_ids.into_iter().map(|id| **id).collect::<Vec<_>>())
+            .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
             .execute(&*self.pool)
             .await?;
 

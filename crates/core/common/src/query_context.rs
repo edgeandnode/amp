@@ -22,6 +22,7 @@ use datafusion::{
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
+    scalar::ScalarValue,
     sql::{TableReference, parser},
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
@@ -42,8 +43,15 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    plan_visitors::{extract_table_references_from_plan, forbid_underscore_prefixed_aliases},
+    plan_visitors::{
+        extract_table_references_from_plan, forbid_duplicate_field_names,
+        forbid_underscore_prefixed_aliases,
+    },
 };
+
+pub fn default_catalog_name() -> ScalarValue {
+    ScalarValue::Utf8(Some("amp".to_string()))
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -139,7 +147,10 @@ impl QueryContext {
     ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
-        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
+        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?.set(
+            "datafusion.catalog.default_catalog",
+            &default_catalog_name(),
+        );
 
         let opts = session_config.options_mut();
 
@@ -277,7 +288,7 @@ impl QueryContext {
         plan: &LogicalPlan,
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let mut range: Option<RangeInclusive<BlockNum>> = None;
-        for table in extract_table_references_from_plan(&plan)? {
+        for table in extract_table_references_from_plan(plan)? {
             range = match (range, self.get_synced_range_for_table(&table)?) {
                 (None, range) | (range, None) => range,
                 (Some(a), Some(b)) => block_range_intersection(a, b),
@@ -318,7 +329,7 @@ pub async fn sql_to_plan(
 }
 
 pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
-    forbid_underscore_prefixed_aliases(&plan).map_err(Error::InvalidPlan)?;
+    forbid_underscore_prefixed_aliases(plan).map_err(Error::InvalidPlan)?;
     read_only_check(plan)
 }
 
@@ -413,6 +424,9 @@ async fn execute_plan(
         .create_physical_plan(&plan, &ctx.state())
         .await
         .map_err(Error::PlanningError)?;
+
+    forbid_duplicate_field_names(&physical_plan, &plan).map_err(Error::PlanningError)?;
+
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     match is_explain {
@@ -464,7 +478,7 @@ fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
 
     let transformed: StringArray = plan_column
         .iter()
-        .map(|value| value.map(|v| sanitize_parquet_paths(v)))
+        .map(|value| value.map(sanitize_parquet_paths))
         .collect();
 
     let mut columns: Vec<ArrayRef> = batch.columns().to_vec();

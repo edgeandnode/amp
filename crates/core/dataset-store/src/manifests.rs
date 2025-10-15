@@ -1,13 +1,11 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::store::ObjectStoreExt;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
 use tokio::sync::OnceCell;
-
-const PLACEHOLDER_OWNER: &'static str = "no-owner";
 
 /// Manages dataset manifest configurations combining ObjectStore and MetadataDb operations
 ///
@@ -227,9 +225,13 @@ where
             }
 
             // Register the dataset in the metadata database
+            // TODO: Pass the actual namespace instead of using a placeholder
+            let namespace = "_"
+                .parse::<Namespace>()
+                .expect("'_' should be a valid namespace");
             match self
                 .metadata_db
-                .register_dataset(PLACEHOLDER_OWNER, &name, &version, &path.to_string())
+                .register_dataset(&namespace, &name, &version, &path.to_string())
                 .await
             {
                 Ok(()) => {
@@ -377,7 +379,7 @@ where
     match store.get_string(path.into_inner()).await {
         Ok(content) => Ok(Some(ManifestContent(content))),
         Err(err) if err.is_not_found() => Ok(None),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }
 

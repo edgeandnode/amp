@@ -13,7 +13,7 @@ use async_stream::stream;
 use axum::{http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    DetachedLogicalPlan, PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
+    DetachedLogicalPlan, PlanningContext, QueryContext,
     arrow::{
         self,
         array::RecordBatch,
@@ -28,10 +28,7 @@ use common::{
     query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
 use datafusion::{
-    common::{DFSchema, tree_node::TreeNodeRecursion},
-    error::DataFusionError,
-    logical_expr::LogicalPlan,
-    physical_plan::stream::RecordBatchStreamAdapter,
+    common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{
     CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
@@ -319,24 +316,6 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let original_schema = plan.schema().clone();
-            let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
-            let plan = if should_transform {
-                let mut plan = plan.propagate_block_num().map_err(Error::ExecutionError)?;
-                // If the user did not request `_block_num` column, we omit it from the final output.
-                if !original_schema
-                    .fields()
-                    .iter()
-                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
-                {
-                    plan = plan
-                        .unproject_special_block_num_column()
-                        .map_err(Error::ExecutionError)?;
-                }
-                plan
-            } else {
-                plan
-            };
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
             let record_batches = ctx.execute_plan(plan, true).await?;
@@ -393,21 +372,6 @@ impl Service {
             }
         }
     }
-}
-
-fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionError> {
-    let mut result = true;
-    plan.apply(|node| {
-        match node {
-            // Trying to propagate the `SPECIAL_BLOCK_NUM` will probably cause problems for these.
-            LogicalPlan::EmptyRelation(_) | LogicalPlan::Aggregate(_) | LogicalPlan::Join(_) => {
-                result = false;
-                Ok(TreeNodeRecursion::Stop)
-            }
-            _ => Ok(TreeNodeRecursion::Continue),
-        }
-    })?;
-    Ok(result)
 }
 
 #[async_trait::async_trait]

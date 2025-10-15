@@ -6,25 +6,30 @@ use arrow::{
 };
 
 use crate::{
-    BLOCK_NUM, BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM,
-    Table, Timestamp, TimestampArrayBuilder, arrow, metadata::segments::BlockRange, timestamp_type,
+    BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    EVM_CURRENCY_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
+    EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table, Timestamp,
+    TimestampArrayBuilder, arrow, metadata::segments::BlockRange, timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
-    Table::new(TABLE_NAME.to_string(), SCHEMA.clone(), network)
+    Table::new(
+        TABLE_NAME.to_string(),
+        SCHEMA.clone(),
+        network,
+        vec!["block_num".to_string(), "timestamp".to_string()],
+    )
 }
 
-pub const TABLE_NAME: &'static str = "blocks";
+pub const TABLE_NAME: &str = "blocks";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
     Schema::new(vec![
         Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
-        Field::new(BLOCK_NUM, DataType::UInt64, false),
+        Field::new("block_num", DataType::UInt64, false),
         Field::new("timestamp", timestamp_type(), false),
         Field::new("hash", BYTES32_TYPE, false),
         Field::new("parent_hash", BYTES32_TYPE, false),

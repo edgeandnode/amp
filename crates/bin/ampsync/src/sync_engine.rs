@@ -476,7 +476,7 @@ impl AmpsyncDbEngine {
         match err {
             sqlx::Error::Database(db_err) => {
                 // PostgreSQL error codes for temporary issues
-                db_err.code().map_or(false, |code| {
+                db_err.code().is_some_and(|code| {
                     matches!(
                         code.as_ref(),
                         "53300" | // Too many connections

@@ -31,7 +31,11 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
     let manifest: CommonManifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(manifest.network, network, "network should match input");
+    assert_eq!(
+        manifest.network,
+        Some(network),
+        "network should match input"
+    );
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(
@@ -65,7 +69,11 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
     let manifest: CommonManifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(manifest.network, network, "network should match input");
+    assert_eq!(
+        manifest.network,
+        Some(network),
+        "network should match input"
+    );
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(
@@ -122,7 +130,11 @@ async fn gen_manifest_cmd_run_with_substreams_kind_generates_valid_manifest() {
     let manifest: CommonManifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(manifest.network, network, "network should match input");
+    assert_eq!(
+        manifest.network,
+        Some(network),
+        "network should match input"
+    );
     assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(

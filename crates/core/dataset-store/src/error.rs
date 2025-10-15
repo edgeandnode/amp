@@ -260,6 +260,16 @@ pub enum GetClientError {
         kind: String,
     },
 
+    /// Dataset is missing the required 'network' field.
+    ///
+    /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, firehose, or substreams)
+    /// does not include the network field, which is required to determine the appropriate provider configuration.
+    #[error("Dataset '{name}' version '{}' is missing required 'network' field for raw dataset kind", version.as_deref().unwrap_or("latest"))]
+    MissingNetwork {
+        name: String,
+        version: Option<String>,
+    },
+
     /// No provider configuration found for the dataset kind and network combination.
     ///
     /// This occurs when:
@@ -360,6 +370,7 @@ pub enum GetLogicalCatalogError {
 
 /// Errors specific to get_physical_catalog operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum GetPhysicalCatalogError {
     /// Failed to get the logical catalog.
     ///
@@ -389,6 +400,7 @@ pub enum GetPhysicalCatalogError {
 
 /// Errors specific to catalog_for_sql operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum CatalogForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -420,6 +432,7 @@ pub enum CatalogForSqlError {
 
 /// Errors specific to planning_ctx_for_sql operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum PlanningCtxForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -537,6 +550,18 @@ pub enum ExtractDatasetFromFunctionNamesError {
 /// the eth_call user-defined function for EVM RPC datasets.
 #[derive(Debug, thiserror::Error)]
 pub enum EthCallForDatasetError {
+    /// Dataset is missing the required 'network' field.
+    ///
+    /// This occurs when an EVM RPC dataset definition does not include the network
+    /// field, which is required to determine the appropriate provider configuration.
+    #[error(
+        "Dataset '{dataset_name}' version '{dataset_version}' is missing required 'network' field for EvmRpc kind"
+    )]
+    MissingNetwork {
+        dataset_name: Name,
+        dataset_version: Version,
+    },
+
     /// No provider configuration found for the dataset kind and network combination.
     ///
     /// This occurs when:

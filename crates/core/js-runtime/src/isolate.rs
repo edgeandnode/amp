@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("exception in script: {0}")]
-    Exception(#[from] ExceptionMessage),
+    Exception(#[from] Box<ExceptionMessage>),
 
     #[error("string too long: {0}")]
     StringTooLong(usize),
@@ -44,6 +44,12 @@ pub struct Isolate {
 
     // TODO: Use cache capable of evicting
     scripts: HashMap<blake3::Hash, v8::Global<v8::UnboundScript>>,
+}
+
+impl Default for Isolate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Isolate {
@@ -89,7 +95,7 @@ impl Isolate {
                 NoCacheReason::NoReason,
             ) {
                 Some(compiled_script) => v8::Global::new(s, compiled_script),
-                None => return Err(catch(s).into()),
+                None => return Err(Box::new(catch(s)).into()),
             }
         };
         self.scripts.insert(key, compiled_script.clone());
@@ -139,7 +145,7 @@ impl Isolate {
         let s = &mut v8::TryCatch::new(s);
         match script.run(s) {
             Some(_) => {} // Ignore script return value
-            None => return Err(catch(s).into()),
+            None => return Err(Box::new(catch(s)).into()),
         }
 
         // Call function
@@ -165,7 +171,7 @@ fn call_function<'a, 't, 's, R: FromV8>(
 
     let ret_val = match func.open(s).call(s, receiver.into(), &params) {
         Some(ret_val) => ret_val,
-        None => return Err(catch(s).into()),
+        None => return Err(Box::new(catch(s)).into()),
     };
 
     R::from_v8(s, ret_val).map_err(Error::ConvertReturnValue)

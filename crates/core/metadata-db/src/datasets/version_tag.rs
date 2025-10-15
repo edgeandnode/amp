@@ -1,6 +1,6 @@
 //! Semantic versioning utilities for proper lexicographical sorting
 //!
-//! This module provides a [`Version`] _new-type_ wrapper around [`semver::Version`] that ensures
+//! This module provides a [`VersionTag`] _new-type_ wrapper around [`semver::Version`] that ensures
 //! proper lexicographical sorting of semantic version strings by padding version components to a
 //! consistent width when encoding to the database.
 
@@ -11,11 +11,11 @@ const COMPONENT_WIDTH: usize = 4;
 
 /// An owned semantic version type for database return values and owned storage scenarios.
 ///
-/// This is a type alias for `Version<'static>`, specifically intended for use as a return type from
+/// This is a type alias for `VersionTag<'static>`, specifically intended for use as a return type from
 /// database queries or in any context where a semantic version with owned storage is required.
 /// Prefer this alias when working with versions that need to be stored or returned from the database,
 /// rather than just representing a semantic version with owned storage in general.
-pub type VersionOwned = Version<'static>;
+pub type VersionTagOwned = VersionTag<'static>;
 
 /// A semantic version wrapper that provides proper lexicographical sorting.
 ///
@@ -23,24 +23,24 @@ pub type VersionOwned = Version<'static>;
 /// in lexicographical order by padding each component (major.minor.patch) to a consistent width
 /// with leading zeros when stored in the database. It can handle both owned and borrowed versions efficiently.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Version<'a>(Cow<'a, semver::Version>);
+pub struct VersionTag<'a>(Cow<'a, semver::Version>);
 
-impl<'a> Version<'a> {
-    /// Create a new Version wrapper from a reference to semver::Version (borrowed)
+impl<'a> VersionTag<'a> {
+    /// Create a new VersionTag wrapper from a reference to semver::Version (borrowed)
     pub fn from_ref(version: &'a semver::Version) -> Self {
         Self(Cow::Borrowed(version))
     }
 
-    /// Create a new Version wrapper from an owned semver::Version
-    pub fn from_owned(version: semver::Version) -> Version<'static> {
-        Version(Cow::Owned(version))
+    /// Create a new VersionTag wrapper from an owned semver::Version
+    pub fn from_owned(version: semver::Version) -> VersionTag<'static> {
+        VersionTag(Cow::Owned(version))
     }
 
     /// Consume and return the inner semver::Version (owned)
     pub fn into_inner(self) -> semver::Version {
         match self {
-            Version(Cow::Owned(version)) => version,
-            Version(Cow::Borrowed(version)) => version.to_owned(),
+            VersionTag(Cow::Owned(version)) => version,
+            VersionTag(Cow::Borrowed(version)) => version.to_owned(),
         }
     }
 
@@ -53,7 +53,7 @@ impl<'a> Version<'a> {
     }
 }
 
-impl<'a> std::ops::Deref for Version<'a> {
+impl<'a> std::ops::Deref for VersionTag<'a> {
     type Target = semver::Version;
 
     fn deref(&self) -> &Self::Target {
@@ -61,13 +61,13 @@ impl<'a> std::ops::Deref for Version<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for Version<'a> {
+impl<'a> std::fmt::Display for VersionTag<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl std::str::FromStr for Version<'static> {
+impl std::str::FromStr for VersionTag<'static> {
     type Err = semver::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -76,13 +76,13 @@ impl std::str::FromStr for Version<'static> {
     }
 }
 
-impl sqlx::Type<sqlx::Postgres> for Version<'_> {
+impl sqlx::Type<sqlx::Postgres> for VersionTag<'_> {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <String as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
-impl<'a> sqlx::Encode<'_, sqlx::Postgres> for Version<'a> {
+impl<'a> sqlx::Encode<'_, sqlx::Postgres> for VersionTag<'a> {
     fn encode_by_ref(
         &self,
         buf: &mut <sqlx::Postgres as sqlx::Database>::ArgumentBuffer<'_>,
@@ -92,7 +92,7 @@ impl<'a> sqlx::Encode<'_, sqlx::Postgres> for Version<'a> {
     }
 }
 
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for VersionOwned {
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for VersionTagOwned {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let s = <&'r str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
         s.parse().map_err(Into::into)
@@ -144,7 +144,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* Then
         assert_eq!(version.major, 1, "major version should be preserved");
@@ -158,7 +158,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* Then
         assert_eq!(version.major, 1, "major version should be preserved");
@@ -172,7 +172,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let version = Version::from_owned(semver);
+        let version = VersionTag::from_owned(semver);
 
         //* Then
         assert_eq!(version.major, 1, "major version should be preserved");
@@ -186,7 +186,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let version = Version::from_owned(semver);
+        let version = VersionTag::from_owned(semver);
 
         //* Then
         assert_eq!(version.major, 1, "major version should be preserved");
@@ -198,7 +198,7 @@ mod tests {
     fn deref_with_borrowed_version_provides_semver_access() {
         //* Given
         let semver = semver::Version::new(1, 2, 3);
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* When
         let major = version.major;
@@ -215,7 +215,7 @@ mod tests {
     fn to_zero_padded_string_with_basic_version_returns_padded_string() {
         //* Given
         let semver = semver::Version::new(1, 2, 3);
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* When
         let result = version.to_zero_padded_string();
@@ -232,7 +232,7 @@ mod tests {
         //* Given
         let mut semver = semver::Version::new(1, 2, 3);
         semver.pre = semver::Prerelease::new("alpha").expect("should create valid prerelease");
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* When
         let result = version.to_zero_padded_string();
@@ -250,7 +250,7 @@ mod tests {
         let padded = "0001.0002.0003";
 
         //* When
-        let result = padded.parse::<Version>();
+        let result = padded.parse::<VersionTag>();
 
         //* Then
         assert!(result.is_ok(), "parsing zero-padded string should succeed");
@@ -266,7 +266,7 @@ mod tests {
         let padded = "0001.0002.0003-alpha";
 
         //* When
-        let result = padded.parse::<Version>();
+        let result = padded.parse::<VersionTag>();
 
         //* Then
         assert!(
@@ -290,7 +290,7 @@ mod tests {
         let regular = "1.2.3";
 
         //* When
-        let result = regular.parse::<Version>();
+        let result = regular.parse::<VersionTag>();
 
         //* Then
         assert!(
@@ -310,9 +310,9 @@ mod tests {
         let semver_1_10_1 = semver::Version::new(1, 10, 1);
         let semver_2_0_0 = semver::Version::new(2, 0, 0);
 
-        let version_1_2_3 = Version::from_ref(&semver_1_2_3);
-        let version_1_10_1 = Version::from_ref(&semver_1_10_1);
-        let version_2_0_0 = Version::from_ref(&semver_2_0_0);
+        let version_1_2_3 = VersionTag::from_ref(&semver_1_2_3);
+        let version_1_10_1 = VersionTag::from_ref(&semver_1_10_1);
+        let version_2_0_0 = VersionTag::from_ref(&semver_2_0_0);
 
         //* When
         let padded_1_2_3 = version_1_2_3.to_zero_padded_string();
@@ -334,7 +334,7 @@ mod tests {
     fn to_zero_padded_string_with_large_versions_handles_correctly() {
         //* Given
         let semver = semver::Version::new(999, 999, 999);
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* When
         let result = version.to_zero_padded_string();
@@ -349,11 +349,11 @@ mod tests {
     #[test]
     fn to_zero_padded_string_and_from_str_roundtrip_preserves_version() {
         //* Given
-        let original = Version::from_owned(semver::Version::new(1, 2, 3));
+        let original = VersionTag::from_owned(semver::Version::new(1, 2, 3));
 
         //* When
         let padded = original.to_zero_padded_string();
-        let parsed_result = padded.parse::<Version>();
+        let parsed_result = padded.parse::<VersionTag>();
 
         //* Then
         assert!(parsed_result.is_ok(), "roundtrip parsing should succeed");
@@ -368,7 +368,7 @@ mod tests {
     fn into_owned_with_borrowed_version_creates_owned_version() {
         //* Given
         let semver = semver::Version::new(1, 2, 3);
-        let borrowed_version = Version::from_ref(&semver);
+        let borrowed_version = VersionTag::from_ref(&semver);
 
         //* When
         let owned_version = borrowed_version.to_owned();
@@ -394,7 +394,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let borrowed = Version::from_ref(&semver);
+        let borrowed = VersionTag::from_ref(&semver);
 
         //* Then
         assert!(
@@ -409,7 +409,7 @@ mod tests {
         let semver = semver::Version::new(1, 2, 3);
 
         //* When
-        let owned = Version::from_owned(semver);
+        let owned = VersionTag::from_owned(semver);
 
         //* Then
         assert!(
@@ -422,7 +422,7 @@ mod tests {
     fn to_zero_padded_string_with_zero_version_returns_padded_zeros() {
         //* Given
         let semver = semver::Version::new(0, 0, 0);
-        let version = Version::from_ref(&semver);
+        let version = VersionTag::from_ref(&semver);
 
         //* When
         let result = version.to_zero_padded_string();
@@ -440,7 +440,7 @@ mod tests {
         let zero_padded = "0000.0000.0000";
 
         //* When
-        let result = zero_padded.parse::<Version>();
+        let result = zero_padded.parse::<VersionTag>();
 
         //* Then
         assert!(

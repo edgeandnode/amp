@@ -12,7 +12,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version::Version,
+};
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
     Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
@@ -55,8 +57,6 @@ pub use self::{
     },
     manifests::StoreError,
 };
-
-const PLACEHOLDER_OWNER: &'static str = "no-owner";
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -127,12 +127,12 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
-        // Register dataset metadata in database
-        // TODO: Extract the dataset owner from the manifest
-        let owner = PLACEHOLDER_OWNER;
-
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         self.metadata_db
-            .register_dataset(owner, name, version, &manifest_path.to_string())
+            .register_dataset(namespace, name, version, manifest_path.as_ref())
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 
@@ -304,14 +304,11 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                let dataset = derived::dataset(manifest).map_err(|err| {
-                    GetDatasetError::DerivedCreationError {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                        source: err.into(),
-                    }
-                })?;
-                dataset
+                derived::dataset(manifest).map_err(|err| GetDatasetError::DerivedCreationError {
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: err,
+                })?
             }
         };
 
@@ -483,17 +480,30 @@ impl DatasetStore {
             });
         }
 
-        let Some(config) = self.find_provider(kind, manifest.network.clone()).await else {
+        let Some(network) = manifest.network else {
+            tracing::warn!(
+                dataset_name = %dataset_name,
+                dataset_version = ?dataset_version,
+                dataset_kind = %kind,
+                "dataset is missing required 'network' field for raw dataset kind"
+            );
+            return Err(GetClientError::MissingNetwork {
+                name: dataset_name.to_string(),
+                version: dataset_version.map(|v| v.to_string()),
+            });
+        };
+
+        let Some(config) = self.find_provider(kind, network.clone()).await else {
             tracing::warn!(
                 provider_kind = %manifest.kind,
-                provider_network = %manifest.network,
+                provider_network = %network,
                 "no providers available for the requested kind-network configuration"
             );
 
             return Err(GetClientError::ProviderNotFound {
                 name: dataset_name.to_string(),
                 dataset_kind: kind,
-                network: manifest.network,
+                network,
             });
         };
 
@@ -591,7 +601,7 @@ impl DatasetStore {
         'try_find_provider: for mut provider in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = crate::env_substitute::substitute_env_vars(value) {
+                if let Err(err) = env_substitute::substitute_env_vars(value) {
                     tracing::warn!(
                         provider_name = %provider.name,
                         provider_kind = %kind,
@@ -631,7 +641,7 @@ impl DatasetStore {
         let (tables, _) = resolve_table_references(query, true)
             .map_err(|err| CatalogForSqlError::TableReferenceResolution { source: err.into() })?;
         let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err.into() })?;
+            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err })?;
 
         self.get_physical_catalog(tables, function_names, &env)
             .await
@@ -656,7 +666,7 @@ impl DatasetStore {
                 .await
                 .map_err(|err| GetPhysicalCatalogError::PhysicalTableRetrieval {
                     table: table.to_string(),
-                    source: err.into(),
+                    source: err,
                 })?
                 .ok_or(GetPhysicalCatalogError::TableNotSynced {
                     table: table.to_string(),
@@ -676,7 +686,7 @@ impl DatasetStore {
             PlanningCtxForSqlError::TableReferenceResolution { source: err.into() }
         })?;
         let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err.into() })?;
+            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err })?;
         let resolved_tables = self
             .get_logical_catalog(tables, function_names, &IsolatePool::dummy())
             .await?;
@@ -810,20 +820,32 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
+        let Some(network) = &dataset.network else {
+            tracing::warn!(
+                dataset_name = %name,
+                dataset_version = %version,
+                "dataset is missing required 'network' field for evm-rpc kind"
+            );
+            return Err(EthCallForDatasetError::MissingNetwork {
+                dataset_name: name.clone(),
+                dataset_version: version.clone(),
+            });
+        };
+
         let Some(config) = self
-            .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
+            .find_provider(DatasetKind::EvmRpc, network.clone())
             .await
         else {
             tracing::warn!(
                 dataset_name = %name,
                 dataset_version = %version,
                 provider_kind = %DatasetKind::EvmRpc,
-                provider_network = %dataset.network,
+                provider_network = %network,
                 "no providers available for the requested kind-network configuration"
             );
             return Err(EthCallForDatasetError::ProviderNotFound {
                 dataset_kind: DatasetKind::EvmRpc,
-                network: dataset.network.clone(),
+                network: network.clone(),
             });
         };
 
@@ -842,7 +864,7 @@ impl DatasetStore {
         let provider = if provider.url.scheme() == "ipc" {
             evm::provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
                 .await
-                .map_err(|err| EthCallForDatasetError::IpcConnection(err.into()))?
+                .map_err(EthCallForDatasetError::IpcConnection)?
         } else {
             evm::provider::new(provider.url, provider.rate_limit_per_minute)
         };
@@ -994,8 +1016,14 @@ pub async fn resolve_blocks_table(
             .get_all_datasets()
             .await?
             .into_iter()
-            .filter(|d| d.network == network)
             .filter(|d| d.kind != DerivedDatasetKind)
+            .filter(|d| {
+                let dataset_network = d
+                    .network
+                    .as_ref()
+                    .expect("network should be set for raw datasets");
+                dataset_network == network
+            })
             .collect();
 
         if datasets.is_empty() {

@@ -47,9 +47,6 @@ pub use store::Store;
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;
 
-/// The block number column name.
-pub const BLOCK_NUM: &str = "block_num";
-
 /// Special column name for block numbers. These are implicitly selected when doing streaming
 /// queries, and in some other cases.
 pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
@@ -127,11 +124,11 @@ impl RawTableRows {
         }
 
         let block_nums = rows
-            .column_by_name(BLOCK_NUM)
-            .ok_or("missing block_num column")?;
+            .column_by_name(SPECIAL_BLOCK_NUM)
+            .ok_or("missing _block_num column")?;
         let block_nums = block_nums
             .as_primitive_opt::<UInt64Type>()
-            .ok_or("block_num column is not uint64")?;
+            .ok_or("_block_num column is not uint64")?;
 
         // Unwrap: `rows` is not empty.
         let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
@@ -152,7 +149,7 @@ pub struct RawDatasetRows(Vec<RawTableRows>);
 impl RawDatasetRows {
     pub fn new(rows: Vec<RawTableRows>) -> Self {
         assert!(!rows.is_empty());
-        assert!(rows.iter().skip(1).all(|r| &r.range == &rows[0].range));
+        assert!(rows.iter().skip(1).all(|r| r.range == rows[0].range));
         Self(rows)
     }
 

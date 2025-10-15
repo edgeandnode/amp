@@ -55,7 +55,7 @@ where
             let mut found_closing = false;
 
             // Collect characters until we hit '}'
-            while let Some((_, c)) = chars.next() {
+            for (_, c) in chars.by_ref() {
                 if c == '}' {
                     found_closing = true;
                     break;

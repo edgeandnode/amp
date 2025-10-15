@@ -182,25 +182,17 @@ impl<T> ObjectStoreExt for T
 where
     T: ObjectStore,
 {
-    fn get_bytes(
-        &self,
-        location: impl Into<Path>,
-    ) -> impl Future<Output = Result<Bytes, StoreError>> {
-        async move { Ok(self.get(&location.into()).await?.bytes().await?) }
+    async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
+        Ok(self.get(&location.into()).await?.bytes().await?)
     }
 
-    fn get_string(
-        &self,
-        location: impl Into<Path>,
-    ) -> impl Future<Output = Result<String, StoreError>> {
-        async move {
-            let path = location.into();
-            let bytes = self.get_bytes(path.clone()).await?;
-            String::from_utf8(bytes.to_vec()).map_err(|err| StoreError::NotUtf8 {
-                path: path.to_string(),
-                err,
-            })
-        }
+    async fn get_string(&self, location: impl Into<Path>) -> Result<String, StoreError> {
+        let path = location.into();
+        let bytes = self.get_bytes(path.clone()).await?;
+        String::from_utf8(bytes.to_vec()).map_err(|err| StoreError::NotUtf8 {
+            path: path.to_string(),
+            err,
+        })
     }
 }
 /// Error type for store operations.

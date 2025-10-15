@@ -15,7 +15,8 @@ use dump::{
 };
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
+
+use crate::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
 
 #[tokio::test]
 async fn sql_dataset_input_batch_size() {

@@ -16,7 +16,7 @@ use datafusion::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    SPECIAL_BLOCK_NUM,
     metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
 };
 
@@ -41,7 +41,7 @@ use crate::{
 /// assert!(!second_generation.is_raw());
 /// assert!(second_generation > generation);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Generation(u64);
 
 impl Generation {
@@ -68,12 +68,6 @@ impl AddAssign<u64> for Generation {
     }
 }
 
-impl Default for Generation {
-    fn default() -> Self {
-        Self(0)
-    }
-}
-
 impl Deref for Generation {
     type Target = u64;
 
@@ -94,9 +88,9 @@ impl From<u64> for Generation {
     }
 }
 
-impl Into<u64> for Generation {
-    fn into(self) -> u64 {
-        self.0
+impl From<Generation> for u64 {
+    fn from(val: Generation) -> Self {
+        val.0
     }
 }
 
@@ -119,10 +113,11 @@ impl Into<u64> for Generation {
 /// and then reduced to its simplest form.
 ///
 /// # Generics
+///
 /// - `PRECISION`: The precision to use when converting a `f64` to a fraction.
-/// Defaults to `10000`. This means that a `f64` value of `1.2345` would be
-/// converted to `12345/10000` and then reduced to `2469/2000` represented as
-/// `Overflow(2469, 2000)`.
+///   Defaults to `10000`. This means that a `f64` value of `1.2345` would be
+///   converted to `12345/10000` and then reduced to `2469/2000` represented as
+///   `Overflow(2469, 2000)`.
 ///
 /// # Member Variables
 /// - `0`: The numerator of the overflow.
@@ -528,7 +523,7 @@ impl Serialize for Overflow {
 /// assert_eq!(large_files_total.rows, 1500); // 500 + 1000
 /// assert_eq!(large_files_total.generation, Generation::default()); // max(0, 10, 0, 1)
 /// ```
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Default)]
 pub struct SegmentSize {
     /// Total number of files in the segment
     pub length: usize,
@@ -586,19 +581,6 @@ impl AddAssign for SegmentSize {
     }
 }
 
-impl Default for SegmentSize {
-    fn default() -> Self {
-        Self {
-            length: 0,
-            blocks: 0,
-            bytes: 0,
-            rows: 0,
-            generation: Generation::default(),
-            created_at: 0,
-        }
-    }
-}
-
 impl Display for SegmentSize {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let mut size_string = (0..6)
@@ -639,7 +621,7 @@ impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
             .key_value_metadata()
             .and_then(|kv_metadata| {
                 kv_metadata
-                    .into_iter()
+                    .iter()
                     .find(|kv| kv.key == GENERATION_METADATA_KEY)
             })
             .and_then(|kv| kv.value.as_deref())
@@ -649,14 +631,10 @@ impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
 
         let created_at = file_metadata
             .key_value_metadata()
-            .and_then(|kv_metadata| {
-                kv_metadata
-                    .into_iter()
-                    .find(|kv| kv.key == PARQUET_METADATA_KEY)
-            })
+            .and_then(|kv_metadata| kv_metadata.iter().find(|kv| kv.key == PARQUET_METADATA_KEY))
             .and_then(|kv| kv.value.as_deref())
             .and_then(|v| serde_json::from_str(v).ok())
-            .and_then(|meta: ParquetMeta| Some(meta.created_at.0.as_micros()))
+            .map(|meta: ParquetMeta| meta.created_at.0.as_micros())
             .unwrap_or_default();
 
         let mut pmax = 0;
@@ -718,8 +696,8 @@ impl Mul<i32> for SegmentSize {
 ///
 /// * `rg` - The row group metadata containing column statistics
 /// * `pmax` - A mutable reference to the previous maximum block number seen. This is used
-///           to detect when consecutive row groups share a boundary block that shouldn't
-///           be counted twice.
+///   to detect when consecutive row groups share a boundary block that shouldn't
+///   be counted twice.
 /// * `index` - The Parquet column index metadata
 ///
 /// # Returns
@@ -773,7 +751,7 @@ impl Mul<i32> for SegmentSize {
 pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
     if let Some(column) = rg.columns().iter().find(|c| {
         let name = c.column_descr().name();
-        name == BLOCK_NUM || name == SPECIAL_BLOCK_NUM
+        name == SPECIAL_BLOCK_NUM
     }) && let Some(statistics) = column.statistics()
         && let Some(Ok(Some(max))) = statistics.max_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
         && let Some(Ok(Some(min))) = statistics.min_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
@@ -793,7 +771,7 @@ pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
         blocks as i64
     // No valid block number column or statistics found so return 0
     } else {
-        return 0;
+        0
     }
 }
 
@@ -858,7 +836,7 @@ pub mod test {
     use std::sync::Arc;
 
     use crate::{
-        BLOCK_NUM, Timestamp,
+        Timestamp,
         metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         parquet::{
             basic::{Repetition, Type as PhysicalType},
@@ -1078,11 +1056,12 @@ pub mod test {
         );
 
         fn schema_descr() -> SchemaDescriptor {
-            let block_num = Type::primitive_type_builder(BLOCK_NUM, PhysicalType::INT64)
-                .with_repetition(Repetition::REQUIRED)
-                .build()
-                .unwrap()
-                .into();
+            let block_num =
+                Type::primitive_type_builder(crate::SPECIAL_BLOCK_NUM, PhysicalType::INT64)
+                    .with_repetition(Repetition::REQUIRED)
+                    .build()
+                    .unwrap()
+                    .into();
 
             let schema = Type::group_type_builder("schema")
                 .with_fields(vec![block_num])
@@ -1097,7 +1076,7 @@ pub mod test {
             let primitive_type = schema_descr.column(0).self_type_ptr();
             let max_def_level = schema_descr.column(0).max_def_level();
             let max_rep_level = schema_descr.column(0).max_rep_level();
-            let path = ColumnPath::new(vec![BLOCK_NUM.to_string()]);
+            let path = ColumnPath::new(vec![crate::SPECIAL_BLOCK_NUM.to_string()]);
             ColumnDescriptor::new(primitive_type, max_def_level, max_rep_level, path)
         }
 
@@ -1151,7 +1130,7 @@ pub mod test {
             schema_descr: Arc<SchemaDescriptor>,
         ) -> ColumnChunkMetaData {
             ColumnChunkMetaData::builder(column_descr(schema_descr).into())
-                .set_statistics(statistics(block_max, block_min).into())
+                .set_statistics(statistics(block_max, block_min))
                 .build()
                 .unwrap()
         }

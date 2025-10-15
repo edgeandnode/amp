@@ -3,12 +3,55 @@ import * as Admin from "@edgeandnode/amp/api/Admin"
 import * as ArrowFlight from "@edgeandnode/amp/api/ArrowFlight"
 import * as JsonLines from "@edgeandnode/amp/api/JsonLines"
 import * as EvmRpc from "@edgeandnode/amp/evm/EvmRpc"
+import type * as Model from "@edgeandnode/amp/Model"
 import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as Vitest from "@effect/vitest"
 import * as Config from "effect/Config"
+import * as Data from "effect/Data"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schedule from "effect/Schedule"
 import * as Fixtures from "./Fixtures.ts"
+
+class JobIncompleteError extends Data.TaggedError("JobIncompleteError")<{
+  readonly cause?: unknown
+  readonly job: Model.JobInfo
+}> {}
+
+/**
+ * Waits for a job to complete by polling its status.
+ *
+ * @param id The job ID.
+ * @param attempts Maximum number of polling attempts (default: 30)
+ * @param interval Polling interval (e.g. "200 millis")
+ * @returns An effect that yields the completed JobInfo or fails with a `JobIncompleteError` if the job errors or times out
+ */
+export const waitForJobCompletion = Effect.fn("waitForJobCompletion")(function*(
+  id: number,
+  options?: {
+    attempts?: number
+    interval?: Duration.DurationInput
+  },
+) {
+  const {
+    attempts = 30,
+    interval = 200,
+  } = options ?? {}
+
+  const admin = yield* Admin.Admin
+  const job = yield* admin.getJobById(id).pipe(
+    Effect.orDie,
+    Effect.filterOrFail((job) => job.status === "COMPLETED", (job) => new JobIncompleteError({ job })),
+    Effect.retry({
+      times: attempts,
+      schedule: Schedule.spaced(interval),
+      while: (error) => error instanceof JobIncompleteError,
+    }),
+  )
+
+  return job
+})
 
 /**
  * Creates a test environment layer that connects to externally managed infrastructure.
