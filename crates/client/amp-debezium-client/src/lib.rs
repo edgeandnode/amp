@@ -7,17 +7,15 @@
 //! ## Example
 //!
 //! ```no_run
-//! use amp_debezium_client::{DebeziumClient, DebeziumOp, InMemoryStore};
+//! use amp_client::SqlClient;
+//! use amp_debezium_client::{DebeziumClient, DebeziumOp};
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create a Debezium client
-//!     let client = DebeziumClient::builder()
-//!         .endpoint("http://localhost:1602")?
-//!         .store(InMemoryStore::new(64)) // Keep last 64 blocks for reorg detection
-//!         .build()
-//!         .await?;
+//!     // Create a Debezium client (defaults to InMemoryStore with 64-block reorg window)
+//!     let amp_client = SqlClient::new("http://localhost:1602").await?;
+//!     let client = DebeziumClient::new(amp_client, None);
 //!
 //!     // Execute a streaming query
 //!     let mut stream = client
@@ -104,7 +102,7 @@ pub mod stores;
 pub mod types;
 
 // Re-export main types
-pub use client::{DebeziumClient, DebeziumClientBuilder};
+pub use client::DebeziumClient;
 pub use error::{Error, Result};
 #[cfg(feature = "lmdb")]
 pub use stores::LmdbStore;
