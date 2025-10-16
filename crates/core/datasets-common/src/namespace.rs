@@ -12,7 +12,6 @@
 /// ## Format Requirements
 ///
 /// A valid namespace must:
-/// - **Start** with a lowercase letter (`a-z`) or underscore (`_`)
 /// - **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)
 /// - **Not be empty** (minimum length of 1 character)
 /// - **Have no spaces** or special characters (except underscore)
@@ -20,7 +19,7 @@
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct Namespace(
-    #[cfg_attr(feature = "schemars", schemars(regex(pattern = r"^[a-z_][a-z0-9_]*$")))]
+    #[cfg_attr(feature = "schemars", schemars(regex(pattern = r"^[a-z0-9_]*$")))]
     #[cfg_attr(feature = "schemars", schemars(length(min = 1)))]
     String,
 );
@@ -156,7 +155,6 @@ impl<'a> From<&'a Namespace> for metadata_db::DatasetNamespace<'a> {
 }
 
 /// Validates that a namespace follows the required format:
-/// - Must start with a lowercase letter or underscore
 /// - Must be lowercase
 /// - Can only contain letters, underscores, and numbers
 pub fn validate_namespace(namespace: &str) -> Result<(), NamespaceError> {
@@ -164,17 +162,7 @@ pub fn validate_namespace(namespace: &str) -> Result<(), NamespaceError> {
         return Err(NamespaceError::Empty);
     }
 
-    // Check first character: must be lowercase letter or underscore
-    if let Some(first_char) = namespace.chars().next()
-        && !(first_char.is_ascii_lowercase() || first_char == '_')
-    {
-        return Err(NamespaceError::InvalidCharacter {
-            character: first_char,
-            value: namespace.to_string(),
-        });
-    }
-
-    // Check remaining characters: must be lowercase letter, underscore, or digit
+    // Check characters: must be lowercase letter, underscore, or digit
     if let Some(c) = namespace
         .chars()
         .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
@@ -208,6 +196,7 @@ mod tests {
         assert!(validate_namespace("my_namespace").is_ok());
         assert!(validate_namespace("my_namespace_123").is_ok());
         assert!(validate_namespace("__my_namespace_123").is_ok());
+        assert!(validate_namespace("0xabc123").is_ok());
     }
 
     #[test]
@@ -256,19 +245,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(NamespaceError::InvalidCharacter { character: '#', .. })
-        ));
-
-        // Numbers at the beginning are not allowed
-        let result = validate_namespace("123namespace");
-        assert!(matches!(
-            result,
-            Err(NamespaceError::InvalidCharacter { character: '1', .. })
-        ));
-
-        let result = validate_namespace("0_my_namespace");
-        assert!(matches!(
-            result,
-            Err(NamespaceError::InvalidCharacter { character: '0', .. })
         ));
     }
 }
