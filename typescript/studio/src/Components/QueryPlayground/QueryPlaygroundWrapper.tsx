@@ -232,7 +232,10 @@ export function QueryPlaygroundWrapper() {
                 <div className={classNames(navbarOpen ? "md:col-span-2 xl:col-span-3" : "col-span-1", "flex flex-col")}>
                   <div className="w-full flex-shrink-0 flex flex-col rounded-lg">
                     {queryField.state.value.map((_, idx) => (
-                      <Tabs.Panel key={`queries[${idx}].editor_panel`} className="w-full h-[400px] overflow-hidden p-4">
+                      <Tabs.Panel
+                        key={`queries[${idx}].editor_panel`}
+                        className="w-full h-[400px] overflow-visible p-4"
+                      >
                         <form.AppField name={`queries[${idx}].query` as const}>
                           {(field) => (
                             <field.Editor
