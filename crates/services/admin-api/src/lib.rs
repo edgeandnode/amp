@@ -29,10 +29,8 @@ pub async fn serve(
     let metadata_db = config.metadata_db().await?;
 
     let provider_configs_store = ProviderConfigsStore::new(config.providers_store.prefixed_store());
-    let dataset_manifests_store = DatasetManifestsStore::new(
-        metadata_db.clone(),
-        config.dataset_defs_store.prefixed_store(),
-    );
+    let dataset_manifests_store =
+        DatasetManifestsStore::new(metadata_db.clone(), config.manifests_store.prefixed_store());
 
     let dataset_store = DatasetStore::new(
         metadata_db.clone(),

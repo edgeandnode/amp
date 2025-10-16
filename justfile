@@ -191,7 +191,7 @@ gen: \
 
 ### JSON Schema generation
 
-SCHEMAS_DIR := "docs/dataset-def-schemas"
+SCHEMAS_DIR := "docs/manifest-schemas"
 
 # Generate the common dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
 gen-common-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:

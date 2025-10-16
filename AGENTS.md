@@ -87,7 +87,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - `AMP_CONFIG_*`: Override config values
 
 ### Key Directories
-1. **dataset_defs_dir**: Dataset definitions (input)
+1. **manifests_dir**: Dataset manifests (input)
 2. **providers_dir**: External service configs
 3. **data_dir**: Parquet file storage (output)
 

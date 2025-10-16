@@ -17,7 +17,7 @@ Or using the full `cargo build` command:
 ```bash
 RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-common-gen
 
-cp target/debug/build/datasets-common-gen-*/out/schema.json docs/dataset-def-schemas/common.spec.json
+cp target/debug/build/datasets-common-gen-*/out/schema.json docs/manifest-schemas/common.spec.json
 ```
 
 This will generate JSON schemas from the common dataset manifest definitions and copy them to `docs/dataset-def-schemas/common.spec.json`.
