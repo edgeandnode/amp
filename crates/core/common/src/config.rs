@@ -29,7 +29,7 @@ use crate::{Store, metadata::Overflow, query_context::QueryEnv, store::ObjectSto
 pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
-    pub dataset_defs_store: Arc<Store>,
+    pub manifests_store: Arc<Store>,
     pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
@@ -313,9 +313,11 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
-    pub data_dir: String,
-    pub providers_dir: String,
-    pub dataset_defs_dir: String,
+    data_dir: String,
+    providers_dir: String,
+    #[serde(default, alias = "dataset_defs_dir")]
+    manifests_dir: String,
+
     pub metadata_db_url: Option<String>,
     #[serde(default)]
     pub metadata_db: MetadataDbConfig,
@@ -331,6 +333,23 @@ pub struct ConfigFile {
     #[serde(default)]
     pub writer: ParquetConfig,
     pub poll_interval_secs: ConfigDuration<1>,
+}
+
+impl ConfigFile {
+    /// Returns the data directory path where Parquet files are stored.
+    pub fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+
+    /// Returns the providers directory path containing external service configurations.
+    pub fn providers_dir(&self) -> &str {
+        &self.providers_dir
+    }
+
+    /// Returns the manifests directory path, falling back to `dataset_defs_dir` if not set.
+    pub fn manifests_dir(&self) -> &str {
+        &self.manifests_dir
+    }
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -386,17 +405,17 @@ impl Config {
         let base = config_path.parent();
         let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
         let data_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.data_dir, base)
+            ObjectStoreUrl::new_with_base(config_file.data_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
         let providers_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.providers_dir, base)
+            ObjectStoreUrl::new_with_base(config_file.providers_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
-        let dataset_defs_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.dataset_defs_dir, base)
+        let manifests_store = Store::new(
+            ObjectStoreUrl::new_with_base(config_file.manifests_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
@@ -430,7 +449,7 @@ impl Config {
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
-            dataset_defs_store: Arc::new(dataset_defs_store),
+            manifests_store: Arc::new(manifests_store),
             metadata_db,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,

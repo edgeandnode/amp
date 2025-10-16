@@ -40,14 +40,14 @@ docker compose up -d
 ```toml
 data_dir = "data/"
 providers_dir = "providers/"
-dataset_defs_dir = "dataset-def-schemas/"
+manifests_dir = "manifest-schemas/"
 metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
 4. Create necessary directories, also in repo root
 
 ```bash
-mkdir data && mkdir providers && mkdir dataset-def-schemas
+mkdir data && mkdir providers && mkdir manifest-schemas
 ```
 
 5. Create a provider toml config file for anvil in `./providers/anvil.toml`
@@ -87,7 +87,7 @@ forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localho
 10. Use `ampd` to generate a manifest. Run in repo root
 
 ```bash
-AMP_CONFIG=config.toml cargo run --bin ampd -- generate-manifest --network anvil --kind evm-rpc --name anvil -o dataset-def-schemas/anvil.json
+AMP_CONFIG=config.toml cargo run --bin ampd -- generate-manifest --network anvil --kind evm-rpc --name anvil -o manifest-schemas/anvil.json
 ```
 
 11. Use `ampd` to dump the dataset

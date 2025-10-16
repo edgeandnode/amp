@@ -17,8 +17,8 @@ Or using the full `cargo build` command:
 ```bash
 RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-firehose-gen
 
-mkdir -p docs/dataset-def-schemas
-cp target/debug/build/datasets-firehose-gen-*/out/schema.json docs/dataset-def-schemas/firehose.spec.json
+mkdir -p docs/manifest-schemas
+cp target/debug/build/datasets-firehose-gen-*/out/schema.json docs/manifest-schemas/firehose.spec.json
 ```
 
 This will generate JSON schemas from the Firehose dataset definitions and copy them to `docs/dataset-def-schemas/firehose.spec.json`.

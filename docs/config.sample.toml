@@ -13,8 +13,8 @@ data_dir = "<config_dir/data>"
 # directory. Dataset definitions will reference providers by a relative path to this directory.
 providers_dir = "<config_dir/providers>"
 
-# Path to a directory containing dataset definition files.
-dataset_defs_dir = "<config_dir/dataset_defs>"
+# Path to a directory containing dataset manifest files.
+manifests_dir = "<config_dir/manifests>"
 
 # Connection to the metadata DB. Optional. If not set, a temporary postgres DB will be provided.
 # To opt out of this default behavior, set `ALLOW_TEMP_DB` to `false` in the environment.

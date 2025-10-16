@@ -6,7 +6,7 @@ in as the `AMP_CONFIG` environment variable.
 
 Configuring datasets to be extracted and served requires three different object storage directories:
 
-- `dataset_defs_dir`: Contains the dataset definitions. This is the input to the extraction process.
+- `manifests_dir`: Contains the dataset definitions. This is the input to the extraction process.
 - `providers_dir`: Auxiliary to the dataset definitions, configures providers for external services
   like Firehose.
 - `data_dir`: Where the actual dataset parquet tables are stored once extracted. Can be initially empty.
@@ -100,7 +100,7 @@ ampd generate-manifest --network mainnet --kind firehose --name eth_firehose
 
 # Output to file
 ampd generate-manifest --network mainnet --kind evm-rpc --name eth_mainnet \
-  -o ./dataset_defs_dir/eth_mainnet.json
+  -o ./manifests_dir/eth_mainnet.json
 ```
 
 #### Parameters
