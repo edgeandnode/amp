@@ -160,11 +160,7 @@ impl Display for CompactionAlgorithm {
 impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
     fn from(config: &'a ParquetConfig) -> Self {
         CompactionAlgorithm {
-            cooldown_duration: config
-                .compactor
-                .algorithm
-                .cooldown_duration
-                .unwrap_or(Duration::from_secs(2)),
+            cooldown_duration: config.compactor.algorithm.cooldown_duration.clone().into(),
             target_partition_size: SegmentSizeLimit::from(&config.target_size),
             eager_compaction_limit: SegmentSizeLimit::from(
                 &config.compactor.algorithm.eager_compaction_limit,

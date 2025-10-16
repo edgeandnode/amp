@@ -34,14 +34,8 @@ impl<'a> From<&'a ParquetConfig> for CollectorProperties {
     fn from(config: &'a ParquetConfig) -> Self {
         CollectorProperties {
             active: Arc::new(AtomicBool::new(config.collector.active)),
-            interval: config
-                .collector
-                .min_interval
-                .unwrap_or_else(|| Duration::from_secs(5)),
-            file_lock_duration: config
-                .collector
-                .deletion_lock_duration
-                .unwrap_or_else(|| Duration::from_secs(30 * 60)),
+            interval: config.collector.min_interval.clone().into(),
+            file_lock_duration: config.collector.deletion_lock_duration.clone().into(),
         }
     }
 }
