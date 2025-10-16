@@ -352,7 +352,7 @@ impl Service {
                 resume_watermark,
                 &self.notification_multiplexer,
                 None,
-                self.config.microbatch_max_interval,
+                self.config.server_microbatch_max_interval,
             )
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
