@@ -41,14 +41,17 @@ where
     // Insert into both manifests and tags tables using CTE
     // Hash is computed in PostgreSQL using encode(sha256(path), 'hex')
     let query = indoc::indoc! {r#"
-        WITH manifest_insert AS (
-            INSERT INTO manifests (hash, path)
-            VALUES (encode(sha256($4::bytea), 'hex'), $4)
-            ON CONFLICT (hash) DO NOTHING
+        WITH path_hash AS (
+          SELECT encode(sha256($4::bytea), 'hex') AS hash
+        ),
+        manifest_insert AS (
+          INSERT INTO manifests (hash, path)
+          SELECT hash, $4 FROM path_hash
+          ON CONFLICT (hash) DO NOTHING
         )
         INSERT INTO tags (namespace, name, version, hash)
-        VALUES ($1, $2, $3, encode(sha256($4::bytea), 'hex'))
-    "#};
+        SELECT $1, $2, $3, hash FROM path_hash
+   "#};
 
     sqlx::query(query)
         .bind(namespace)
