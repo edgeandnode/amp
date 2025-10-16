@@ -5,7 +5,7 @@ use axum::{
 };
 use common::BoxError;
 use dataset_store::{DatasetKind, RegisterManifestError};
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version_tag::VersionTag};
 use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 
@@ -51,7 +51,7 @@ use crate::{
 /// This handler supports derived and evm-rpc dataset registration:
 /// - **Derived dataset** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
 /// - **EVM-RPC dataset** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
-/// - **Other raw datasets** (firehose, substreams, etc.) are **not supported** and will return an error
+/// - **Other raw datasets** (firehose, etc.) are **not supported** and will return an error
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
 /// Both dataset types are registered using the same underlying `register_manifest` method to ensure consistency.
@@ -249,7 +249,7 @@ pub struct RegisterRequest {
     pub name: Name,
     /// Version of the dataset to register using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: Version,
+    pub version: VersionTag,
     /// JSON string representation of the dataset manifest (required)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub manifest: NonEmptyString,

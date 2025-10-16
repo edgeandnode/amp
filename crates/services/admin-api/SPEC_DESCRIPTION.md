@@ -31,7 +31,7 @@ Manage locations where dataset tables are stored:
 ### Provider Configuration
 Configure external blockchain data sources:
 - Create, retrieve, and delete provider configurations
-- Support for EVM RPC endpoints, Firehose streams, and Substreams packages
+- Support for EVM RPC endpoints and Firehose streams
 - Providers are reusable across multiple dataset definitions
 - **Security Note**: Provider configurations may contain connection details; ensure sensitive information is properly managed
 

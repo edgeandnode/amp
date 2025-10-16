@@ -8,7 +8,7 @@ The API serves as the primary administrative interface for monitoring and contro
 - Deploy and manage datasets with versioning support
 - Trigger and monitor data extraction jobs
 - Manage distributed storage locations
-- Configure external data providers (EVM RPC, Firehose, Substreams)
+- Configure external data providers (EVM RPC, Firehose)
 - Perform operations on Parquet files and their metadata
 
 ## API Documentation

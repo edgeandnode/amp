@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use admin_api::handlers::datasets::get_versions::DatasetVersionsResponse;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 use datasets_derived::Manifest;
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -79,7 +79,7 @@ lazy_static! {
 pub async fn fetch_latest_version(
     admin_api_addr: &str,
     name: &Name,
-) -> Result<Version, ManifestError> {
+) -> Result<VersionTag, ManifestError> {
     resolve_qualified_version(admin_api_addr, name, None).await
 }
 
@@ -100,8 +100,8 @@ pub async fn fetch_latest_version(
 async fn resolve_qualified_version(
     admin_api_addr: &str,
     name: &Name,
-    version: Option<&Version>,
-) -> Result<Version, ManifestError> {
+    version: Option<&VersionTag>,
+) -> Result<VersionTag, ManifestError> {
     let url = format!(
         "{}/datasets/{}/versions?limit={}",
         admin_api_addr, name, ADMIN_API_VERSION_LIMIT
@@ -207,7 +207,7 @@ async fn resolve_qualified_version(
 pub async fn fetch_manifest_with_startup_poll(
     admin_api_addr: &str,
     name: &Name,
-    version: Option<&Version>,
+    version: Option<&VersionTag>,
 ) -> Result<Manifest, ManifestError> {
     let mut first_error_logged = false;
     let mut attempt = 0u32;
@@ -295,7 +295,7 @@ pub async fn fetch_manifest_with_startup_poll(
 pub async fn fetch_manifest(
     admin_api_addr: &str,
     name: &Name,
-    version: Option<&Version>,
+    version: Option<&VersionTag>,
 ) -> Result<Manifest, ManifestError> {
     // Resolve version (handles both explicit version and "latest" via None)
     let qualified_version = resolve_qualified_version(admin_api_addr, name, version).await?;

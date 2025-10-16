@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 use metadata_db::TableId;
 
 use super::tracing::display_selector_version;
@@ -109,7 +109,7 @@ pub async fn handler(
 )]
 pub async fn handler_with_version(
     State(ctx): State<Ctx>,
-    path: Result<Path<(Name, Version)>, PathRejection>,
+    path: Result<Path<(Name, VersionTag)>, PathRejection>,
 ) -> Result<Json<DatasetInfo>, ErrorResponse> {
     let (name, version) = match path {
         Ok(Path((name, version))) => (name, version),
@@ -126,7 +126,7 @@ pub async fn handler_with_version(
 async fn handler_inner(
     ctx: Ctx,
     name: Name,
-    version: Option<Version>,
+    version: Option<VersionTag>,
 ) -> Result<Json<DatasetInfo>, ErrorResponse> {
     tracing::debug!(
         dataset_name=%name,
@@ -218,7 +218,7 @@ pub struct DatasetInfo {
     pub name: Name,
     /// The version of the dataset using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: Version,
+    pub version: VersionTag,
     /// The kind/type of dataset (e.g., "evm-rpc", "firehose", "substreams", "sql")
     pub kind: String,
     /// List of tables contained in the dataset with their details
@@ -263,7 +263,7 @@ pub enum Error {
     #[error("dataset '{name}'{} not found", version.as_ref().map(|v| format!(" version '{}'", v)).unwrap_or_default())]
     NotFound {
         name: Name,
-        version: Option<Version>,
+        version: Option<VersionTag>,
     },
 
     /// Dataset store error while getting the dataset

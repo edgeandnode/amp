@@ -204,7 +204,7 @@ Time spent in compaction operations. Use to estimate compaction windows, identif
 
 **Location:** `crates/extractors/evm-rpc/src/metrics.rs`
 
-EVM-RPC is the primary extraction path (Firehose and Substreams are being deprecated).
+EVM-RPC is the primary extraction path (Firehose is being deprecated).
 
 ### evm_rpc_requests_total
 
@@ -277,32 +277,6 @@ Duration of streaming sessions. Use to understand stream stability, detect frequ
 **Labels:** `provider`, `network`, `error_type`
 
 Stream error count by category. Use to identify unreliable Firehose endpoints, distinguish network vs server errors, prioritize reliability improvements, and validate retry logic.
-
-## Substreams Metrics
-
-**Location:** `crates/extractors/substreams/src/metrics.rs`
-
-### substreams_blocks_processed_total
-
-**Type:** Counter
-**Labels:** `provider`, `network`, `module`
-
-Blocks processed through Substreams modules. Use to track processing progress, measure throughput, compare module performance, and validate completeness.
-
-### substreams_stream_duration_milliseconds
-
-**Type:** Histogram
-**Unit:** milliseconds
-**Labels:** `provider`, `network`, `module`
-
-Duration of streaming sessions. Use to understand stream stability, detect frequent disconnects, validate reconnection logic, and measure time-to-recovery after failures.
-
-### substreams_stream_errors_total
-
-**Type:** Counter
-**Labels:** `provider`, `network`, `module`, `error_type`
-
-Processing errors by module. Use to identify buggy modules, track reliability by module, prioritize fixes, and distinguish data issues from code bugs.
 
 ## Admin API Metrics
 

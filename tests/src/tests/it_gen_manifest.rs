@@ -4,7 +4,6 @@ use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
 use monitoring::logging;
-use substreams_datasets::SubstreamsDatasetKind;
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
@@ -18,16 +17,7 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
-        name.clone(),
-        kind,
-        network.clone(),
-        None,
-        None,
-        None,
-        &mut out,
-    )
-    .await;
+    let result = gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, &mut out).await;
 
     //* Then
     assert!(
@@ -55,16 +45,7 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
-        name.clone(),
-        kind,
-        network.clone(),
-        None,
-        None,
-        None,
-        &mut out,
-    )
-    .await;
+    let result = gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, &mut out).await;
 
     //* Then
     assert!(
@@ -81,52 +62,6 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
 }
 
 #[tokio::test]
-async fn gen_manifest_cmd_run_with_substreams_kind_generates_valid_manifest() {
-    //* Given
-    logging::init();
-    let name = "substreams"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
-    let kind = SubstreamsDatasetKind;
-    let network = "mainnet".to_string();
-    let manifest_url = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
-    let module_name = "map_events".to_string();
-
-    //* When
-    let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
-        name.clone(),
-        kind,
-        network.clone(),
-        None,
-        Some(manifest_url.clone()),
-        Some(module_name.clone()),
-        &mut out,
-    )
-    .await;
-
-    //* Then
-    assert!(
-        result.is_ok(),
-        "manifest generation should succeed with valid Substreams parameters"
-    );
-    let manifest: substreams_datasets::dataset::Manifest =
-        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
-
-    assert_eq!(manifest.network, network, "network should match input");
-    assert_eq!(manifest.kind, kind, "kind should match input");
-    assert_eq!(manifest.name, name, "name should match input");
-    assert_eq!(
-        manifest.manifest, manifest_url,
-        "manifest URL should match input"
-    );
-    assert_eq!(
-        manifest.module, module_name,
-        "module name should match input"
-    );
-}
-
-#[tokio::test]
 async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
     //* Given
     logging::init();
@@ -138,7 +73,7 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(name, kind, network, None, None, None, &mut out).await;
+    let result = gen_manifest_cmd::run(name, kind, network, None, &mut out).await;
 
     //* Then
     assert!(
@@ -172,8 +107,6 @@ async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
         kind,
         network.clone(),
         Some(start_block),
-        None,
-        None,
         &mut out,
     )
     .await;
@@ -206,16 +139,7 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
-        name.clone(),
-        kind,
-        network.clone(),
-        None,
-        None,
-        None,
-        &mut out,
-    )
-    .await;
+    let result = gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, &mut out).await;
 
     //* Then
     assert!(
@@ -228,50 +152,4 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
     assert_eq!(manifest.start_block, 0, "start_block should default to 0");
     assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(manifest.network, network, "network should match input");
-}
-
-#[tokio::test]
-async fn gen_manifest_cmd_run_substreams_does_not_include_start_block() {
-    //* Given
-    logging::init();
-    let name = "substreams"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
-    let kind = SubstreamsDatasetKind;
-    let network = "mainnet".to_string();
-    let manifest_url = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
-    let module_name = "map_events".to_string();
-
-    //* When - passing start_block but it should be ignored for substreams
-    let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
-        name.clone(),
-        kind,
-        network.clone(),
-        Some(1000000),
-        Some(manifest_url.clone()),
-        Some(module_name.clone()),
-        &mut out,
-    )
-    .await;
-
-    //* Then
-    assert!(
-        result.is_ok(),
-        "manifest generation should succeed for substreams"
-    );
-    let manifest: substreams_datasets::dataset::Manifest =
-        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
-
-    // Verify the manifest structure - substreams manifests don't have start_block field
-    assert_eq!(manifest.name, name, "name should match input");
-    assert_eq!(manifest.network, network, "network should match input");
-    assert_eq!(
-        manifest.manifest, manifest_url,
-        "manifest URL should match input"
-    );
-    assert_eq!(
-        manifest.module, module_name,
-        "module name should match input"
-    );
 }

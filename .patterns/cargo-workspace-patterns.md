@@ -67,7 +67,6 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 **What belongs here:**
 - **`evm-rpc`**: Ethereum JSON-RPC data extraction (blocks, transactions, logs)
 - **`firehose`**: StreamingFast Firehose protocol implementation  
-- **`substreams`**: Substreams package processing and entity extraction
 
 **Dependency Rules:**
 - ✅ Can depend on `core` crates for shared functionality

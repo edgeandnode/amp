@@ -27,11 +27,11 @@ export const Network = Schema.Lowercase.pipe(
   }),
 )
 
-export const DatasetKind = Schema.Literal("manifest", "sql", "substreams", "firehose", "evm-rpc").pipe(
+export const DatasetKind = Schema.Literal("manifest", "sql", "firehose", "evm-rpc").pipe(
   Schema.annotations({
     title: "Kind",
     description: "the kind of dataset",
-    examples: ["manifest", "sql", "substreams", "firehose", "evm-rpc"],
+    examples: ["manifest", "sql", "firehose", "evm-rpc"],
   }),
 )
 

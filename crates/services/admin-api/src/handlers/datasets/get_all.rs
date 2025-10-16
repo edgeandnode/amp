@@ -7,7 +7,7 @@ use axum::{
 };
 use datasets_common::{
     name::{Name, NameError},
-    version::{Version, VersionError},
+    version_tag::{VersionTag, VersionTagError},
 };
 
 use crate::{
@@ -156,7 +156,7 @@ pub struct DatasetRegistryInfo {
     pub name: Name,
     /// The version of the dataset
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: Version,
+    pub version: VersionTag,
 }
 
 impl From<metadata_db::Dataset> for DatasetRegistryInfo {
@@ -184,7 +184,7 @@ pub struct DatasetsResponse {
 
 /// Cursor for dataset pagination containing both name and version
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct Cursor(pub Name, pub Version);
+pub struct Cursor(pub Name, pub VersionTag);
 
 impl Cursor {
     /// Access the name field
@@ -193,7 +193,7 @@ impl Cursor {
     }
 
     /// Access the version field
-    pub fn version(&self) -> &Version {
+    pub fn version(&self) -> &VersionTag {
         &self.1
     }
 }
@@ -234,7 +234,7 @@ pub enum InvalidCursorError {
 
     /// The dataset version is invalid
     #[error("invalid dataset version in cursor: {0}")]
-    InvalidVersion(VersionError),
+    InvalidVersion(VersionTagError),
 }
 
 /// Errors that can occur during dataset listing

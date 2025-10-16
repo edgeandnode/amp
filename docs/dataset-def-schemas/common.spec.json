@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "kind": {
-      "description": "Dataset kind. See specific dataset definitions for supported values.\n\nCommon values include: `manifest`, `evm-rpc`, `firehose`, `substreams`.",
+      "description": "Dataset kind. See specific dataset definitions for supported values.\n\nCommon values include: `manifest`, `evm-rpc`, `firehose`.",
       "type": "string"
     },
     "name": {

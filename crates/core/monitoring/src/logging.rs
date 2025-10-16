@@ -77,7 +77,6 @@ const AMP_CRATES: &[&str] = &[
     "metadata_db",
     "monitoring",
     "server",
-    "substreams_datasets",
     "tests",
     "worker",
 ];

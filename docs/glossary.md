@@ -45,11 +45,10 @@ The implementation type that determines how a [dataset](#dataset) processes data
 - **derived**: Transforms and combines data from other datasets using SQL [queries](#query)
 - **evm-rpc**: Extracts blockchain data via Ethereum-compatible JSON-RPC endpoints
 - **firehose**: Streams real-time blockchain data through StreamingFast Firehose protocol
-- **substreams**: Processes data from Substreams packages with dynamic [schema](#schema) inference
 
 ### Dataset Category
 A high-level classification grouping [datasets](#dataset) by their data processing approach:
-- **Raw** (a.k.a. **Extractor Datasets**): Extracts data directly from external blockchain sources (includes _evm-rpc_, _firehose_, and _substreams_ [kinds](#dataset-kind))
+- **Raw** (a.k.a. **Extractor Datasets**): Extracts data directly from external blockchain sources (includes _evm-rpc_ and _firehose_ [kinds](#dataset-kind))
 - **Derived**: Transforms and combines data from existing datasets (_derived_ [kind](#dataset-kind))
 
 ## Physical

@@ -16,7 +16,7 @@ use datafusion::{
 use datasets_common::{
     manifest::{DataType, VersionReq},
     name::Name,
-    version::Version,
+    version_tag::VersionTag,
 };
 
 use crate::dataset_kind::DerivedDatasetKind;
@@ -33,7 +33,7 @@ pub struct Manifest {
     /// Dataset name
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
-    pub version: Version,
+    pub version: VersionTag,
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
 

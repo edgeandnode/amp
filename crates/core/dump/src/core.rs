@@ -99,10 +99,7 @@ pub async fn dump_raw_tables(
 
     let kind = DatasetKind::from_str(&dataset.kind)?;
     match kind {
-        DatasetKind::EvmRpc
-        | DatasetKind::EthBeacon
-        | DatasetKind::Firehose
-        | DatasetKind::Substreams => {
+        DatasetKind::EvmRpc | DatasetKind::EthBeacon | DatasetKind::Firehose => {
             raw_dataset::dump(
                 ctx,
                 n_jobs,

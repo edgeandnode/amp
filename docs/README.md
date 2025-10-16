@@ -37,7 +37,6 @@ JSON schemas for defining datasets:
 - Common dataset fields
 - EVM RPC datasets
 - Firehose datasets
-- Substreams datasets
 - SQL/manifest datasets (derived datasets)
 
 #### Dataset Schema Documentation

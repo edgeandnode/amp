@@ -8,8 +8,6 @@ pub async fn run(
     kind: impl Into<DatasetKind>,
     network: String,
     start_block: Option<u64>,
-    manifest: Option<String>,
-    module: Option<String>,
     writer: &mut impl io::Write,
 ) -> Result<(), Error> {
     let kind = kind.into();
@@ -45,20 +43,6 @@ pub async fn run(
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
-        dataset_store::DatasetKind::Substreams => {
-            let (Some(manifest_url), Some(module_name)) = (manifest, module) else {
-                return Err(Error::MissingSubstreamsArgs);
-            };
-            let manifest = substreams_datasets::dataset::Manifest {
-                name,
-                version: Default::default(),
-                kind: kind.as_str().parse().expect("kind is valid"),
-                network,
-                manifest: manifest_url,
-                module: module_name,
-            };
-            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
-        }
         dataset_store::DatasetKind::Derived => {
             return Err(Error::DerivedNotSupported);
         }
@@ -86,29 +70,10 @@ pub enum Error {
     /// The dataset kind specified is not supported.
     ///
     /// This occurs when the `kind` parameter contains a value that doesn't match
-    /// any of the supported dataset types (evm-rpc, eth-beacon, firehose, substreams,
+    /// any of the supported dataset types (evm-rpc, eth-beacon, firehose,
     /// derived, sql).
     #[error("Unsupported dataset kind '{0}'")]
     InvalidKind(String),
-
-    /// Required Substreams arguments are missing.
-    ///
-    /// This occurs when generating a manifest for a Substreams dataset without
-    /// providing both the `manifest` (Substreams package URL) and `module`
-    /// (output module name) parameters, which are required for Substreams datasets.
-    #[error("`manifest` and `module` arguments are required for `DatasetKind::Substreams`")]
-    MissingSubstreamsArgs,
-
-    /// Failed to fetch table definitions from a Substreams package.
-    ///
-    /// This occurs when the system cannot retrieve or process the Substreams package
-    /// to extract table definitions, which may be due to:
-    /// - Invalid Substreams package URL
-    /// - Network connectivity issues
-    /// - Invalid package format or structure
-    /// - Missing or invalid output module
-    #[error("Failed to fetch substreams tables: {0}")]
-    SubstreamsTables(#[source] firehose_datasets::Error),
 
     /// Derived datasets do not support automatic manifest generation.
     ///

@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::store::ObjectStoreExt;
-use datasets_common::{name::Name, namespace::Namespace, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version_tag::VersionTag};
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
@@ -67,7 +67,7 @@ where
     pub async fn get_latest_version(
         &self,
         name: &Name,
-    ) -> Result<Option<Version>, GetLatestVersionError> {
+    ) -> Result<Option<VersionTag>, GetLatestVersionError> {
         self.init().await;
 
         let dataset = self
@@ -83,7 +83,7 @@ where
     ///
     /// Returns a set of all available manifests with their name, version, and path information.
     /// This operation directly queries the underlying store without caching.
-    pub async fn list(&self) -> Vec<(Name, Version)> {
+    pub async fn list(&self) -> Vec<(Name, VersionTag)> {
         self.init().await;
 
         // Get all datasets from metadata database
@@ -123,7 +123,7 @@ where
     pub async fn get(
         &self,
         name: &Name,
-        version: impl Into<Option<&Version>>,
+        version: impl Into<Option<&VersionTag>>,
     ) -> Result<Option<ManifestContent>, GetError> {
         self.init().await;
 
@@ -159,7 +159,7 @@ where
     pub async fn store<M>(
         &self,
         name: &Name,
-        version: &Version,
+        version: &VersionTag,
         manifest: &M,
     ) -> Result<ObjectStorePath, StoreError>
     where
@@ -273,7 +273,7 @@ where
     }
 }
 
-async fn list<S>(store: &S) -> BTreeSet<(Name, Version, ManifestPath)>
+async fn list<S>(store: &S) -> BTreeSet<(Name, VersionTag, ManifestPath)>
 where
     S: ObjectStore,
 {
@@ -318,7 +318,7 @@ where
             }
         };
 
-        let version = match version_str.replace('_', ".").parse::<Version>() {
+        let version = match version_str.replace('_', ".").parse::<VersionTag>() {
             Ok(version) => version,
             Err(err) => {
                 tracing::debug!(file_path = %manifest_path, error = ?err, "Skipping file with invalid version");

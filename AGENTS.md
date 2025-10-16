@@ -7,7 +7,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ## Architecture Overview
 
 ### Data Flow
-1. **Extract**: Pull data from blockchain sources (EVM RPC, Firehose, Substreams)
+1. **Extract**: Pull data from blockchain sources (EVM RPC, Firehose, etc.)
 2. **Transform**: Process data using SQL queries with custom UDFs
 3. **Store**: Save as Parquet files (columnar format optimized for analytics)
 4. **Serve**: Provide query interfaces (Arrow Flight gRPC, JSON Lines HTTP)
@@ -54,11 +54,6 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - Real-time blockchain data streaming
 - Tables: blocks, transactions, logs, calls
 - Protocol buffer-based
-
-#### Substreams (`substreams-datasets`)
-- Processes Substreams packages
-- Dynamic schema inference
-- Entity-based transformations
 
 ### 5. Core Libraries
 

@@ -123,8 +123,8 @@ metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
 Dump extractor interfaces to parquet files.
 
 - Supports parallel and resumeable extraction.
-- Supports dumping EVM Firehose, Substreams, and JSON-RPC to Parquet. EVM Firehose uses a simplified
-  schema and Substreams uses a schema inferred from the manifest.
+- Supports dumping EVM Firehose and JSON-RPC to Parquet. EVM Firehose uses a simplified
+  schema.
 
 Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as
 you can simply refer to the dataset by name. An example usage to dump first four million blocks of a

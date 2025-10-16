@@ -90,7 +90,7 @@
     },
     "generate-manifest": {
       "summary": "Generate dataset manifests",
-      "description": "Generates dataset manifest files for different dataset types (firehose, substreams, evm-rpc, etc.). The manifest can be output to a file, directory, or stdout. For Substreams datasets, additional manifest and module parameters are required. The --config parameter is NOT required for this command (unlike other commands). If --out is omitted, the manifest is printed to stdout for easy piping. If --out points to a directory, the output file will be named after the 'kind' parameter. The generated manifest is in JSON format and can be used with the dump command.",
+      "description": "Generates dataset manifest files for different dataset types (firehose, evm-rpc, etc.). The manifest can be output to a file, directory, or stdout. The --config parameter is NOT required for this command (unlike other commands). If --out is omitted, the manifest is printed to stdout for easy piping. If --out points to a directory, the output file will be named after the 'kind' parameter. The generated manifest is in JSON format and can be used with the dump command.",
       "parameters": [
         {
           "name": "network",
@@ -105,7 +105,7 @@
         {
           "name": "kind",
           "in": "option",
-          "description": "The kind/type of the dataset (e.g., firehose, substreams, evm-rpc). This determines the dataset extractor type and structure.",
+          "description": "The kind/type of the dataset (e.g., firehose, evm-rpc). This determines the dataset extractor type and structure.",
           "required": true,
           "schema": {
             "type": "string"
@@ -133,27 +133,6 @@
             "format": "path"
           },
           "x-environment": "GM_OUT"
-        },
-        {
-          "name": "manifest",
-          "in": "option",
-          "description": "Substreams package manifest URL. This option is required when generating manifests for DatasetKind::Substreams.",
-          "required": false,
-          "schema": {
-            "type": "string",
-            "format": "uri"
-          },
-          "x-environment": "GM_SS_MANIFEST_URL"
-        },
-        {
-          "name": "module",
-          "in": "option",
-          "description": "Substreams output module name. This option is required when generating manifests for DatasetKind::Substreams, specifying which module's output to use.",
-          "required": false,
-          "schema": {
-            "type": "string"
-          },
-          "x-environment": "GM_SS_MODULE"
         }
       ],
       "responses": {
@@ -172,10 +151,6 @@
         {
           "command": "ampd generate-manifest --network mainnet --kind evm-rpc --name eth_rpc -o manifests/",
           "description": "Generate an EVM RPC dataset manifest and save to manifests/evm-rpc.json"
-        },
-        {
-          "command": "ampd generate-manifest --network mainnet --kind substreams --name my_substream --manifest https://example.com/substreams.spkg --module map_events -o output.json",
-          "description": "Generate a Substreams dataset manifest with required Substreams parameters"
         }
       ]
     },
@@ -292,7 +267,7 @@
     },
     "dump": {
       "summary": "Extract data from blockchain sources to Parquet",
-      "description": "Extracts blockchain data from various sources (EVM RPC, Firehose, Substreams) and saves it as Parquet files. Supports parallel extraction with configurable workers, dependency resolution for SQL datasets, and resumable extraction with progress tracking. Can run once or continuously on a schedule. Extraction is resumable - if interrupted, it will continue from where it left off. By default, dependencies are resolved and dumped in the correct order. Parallel jobs divide the block range into equal contiguous sections. When using --run-every-mins, the process runs indefinitely until terminated. The --fresh flag will delete existing progress and start from scratch. The --only-finalized-blocks flag only applies to raw datasets, not SQL-derived ones. Progress is tracked in the metadata database for resumability.",
+      "description": "Extracts blockchain data from various sources (EVM RPC, Firehose) and saves it as Parquet files. Supports parallel extraction with configurable workers, dependency resolution for SQL datasets, and resumable extraction with progress tracking. Can run once or continuously on a schedule. Extraction is resumable - if interrupted, it will continue from where it left off. By default, dependencies are resolved and dumped in the correct order. Parallel jobs divide the block range into equal contiguous sections. When using --run-every-mins, the process runs indefinitely until terminated. The --fresh flag will delete existing progress and start from scratch. The --only-finalized-blocks flag only applies to raw datasets, not SQL-derived ones. Progress is tracked in the metadata database for resumability.",
       "parameters": [
         {
           "name": "dataset",
