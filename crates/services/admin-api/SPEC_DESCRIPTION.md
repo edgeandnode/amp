@@ -43,15 +43,26 @@ Validate SQL queries and infer output schemas:
 
 ## Pagination
 
-All list endpoints use cursor-based pagination for efficient data retrieval:
+Most list endpoints use cursor-based pagination for efficient data retrieval:
 
-### Query Parameters
+### Paginated Endpoints
+The following endpoints support pagination:
+- Jobs: `/jobs`
+- Locations: `/locations`
+- Files: `/locations/{location_id}/files`
+
+### Non-Paginated Endpoints
+The following endpoints return all results without pagination:
+- Datasets: `/datasets` (returns all datasets)
+- Dataset Versions: `/datasets/{name}/versions` (returns all versions for a dataset)
+
+### Query Parameters (Paginated Endpoints Only)
 - `limit`: Maximum items per page (default: 50, max: 1000)
 - `last_*_id`: Cursor from previous page's `next_cursor` field
 
 ### Response Format
 Paginated responses include:
-- Array of items (e.g., `datasets`, `jobs`, `locations`, `files`)
+- Array of items (e.g., `jobs`, `locations`, `files`)
 - `next_cursor`: Cursor for the next page (absent when no more results)
 
 ### Usage Pattern
@@ -87,28 +98,10 @@ GET /jobs?limit=100&last_job_id=12345
 Endpoints use different cursor formats based on their data type:
 
 **Integer ID Cursors (64-bit integers):**
-Most endpoints use simple integer IDs as cursors:
+Most paginated endpoints use simple integer IDs as cursors:
 - Jobs: `last_job_id=12345`
 - Locations: `last_location_id=67890`
 - Files: `last_file_id=54321`
-
-**Version String Cursors:**
-Dataset version endpoints use semantic version strings:
-- Example: `last_version=1.0.0`
-- Format: Standard semantic versioning
-
-**Composite String Cursors:**
-Dataset listings use a composite `"name:version"` format:
-- Parameter: `last_dataset_id`
-- Format: `"name:version"` (e.g., `eth_mainnet:1.0.0`)
-- The colon (`:`) is valid per RFC 3986 and doesn't require URL encoding
-- Both encoded (`eth_mainnet%3A1.0.0`) and unencoded (`eth_mainnet:1.0.0`) formats are accepted
-- URL encoding the colon as `%3A` is recommended for maximum browser compatibility
-
-Example:
-```
-GET /datasets?limit=50&last_dataset_id=eth_mainnet:1.0.0
-```
 
 ## Error Handling
 
