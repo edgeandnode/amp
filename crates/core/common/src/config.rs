@@ -33,7 +33,10 @@ pub struct Config {
     pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    /// Maximum interval for derived dataset dump microbatches
     pub microbatch_max_interval: u64,
+    /// Maximum interval for streaming server microbatches
+    pub server_microbatch_max_interval: u64,
     pub opentelemetry: Option<OpenTelemetryConfig>,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
@@ -326,6 +329,7 @@ pub struct ConfigFile {
     #[serde(default)]
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: Option<u64>,
+    pub server_microbatch_max_interval: Option<u64>,
     pub flight_addr: Option<String>,
     pub jsonl_addr: Option<String>,
     pub admin_api_addr: Option<String>,
@@ -454,6 +458,9 @@ impl Config {
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
+            server_microbatch_max_interval: config_file
+                .server_microbatch_max_interval
+                .unwrap_or(1_000),
             parquet: config_file.writer,
             opentelemetry: config_file.opentelemetry,
             addrs,
