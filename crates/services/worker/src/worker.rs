@@ -1,12 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{config::Config, notification_multiplexer};
+use common::config::Config;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use dump::Ctx;
 use futures::TryStreamExt as _;
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, notification_multiplexer};
 use tokio::time::{Interval, MissedTickBehavior};
 use tokio_util::task::AbortOnDropHandle;
 
