@@ -1,7 +1,7 @@
 //! Dataset registry resource management
 //!
-//! This module provides database operations for the `registry` table,
-//! which stores dataset registration information including namespace, name,
+//! This module provides database operations for the `manifests` and `tags` tables,
+//! which store dataset registration information including namespace, name,
 //! version, and manifest data.
 
 use futures::stream::Stream;
@@ -33,21 +33,31 @@ pub async fn insert<'c, E>(
     namespace: Namespace<'_>,
     name: Name<'_>,
     version: VersionTag<'_>,
-    manifest_path: &str,
+    path: &str,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
+    // Insert into both manifests and tags tables using CTE
+    // Hash is computed in PostgreSQL using encode(sha256(path), 'hex')
     let query = indoc::indoc! {r#"
-        INSERT INTO registry (dataset, version, manifest, owner)
-        VALUES ($1, $2, $3, $4)
-    "#};
+        WITH path_hash AS (
+          SELECT encode(sha256($4::bytea), 'hex') AS hash
+        ),
+        manifest_insert AS (
+          INSERT INTO manifests (hash, path)
+          SELECT hash, $4 FROM path_hash
+          ON CONFLICT (hash) DO NOTHING
+        )
+        INSERT INTO tags (namespace, name, version, hash)
+        SELECT $1, $2, $3, hash FROM path_hash
+   "#};
 
     sqlx::query(query)
+        .bind(namespace)
         .bind(name)
         .bind(version)
-        .bind(manifest_path)
-        .bind(namespace)
+        .bind(path)
         .execute(exe)
         .await?;
 
@@ -65,12 +75,13 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            owner,
-            dataset,
-            version,
-            manifest
-        FROM registry
-        WHERE dataset = $1 AND version = $2
+            t.namespace,
+            t.name,
+            t.version,
+            m.path
+        FROM tags t
+        JOIN manifests m ON t.hash = m.hash
+        WHERE t.name = $1 AND t.version = $2
     "#};
 
     let result = sqlx::query_as(query)
@@ -91,7 +102,7 @@ pub async fn exists_by_name_and_version<'c, E>(
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = "SELECT COUNT(*) FROM registry WHERE dataset = $1 AND version = $2";
+    let query = "SELECT COUNT(*) FROM tags WHERE name = $1 AND version = $2";
 
     let result: i64 = sqlx::query_scalar(query)
         .bind(name)
@@ -111,7 +122,12 @@ pub async fn get_manifest_path_by_name_and_version<'c, E>(
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = "SELECT manifest FROM registry WHERE dataset = $1 AND version = $2";
+    let query = indoc::indoc! {r#"
+        SELECT m.path
+        FROM tags t
+        JOIN manifests m ON t.hash = m.hash
+        WHERE t.name = $1 AND t.version = $2
+    "#};
 
     let result = sqlx::query_scalar(query)
         .bind(name)
@@ -132,13 +148,14 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            owner,
-            dataset,
-            version,
-            manifest
-        FROM registry
-        WHERE dataset = $1
-        ORDER BY version DESC
+            t.namespace,
+            t.name,
+            t.version,
+            m.path
+        FROM tags t
+        JOIN manifests m ON t.hash = m.hash
+        WHERE t.name = $1
+        ORDER BY t.version DESC
         LIMIT 1
     "#};
 
@@ -157,11 +174,11 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            owner,
-            dataset,
+            namespace,
+            name,
             version
-        FROM registry
-        ORDER BY dataset ASC, version ASC
+        FROM tags
+        ORDER BY name ASC, version ASC
     "#};
 
     sqlx::query_as(query).fetch(executor)
@@ -171,10 +188,8 @@ where
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Dataset {
     /// Dataset namespace identifier
-    #[sqlx(rename = "owner")]
     pub namespace: String,
     /// Dataset name
-    #[sqlx(rename = "dataset")]
     pub name: NameOwned,
     /// Dataset version
     pub version: VersionTagOwned,
@@ -184,15 +199,13 @@ pub struct Dataset {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DatasetWithDetails {
     /// Dataset namespace identifier
-    #[sqlx(rename = "owner")]
     pub namespace: String,
     /// Dataset name
-    #[sqlx(rename = "dataset")]
     pub name: NameOwned,
     /// Dataset version
     pub version: VersionTagOwned,
     /// Dataset manifest content
-    #[sqlx(rename = "manifest")]
+    #[sqlx(rename = "path")]
     pub manifest_path: String,
 }
 
