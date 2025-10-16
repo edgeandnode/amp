@@ -39,6 +39,7 @@ pub struct Config {
     pub addrs: Addrs,
     pub config_path: PathBuf,
     pub parquet: ParquetConfig,
+    pub poll_interval: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,18 @@ fn default_pool_size() -> u32 {
 
 fn default_auto_migrate() -> bool {
     true
+}
+
+fn default_poll_interval_secs() -> Option<Duration> {
+    Some(Duration::from_secs(1))
+}
+
+fn default_collector_min_interval() -> Option<Duration> {
+    Some(Duration::from_secs(30))
+}
+
+fn default_collector_deletion_lock_duration() -> Option<Duration> {
+    Some(Duration::from_secs(30 * 60)) // 30 minutes
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,16 +110,24 @@ impl Default for ParquetConfig {
 #[serde(default)]
 pub struct CollectorConfig {
     pub active: bool,
-    pub min_interval: Duration,
-    pub deletion_lock_duration: Duration,
+    #[serde(
+        default = "default_collector_min_interval",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub min_interval: Option<Duration>,
+    #[serde(
+        default = "default_collector_deletion_lock_duration",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub deletion_lock_duration: Option<Duration>,
 }
 
 impl Default for CollectorConfig {
     fn default() -> Self {
         Self {
             active: false,
-            min_interval: Duration::from_secs(5), // 5 seconds
-            deletion_lock_duration: Duration::from_secs(30 * 60), // 30 minutes
+            min_interval: default_collector_min_interval(),
+            deletion_lock_duration: default_collector_deletion_lock_duration(),
         }
     }
 }
@@ -151,7 +172,7 @@ pub struct CompactionAlgorithmConfig {
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
-            cooldown_duration: Duration::from_secs(2).into(),
+            cooldown_duration: Duration::from_secs(1024).into(),
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }
@@ -317,6 +338,11 @@ pub struct ConfigFile {
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub writer: ParquetConfig,
+    #[serde(
+        default = "default_poll_interval_secs",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub poll_interval_secs: Option<Duration>,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -425,6 +451,9 @@ impl Config {
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
+            poll_interval: config_file
+                .poll_interval_secs
+                .unwrap_or(Duration::from_secs(1)),
         })
     }
 
