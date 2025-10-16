@@ -9,7 +9,6 @@ use common::{
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
-    notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::{constrain_by_block_num, unproject_special_block_num_column},
     query_context::{QueryEnv, parse_sql},
 };
@@ -20,7 +19,7 @@ use futures::{
     stream::{self, BoxStream, StreamExt},
 };
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
-use metadata_db::LocationId;
+use metadata_db::{LocationId, NotificationMultiplexerHandle};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;

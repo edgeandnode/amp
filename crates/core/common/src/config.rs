@@ -29,16 +29,20 @@ use crate::{Store, metadata::Overflow, query_context::QueryEnv, store::ObjectSto
 pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
-    pub dataset_defs_store: Arc<Store>,
+    pub manifests_store: Arc<Store>,
     pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    /// Maximum interval for derived dataset dump microbatches
     pub microbatch_max_interval: u64,
+    /// Maximum interval for streaming server microbatches
+    pub server_microbatch_max_interval: u64,
     pub opentelemetry: Option<OpenTelemetryConfig>,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
     pub parquet: ParquetConfig,
+    pub poll_interval: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -93,22 +97,12 @@ impl Default for ParquetConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct CollectorConfig {
     pub active: bool,
-    pub min_interval: Duration,
-    pub deletion_lock_duration: Duration,
-}
-
-impl Default for CollectorConfig {
-    fn default() -> Self {
-        Self {
-            active: false,
-            min_interval: Duration::from_secs(5), // 5 seconds
-            deletion_lock_duration: Duration::from_secs(30 * 60), // 30 minutes
-        }
-    }
+    pub min_interval: ConfigDuration<30>, // 30 seconds
+    pub deletion_lock_duration: ConfigDuration<1800>, // 30 minutes
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,8 +113,7 @@ pub struct CompactorConfig {
     pub algorithm: CompactionAlgorithmConfig,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
-    #[serde(deserialize_with = "deserialize_duration")]
-    pub min_interval: Option<Duration>,
+    pub min_interval: ConfigDuration<1>,
 }
 
 impl Default for CompactorConfig {
@@ -130,7 +123,7 @@ impl Default for CompactorConfig {
             algorithm: CompactionAlgorithmConfig::default(),
             metadata_concurrency: 2,
             write_concurrency: 2,
-            min_interval: Duration::from_secs(1).into(),
+            min_interval: ConfigDuration::default(),
         }
     }
 }
@@ -138,8 +131,7 @@ impl Default for CompactorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactionAlgorithmConfig {
-    #[serde(deserialize_with = "deserialize_duration")]
-    pub cooldown_duration: Option<Duration>,
+    pub cooldown_duration: ConfigDuration<1024>,
     #[serde(
         flatten,
         default = "SizeLimitConfig::default_eager_limit",
@@ -151,7 +143,7 @@ pub struct CompactionAlgorithmConfig {
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
-            cooldown_duration: Duration::from_secs(2).into(),
+            cooldown_duration: ConfigDuration::default(),
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }
@@ -298,11 +290,37 @@ where
     <Option<f64>>::deserialize(deserializer).map(|option| option.map(Duration::from_secs_f64))
 }
 
+#[derive(Debug, Clone)]
+pub struct ConfigDuration<const DEFAULT_SECS: u64>(Duration);
+
+impl<const DEFAULT_SECS: u64> Default for ConfigDuration<DEFAULT_SECS> {
+    fn default() -> Self {
+        Self(Duration::from_secs(DEFAULT_SECS))
+    }
+}
+
+impl<const DEFAULT_SECS: u64> Into<Duration> for ConfigDuration<DEFAULT_SECS> {
+    fn into(self) -> Duration {
+        self.0
+    }
+}
+
+impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DEFAULT_SECS> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_duration(deserializer).map(|opt| opt.map_or_else(|| Self::default(), Self))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
-    pub data_dir: String,
-    pub providers_dir: String,
-    pub dataset_defs_dir: String,
+    data_dir: String,
+    providers_dir: String,
+    #[serde(default, alias = "dataset_defs_dir")]
+    manifests_dir: String,
+
     pub metadata_db_url: Option<String>,
     #[serde(default)]
     pub metadata_db: MetadataDbConfig,
@@ -311,12 +329,31 @@ pub struct ConfigFile {
     #[serde(default)]
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: Option<u64>,
+    pub server_microbatch_max_interval: Option<u64>,
     pub flight_addr: Option<String>,
     pub jsonl_addr: Option<String>,
     pub admin_api_addr: Option<String>,
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub writer: ParquetConfig,
+    pub poll_interval_secs: ConfigDuration<1>,
+}
+
+impl ConfigFile {
+    /// Returns the data directory path where Parquet files are stored.
+    pub fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+
+    /// Returns the providers directory path containing external service configurations.
+    pub fn providers_dir(&self) -> &str {
+        &self.providers_dir
+    }
+
+    /// Returns the manifests directory path, falling back to `dataset_defs_dir` if not set.
+    pub fn manifests_dir(&self) -> &str {
+        &self.manifests_dir
+    }
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -372,17 +409,17 @@ impl Config {
         let base = config_path.parent();
         let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
         let data_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.data_dir, base)
+            ObjectStoreUrl::new_with_base(config_file.data_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
         let providers_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.providers_dir, base)
+            ObjectStoreUrl::new_with_base(config_file.providers_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
-        let dataset_defs_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.dataset_defs_dir, base)
+        let manifests_store = Store::new(
+            ObjectStoreUrl::new_with_base(config_file.manifests_dir(), base)
                 .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
         )
         .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
@@ -416,15 +453,19 @@ impl Config {
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
-            dataset_defs_store: Arc::new(dataset_defs_store),
+            manifests_store: Arc::new(manifests_store),
             metadata_db,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
+            server_microbatch_max_interval: config_file
+                .server_microbatch_max_interval
+                .unwrap_or(1_000),
             parquet: config_file.writer,
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
+            poll_interval: config_file.poll_interval_secs.into(),
         })
     }
 

@@ -5,7 +5,7 @@ use axum::{
 };
 use common::BoxError;
 use dataset_store::{DatasetKind, RegisterManifestError};
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version_tag::VersionTag};
 use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 
@@ -249,7 +249,7 @@ pub struct RegisterRequest {
     pub name: Name,
     /// Version of the dataset to register using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: Version,
+    pub version: VersionTag,
     /// JSON string representation of the dataset manifest (required)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub manifest: NonEmptyString,

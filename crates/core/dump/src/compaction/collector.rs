@@ -34,12 +34,11 @@ impl<'a> From<&'a ParquetConfig> for CollectorProperties {
     fn from(config: &'a ParquetConfig) -> Self {
         CollectorProperties {
             active: Arc::new(AtomicBool::new(config.collector.active)),
-            interval: config.collector.min_interval,
-            file_lock_duration: config.collector.deletion_lock_duration,
+            interval: config.collector.min_interval.clone().into(),
+            file_lock_duration: config.collector.deletion_lock_duration.clone().into(),
         }
     }
 }
-
 #[derive(Clone)]
 pub struct Collector {
     pub(super) table: Arc<PhysicalTable>,

@@ -23,7 +23,6 @@ use common::{
     catalog::physical::Catalog,
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
-    notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::IncrementalCheck,
     query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
@@ -39,7 +38,7 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use prost::Message as _;
 use serde_json::json;
 use thiserror::Error;
@@ -241,7 +240,7 @@ impl Service {
                 ProviderConfigsStore::new(config.providers_store.prefixed_store());
             let dataset_manifests_store = DatasetManifestsStore::new(
                 metadata_db.clone(),
-                config.dataset_defs_store.prefixed_store(),
+                config.manifests_store.prefixed_store(),
             );
             DatasetStore::new(
                 metadata_db.clone(),
@@ -353,7 +352,7 @@ impl Service {
                 resume_watermark,
                 &self.notification_multiplexer,
                 None,
-                self.config.microbatch_max_interval,
+                self.config.server_microbatch_max_interval,
             )
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;

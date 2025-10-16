@@ -8,7 +8,7 @@ use axum::{
     },
     http::StatusCode,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 
 use crate::{
     ctx::Ctx,
@@ -35,7 +35,7 @@ pub struct QueryParams {
     /// Last version from the previous page for pagination
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
     #[cfg_attr(feature = "utoipa", param(value_type = Option<String>))]
-    last_version: Option<Version>,
+    last_version: Option<VersionTag>,
 }
 
 fn default_limit() -> usize {
@@ -161,12 +161,12 @@ pub async fn handler(
 pub struct DatasetVersionsResponse {
     /// List of dataset versions in this page
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub versions: Vec<Version>,
+    pub versions: Vec<VersionTag>,
     /// Cursor for the next page of results (None if no more results)
     #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub next_cursor: Option<Version>,
+    pub next_cursor: Option<VersionTag>,
 }
 
 /// Errors that can occur during dataset versions listing

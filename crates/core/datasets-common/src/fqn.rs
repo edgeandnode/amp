@@ -26,9 +26,14 @@ use crate::{
 /// Both the namespace and name components must follow their respective
 /// validation rules (lowercase letters, digits, and underscores only).
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct FullyQualifiedName(pub Namespace, pub Name);
+pub struct FullyQualifiedName(Namespace, Name);
 
 impl FullyQualifiedName {
+    /// Create a new FullyQualifiedName from validated components
+    pub fn new(namespace: Namespace, name: Name) -> Self {
+        Self(namespace, name)
+    }
+
     /// Access the namespace component
     pub fn namespace(&self) -> &Namespace {
         &self.0

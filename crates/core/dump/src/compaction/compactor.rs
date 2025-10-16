@@ -38,10 +38,7 @@ impl<'a> From<&'a ParquetConfig> for CompactorProperties {
         CompactorProperties {
             active: Arc::new(AtomicBool::new(config.compactor.active)),
             algorithm: CompactionAlgorithm::from(config),
-            interval: config
-                .compactor
-                .min_interval
-                .unwrap_or_else(|| Duration::from_millis(1000)),
+            interval: config.compactor.min_interval.clone().into(),
             metadata_concurrency: config.compactor.metadata_concurrency,
             write_concurrency: config.compactor.write_concurrency,
         }

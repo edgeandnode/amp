@@ -3,7 +3,7 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 
 use crate::{
     ctx::Ctx,
@@ -55,7 +55,7 @@ use crate::{
 )]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    path: Result<Path<(Name, Version)>, PathRejection>,
+    path: Result<Path<(Name, VersionTag)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let (name, version) = match path {
         Ok(Path((name, version))) => (name, version),
@@ -134,7 +134,7 @@ pub enum Error {
     /// - The dataset has been deleted or moved
     /// - Dataset configuration is missing
     #[error("manifest '{name}' version '{version}' not found")]
-    NotFound { name: Name, version: Version },
+    NotFound { name: Name, version: VersionTag },
 
     /// Manifest retrieval error from the dataset manifests store
     ///

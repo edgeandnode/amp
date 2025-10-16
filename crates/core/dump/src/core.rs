@@ -9,14 +9,13 @@ use common::{
     BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    notification_multiplexer::NotificationMultiplexerHandle,
     query_context::Error as QueryError,
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
 use datasets_derived::DerivedDatasetKind;
 use futures::TryStreamExt as _;
-use metadata_db::{LocationId, MetadataDb};
+use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
 use object_store::ObjectMeta;
 
 use crate::metrics;

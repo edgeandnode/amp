@@ -18,11 +18,11 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            owner,
-            dataset,
+            namespace,
+            name,
             version
-        FROM registry
-        ORDER BY dataset ASC, version DESC
+        FROM tags
+        ORDER BY name ASC, version DESC
         LIMIT $1
     "#};
 
@@ -45,12 +45,12 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            owner,
-            dataset,
+            namespace,
+            name,
             version
-        FROM registry
-        WHERE dataset > $2 OR (dataset = $2 AND version < $3)
-        ORDER BY dataset ASC, version DESC
+        FROM tags
+        WHERE name > $2 OR (name = $2 AND version < $3)
+        ORDER BY name ASC, version DESC
         LIMIT $1
     "#};
 
@@ -77,8 +77,8 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT version
-        FROM registry
-        WHERE dataset = $1
+        FROM tags
+        WHERE name = $1
         ORDER BY version DESC
         LIMIT $2
     "#};
@@ -107,8 +107,8 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT version
-        FROM registry
-        WHERE dataset = $1 AND version < $3
+        FROM tags
+        WHERE name = $1 AND version < $3
         ORDER BY version DESC
         LIMIT $2
     "#};

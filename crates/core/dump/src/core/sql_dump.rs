@@ -100,12 +100,12 @@ use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::ResumeWatermark},
-    notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::IncrementalCheck,
     query_context::{QueryEnv, parse_sql},
 };
 use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
+use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
 
 use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};

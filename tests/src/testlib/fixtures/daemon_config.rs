@@ -69,7 +69,7 @@ impl DaemonConfig {
         // Internal struct matching the expected TOML structure
         #[derive(serde::Serialize)]
         struct TestConfig {
-            dataset_defs_dir: String,
+            manifests_dir: String,
             providers_dir: String,
             data_dir: String,
             max_mem_mb: u32,
@@ -101,7 +101,7 @@ impl DaemonConfig {
         }
 
         toml::to_string_pretty(&TestConfig {
-            dataset_defs_dir: self.manifests_dir.clone(),
+            manifests_dir: self.manifests_dir.clone(),
             providers_dir: self.providers_dir.clone(),
             data_dir: self.data_dir.clone(),
             max_mem_mb: self.max_mem_mb,

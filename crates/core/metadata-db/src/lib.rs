@@ -16,6 +16,7 @@ mod datasets;
 mod files;
 mod jobs;
 mod locations;
+pub mod notification_multiplexer;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 mod workers;
@@ -43,6 +44,7 @@ pub use self::{
             LocationNotification,
         },
     },
+    notification_multiplexer::NotificationMultiplexerHandle,
     workers::{
         NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},

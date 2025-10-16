@@ -17,8 +17,8 @@ Or using the full `cargo build` command:
 ```bash
 RUSTFLAGS="--cfg gen_schema" cargo build -p evm-rpc-gen
 
-mkdir -p docs/dataset-def-schemas
-cp target/debug/build/evm-rpc-gen-*/out/schema.json docs/dataset-def-schemas/EvmRpc.json
+mkdir -p docs/manifest-schemas
+cp target/debug/build/evm-rpc-gen-*/out/schema.json docs/manifest-schemas/EvmRpc.json
 ```
 
 This will generate JSON schemas from the EVM RPC dataset definitions and copy them to `docs/dataset-def-schemas/EvmRpc.json`.

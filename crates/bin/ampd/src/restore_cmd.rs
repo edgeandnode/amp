@@ -23,7 +23,7 @@ pub async fn run(
             ProviderConfigsStore::new(config.providers_store.prefixed_store());
         let dataset_manifests_store = DatasetManifestsStore::new(
             metadata_db.clone(),
-            config.dataset_defs_store.prefixed_store(),
+            config.manifests_store.prefixed_store(),
         );
         DatasetStore::new(
             metadata_db.clone(),
