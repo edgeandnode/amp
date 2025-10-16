@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
 
-use crate::{name::Name, version::Version};
+use crate::{name::Name, version_tag::VersionTag};
 
 /// Common metadata fields required by all dataset definitions.
 ///
@@ -20,7 +20,7 @@ pub struct Manifest {
     pub name: Name,
     /// Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`
     #[serde(default)]
-    pub version: Version,
+    pub version: VersionTag,
     /// Dataset kind. See specific dataset definitions for supported values.
     ///
     /// Common values include: `manifest`, `evm-rpc`, `firehose`.

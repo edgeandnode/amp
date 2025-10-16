@@ -1,5 +1,5 @@
 use common::BlockNum;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 
 use crate::dataset_kind::FirehoseDatasetKind;
 
@@ -10,7 +10,7 @@ pub struct Manifest {
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
     #[serde(default)]
-    pub version: Version,
+    pub version: VersionTag,
     /// Dataset kind, must be `firehose`.
     pub kind: FirehoseDatasetKind,
     /// Network name, e.g., `mainnet`.

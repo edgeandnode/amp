@@ -4,7 +4,7 @@
 //! - Manifest SQL queries are fetched and parsed correctly
 //! - SETTINGS stream = true is automatically added when missing
 
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 use datasets_derived::manifest::TableInput;
 use mockito::Server;
 
@@ -19,7 +19,7 @@ async fn test_manifest_sql_gets_streaming_settings_added() {
     let mut server = Server::new_async().await;
 
     let dataset_name: Name = "test_dataset".parse().unwrap();
-    let version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
+    let version: VersionTag = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
     // Mock the versions endpoint
     let _versions_mock = server

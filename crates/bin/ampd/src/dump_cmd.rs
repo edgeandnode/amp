@@ -12,7 +12,7 @@ use common::{
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
-use datasets_common::version::Version;
+use datasets_common::version_tag::VersionTag;
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedDatasetManifest};
 use dump::EndBlock;
 use metadata_db::MetadataDb;
@@ -161,7 +161,7 @@ pub async fn dump(
     for dataset_name in datasets {
         let (dataset_name, version) =
             if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match Version::try_from_underscore_version(version_str) {
+                match VersionTag::try_from_underscore_version(version_str) {
                     Ok(v) => (name, Some(v)),
                     Err(err) => {
                         tracing::warn!(

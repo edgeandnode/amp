@@ -12,7 +12,7 @@ use amp_client::SqlClient;
 use clap::Parser as _;
 use common::BoxError;
 use conn::DbConnPool;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 use tracing::{error, info};
 
 use crate::{
@@ -41,7 +41,7 @@ enum Command {
         /// - the latest version from the dataset versions endpoint schema is pulled.
         /// - the versions endpoint is polled from the admin-api and any newly found versions are fetched
         #[arg(long, required = false, env = "AMP_DATASET_VERSION")]
-        dataset_version: Option<Version>,
+        dataset_version: Option<VersionTag>,
 
         /// Address of the amp arrow flight url.
         /// Used to stream the arrow queries to fetch data and insert into the configured database.
@@ -221,7 +221,7 @@ async fn main() -> Result<(), BoxError> {
             // Using watch channel - if multiple versions update before consumer processes,
             // only the latest version is retained (no need to process intermediate versions)
             let (version_change_tx, mut version_change_rx) =
-                tokio::sync::watch::channel::<Version>(config.manifest.version.clone());
+                tokio::sync::watch::channel::<VersionTag>(config.manifest.version.clone());
             let version_poll_handle = if version_polling_enabled {
                 let admin_api_addr = config.amp_admin_api_addr.clone();
                 let dataset_name = config.dataset_name.clone();

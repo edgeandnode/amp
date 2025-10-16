@@ -1145,7 +1145,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The kind/type of dataset (e.g., \"evm-rpc\", \"firehose\", \"sql\")"
+            "description": "The kind/type of dataset (e.g., \"evm-rpc\", \"firehose\", \"substreams\", \"sql\")"
           },
           "name": {
             "type": "string",
