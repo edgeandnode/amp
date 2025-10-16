@@ -5,7 +5,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, version_tag::VersionTag};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -15,7 +15,7 @@ use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 #[derive(Clone, Debug)]
 pub struct Dataset {
     pub name: Name,
-    pub version: Option<Version>,
+    pub version: Option<VersionTag>,
     pub kind: String,
     pub network: Option<String>,
     pub start_block: Option<BlockNum>,

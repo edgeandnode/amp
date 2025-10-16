@@ -1,7 +1,7 @@
 use common::BoxError;
 use datasets_common::{
     name::{Name, NameError},
-    version::Version,
+    version_tag::VersionTag,
 };
 
 use crate::{
@@ -20,7 +20,7 @@ pub struct IsRegisteredError(#[source] pub metadata_db::Error);
 pub enum RegisterManifestError {
     /// Dataset already exists in the registry
     #[error("Dataset '{name}' version '{version}' already registered")]
-    DatasetExists { name: Name, version: Version },
+    DatasetExists { name: Name, version: VersionTag },
 
     /// Failed to serialize manifest to JSON
     #[error("Failed to serialize manifest to JSON: {0}")]
@@ -306,7 +306,7 @@ pub enum GetLogicalCatalogError {
     #[error("Dataset '{name}' version '{}' not found", version.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "latest".to_string()))]
     DatasetNotFound {
         name: String,
-        version: Option<Version>,
+        version: Option<VersionTag>,
     },
 
     /// Failed to get a dataset.
@@ -519,7 +519,7 @@ pub enum EthCallForDatasetError {
     )]
     MissingNetwork {
         dataset_name: Name,
-        dataset_version: Version,
+        dataset_version: VersionTag,
     },
 
     /// No provider configuration found for the dataset kind and network combination.

@@ -13,7 +13,7 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version::Version,
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version_tag::VersionTag,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -104,7 +104,7 @@ impl DatasetStore {
     pub async fn register_manifest<M>(
         &self,
         name: &Name,
-        version: &Version,
+        version: &VersionTag,
         manifest: &M,
     ) -> Result<(), RegisterManifestError>
     where
@@ -148,7 +148,7 @@ impl DatasetStore {
     pub async fn is_registered(
         &self,
         name: &Name,
-        version: &Version,
+        version: &VersionTag,
     ) -> Result<bool, IsRegisteredError> {
         self.metadata_db
             .dataset_exists(name, version)
@@ -159,7 +159,7 @@ impl DatasetStore {
     pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&Version>>,
+        version: impl Into<Option<&VersionTag>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
         let name = &name
             .parse::<Name>()
@@ -325,7 +325,7 @@ impl DatasetStore {
     pub async fn get_derived_manifest(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&Version>> + std::fmt::Debug,
+        version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
     ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
         // Validate dataset name
         let name =
@@ -398,7 +398,7 @@ impl DatasetStore {
     pub async fn get_client(
         &self,
         dataset_name: &str,
-        dataset_version: impl Into<Option<&Version>> + std::fmt::Debug,
+        dataset_version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
         only_finalized_blocks: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Option<impl BlockStreamer>, GetClientError> {
@@ -845,7 +845,7 @@ impl DatasetStore {
 /// A set of unique (dataset_name, version) tuples extracted from the table references.
 fn dataset_versions_from_table_refs<'a>(
     table_refs: impl Iterator<Item = &'a TableReference>,
-) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromTableRefsError> {
+) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromTableRefsError> {
     let mut datasets = BTreeSet::new();
 
     for table_ref in table_refs {
@@ -878,11 +878,12 @@ fn dataset_versions_from_table_refs<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<Version>()
-                    .map_err(|_| ExtractDatasetFromTableRefsError::InvalidVersion {
+                v.parse::<VersionTag>().map_err(|_| {
+                    ExtractDatasetFromTableRefsError::InvalidVersion {
                         version: v,
                         schema: catalog_schema.to_string(),
-                    })
+                    }
+                })
             })
             .transpose()?;
 
@@ -906,7 +907,7 @@ fn dataset_versions_from_table_refs<'a>(
 /// A set of unique (dataset_name, version) tuples extracted from the function names.
 fn dataset_versions_from_function_names<'a>(
     function_names: impl IntoIterator<Item = &'a str>,
-) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromFunctionNamesError> {
+) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromFunctionNamesError> {
     let mut datasets = BTreeSet::new();
 
     for func_name in function_names {
@@ -941,7 +942,7 @@ fn dataset_versions_from_function_names<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<Version>().map_err(|_| {
+                v.parse::<VersionTag>().map_err(|_| {
                     ExtractDatasetFromFunctionNamesError::InvalidVersion {
                         version: v,
                         function: fn_dataset.to_string(),
