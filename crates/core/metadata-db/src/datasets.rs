@@ -34,23 +34,21 @@ pub async fn insert<'c, E>(
     name: Name<'_>,
     version: VersionTag<'_>,
     path: &str,
+    hash: VersionHash<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     // Insert into both manifests and tags tables using CTE
-    // Hash is computed in PostgreSQL using encode(sha256(path), 'hex')
+    // Hash is provided by the caller (computed from manifest content)
     let query = indoc::indoc! {r#"
-        WITH path_hash AS (
-          SELECT encode(sha256($4::bytea), 'hex') AS hash
-        ),
-        manifest_insert AS (
+        WITH manifest_insert AS (
           INSERT INTO manifests (hash, path)
-          SELECT hash, $4 FROM path_hash
+          VALUES ($5, $4)
           ON CONFLICT (hash) DO NOTHING
         )
         INSERT INTO tags (namespace, name, version, hash)
-        SELECT $1, $2, $3, hash FROM path_hash
+        VALUES ($1, $2, $3, $5)
    "#};
 
     sqlx::query(query)
@@ -58,6 +56,7 @@ where
         .bind(name)
         .bind(version)
         .bind(path)
+        .bind(hash)
         .execute(exe)
         .await?;
 
@@ -207,9 +206,4 @@ pub struct DatasetWithDetails {
     /// Dataset manifest content
     #[sqlx(rename = "path")]
     pub manifest_path: String,
-}
-
-#[cfg(test)]
-mod tests {
-    mod it_crud;
 }

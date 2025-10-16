@@ -5,7 +5,9 @@ use axum::{
 };
 use common::BoxError;
 use dataset_store::{DatasetKind, RegisterManifestError};
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version_tag::VersionTag};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, version_hash, version_tag::VersionTag,
+};
 use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 
@@ -41,7 +43,6 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
-/// - `MANIFEST_VALIDATION_ERROR`: Manifest name/version doesn't match request parameters
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
 /// - `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists
 /// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not "manifest" or "evm-rpc" (only derived and evm-rpc datasets supported)
@@ -136,19 +137,13 @@ pub async fn handler(
             Error::InvalidManifest(err)
         })?;
 
-    // Validate that the manifest name and version match the request parameters
-    if manifest.name != payload.name || manifest.version != payload.version {
-        return Err(Error::ManifestValidationError(
-            manifest.name.to_string(),
-            manifest.version.to_string(),
-        )
-        .into());
-    }
-
     let dataset_kind = manifest
         .kind
         .parse()
         .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
+
+    // Compute hash from the manifest JSON string
+    let manifest_hash = version_hash::hash(&payload.manifest);
 
     match dataset_kind {
         DatasetKind::Derived => {
@@ -176,7 +171,7 @@ pub async fn handler(
             })?;
 
             ctx.dataset_store
-                .register_manifest(&payload.name, &payload.version, &manifest)
+                .register_manifest(&payload.name, &payload.version, &manifest_hash, &manifest)
                 .await
                 .map_err(|err| {
                     tracing::error!(
@@ -210,7 +205,7 @@ pub async fn handler(
                 })?;
 
             ctx.dataset_store
-                .register_manifest(&payload.name, &payload.version, &manifest)
+                .register_manifest(&payload.name, &payload.version, &manifest_hash, &manifest)
                 .await
                 .map_err(|err| {
                     tracing::error!(
@@ -279,15 +274,6 @@ pub enum Error {
     #[error("invalid manifest: {0}")]
     InvalidManifest(#[from] serde_json::Error),
 
-    /// Manifest validation error - name/version mismatch
-    ///
-    /// This occurs when:
-    /// - Manifest name doesn't match the request dataset_name
-    /// - Manifest version doesn't match the request version
-    /// - Manifest and request parameters are inconsistent
-    #[error("Manifest name '{0}' and version '{1}' do not match with manifest")]
-    ManifestValidationError(String, String),
-
     /// Dependency validation error
     ///
     /// This occurs when:
@@ -338,7 +324,6 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPayloadFormat => "INVALID_PAYLOAD_FORMAT",
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
-            Error::ManifestValidationError(_, _) => "MANIFEST_VALIDATION_ERROR",
             Error::DependencyValidationError(_) => "DEPENDENCY_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
             Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
@@ -351,7 +336,6 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPayloadFormat => StatusCode::BAD_REQUEST,
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
-            Error::ManifestValidationError(_, _) => StatusCode::BAD_REQUEST,
             Error::DependencyValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,

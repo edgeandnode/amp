@@ -412,30 +412,6 @@ export class ManifestRequired extends Schema.Class<ManifestRequired>("ManifestRe
 }
 
 /**
- * ManifestValidationError - Manifest name and version do not match request parameters.
- *
- * Causes:
- * - Manifest contains different name than request parameter
- * - Manifest contains different version than request parameter
- * - Mismatch between manifest content and registration request
- *
- * Applies to:
- * - POST /datasets - During manifest validation
- * - POST /datasets - During manifest validation
- */
-export class ManifestValidationError extends Schema.Class<ManifestValidationError>("ManifestValidationError")(
-  {
-    code: Schema.Literal("MANIFEST_VALIDATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 400,
-  },
-) {
-  readonly _tag = "ManifestValidationError" as const
-}
-
-/**
  * ManifestRegistrationError - Failed to register manifest in the system.
  *
  * Causes:
