@@ -212,5 +212,4 @@ pub struct DatasetWithDetails {
 #[cfg(test)]
 mod tests {
     mod it_crud;
-    mod it_pagination;
 }

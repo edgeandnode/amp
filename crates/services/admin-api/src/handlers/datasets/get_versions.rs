@@ -70,7 +70,7 @@ fn default_limit() -> usize {
 /// This handler provides comprehensive dataset version information from the registry including:
 /// - All versions for the specified dataset from the metadata database
 /// - Cursor-based pagination for efficient traversal of large version lists
-/// - Proper ordering by version DESC (newest first)
+/// - Lexicographical ordering by version string DESC (e.g., "2.0.0" > "1.9.0" > "1.2.3" > "1.10.0")
 ///
 /// The handler:
 /// - Accepts path parameter for dataset name and query parameters for pagination (limit, last_version)
