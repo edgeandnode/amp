@@ -57,18 +57,6 @@ fn default_auto_migrate() -> bool {
     true
 }
 
-fn default_poll_interval_secs() -> Option<Duration> {
-    Some(Duration::from_secs(1))
-}
-
-fn default_collector_min_interval() -> Option<Duration> {
-    Some(Duration::from_secs(30))
-}
-
-fn default_collector_deletion_lock_duration() -> Option<Duration> {
-    Some(Duration::from_secs(30 * 60)) // 30 minutes
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ParquetConfig {
     #[serde(
@@ -106,30 +94,12 @@ impl Default for ParquetConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct CollectorConfig {
     pub active: bool,
-    #[serde(
-        default = "default_collector_min_interval",
-        deserialize_with = "deserialize_duration"
-    )]
-    pub min_interval: Option<Duration>,
-    #[serde(
-        default = "default_collector_deletion_lock_duration",
-        deserialize_with = "deserialize_duration"
-    )]
-    pub deletion_lock_duration: Option<Duration>,
-}
-
-impl Default for CollectorConfig {
-    fn default() -> Self {
-        Self {
-            active: false,
-            min_interval: default_collector_min_interval(),
-            deletion_lock_duration: default_collector_deletion_lock_duration(),
-        }
-    }
+    pub min_interval: ConfigDuration<30>, // 30 seconds
+    pub deletion_lock_duration: ConfigDuration<1800>, // 30 minutes
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,8 +110,7 @@ pub struct CompactorConfig {
     pub algorithm: CompactionAlgorithmConfig,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
-    #[serde(deserialize_with = "deserialize_duration")]
-    pub min_interval: Option<Duration>,
+    pub min_interval: ConfigDuration<1>,
 }
 
 impl Default for CompactorConfig {
@@ -151,7 +120,7 @@ impl Default for CompactorConfig {
             algorithm: CompactionAlgorithmConfig::default(),
             metadata_concurrency: 2,
             write_concurrency: 2,
-            min_interval: Duration::from_secs(1).into(),
+            min_interval: ConfigDuration::default(),
         }
     }
 }
@@ -159,8 +128,7 @@ impl Default for CompactorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactionAlgorithmConfig {
-    #[serde(deserialize_with = "deserialize_duration")]
-    pub cooldown_duration: Option<Duration>,
+    pub cooldown_duration: ConfigDuration<1024>,
     #[serde(
         flatten,
         default = "SizeLimitConfig::default_eager_limit",
@@ -172,7 +140,7 @@ pub struct CompactionAlgorithmConfig {
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
-            cooldown_duration: Duration::from_secs(1024).into(),
+            cooldown_duration: ConfigDuration::default(),
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }
@@ -319,6 +287,30 @@ where
     <Option<f64>>::deserialize(deserializer).map(|option| option.map(Duration::from_secs_f64))
 }
 
+#[derive(Debug, Clone)]
+pub struct ConfigDuration<const DEFAULT_SECS: u64>(Duration);
+
+impl<const DEFAULT_SECS: u64> Default for ConfigDuration<DEFAULT_SECS> {
+    fn default() -> Self {
+        Self(Duration::from_secs(DEFAULT_SECS))
+    }
+}
+
+impl<const DEFAULT_SECS: u64> Into<Duration> for ConfigDuration<DEFAULT_SECS> {
+    fn into(self) -> Duration {
+        self.0
+    }
+}
+
+impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DEFAULT_SECS> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_duration(deserializer).map(|opt| opt.map_or_else(|| Self::default(), Self))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     pub data_dir: String,
@@ -338,11 +330,7 @@ pub struct ConfigFile {
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub writer: ParquetConfig,
-    #[serde(
-        default = "default_poll_interval_secs",
-        deserialize_with = "deserialize_duration"
-    )]
-    pub poll_interval_secs: Option<Duration>,
+    pub poll_interval_secs: ConfigDuration<1>,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -451,9 +439,7 @@ impl Config {
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
-            poll_interval: config_file
-                .poll_interval_secs
-                .unwrap_or(Duration::from_secs(1)),
+            poll_interval: config_file.poll_interval_secs.into(),
         })
     }
 
