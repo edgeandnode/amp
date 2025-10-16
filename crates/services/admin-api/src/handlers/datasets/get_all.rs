@@ -68,7 +68,7 @@ fn default_limit() -> usize {
 /// This handler provides comprehensive dataset information from the registry including:
 /// - Dataset names, versions, and owners from the metadata database
 /// - Cursor-based pagination for efficient traversal of large dataset lists
-/// - Proper ordering by dataset name ASC and version DESC (newest first within each dataset)
+/// - Lexicographical ordering by dataset name ASC, then version string DESC within each dataset
 ///
 /// The handler:
 /// - Accepts query parameters for pagination (limit, last_dataset_id)

@@ -70,26 +70,32 @@ impl AsRef<semver::Version> for VersionTag {
 #[cfg(feature = "metadata-db")]
 impl From<metadata_db::DatasetVersionTagOwned> for VersionTag {
     fn from(value: metadata_db::DatasetVersionTagOwned) -> Self {
-        // SAFETY: DatasetVersionOwned is a new-type wrapper around semver::Version,
-        // and into_inner() returns the owned semver::Version without any validation
-        // or transformation, making this conversion safe and lossless.
-        Self(value.into_inner())
+        let version_str = value.into_inner();
+
+        // SAFETY: The string is already validated at system boundaries, so parsing should succeed
+        let version = semver::Version::parse(&version_str)
+            .expect("metadata-db VersionTag should contain valid semver string");
+        Self(version)
     }
 }
 
 #[cfg(feature = "metadata-db")]
 impl From<VersionTag> for metadata_db::DatasetVersionTagOwned {
     fn from(value: VersionTag) -> Self {
-        // SAFETY: This conversion is safe and lossless as both types have identical representation
-        metadata_db::DatasetVersionTag::from_owned(value.0)
+        let version_str = value.0.to_string();
+
+        // SAFETY: semver::Version always produces valid semver strings
+        metadata_db::DatasetVersionTag::from_owned_unchecked(version_str)
     }
 }
 
 #[cfg(feature = "metadata-db")]
 impl<'a> From<&'a VersionTag> for metadata_db::DatasetVersionTag<'a> {
     fn from(value: &'a VersionTag) -> Self {
-        // SAFETY: This conversion is safe and lossless as both types have identical representation
-        metadata_db::DatasetVersionTag::from_ref(&value.0)
+        let version_str = value.0.to_string();
+
+        // SAFETY: semver::Version always produces valid semver strings
+        metadata_db::DatasetVersionTag::from_owned_unchecked(version_str)
     }
 }
 
