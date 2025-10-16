@@ -74,10 +74,6 @@ enum Command {
         /// Overwrite existing location and dump to a new, fresh directory
         #[arg(long, env = "DUMP_FRESH")]
         fresh: bool,
-
-        /// Only dump finalized block data. This only applies to raw datasets.
-        #[arg(long, env = "DUMP_ONLY_FINALIZED_BLOCKS")]
-        only_finalized_blocks: bool,
     },
     Dev {
         /// Enable Arrow Flight RPC Server.
@@ -127,6 +123,10 @@ enum Command {
         /// The starting block number for the dataset. Defaults to 0.
         #[arg(long, env = "GM_START_BLOCK")]
         start_block: Option<u64>,
+
+        /// Only include finalized block data.
+        #[arg(long, env = "GM_FINALIZED_BLOCKS_ONLY")]
+        finalized_blocks_only: bool,
     },
     /// Run migrations on the metadata database
     Migrate,
@@ -203,7 +203,6 @@ async fn main_inner() -> Result<(), BoxError> {
             run_every_mins,
             location,
             fresh,
-            only_finalized_blocks,
         } => {
             let config = load_config(config_path.as_ref(), false).await?;
             let metadata_db = config.metadata_db().await?;
@@ -222,7 +221,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 run_every_mins,
                 location,
                 fresh,
-                only_finalized_blocks,
                 metrics_meter.as_ref(),
             )
             .await;
@@ -311,6 +309,7 @@ async fn main_inner() -> Result<(), BoxError> {
             name,
             out,
             start_block,
+            finalized_blocks_only,
         } => {
             let name = name.parse()?;
             let kind = kind.parse::<DatasetKind>()?;
@@ -323,10 +322,26 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                gen_manifest_cmd::run(name, kind, network, start_block, &mut out).await
+                gen_manifest_cmd::run(
+                    name,
+                    kind,
+                    network,
+                    start_block,
+                    finalized_blocks_only,
+                    &mut out,
+                )
+                .await
             } else {
                 let mut out = std::io::stdout();
-                gen_manifest_cmd::run(name, kind, network, start_block, &mut out).await
+                gen_manifest_cmd::run(
+                    name,
+                    kind,
+                    network,
+                    start_block,
+                    finalized_blocks_only,
+                    &mut out,
+                )
+                .await
             };
 
             monitoring::deinit(metrics_provider, tracing_provider)?;

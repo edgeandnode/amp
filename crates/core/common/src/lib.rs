@@ -173,7 +173,10 @@ pub trait BlockStreamer: Clone + 'static {
         end: BlockNum,
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
-    fn latest_block(&mut self) -> impl Future<Output = Result<Option<BlockNum>, BoxError>> + Send;
+    fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> impl Future<Output = Result<Option<BlockNum>, BoxError>> + Send;
 
     fn provider_name(&self) -> &str;
 }
@@ -240,12 +243,12 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
         }
     }
 
-    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
         use backon::{ExponentialBuilder, Retryable};
 
         (|| async {
             let mut inner = self.0.clone();
-            inner.latest_block().await
+            inner.latest_block(finalized).await
         })
         .retry(
             ExponentialBuilder::default()

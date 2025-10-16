@@ -8,6 +8,7 @@ pub async fn run(
     kind: impl Into<DatasetKind>,
     network: String,
     start_block: Option<u64>,
+    finalized_blocks_only: bool,
     writer: &mut impl io::Write,
 ) -> Result<(), Error> {
     let kind = kind.into();
@@ -20,6 +21,7 @@ pub async fn run(
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network,
                 start_block: start_block.unwrap_or(0),
+                finalized_blocks_only,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
@@ -30,6 +32,7 @@ pub async fn run(
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network,
                 start_block: start_block.unwrap_or(0),
+                finalized_blocks_only,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
@@ -40,6 +43,7 @@ pub async fn run(
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network,
                 start_block: start_block.unwrap_or(0),
+                finalized_blocks_only,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }

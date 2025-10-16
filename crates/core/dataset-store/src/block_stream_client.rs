@@ -41,11 +41,11 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
-    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
         match self {
-            Self::EvmRpc(client) => client.latest_block().await,
-            Self::EthBeacon(client) => client.latest_block().await,
-            Self::Firehose(client) => client.latest_block().await,
+            Self::EvmRpc(client) => client.latest_block(finalized).await,
+            Self::EthBeacon(client) => client.latest_block(finalized).await,
+            Self::Firehose(client) => client.latest_block(finalized).await,
         }
     }
 

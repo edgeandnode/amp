@@ -61,7 +61,6 @@ async fn evm_rpc_single_dump() {
             None,                      // new_location
             false,                     // fresh
             None,                      // meter
-            false,                     // only_finalized_blocks
         )
         .await
         .expect("Failed to dump dataset");
@@ -140,7 +139,6 @@ async fn eth_beacon_single_dump() {
             None,                      // microbatch_max_rows
             false,                     // fresh
             None,                      // meter
-            false,                     // only_finalized_blocks
         )
         .await
         .expect("Failed to dump dataset");
@@ -219,7 +217,6 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             None,                      // skip_consistency_check
             false,                     // metrics
             None,                      // meter
-            false,                     // track_progress
         )
         .await
         .expect("Failed to dump dataset");
@@ -297,8 +294,7 @@ async fn evm_rpc_base_single_dump() {
             None, // microbatch_max_interval
             None, // skip_consistency_check
             false,
-            None,  // meter
-            false, // track_progress
+            None, // meter
         )
         .await
         .expect("Failed to dump dataset");
@@ -377,7 +373,6 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             None,                      // microbatch_max_rows
             false,                     // skip_consistency_check
             None,                      // metrics
-            false,                     // track_progress
         )
         .await
         .expect("Failed to dump dataset");
@@ -456,7 +451,6 @@ async fn eth_firehose_single_dump() {
             None,
             false,
             None,
-            false,
         )
         .await
         .expect("Failed to dump dataset");
@@ -535,7 +529,6 @@ async fn base_firehose_single_dump() {
             None,                      // microbatch_max_rows
             false,                     // skip_consistency_check
             None,                      // metrics
-            false,
         )
         .await
         .expect("Failed to dump dataset");

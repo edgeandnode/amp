@@ -19,6 +19,7 @@ pub struct Dataset {
     pub kind: String,
     pub network: Option<String>,
     pub start_block: Option<BlockNum>,
+    pub finalized_blocks_only: bool,
     pub tables: Vec<Table>,
     pub functions: Vec<Function>,
 }

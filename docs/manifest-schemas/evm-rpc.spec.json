@@ -3,6 +3,11 @@
   "title": "Manifest",
   "type": "object",
   "properties": {
+    "finalized_blocks_only": {
+      "description": "Only include finalized block data",
+      "type": "boolean",
+      "default": false
+    },
     "kind": {
       "description": "Dataset kind, must be `evm-rpc`",
       "const": "evm-rpc"

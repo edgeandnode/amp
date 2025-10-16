@@ -30,7 +30,6 @@ pub async fn run(
     run_every_mins: Option<u64>,
     location: Option<String>,
     fresh: bool,
-    only_finalized_blocks: bool,
     metrics_meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     if let Some(size_mb) = partition_size_mb {
@@ -67,7 +66,6 @@ pub async fn run(
         location,
         fresh,
         metrics_meter,
-        only_finalized_blocks,
     )
     .await
 }
@@ -85,7 +83,6 @@ pub async fn dump(
     new_location: Option<String>,
     fresh: bool,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-    only_finalized_blocks: bool,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     // Create metrics registry if meter is available
     let metrics = meter.map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m)));
@@ -200,7 +197,6 @@ pub async fn dump(
                     end_block,
                     metrics.clone(),
                     meter,
-                    only_finalized_blocks,
                 )
                 .await?
             }
@@ -217,7 +213,6 @@ pub async fn dump(
                     end_block,
                     metrics.clone(),
                     meter,
-                    only_finalized_blocks,
                 )
                 .await?;
             }

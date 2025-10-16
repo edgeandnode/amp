@@ -399,7 +399,6 @@ impl DatasetStore {
         &self,
         dataset_name: &str,
         dataset_version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
-        only_finalized_blocks: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Option<impl BlockStreamer>, GetClientError> {
         let dataset_name =
@@ -489,7 +488,7 @@ impl DatasetStore {
                         name: dataset_name.to_string(),
                         source: err,
                     })?;
-                evm_rpc_datasets::client(config, only_finalized_blocks, meter)
+                evm_rpc_datasets::client(config, meter)
                     .await
                     .map(BlockStreamClient::EvmRpc)
                     .map_err(|err| GetClientError::EvmRpcClientError {
@@ -504,10 +503,7 @@ impl DatasetStore {
                         name: dataset_name.to_string(),
                         source: err,
                     })?;
-                BlockStreamClient::EthBeacon(eth_beacon_datasets::client(
-                    config,
-                    only_finalized_blocks,
-                ))
+                BlockStreamClient::EthBeacon(eth_beacon_datasets::client(config))
             }
             DatasetKind::Firehose => {
                 let config = config
@@ -516,7 +512,7 @@ impl DatasetStore {
                         name: dataset_name.to_string(),
                         source: err,
                     })?;
-                firehose_datasets::Client::new(config, only_finalized_blocks, meter)
+                firehose_datasets::Client::new(config, meter)
                     .await
                     .map(BlockStreamClient::Firehose)
                     .map_err(|err| GetClientError::FirehoseClientError {
