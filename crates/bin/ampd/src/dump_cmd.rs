@@ -13,7 +13,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::version_tag::VersionTag;
-use datasets_derived::{DerivedDatasetKind, Manifest as DerivedDatasetManifest};
+use datasets_derived::DerivedDatasetKind;
 use dump::EndBlock;
 use metadata_db::{MetadataDb, notification_multiplexer};
 use static_assertions::const_assert;
@@ -55,46 +55,10 @@ pub async fn run(
         );
     }
 
-    let mut datasets_to_dump = Vec::new();
-    let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store = DatasetManifestsStore::new(
-            metadata_db.clone(),
-            config.manifests_store.prefixed_store(),
-        );
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
-    };
-
-    for dataset in datasets {
-        if dataset.ends_with(".json") {
-            tracing::info!("Registering manifest: {}", dataset);
-
-            let manifest = fs::read_to_string(&dataset)?;
-            let manifest: DerivedDatasetManifest = serde_json::from_str(&manifest)?;
-            dataset_store
-                .register_manifest(&manifest.name, &manifest.version, &manifest)
-                .await
-                .map_err(|err| -> BoxError { err.to_string().into() })?;
-
-            datasets_to_dump.push(format!(
-                "{}__{}",
-                manifest.name,
-                manifest.version.to_underscore_version()
-            ));
-        } else {
-            datasets_to_dump.push(dataset);
-        }
-    }
-
     dump(
         config.into(),
         metadata_db,
-        datasets_to_dump,
+        datasets,
         ignore_deps,
         end_block,
         n_jobs,
