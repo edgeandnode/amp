@@ -40,7 +40,7 @@ docker compose up -d
 ```toml
 data_dir = "data/"
 providers_dir = "providers/"
-manifests_dir = "dataset-def-schemas/"
+manifests_dir = "manifest-schemas/"
 metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
