@@ -11,6 +11,7 @@ pub fn dataset(manifest: Manifest) -> Dataset {
         version: Some(manifest.version),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
+        finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&manifest.network),
         network: Some(manifest.network),
         functions: vec![],

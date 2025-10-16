@@ -31,7 +31,6 @@ pub struct Client {
     auth: AuthInterceptor,
     network: String,
     provider_name: String,
-    final_blocks_only: bool,
     metrics: Option<crate::metrics::MetricsRegistry>,
 }
 
@@ -39,7 +38,6 @@ impl Client {
     /// Configure the client from a Firehose dataset definition.
     pub async fn new(
         config: ProviderConfig,
-        final_blocks_only: bool,
         meter: Option<&telemetry::metrics::Meter>,
     ) -> Result<Self, Error> {
         let metrics = meter.map(crate::metrics::MetricsRegistry::new);
@@ -54,7 +52,6 @@ impl Client {
                 auth,
                 network: config.network,
                 provider_name: config.name,
-                final_blocks_only,
                 metrics,
             }
         };
@@ -90,11 +87,12 @@ impl Client {
         &mut self,
         start: i64,
         stop: BlockNum,
+        final_blocks_only: bool,
     ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>> + use<>, Error> {
         let request = tonic::Request::new(pbfirehose::Request {
             start_block_num: start as i64,
             stop_block_num: stop,
-            final_blocks_only: self.final_blocks_only,
+            final_blocks_only,
             cursor: String::new(),
             transforms: vec![],
         });
@@ -181,7 +179,7 @@ impl BlockStreamer for Client {
             let mut next_block = start_block;
 
             'retry: loop {
-                let mut stream = match self.blocks(next_block as i64, end_block).await {
+                let mut stream = match self.blocks(next_block as i64, end_block, false).await {
                     Ok(stream) => std::pin::pin!(stream),
                     // If there is an error at the initial connection, we don't retry here as that's
                     // unexpected.
@@ -246,8 +244,8 @@ impl BlockStreamer for Client {
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
-        let stream = self.blocks(-1, 0).await?;
+    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
+        let stream = self.blocks(-1, 0, finalized).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
         Ok(block.transpose()?.map(|block| block.number))

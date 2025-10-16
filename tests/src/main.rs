@@ -302,7 +302,6 @@ async fn bless(
         None,                    // microbatch_max_rows
         false,                   // skip_consistency_check
         None,                    // meter
-        false,                   // track_progress
     )
     .await
     .map_err(|err| {

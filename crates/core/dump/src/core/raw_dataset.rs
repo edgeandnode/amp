@@ -118,20 +118,22 @@ pub async fn dump(
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-    only_finalized_blocks: bool,
+    finalized_blocks_only: bool,
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
 
     let mut client = ctx
         .dataset_store
-        .get_client(dataset_name, None, only_finalized_blocks, meter)
+        .get_client(dataset_name, None, meter)
         .await?
         .ok_or_else(|| format!("Client for dataset '{}' not found", dataset_name))?;
 
     tracing::info!("connected to provider: {}", client.provider_name());
 
     let mut start = tables[0].dataset().start_block.unwrap_or(0);
-    let resolved = end.resolve(start, client.latest_block()).await?;
+    let resolved = end
+        .resolve(start, client.latest_block(finalized_blocks_only))
+        .await?;
 
     let end = match resolved {
         ResolvedEndBlock::NoDataAvailable => {
@@ -147,7 +149,7 @@ pub async fn dump(
     loop {
         timer.tick().await;
 
-        let Some(latest_block) = client.latest_block().await? else {
+        let Some(latest_block) = client.latest_block(finalized_blocks_only).await? else {
             // No data to dump
             continue;
         };

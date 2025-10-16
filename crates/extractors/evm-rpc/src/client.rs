@@ -107,7 +107,6 @@ pub struct JsonRpcClient {
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
     fetch_receipts_per_tx: bool,
-    final_blocks_only: bool,
 }
 
 impl JsonRpcClient {
@@ -119,7 +118,6 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
-        final_blocks_only: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
@@ -134,7 +132,6 @@ impl JsonRpcClient {
             limiter,
             batch_size,
             fetch_receipts_per_tx,
-            final_blocks_only,
         })
     }
 
@@ -146,7 +143,6 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
-        final_blocks_only: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
@@ -161,7 +157,6 @@ impl JsonRpcClient {
             limiter,
             batch_size,
             fetch_receipts_per_tx,
-            final_blocks_only,
         })
     }
 
@@ -173,7 +168,6 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
-        final_blocks_only: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
@@ -188,7 +182,6 @@ impl JsonRpcClient {
             limiter,
             batch_size,
             fetch_receipts_per_tx,
-            final_blocks_only,
         })
     }
 
@@ -456,8 +449,8 @@ impl BlockStreamer for JsonRpcClient {
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
-        let number = match self.final_blocks_only {
+    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
+        let number = match finalized {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
         };

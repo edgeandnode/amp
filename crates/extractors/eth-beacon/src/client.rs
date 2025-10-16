@@ -12,7 +12,6 @@ pub struct BeaconClient {
     url: Url,
     network: String,
     provider_name: String,
-    final_blocks_only: bool,
     client: reqwest::Client,
     concurrency_limiter: Arc<tokio::sync::Semaphore>,
     rate_limiter: Option<Arc<DefaultDirectRateLimiter>>,
@@ -25,7 +24,6 @@ impl BeaconClient {
         provider_name: String,
         concurrent_request_limit: u16,
         rate_limit_per_minute: Option<NonZeroU32>,
-        final_blocks_only: bool,
     ) -> Self {
         let rate_limiter = rate_limit_per_minute.map(|limit| {
             let quota = Quota::per_minute(limit);
@@ -35,7 +33,6 @@ impl BeaconClient {
             url,
             network,
             provider_name,
-            final_blocks_only,
             client: reqwest::Client::new(),
             concurrency_limiter: Semaphore::new(concurrent_request_limit as usize).into(),
             rate_limiter,
@@ -89,13 +86,13 @@ impl common::BlockStreamer for BeaconClient {
         }
     }
 
-    async fn latest_block(&mut self) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
         let _permit = self.concurrency_limiter.acquire().await;
         if let Some(rate_limiter) = &self.rate_limiter {
             rate_limiter.until_ready().await;
         }
 
-        let block_id = match self.final_blocks_only {
+        let block_id = match finalized {
             true => "finalized",
             false => "head",
         };

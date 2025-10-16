@@ -1,10 +1,8 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
-use ampd::dump_cmd::dump as amp_dump;
 use arrow_flight::FlightData;
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
-use dump::EndBlock;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
@@ -112,7 +110,7 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
 
 #[tokio::test]
 async fn dump_finalized() {
-    let test = ReorgTestCtx::setup("dump_finalized", "anvil_rpc").await;
+    let test = ReorgTestCtx::setup("dump_finalized", "anvil_rpc_finalized").await;
 
     let last_block = 70;
     test.mine(last_block).await;
@@ -121,19 +119,18 @@ async fn dump_finalized() {
         let config = test.ctx.daemon_server().config().clone();
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
-            amp_dump(
+            ampd::dump_cmd::dump(
                 config,
                 metadata_db,
-                vec!["anvil_rpc".to_string()],
-                true, // only_finalized_blocks
-                EndBlock::None,
-                1, // n_jobs
+                vec!["anvil_rpc_finalized".to_string()],
+                false,
+                dump::EndBlock::None,
+                1,
                 None,
                 None,
                 None,
                 false,
                 None,
-                true, // enable continuous dump
             )
             .await
             .expect("Failed to start continuous dump task");
@@ -142,7 +139,7 @@ async fn dump_finalized() {
 
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Some(block) = test.max_dump_block("anvil_rpc").await
+        if let Some(block) = test.max_dump_block("anvil_rpc_finalized").await
             && block >= (last_block - 64)
         {
             break;
@@ -151,11 +148,9 @@ async fn dump_finalized() {
 
     // Ethereum PoS finalizes after 2 epochs (32 slots/blocks each) totalling 64 blocks.
     assert_eq!(
-        test.max_dump_block("anvil_rpc").await,
+        test.max_dump_block("anvil_rpc_finalized").await,
         Some(last_block - 64)
     );
-    test.dump("anvil_rpc", last_block).await;
-    assert_eq!(test.max_dump_block("anvil_rpc").await, Some(last_block));
 }
 
 #[tokio::test]

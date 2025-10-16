@@ -28,6 +28,9 @@ pub struct Manifest {
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
+    /// Only include finalized block data.
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 #[serde_with::serde_as]
@@ -49,6 +52,7 @@ pub fn dataset(manifest: Manifest) -> Dataset {
         kind: manifest.kind.to_string(),
         network: Some(manifest.network.clone()),
         start_block: Some(manifest.start_block),
+        finalized_blocks_only: manifest.finalized_blocks_only,
         tables: all_tables(manifest.network),
         functions: vec![],
     }
@@ -58,14 +62,13 @@ pub fn all_tables(network: String) -> Vec<common::Table> {
     vec![block::table(network)]
 }
 
-pub fn client(provider: ProviderConfig, final_blocks_only: bool) -> BeaconClient {
+pub fn client(provider: ProviderConfig) -> BeaconClient {
     BeaconClient::new(
         provider.url,
         provider.network,
         provider.name,
         u16::max(1, provider.concurrent_request_limit.unwrap_or(1024)),
         provider.rate_limit_per_minute,
-        final_blocks_only,
     )
 }
 

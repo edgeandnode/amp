@@ -35,10 +35,12 @@ pub struct Manifest {
     pub kind: EvmRpcDatasetKind,
     /// Network name, e.g., `anvil`, `mainnet`
     pub network: String,
-
     /// Dataset start block
     #[serde(default)]
     pub start_block: BlockNum,
+    /// Only include finalized block data
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 #[serde_as]
@@ -66,6 +68,7 @@ pub fn dataset(manifest: Manifest) -> Dataset {
         version: Some(manifest.version),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
+        finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&manifest.network),
         network: Some(manifest.network),
         functions: vec![],
@@ -74,7 +77,6 @@ pub fn dataset(manifest: Manifest) -> Dataset {
 
 pub async fn client(
     config: ProviderConfig,
-    final_blocks_only: bool,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, Error> {
     let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
@@ -89,7 +91,6 @@ pub async fn client(
                 config.rpc_batch_size,
                 config.rate_limit_per_minute,
                 config.fetch_receipts_per_tx,
-                final_blocks_only,
                 meter,
             )
             .await
@@ -103,7 +104,6 @@ pub async fn client(
             config.rpc_batch_size,
             config.rate_limit_per_minute,
             config.fetch_receipts_per_tx,
-            final_blocks_only,
             meter,
         )
         .await
@@ -116,7 +116,6 @@ pub async fn client(
             config.rpc_batch_size,
             config.rate_limit_per_minute,
             config.fetch_receipts_per_tx,
-            final_blocks_only,
             meter,
         )
         .map_err(Error::Client)?,

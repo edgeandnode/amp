@@ -75,6 +75,7 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
         name: manifest.name,
         version: Some(manifest.version),
         start_block: None,
+        finalized_blocks_only: false,
         tables,
         functions,
     })

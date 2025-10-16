@@ -35,7 +35,6 @@ pub async fn dump_tables(
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-    only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
     for t in tables {
@@ -46,16 +45,7 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(
-            ctx,
-            tables,
-            n_jobs,
-            end,
-            metrics,
-            meter,
-            only_finalized_blocks,
-        )
-        .await
+        dump_raw_tables(ctx, tables, n_jobs, end, metrics, meter).await
     } else {
         dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
     }
@@ -69,7 +59,6 @@ pub async fn dump_raw_tables(
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-    only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -109,7 +98,7 @@ pub async fn dump_raw_tables(
                 &dataset.name,
                 metrics,
                 meter,
-                only_finalized_blocks,
+                dataset.finalized_blocks_only,
             )
             .await?;
         }

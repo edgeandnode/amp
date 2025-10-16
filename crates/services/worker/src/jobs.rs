@@ -124,7 +124,6 @@ impl Job {
                     end_block,
                     metrics,
                     meter.as_ref(),
-                    false,
                 )
                 .await
             }
