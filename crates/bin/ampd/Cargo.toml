@@ -15,7 +15,6 @@ snmalloc = ["dep:snmalloc-rs"]
 clap.workspace = true
 common = { path = "../../core/common" }
 controller = { path = "../../services/controller" }
-datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }

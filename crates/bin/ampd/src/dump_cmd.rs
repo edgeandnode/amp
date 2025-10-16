@@ -6,8 +6,8 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
-    store::ObjectStoreUrl, utils::dfs,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, store::ObjectStoreUrl,
+    utils::dfs,
 };
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
@@ -15,7 +15,7 @@ use dataset_store::{
 use datasets_common::version_tag::VersionTag;
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedDatasetManifest};
 use dump::EndBlock;
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, notification_multiplexer};
 use static_assertions::const_assert;
 
 #[allow(clippy::too_many_arguments)]

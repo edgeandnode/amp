@@ -23,7 +23,6 @@ use common::{
     catalog::physical::Catalog,
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
-    notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::IncrementalCheck,
     query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
@@ -39,7 +38,7 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use prost::Message as _;
 use serde_json::json;
 use thiserror::Error;

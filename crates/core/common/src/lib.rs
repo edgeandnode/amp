@@ -6,7 +6,6 @@ pub mod evm;
 pub mod js_udf;
 pub mod manifest;
 pub mod metadata;
-pub mod notification_multiplexer;
 pub mod plan_visitors;
 pub mod planning_context;
 pub mod query_context;

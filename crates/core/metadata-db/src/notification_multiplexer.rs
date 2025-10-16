@@ -1,13 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use backon::{ExponentialBuilder, Retryable};
-use metadata_db::{LocationId, LocationNotification, MetadataDb};
 use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::instrument;
 
-use crate::BoxError;
+use crate::{LocationId, LocationNotification, MetadataDb};
+
+type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 struct NotificationMultiplexer {
     metadata_db: MetadataDb,
