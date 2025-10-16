@@ -76,6 +76,7 @@ export function Editor({
         onMount={(editor: monaco.editor.IStandaloneCodeEditor) => {
           // Configure editor options
           editor.updateOptions({
+            fixedOverflowWidgets: true,
             suggest: {
               showWords: false, // Disable generic word suggestions to prioritize SQL completions
               showKeywords: true, // Let our provider handle SQL keywords
