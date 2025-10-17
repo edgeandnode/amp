@@ -15,16 +15,12 @@ use metadata_db::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::{
-    ConsistencyCheckError, WriterProperties,
-    compaction::{AmpCompactorTaskType, Collector, compactor::Compactor},
-};
+use crate::{ConsistencyCheckError, WriterProperties};
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
 
 pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
-    type Task: AmpCompactorTaskType<Error = Self>;
     /// Whether the error is merely for debugging and does not indicate a failure
     /// Default implementation returns false for all error variants
     fn is_debug(&self) -> bool {
@@ -192,8 +188,6 @@ impl From<JoinError> for CompactorError {
 }
 
 impl CompactionErrorExt for CompactorError {
-    type Task = Compactor;
-
     fn is_debug(&self) -> bool {
         matches!(self, CompactorError::EmptyChain)
     }
@@ -259,8 +253,6 @@ impl From<ObjectStoreError> for CollectorError {
 }
 
 impl CompactionErrorExt for CollectorError {
-    type Task = Collector;
-
     fn is_cancellation(&self) -> bool {
         match self {
             CollectorError::JoinError { err, .. } => err.is_cancelled(),
@@ -278,8 +270,13 @@ impl CollectorError {
         Self::FileStreamError { err }
     }
 
-    pub fn file_metadata_delete(file_ids: Vec<FileId>, err: metadata_db::Error) -> Self {
-        CollectorError::FileMetadataDeleteError { err, file_ids }
+    pub fn file_metadata_delete<'a>(
+        file_ids: impl Iterator<Item = &'a FileId>,
+    ) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| CollectorError::FileMetadataDeleteError {
+            err,
+            file_ids: file_ids.cloned().collect(),
+        }
     }
 
     pub fn gc_manifest_delete(file_id: FileId) -> impl FnOnce(metadata_db::Error) -> Self {

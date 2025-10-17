@@ -305,9 +305,9 @@ async fn dump_sql_query(
     let location_id = *physical_table.location_id();
 
     let mut compactor = AmpCompactor::start(
-        physical_table.clone(),
+        &physical_table,
         env.parquet_footer_cache.clone(),
-        opts.clone(),
+        opts,
         metrics.clone(),
     );
 
@@ -368,7 +368,7 @@ async fn dump_sql_query(
                 )
                 .await?;
 
-                compactor.try_run();
+                compactor.try_run()?;
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;

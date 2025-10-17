@@ -15,9 +15,7 @@ pub use core::*;
 
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
-use crate::compaction::{
-    SegmentSizeLimit, collector::CollectorProperties, compactor::CompactorProperties,
-};
+use crate::compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit};
 
 #[derive(Debug, Clone)]
 pub struct WriterProperties {

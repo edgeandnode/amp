@@ -47,7 +47,11 @@ pub struct MetricsRegistry {
     // Garbage Collector metrics.
     pub files_deleted: telemetry::metrics::Counter,
     pub files_not_found: telemetry::metrics::Counter,
-    pub files_failed_to_delete: telemetry::metrics::Counter,
+    pub expired_files_found: telemetry::metrics::Counter,
+    pub expired_entries_deleted: telemetry::metrics::Counter,
+
+    pub successful_collections: telemetry::metrics::Counter,
+    pub failed_collections: telemetry::metrics::Counter,
 }
 
 impl MetricsRegistry {
@@ -126,10 +130,25 @@ impl MetricsRegistry {
                 "files_not_found",
                 "Counter for files not found during garbage collection",
             ),
-            files_failed_to_delete: telemetry::metrics::Counter::new(
+            expired_files_found: telemetry::metrics::Counter::new(
+                meter,
+                "files_not_found",
+                "Counter for files not found during garbage collection",
+            ),
+            expired_entries_deleted: telemetry::metrics::Counter::new(
                 meter,
                 "files_failed_to_delete",
                 "Counter for files that failed to delete during garbage collection",
+            ),
+            successful_collections: telemetry::metrics::Counter::new(
+                meter,
+                "successful_collections",
+                "Counter for successful garbage collection operations",
+            ),
+            failed_collections: telemetry::metrics::Counter::new(
+                meter,
+                "failed_collections",
+                "Counter for failed garbage collection operations",
             ),
         }
     }
@@ -310,12 +329,42 @@ impl MetricsRegistry {
             .inc_by_with_kvs(amount as u64, &kv_pairs);
     }
 
-    pub(crate) fn inc_files_failed_to_delete(&self, amount: usize, dataset: String, table: String) {
+    pub(crate) fn inc_expired_files_found(&self, amount: usize, dataset: String, table: String) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("dataset", dataset),
             telemetry::metrics::KeyValue::new("table", table),
         ];
-        self.files_failed_to_delete
+        self.expired_files_found
             .inc_by_with_kvs(amount as u64, &kv_pairs);
+    }
+
+    pub(crate) fn inc_expired_entries_deleted(
+        &self,
+        amount: usize,
+        dataset: String,
+        table: String,
+    ) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.expired_entries_deleted
+            .inc_by_with_kvs(amount as u64, &kv_pairs);
+    }
+
+    pub(crate) fn inc_successful_collections(&self, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.successful_collections.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_failed_collections(&self, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
+        self.failed_collections.inc_with_kvs(&kv_pairs);
     }
 }

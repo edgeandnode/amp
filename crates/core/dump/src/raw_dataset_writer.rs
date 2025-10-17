@@ -137,8 +137,7 @@ impl RawTableWriter {
             None => None,
         };
 
-        let amp_compactor =
-            AmpCompactor::start(table.clone(), cache, opts.clone(), metrics.clone());
+        let amp_compactor = AmpCompactor::start(&table, cache, &opts, metrics.clone());
 
         Ok(Self {
             table,
@@ -279,7 +278,7 @@ impl RawTableWriter {
 
         let metadata = file.close(range, vec![], Generation::default()).await?;
 
-        self.compactor.try_run();
+        self.compactor.try_run()?;
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
