@@ -107,9 +107,13 @@ impl Compactor {
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics)
-            .await?
-            .try_compact_all();
+        let mut join_set = if let Some(plan) =
+            CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
+        {
+            plan.try_compact_all()
+        } else {
+            return Ok(self);
+        };
 
         // await: We need to await all the compaction tasks to finish before returning
         while let Some(result) = join_set.next().await {

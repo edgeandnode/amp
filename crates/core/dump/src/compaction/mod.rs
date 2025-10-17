@@ -192,12 +192,8 @@ pub struct AmpCompactorTask {
 }
 
 impl AmpCompactorTask {
-    fn new(
-        inner: JoinHandle<TaskResult<AmpCollectorInnerTask>>,
-    ) -> Self {
-        Self {
-            inner,
-        }
+    fn new(inner: JoinHandle<TaskResult<AmpCollectorInnerTask>>) -> Self {
+        Self { inner }
     }
 
     pub fn start(
