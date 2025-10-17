@@ -178,7 +178,8 @@ impl Worker {
                         Ok(Some(notif)) => notif,
                         Ok(None) => {
                             tracing::error!(node_id=%self.node_id, "job notification stream closed");
-                            return Err(Error::MainLoop(MainLoopError::NotificationHandling(NotificationError::StreamClosed)));
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            continue;
                         }
                         Err(NotificationError::DeserializationFailed(err)) => {
                             tracing::error!(node_id=%self.node_id, error=%err, "job notification deserialization failed, skipping");
