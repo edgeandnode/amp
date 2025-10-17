@@ -15,96 +15,66 @@ pub use collector::{Collector, CollectorProperties};
 use common::{ParquetFooterCache, Timestamp, catalog::physical::PhysicalTable};
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use tokio::task::{JoinError, JoinHandle};
 
 use crate::{WriterProperties, metrics::MetricsRegistry};
 
-pub type TaskResult<T> = Result<T, TaskError>;
+pub type TaskResult<T> = Result<T, AmpCompactorTaskError>;
 
 #[derive(Debug)]
-pub enum TaskError {
+pub enum AmpCompactorTaskError {
     Compaction(CompactorError),
     Collection(CollectorError),
     Join(JoinError),
 }
 
-impl TaskError {
-    pub fn handle_error(
-        self,
-        table: Arc<PhysicalTable>,
-        cache: ParquetFooterCache,
-        props: Arc<WriterProperties>,
-        metrics: Option<Arc<MetricsRegistry>>,
-    ) -> TaskResult<InnerTask> {
-        use TaskError::*;
-        match self {
-            // Propagate thread panics
-            Collection(CollectorError::JoinError { err: error })
-            | Compaction(CompactorError::JoinError { err: error })
-                if error.is_panic() =>
-            {
-                return Err(Join(error));
-            }
-            // Collection was cancelled, set active to false
-            Collection(CollectorError::JoinError { err: error })
-            | Compaction(CompactorError::JoinError { err: error })
-                if error.is_cancelled() =>
-            {
-                props.collector.active.store(false, SeqCst);
-                props.compactor.active.store(false, SeqCst);
-            }
-            // Ignore these errors and continue
-            Compaction(CompactorError::EmptyChain) | Compaction(CompactorError::SendError) => {}
-            // Propagate all other errors
-            error => {
-                return Err(error);
-            }
-        };
-        Ok(InnerTask::new(&table, cache, &props, metrics))
-    }
-}
-
-impl Display for TaskError {
+impl Display for AmpCompactorTaskError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            TaskError::Compaction(e) => e.fmt(f),
-            TaskError::Collection(e) => e.fmt(f),
-            TaskError::Join(e) => e.fmt(f),
+            AmpCompactorTaskError::Compaction(e) => e.fmt(f),
+            AmpCompactorTaskError::Collection(e) => e.fmt(f),
+            AmpCompactorTaskError::Join(e) => e.fmt(f),
         }
     }
 }
 
-impl Error for TaskError {
+impl Error for AmpCompactorTaskError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            TaskError::Compaction(e) => e.source(),
-            TaskError::Collection(e) => e.source(),
-            TaskError::Join(e) => e.source(),
+            AmpCompactorTaskError::Compaction(e) => e.source(),
+            AmpCompactorTaskError::Collection(e) => e.source(),
+            AmpCompactorTaskError::Join(e) => e.source(),
         }
     }
 }
 
-impl From<CollectorError> for TaskError {
+impl From<CollectorError> for AmpCompactorTaskError {
     fn from(err: CollectorError) -> Self {
-        TaskError::Collection(err)
+        match err {
+            CollectorError::JoinError { err } => AmpCompactorTaskError::Join(err),
+            other => AmpCompactorTaskError::Collection(other),
+        }
     }
 }
 
-impl From<CompactorError> for TaskError {
+impl From<CompactorError> for AmpCompactorTaskError {
     fn from(err: CompactorError) -> Self {
-        TaskError::Compaction(err)
+        match err {
+            CompactorError::JoinError { err } => AmpCompactorTaskError::Join(err),
+            other => AmpCompactorTaskError::Compaction(other),
+        }
     }
 }
 
-impl From<JoinError> for TaskError {
+impl From<JoinError> for AmpCompactorTaskError {
     fn from(err: JoinError) -> Self {
-        TaskError::Join(err)
+        AmpCompactorTaskError::Join(err)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct InnerTask {
+pub struct AmpCollectorInnerTask {
     pub compactor: Compactor,
     pub collector: Collector,
     pub props: Arc<WriterProperties>,
@@ -114,7 +84,7 @@ pub struct InnerTask {
     pub previous_compaction: Timestamp,
 }
 
-impl InnerTask {
+impl AmpCollectorInnerTask {
     pub fn new(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
@@ -128,7 +98,7 @@ impl InnerTask {
         let previous_collection = Timestamp::now();
         let previous_compaction = Timestamp::now();
 
-        InnerTask {
+        AmpCollectorInnerTask {
             compactor,
             collector,
             props,
@@ -139,18 +109,14 @@ impl InnerTask {
         }
     }
 
-    pub fn start(
+    fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
         props: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
-    ) -> JoinHandle<Result<Self, TaskError>> {
-        let task = InnerTask::new(table, cache, props, metrics);
+    ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
+        let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
         tokio::spawn(task.try_run())
-    }
-
-    pub fn spawn(self) -> JoinHandle<Result<Self, TaskError>> {
-        tokio::spawn(self.run())
     }
 
     /// Run compaction followed by collection
@@ -170,48 +136,26 @@ impl InnerTask {
     /// and/or niether respective interval has elapsed this is
     /// a no-op
     pub async fn try_run(self) -> TaskResult<Self> {
-        // First try to collect, then try to compact
-        let table = Arc::clone(&self.table);
-        let cache = self.compactor.cache.clone();
-        let props = Arc::clone(&self.props);
-        let metrics = self.metrics.clone();
-
-        match self
-            .try_compact()
-            .and_then(Self::try_collect)
-            .await
-            .map_err(|err| err.handle_error(table, cache, props, metrics))
-        {
-            Ok(task) | Err(Ok(task)) => Ok(task),
-            Err(err) => err,
-        }
+        Ok(self.try_compact().await?.try_collect().await?)
     }
 
-    pub async fn collect(mut self) -> CollectionResult<Self> {
+    async fn collect(mut self) -> CollectionResult<Self> {
         self.collector = self.collector.collect().await?;
         Ok(self)
     }
 
-    pub async fn compact(mut self) -> CompactionResult<Self> {
+    async fn compact(mut self) -> CompactionResult<Self> {
         self.compactor = self.compactor.compact().await?;
         Ok(self)
     }
 
-    pub async fn try_collect(mut self) -> TaskResult<Self> {
+    async fn try_collect(mut self) -> TaskResult<Self> {
         // If collection is active and the interval has elapsed, run collection
         let is_active = self.props.collector.active.load(SeqCst);
         let has_elapsed = Timestamp::now()
             .0
             .saturating_sub(self.previous_collection.0)
             > self.props.collector.interval;
-        tracing::debug!(
-            "Try collect: is_active={}, has_elapsed={}, previous_collection={:?}, now={:?}, interval={:?}",
-            is_active,
-            has_elapsed,
-            self.previous_collection,
-            Timestamp::now(),
-            self.props.collector.interval
-        );
         if is_active && has_elapsed {
             self.previous_collection = Timestamp::now();
             Ok(self.collect().await?)
@@ -221,22 +165,13 @@ impl InnerTask {
         }
     }
 
-    pub async fn try_compact(mut self) -> TaskResult<Self> {
+    async fn try_compact(mut self) -> TaskResult<Self> {
         // If compaction is active and the interval has elapsed, run compaction
         let is_active = self.props.compactor.active.load(SeqCst);
         let has_elapsed = Timestamp::now()
             .0
             .saturating_sub(self.previous_compaction.0)
             > self.props.compactor.interval;
-
-        tracing::debug!(
-            "Try compact: is_active={}, has_elapsed={}, previous_compaction={:?}, now={:?}, interval={:?}",
-            is_active,
-            has_elapsed,
-            self.previous_compaction,
-            Timestamp::now(),
-            self.props.compactor.interval
-        );
 
         if is_active && has_elapsed {
             self.previous_compaction = Timestamp::now();
@@ -249,30 +184,19 @@ impl InnerTask {
 }
 
 pub struct AmpCompactor {
-    task: Task,
+    task: AmpCompactorTask,
 }
 
-pub struct Task {
-    inner: JoinHandle<TaskResult<InnerTask>>,
-    table: Arc<PhysicalTable>,
-    props: Arc<WriterProperties>,
-    metrics: Option<Arc<MetricsRegistry>>,
+pub struct AmpCompactorTask {
+    inner: JoinHandle<TaskResult<AmpCollectorInnerTask>>,
 }
 
-impl Task {
-    pub fn new(
-        inner: JoinHandle<TaskResult<InnerTask>>,
-        table: &Arc<PhysicalTable>,
-        props: &Arc<WriterProperties>,
-        metrics: Option<Arc<MetricsRegistry>>,
+impl AmpCompactorTask {
+    fn new(
+        inner: JoinHandle<TaskResult<AmpCollectorInnerTask>>,
     ) -> Self {
-        let table = Arc::clone(table);
-        let props = Arc::clone(props);
         Self {
             inner,
-            table,
-            props,
-            metrics,
         }
     }
 
@@ -282,8 +206,8 @@ impl Task {
         props: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let inner = InnerTask::start(table, cache, props, metrics.clone());
-        Self::new(inner, table, props, metrics)
+        let inner = AmpCollectorInnerTask::start(table, cache, props, metrics.clone());
+        Self::new(inner)
     }
 
     pub fn is_finished(&self) -> bool {
@@ -298,7 +222,7 @@ impl AmpCompactor {
         opts: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let inner = Task::start(table, cache, opts, metrics);
+        let inner = AmpCompactorTask::start(table, cache, opts, metrics);
         Self { task: inner }
     }
 
@@ -317,29 +241,8 @@ impl AmpCompactor {
 
     pub async fn join_current_then_spawn_new(&mut self) -> TaskResult<()> {
         let handle = &mut self.task.inner;
-        let table = &self.task.table;
-        let props = &self.task.props;
-        let metrics = &self.task.metrics;
 
-        let inner = match handle.await {
-            // Task completed successfully
-            Ok(Ok(inner)) => inner,
-            // Task ran but failed
-            Ok(Err(e)) => {
-                return Err(e);
-            }
-            // Task was aborted due to panic
-            Err(e) if e.is_panic() => {
-                return Err(TaskError::Join(e));
-            }
-            // Task was cancelled, set active to false for both compactor and collector
-            Err(..) => {
-                props.compactor.active.store(false, SeqCst);
-                props.collector.active.store(false, SeqCst);
-                let cache = ParquetFooterCache::builder(props.cache_size_mb * 1024 * 1024).build();
-                InnerTask::new(table, cache, props, metrics.clone())
-            }
-        };
+        let inner = handle.await??;
 
         self.task.inner = tokio::spawn(inner.try_run());
 
