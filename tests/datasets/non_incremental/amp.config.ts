@@ -5,10 +5,7 @@ export default defineDataset(() => ({
   network: "mainnet",
   version: "0.1.0",
   dependencies: {
-    eth_rpc: {
-      name: "eth_rpc",
-      version: "0.0.0",
-    },
+    eth_rpc: "_/eth_rpc@0.0.0",
   },
   tables: {
     // This table uses JOIN which is a non-incremental operation

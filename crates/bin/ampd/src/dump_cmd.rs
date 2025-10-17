@@ -247,7 +247,7 @@ pub async fn datasets_and_dependencies(
         let refs: Vec<String> = manifest
             .dependencies
             .into_values()
-            .map(|d| d.name)
+            .map(|d| d.name().to_string())
             .collect();
         let mut untracked_refs = refs
             .iter()

@@ -348,10 +348,7 @@ fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
             "version": "{version}",
             "kind": "manifest",
             "dependencies": {{
-                "raw_mainnet": {{
-                    "name": "eth_firehose",
-                    "version": "0.0.1"
-                }}
+                "raw_mainnet": "_/eth_firehose@0.0.1"
             }},
             "tables": {{
                 "test_table": {{

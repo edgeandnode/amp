@@ -5,10 +5,7 @@ export default defineDataset(() => ({
   network: "mainnet",
   version: "0.0.2",
   dependencies: {
-    eth_firehose: {
-      name: "eth_firehose",
-      version: "0.0.0",
-    },
+    eth_firehose: "_/eth_firehose@0.0.0",
   },
   tables: {
     blocks: {
