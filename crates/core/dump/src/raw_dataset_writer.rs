@@ -278,8 +278,6 @@ impl RawTableWriter {
 
         let metadata = file.close(range, vec![], Generation::default()).await?;
 
-        self.compactor.try_run()?;
-
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
             let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
@@ -292,6 +290,8 @@ impl RawTableWriter {
                 *location_id,
             );
         }
+
+        self.compactor.try_run()?;
 
         Ok(metadata)
     }

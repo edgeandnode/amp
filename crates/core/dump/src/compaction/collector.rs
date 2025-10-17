@@ -13,7 +13,6 @@ use object_store::{Error as ObjectStoreError, path::Path};
 use crate::{
     WriterProperties,
     compaction::error::{CollectionResult, CollectorError},
-    consistency_check,
     metrics::MetricsRegistry,
 };
 
@@ -67,16 +66,6 @@ impl Collector {
     pub(super) async fn collect(self) -> CollectionResult<Self> {
         let dataset_name: Arc<str> = Arc::from(self.table.dataset().name.as_str());
         let table_name: Arc<str> = Arc::from(self.table.table_name());
-
-        if let Err(e) = consistency_check(&self.table)
-            .await
-            .map_err(CollectorError::consistency_check_error)
-        {
-            if let Some(metrics) = &self.metrics {
-                metrics.inc_failed_collections(dataset_name.to_string(), table_name.to_string());
-            }
-            return Err(e);
-        }
 
         let metadata_db = self.table.metadata_db();
 
@@ -180,8 +169,8 @@ impl Collector {
                                 files_not_found += 1;
                             }
                             Err(e) => {
-                                tracing::info!("Expired files deleted: {}", files_deleted);
-                                tracing::info!("Expired files not found: {}", files_not_found);
+                                tracing::debug!("Expired files deleted: {}", files_deleted);
+                                tracing::debug!("Expired files not found: {}", files_not_found);
                                 if let Some(metrics) = &metrics {
                                     metrics.inc_failed_collections(
                                         dataset_name.to_string(),
@@ -198,8 +187,8 @@ impl Collector {
             )
             .await?;
 
-        tracing::info!("Expired files deleted: {}", files_deleted);
-        tracing::info!("Expired files not found: {}", files_not_found);
+        tracing::debug!("Expired files deleted: {}", files_deleted);
+        tracing::debug!("Expired files not found: {}", files_not_found);
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.inc_successful_collections(dataset_name.to_string(), table_name.to_string());
