@@ -1036,17 +1036,15 @@ pub async fn resolve_blocks_table(
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
 /// each dataset comes after all datasets it depends on.
-pub async fn datasets_and_dependencies(
+pub async fn dataset_and_dependencies(
     store: &Arc<DatasetStore>,
-    mut datasets: Vec<Reference>,
+    dataset: Reference,
 ) -> Result<Vec<Reference>, BoxError> {
+    let mut datasets = vec![dataset];
     let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
     while let Some(dataset_ref) = datasets.pop() {
         let Some(dataset) = store
-            .get_dataset(
-                dataset_ref.name(),
-                &dataset_ref.version().clone().into_tag(),
-            )
+            .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
             .await?
         else {
             return Err(format!("Dataset '{}' not found", dataset_ref).into());

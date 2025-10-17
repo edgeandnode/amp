@@ -1,6 +1,7 @@
 //! Test step for dumping dataset data to storage.
 
 use common::BoxError;
+use datasets_common::reference::Reference;
 
 use crate::testlib::{ctx::TestCtx, helpers as test_helpers};
 
@@ -14,7 +15,7 @@ pub struct Step {
     /// The name of this test step.
     pub name: String,
     /// The name of the dataset to dump.
-    pub dataset: String,
+    pub dataset: Reference,
     /// The ending block number for the dump operation.
     pub end: u64,
     /// Expected failure message substring (if dump should fail).
@@ -39,7 +40,7 @@ impl Step {
             let physical_tables = test_helpers::dump_dataset(
                 ctx.daemon_server().config(),
                 ctx.metadata_db(),
-                &self.dataset,
+                self.dataset.clone(),
                 self.end,
                 1,
                 None,

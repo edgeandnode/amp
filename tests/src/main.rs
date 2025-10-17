@@ -47,12 +47,14 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::dump_cmd::{datasets_and_dependencies, dump};
+use ampd::dump_cmd::dump;
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
+use datasets_common::reference::Reference;
 use dump::{EndBlock, consistency_check};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -223,26 +225,26 @@ async fn bless(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     dataset_store: Arc<DatasetStore>,
-    dataset_name: String,
+    dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {
     // Resolve dataset dependencies and restore them first
-    tracing::debug!(dataset=%dataset_name, "Resolving dataset dependencies");
+    tracing::debug!(%dataset, "Resolving dataset dependencies");
     let deps = {
-        let mut ds_and_deps = datasets_and_dependencies(&dataset_store, vec![dataset_name.clone()])
+        let mut ds_and_deps = dataset_and_dependencies(&dataset_store, dataset.clone())
             .await
             .map_err(|err| {
                 format!(
                     "Failed to resolve dependencies for dataset '{}': {}",
-                    dataset_name, err
+                    dataset, err
                 )
             })?;
 
         // Remove the dataset itself from the list, leaving only dependencies
-        if ds_and_deps.pop() != Some(dataset_name.clone()) {
+        if ds_and_deps.pop() != Some(dataset.clone()) {
             return Err(format!(
                 "Dataset '{}' not found in resolved dependencies list",
-                dataset_name
+                dataset
             )
             .into());
         }
@@ -250,7 +252,7 @@ async fn bless(
         ds_and_deps
     };
 
-    tracing::debug!(dataset=%dataset_name, ?deps, "Restoring dataset dependencies");
+    tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
         test_helpers::restore_dataset_snapshot(&config, &metadata_db, &dataset_store, &dep)
             .await
