@@ -70,9 +70,13 @@ where
     ) -> Result<Option<Version>, GetLatestVersionError> {
         self.init().await;
 
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         let dataset = self
             .metadata_db
-            .get_dataset_latest_version_with_details(name)
+            .get_dataset_latest_version_with_details(&namespace, name)
             .await
             .map_err(GetLatestVersionError)?;
 
@@ -127,15 +131,19 @@ where
     ) -> Result<Option<ManifestContent>, GetError> {
         self.init().await;
 
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         let res = match version.into() {
             None => self
                 .metadata_db
-                .get_dataset_latest_version_with_details(name)
+                .get_dataset_latest_version_with_details(&namespace, name)
                 .await
                 .map_err(GetError::MetadataDbError)?,
             Some(version) => self
                 .metadata_db
-                .get_dataset_with_details(name, version)
+                .get_dataset_with_details(&namespace, name, version)
                 .await
                 .map_err(GetError::MetadataDbError)?,
         };
@@ -201,7 +209,15 @@ where
             total_count += 1;
 
             // Check if the dataset already exists in the metadata database
-            let dataset_exists = match self.metadata_db.dataset_exists(&name, &version).await {
+            // TODO: Pass the actual namespace instead of using a placeholder
+            let namespace = "_"
+                .parse::<Namespace>()
+                .expect("'_' should be a valid namespace");
+            let dataset_exists = match self
+                .metadata_db
+                .dataset_exists(&namespace, &name, &version)
+                .await
+            {
                 Ok(exists) => exists,
                 Err(err) => {
                     error_count += 1;

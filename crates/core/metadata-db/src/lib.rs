@@ -26,11 +26,10 @@ use self::conn::{DbConn, DbConnPool};
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
-        Dataset, DatasetWithDetails, Hash as DatasetHash, Hash as DatasetVersionHash,
-        HashOwned as DatasetHashOwned, HashOwned as DatasetVersionHashOwned, Name as DatasetName,
+        Hash as DatasetHash, HashOwned as DatasetHashOwned, Name as DatasetName,
         NameOwned as DatasetNameOwned, Namespace as DatasetNamespace,
         NamespaceOwned as DatasetNamespaceOwned, Version as DatasetVersion,
-        VersionOwned as DatasetVersionOwned,
+        VersionOwned as DatasetVersionOwned, tags::Tag as DatasetTag,
     },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
@@ -797,8 +796,16 @@ impl MetadataDb {
 impl MetadataDb {
     /// Register a new dataset in the registry
     ///
-    /// Creates a new dataset entry with the specified namespace, name, version, manifest path, and hash.
-    /// The combination of dataset name and version must be unique across all datasets.
+    /// Creates a complete dataset registration including manifest, dataset-manifest link,
+    /// and version tag. This operation uses a transaction to ensure atomicity - either all
+    /// entities are created or none are.
+    ///
+    /// The combination of (namespace, name, version) must be unique.
+    ///
+    /// # Steps performed (in transaction)
+    /// 1. Insert manifest (idempotent - no error if hash already exists)
+    /// 2. Link manifest to dataset (idempotent - no error if link already exists)
+    /// 3. Insert version tag
     #[instrument(skip(self), err)]
     pub async fn register_dataset(
         &self,
@@ -808,16 +815,25 @@ impl MetadataDb {
         manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
-        datasets::insert(
-            &*self.pool,
-            namespace.into(),
-            name.into(),
-            version.into(),
-            manifest_path,
-            manifest_hash.into(),
-        )
-        .await
-        .map_err(Into::into)
+        let namespace = namespace.into();
+        let name = name.into();
+        let version = version.into();
+        let manifest_hash = manifest_hash.into();
+
+        let mut tx = self.pool.begin().await?;
+
+        // Step 1: Insert manifest (idempotent)
+        datasets::manifest_files::insert(&mut *tx, &manifest_hash, manifest_path).await?;
+
+        // Step 2: Link manifest to dataset (idempotent)
+        datasets::manifests::insert(&mut *tx, &namespace, &name, &manifest_hash).await?;
+
+        // Step 3: Insert version tag
+        datasets::tags::insert(&mut *tx, &namespace, &name, &version, &manifest_hash).await?;
+
+        tx.commit().await?;
+
+        Ok(())
     }
 
     /// Check if a dataset exists for the given name and version
@@ -825,12 +841,18 @@ impl MetadataDb {
     /// Returns `true` if a dataset with the specified name and version exists in the registry.
     pub async fn dataset_exists(
         &self,
+        namespace: impl Into<DatasetNamespace<'_>>,
         name: impl Into<DatasetName<'_>>,
         version: impl Into<DatasetVersion<'_>>,
     ) -> Result<bool, Error> {
-        datasets::exists_by_name_and_version(&*self.pool, name.into(), version.into())
-            .await
-            .map_err(Into::into)
+        datasets::tags::exists_by_namespace_name_and_version(
+            &*self.pool,
+            namespace.into(),
+            name.into(),
+            version.into(),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Get complete dataset registry information
@@ -839,26 +861,18 @@ impl MetadataDb {
     /// Returns `None` if no dataset is found with the specified name and version.
     pub async fn get_dataset_with_details(
         &self,
+        namespace: impl Into<DatasetNamespace<'_>>,
         name: impl Into<DatasetName<'_>>,
         version: impl Into<DatasetVersion<'_>>,
-    ) -> Result<Option<DatasetWithDetails>, Error> {
-        datasets::get_by_name_and_version_with_details(&*self.pool, name.into(), version.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Get manifest content for a dataset
-    ///
-    /// Retrieves the manifest string stored for the specified dataset.
-    /// Returns `None` if no dataset is found with the specified name and version.
-    pub async fn get_dataset_manifest_path(
-        &self,
-        name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersion<'_>>,
-    ) -> Result<Option<String>, Error> {
-        datasets::get_manifest_path_by_name_and_version(&*self.pool, name.into(), version.into())
-            .await
-            .map_err(Into::into)
+    ) -> Result<Option<DatasetTag>, Error> {
+        datasets::tags::get_by_namespace_name_and_version_with_details(
+            &*self.pool,
+            namespace.into(),
+            name.into(),
+            version.into(),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Get the latest version for a dataset
@@ -868,9 +882,10 @@ impl MetadataDb {
     #[instrument(skip(self), err)]
     pub async fn get_dataset_latest_version_with_details(
         &self,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetWithDetails>, Error> {
-        datasets::get_latest_version_by_name_with_details(&*self.pool, name.into())
+    ) -> Result<Option<DatasetTag>, Error> {
+        datasets::tags::get_latest_by_namespace_and_name(&*self.pool, namespace.into(), name.into())
             .await
             .map_err(Into::into)
     }
@@ -879,28 +894,29 @@ impl MetadataDb {
     ///
     /// Returns a stream of all dataset records with basic information (namespace, name, version),
     /// ordered by dataset name first, then by version.
-    pub fn stream_all_datasets(&self) -> impl Stream<Item = Result<Dataset, Error>> + '_ {
-        datasets::stream(&*self.pool).map(|result| result.map_err(Error::DbError))
+    pub fn stream_all_datasets(&self) -> impl Stream<Item = Result<DatasetTag, Error>> + '_ {
+        datasets::tags::stream(&*self.pool).map(|result| result.map_err(Error::DbError))
     }
 
     /// List all datasets from the registry
     ///
     /// Returns all dataset records ordered by dataset name ASC and version DESC.
-    pub async fn list_datasets(&self) -> Result<Vec<Dataset>, Error> {
-        Ok(datasets::list_all(&*self.pool).await?)
+    pub async fn list_datasets(&self) -> Result<Vec<DatasetTag>, Error> {
+        Ok(datasets::tags::list_all(&*self.pool).await?)
     }
 
     /// List all versions for a dataset
     ///
     /// Returns all versions for the specified dataset ordered by version DESC.
-    pub async fn list_dataset_versions<'a, N>(
+    pub async fn list_dataset_versions(
         &self,
-        name: N,
-    ) -> Result<Vec<DatasetVersionOwned>, Error>
-    where
-        N: Into<DatasetName<'a>>,
-    {
-        Ok(datasets::list_versions_by_name(&*self.pool, name.into()).await?)
+        namespace: impl Into<DatasetNamespace<'_>>,
+        name: impl Into<DatasetName<'_>>,
+    ) -> Result<Vec<DatasetVersionOwned>, Error> {
+        Ok(
+            datasets::tags::list_by_namespace_and_name(&*self.pool, namespace.into(), name.into())
+                .await?,
+        )
     }
 }
 

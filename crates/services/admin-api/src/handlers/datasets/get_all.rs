@@ -65,8 +65,8 @@ pub struct DatasetRegistryInfo {
     pub version: Version,
 }
 
-impl From<metadata_db::Dataset> for DatasetRegistryInfo {
-    fn from(dataset: metadata_db::Dataset) -> Self {
+impl From<metadata_db::DatasetTag> for DatasetRegistryInfo {
+    fn from(dataset: metadata_db::DatasetTag) -> Self {
         Self {
             name: dataset.name.into(),
             version: dataset.version.into(),

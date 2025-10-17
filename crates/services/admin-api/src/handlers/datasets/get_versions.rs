@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 
 use crate::{
     ctx::Ctx,
@@ -69,9 +69,13 @@ pub async fn handler(
     };
 
     // Fetch all dataset versions from metadata DB
+    // TODO: Pass the actual namespace instead of using a placeholder
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
     let versions = ctx
         .metadata_db
-        .list_dataset_versions(&name)
+        .list_dataset_versions(&namespace, &name)
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, dataset_name=%name, "failed to list dataset versions");
