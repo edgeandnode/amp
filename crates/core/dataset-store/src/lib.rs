@@ -13,7 +13,8 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, version_tag::VersionTag,
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
+    version_hash::VersionHash, version_tag::VersionTag,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -105,6 +106,7 @@ impl DatasetStore {
         &self,
         name: &Name,
         version: &VersionTag,
+        manifest_hash: &VersionHash,
         manifest: &M,
     ) -> Result<(), RegisterManifestError>
     where
@@ -134,7 +136,13 @@ impl DatasetStore {
             .parse::<Namespace>()
             .expect("'_' should be a valid namespace");
         self.metadata_db
-            .register_dataset(namespace, name, version, manifest_path.as_ref())
+            .register_dataset(
+                namespace,
+                name,
+                version,
+                manifest_hash,
+                manifest_path.as_ref(),
+            )
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 

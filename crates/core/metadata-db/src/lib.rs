@@ -796,7 +796,7 @@ impl MetadataDb {
 impl MetadataDb {
     /// Register a new dataset in the registry
     ///
-    /// Creates a new dataset entry with the specified namespace, name, version, and manifest.
+    /// Creates a new dataset entry with the specified namespace, name, version, manifest path, and hash.
     /// The combination of dataset name and version must be unique across all datasets.
     #[instrument(skip(self), err)]
     pub async fn register_dataset(
@@ -804,6 +804,7 @@ impl MetadataDb {
         namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
         version: impl Into<DatasetVersionTag<'_>> + std::fmt::Debug,
+        manifest_hash: impl Into<DatasetVersionHash<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
         datasets::insert(
@@ -812,6 +813,7 @@ impl MetadataDb {
             name.into(),
             version.into(),
             manifest_path,
+            manifest_hash.into(),
         )
         .await
         .map_err(Into::into)

@@ -111,7 +111,6 @@ export type DumpDatasetError =
 const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.InvalidRequest)
   .addError(Error.InvalidManifest)
-  .addError(Error.ManifestValidationError)
   .addError(Error.ManifestRegistrationError)
   .addError(Error.DatasetAlreadyExists)
   .addError(Error.DatasetDefStoreError)
@@ -130,7 +129,6 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
  *
  * - InvalidRequest: Invalid request parameters or dataset name format.
  * - InvalidManifest: The manifest is semantically invalid.
- * - ManifestValidationError: Manifest name/version doesn't match request parameters.
  * - ManifestRegistrationError: Failed to register manifest in system.
  * - DatasetAlreadyExists: Dataset exists and manifest provided (conflict).
  * - DatasetDefStoreError: Failure in dataset definition store operations.
@@ -139,7 +137,6 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
 export type RegisterDatasetError =
   | Error.InvalidRequest
   | Error.InvalidManifest
-  | Error.ManifestValidationError
   | Error.ManifestRegistrationError
   | Error.DatasetAlreadyExists
   | Error.DatasetDefStoreError

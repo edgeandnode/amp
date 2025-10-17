@@ -144,49 +144,6 @@ async fn register_with_missing_dependency_fails() {
 }
 
 #[tokio::test]
-async fn register_with_mismatched_manifest_fails() {
-    //* Given
-    let ctx = TestCtx::setup("test_register_manifest_validation_error").await;
-    let manifest = create_test_manifest("wrong_name", "2.0.0");
-    let manifest_json =
-        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
-    // Request with different name and version than in manifest
-    let register_request = RegisterRequest {
-        name: "different_name".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: manifest_json.parse().expect("Valid JSON"),
-    };
-
-    //* When
-    let resp = ctx.register(register_request).await;
-
-    //* Then
-    assert_eq!(
-        resp.status(),
-        StatusCode::BAD_REQUEST,
-        "registration should fail with mismatched manifest"
-    );
-    let error_response: serde_json::Value = resp
-        .json()
-        .await
-        .expect("failed to parse error response JSON");
-    let error_code = error_response["error_code"]
-        .as_str()
-        .expect("error_code should be a string");
-    let error_message = error_response["error_message"]
-        .as_str()
-        .expect("error_message should be a string");
-    assert_eq!(
-        error_code, "MANIFEST_VALIDATION_ERROR",
-        "should return manifest validation error"
-    );
-    assert!(
-        error_message.contains("do not match with manifest"),
-        "error message should indicate manifest mismatch"
-    );
-}
-
-#[tokio::test]
 async fn register_existing_dataset_with_manifest_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_dataset_already_exists").await;

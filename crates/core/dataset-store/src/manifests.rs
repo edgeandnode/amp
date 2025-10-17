@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::store::ObjectStoreExt;
-use datasets_common::{name::Name, namespace::Namespace, version_tag::VersionTag};
+use datasets_common::{name::Name, namespace::Namespace, version_hash, version_tag::VersionTag};
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
@@ -224,6 +224,35 @@ where
                 continue;
             }
 
+            // Fetch manifest content to compute hash
+            let manifest_content = match fetch_manifest_content(&self.store, path.clone()).await {
+                Ok(Some(content)) => content,
+                Ok(None) => {
+                    error_count += 1;
+                    tracing::warn!(
+                        dataset_name = %name,
+                        dataset_version = %version,
+                        manifest_path = %path,
+                        "Manifest file not found in object store"
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    error_count += 1;
+                    tracing::warn!(
+                        dataset_name = %name,
+                        dataset_version = %version,
+                        manifest_path = %path,
+                        error = %err,
+                        "Failed to fetch manifest content from object store"
+                    );
+                    continue;
+                }
+            };
+
+            // Compute hash from manifest content
+            let manifest_hash = version_hash::hash(manifest_content);
+
             // Register the dataset in the metadata database
             // TODO: Pass the actual namespace instead of using a placeholder
             let namespace = "_"
@@ -231,7 +260,13 @@ where
                 .expect("'_' should be a valid namespace");
             match self
                 .metadata_db
-                .register_dataset(&namespace, &name, &version, &path.to_string())
+                .register_dataset(
+                    &namespace,
+                    &name,
+                    &version,
+                    &manifest_hash,
+                    &path.to_string(),
+                )
                 .await
             {
                 Ok(()) => {
@@ -457,6 +492,12 @@ impl ManifestContent {
         T: serde::de::DeserializeOwned,
     {
         serde_json::from_str(&self.0).map_err(ManifestParseError)
+    }
+}
+
+impl AsRef<[u8]> for ManifestContent {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_bytes()
     }
 }
 

@@ -45,6 +45,12 @@ impl AsRef<str> for NonEmptyString {
     }
 }
 
+impl AsRef<[u8]> for NonEmptyString {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
 impl std::ops::Deref for NonEmptyString {
     type Target = str;
 
