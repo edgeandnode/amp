@@ -29,7 +29,7 @@
     },
     "version": {
       "description": "Dataset version, e.g., `1.0.0`",
-      "$ref": "#/$defs/VersionTag",
+      "$ref": "#/$defs/Version",
       "default": "0.0.0"
     }
   },
@@ -45,8 +45,8 @@
       "minLength": 1,
       "pattern": "^[a-z_][a-z0-9_]*$"
     },
-    "VersionTag": {
-      "description": "Semver version tag wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset version tagging.",
+    "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
       "type": "string"
     }
   }

@@ -4,10 +4,10 @@
 //! including serializable schema representations and common dataset metadata.
 
 pub mod fqn;
+pub mod hash;
 pub mod manifest;
 pub mod name;
 pub mod namespace;
 pub mod reference;
+pub mod revision;
 pub mod version;
-pub mod version_hash;
-pub mod version_tag;

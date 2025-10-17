@@ -38,7 +38,7 @@
     },
     "version": {
       "description": "Dataset version, e.g., `1.0.0`",
-      "$ref": "#/$defs/VersionTag"
+      "$ref": "#/$defs/Version"
     }
   },
   "required": [
@@ -141,7 +141,7 @@
       "pattern": "^[a-z_][a-z0-9_]*$"
     },
     "Reference": {
-      "description": "A complete dataset reference combining namespace, name, and version.\n\nThis type provides a fully versioned identifier for datasets by combining\na namespace, dataset name, and version using `/` and `@` separators.\n\n## Format\n\nThe string representation follows the format: `<namespace>/<name>@<version>`\n\n## Examples\n\n```text\nmy_namespace/my_dataset@1.0.0\nmy_namespace/my_dataset@0.4.10-rc.1+20230502\nmy_namespace/my_dataset@latest\nmy_namespace/my_dataset@dev\nmy_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9\n```\n\n## PURL Format\n\nReferences can also be represented as Package URLs (PURLs) with the format:\n`pkg:amp/<namespace>/<name>@<version>`\n\nAll three components must follow their respective validation rules.",
+      "description": "A complete dataset reference combining namespace, name, and revision.\n\nThis type provides a fully versioned identifier for datasets by combining\na namespace, dataset name, and revision using `/` and `@` separators.\n\n## Format\n\nThe string representation follows the format: `<namespace>/<name>@<revision>`\n\n## Examples\n\n```text\nmy_namespace/my_dataset@1.0.0\nmy_namespace/my_dataset@0.4.10-rc.1+20230502\nmy_namespace/my_dataset@latest\nmy_namespace/my_dataset@dev\nmy_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9\n```\n\n## PURL Format\n\nReferences can also be represented as Package URLs (PURLs) with the format:\n`pkg:amp/<namespace>/<name>@<revision>`\n\nAll three components must follow their respective validation rules.",
       "type": "string",
       "examples": [
         "my_namespace/my_dataset@1.0.0",
@@ -198,8 +198,8 @@
         "arrow"
       ]
     },
-    "VersionTag": {
-      "description": "Semver version tag wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset version tagging.",
+    "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
       "type": "string"
     },
     "View": {

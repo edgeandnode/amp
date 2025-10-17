@@ -5,7 +5,7 @@
 //! - Version changes trigger manifest reload
 //! - Polling uses efficient endpoints
 
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use mockito::Server;
 use tokio::sync::watch;
 
@@ -69,10 +69,10 @@ async fn test_version_polling_detects_changes() {
     let mut server = Server::new_async().await;
 
     let dataset_name: Name = "test_dataset".parse().unwrap();
-    let initial_version: VersionTag = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
+    let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
     // Create watch channel for version notifications
-    let (tx, mut rx) = watch::channel::<VersionTag>(initial_version.clone());
+    let (tx, mut rx) = watch::channel::<Version>(initial_version.clone());
 
     // Mock versions endpoint - returns old version first, then new version
     // Use expect_at_least since the polling task will continue running
@@ -142,9 +142,9 @@ async fn test_version_polling_handles_api_errors() {
     let mut server = Server::new_async().await;
 
     let dataset_name: Name = "test_dataset".parse().unwrap();
-    let initial_version: VersionTag = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
+    let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
-    let (tx, mut rx) = watch::channel::<VersionTag>(initial_version.clone());
+    let (tx, mut rx) = watch::channel::<Version>(initial_version.clone());
 
     // First poll: API error (500) - should be retried at least once
     let _error_mock = server

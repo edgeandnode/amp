@@ -1,7 +1,7 @@
 use std::{num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use serde_with::serde_as;
 use url::Url;
 
@@ -30,7 +30,7 @@ pub struct Manifest {
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
     #[serde(default)]
-    pub version: VersionTag,
+    pub version: Version,
     /// Dataset kind, must be `evm-rpc`
     pub kind: EvmRpcDatasetKind,
     /// Network name, e.g., `anvil`, `mainnet`

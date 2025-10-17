@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use worker::JobId;
 
 use super::tracing::display_selector_version;
@@ -117,7 +117,7 @@ pub async fn handler(
 )]
 pub async fn handler_with_version(
     State(ctx): State<Ctx>,
-    path: Result<Path<(Name, VersionTag)>, PathRejection>,
+    path: Result<Path<(Name, Version)>, PathRejection>,
     Json(options): Json<DumpOptions>,
 ) -> Result<Json<DumpResponse>, ErrorResponse> {
     let (name, version) = match path {
@@ -135,7 +135,7 @@ pub async fn handler_with_version(
 async fn handler_inner(
     ctx: Ctx,
     name: Name,
-    version: Option<VersionTag>,
+    version: Option<Version>,
     options: DumpOptions,
 ) -> Result<Json<DumpResponse>, ErrorResponse> {
     tracing::debug!(
@@ -275,7 +275,7 @@ pub enum Error {
     )]
     NotFound {
         name: Name,
-        version: Option<VersionTag>,
+        version: Option<Version>,
     },
 
     /// Dataset store error while getting the dataset

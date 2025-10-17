@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::store::ObjectStoreExt;
-use datasets_common::{name::Name, namespace::Namespace, version_hash, version_tag::VersionTag};
+use datasets_common::{hash::hash, name::Name, namespace::Namespace, version::Version};
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
@@ -67,7 +67,7 @@ where
     pub async fn get_latest_version(
         &self,
         name: &Name,
-    ) -> Result<Option<VersionTag>, GetLatestVersionError> {
+    ) -> Result<Option<Version>, GetLatestVersionError> {
         self.init().await;
 
         let dataset = self
@@ -83,7 +83,7 @@ where
     ///
     /// Returns a set of all available manifests with their name, version, and path information.
     /// This operation directly queries the underlying store without caching.
-    pub async fn list(&self) -> Vec<(Name, VersionTag)> {
+    pub async fn list(&self) -> Vec<(Name, Version)> {
         self.init().await;
 
         // Get all datasets from metadata database
@@ -123,7 +123,7 @@ where
     pub async fn get(
         &self,
         name: &Name,
-        version: impl Into<Option<&VersionTag>>,
+        version: impl Into<Option<&Version>>,
     ) -> Result<Option<ManifestContent>, GetError> {
         self.init().await;
 
@@ -159,7 +159,7 @@ where
     pub async fn store<M>(
         &self,
         name: &Name,
-        version: &VersionTag,
+        version: &Version,
         manifest: &M,
     ) -> Result<ObjectStorePath, StoreError>
     where
@@ -251,7 +251,7 @@ where
             };
 
             // Compute hash from manifest content
-            let manifest_hash = version_hash::hash(manifest_content);
+            let manifest_hash = hash(manifest_content);
 
             // Register the dataset in the metadata database
             // TODO: Pass the actual namespace instead of using a placeholder
@@ -308,7 +308,7 @@ where
     }
 }
 
-async fn list<S>(store: &S) -> BTreeSet<(Name, VersionTag, ManifestPath)>
+async fn list<S>(store: &S) -> BTreeSet<(Name, Version, ManifestPath)>
 where
     S: ObjectStore,
 {
@@ -353,7 +353,7 @@ where
             }
         };
 
-        let version = match version_str.replace('_', ".").parse::<VersionTag>() {
+        let version = match version_str.replace('_', ".").parse::<Version>() {
             Ok(version) => version,
             Err(err) => {
                 tracing::debug!(file_path = %manifest_path, error = ?err, "Skipping file with invalid version");
