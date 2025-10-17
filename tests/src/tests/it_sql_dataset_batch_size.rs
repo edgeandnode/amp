@@ -8,9 +8,7 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{
-        AmpCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
-    },
+    compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
 };
 use futures::StreamExt;
@@ -175,8 +173,9 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
-        let mut task = Compactor::start(table, &self.cache, &opts, &None);
-        task.join_current_then_spawn_new().await;
+        let cache = self.cache.clone();
+        let mut task = AmpCompactor::start(table, cache, &opts, None);
+        task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
@@ -194,8 +193,9 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
-        let mut task = Collector::start(table, &self.cache, &opts, &None);
-        task.join_current_then_spawn_new().await;
+        let cache = self.cache.clone();
+        let mut task = AmpCompactor::start(table, cache, &opts, None);
+        task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
