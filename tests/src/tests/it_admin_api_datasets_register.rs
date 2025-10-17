@@ -13,6 +13,7 @@ async fn register_new_dataset_with_manifest_succeeds() {
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     let register_request = RegisterRequest {
+        namespace: "_".parse().expect("valid namespace"),
         name: "register_test_new".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
         manifest: manifest_json.parse().expect("Valid JSON"),
@@ -41,6 +42,7 @@ async fn register_with_invalid_dataset_name_fails() {
     // This test expects deserialization to fail, so we need to construct the JSON manually
     // since .parse() would panic before we can test the HTTP error
     let json_payload = serde_json::json!({
+        "namespace": "_",
         "name": "invalid dataset name", // Contains spaces
         "version": "1.0.0",
         "manifest": null
@@ -81,6 +83,7 @@ async fn register_with_invalid_version_fails() {
     let ctx = TestCtx::setup("test_register_invalid_version").await;
     // This test expects deserialization to fail, so we need to construct the JSON manually
     let json_payload = serde_json::json!({
+        "namespace": "_",
         "name": "test_dataset",
         "version": "not_a_version", // Invalid semver
         "manifest": null
@@ -124,6 +127,7 @@ async fn register_with_missing_dependency_fails() {
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     let register_request = RegisterRequest {
+        namespace: "_".parse().expect("valid namespace"),
         name: "missing_dep".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
         manifest: manifest_json.parse().expect("Valid JSON"),
@@ -161,6 +165,7 @@ async fn register_existing_dataset_with_manifest_fails() {
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     let register_request = RegisterRequest {
+        namespace: "_".parse().expect("valid namespace"),
         name: "register_test_existing_dataset"
             .parse()
             .expect("valid dataset name"),
@@ -202,6 +207,7 @@ async fn register_with_invalid_manifest_json_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_invalid_manifest_json").await;
     let register_request = RegisterRequest {
+        namespace: "_".parse().expect("valid namespace"),
         name: "register_test_dataset".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
         manifest: "this is not valid json".parse().expect("non-empty string"),
@@ -250,6 +256,7 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
             serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
 
         let register_request = RegisterRequest {
+            namespace: "_".parse().expect("valid namespace"),
             name: "register_test_multi_version"
                 .parse()
                 .expect("valid dataset name"),
@@ -313,6 +320,7 @@ impl TestCtx {
         let manifest_json =
             serde_json::to_string(manifest).expect("failed to serialize manifest to JSON");
         let request = RegisterRequest {
+            namespace: "_".parse().expect("valid namespace"),
             name: manifest.name.clone(),
             version: manifest.version.clone(),
             manifest: manifest_json.parse().expect("Valid JSON"),
@@ -333,7 +341,6 @@ impl TestCtx {
     async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
         let name = name.parse::<Name>().expect("Invalid name");
         let version = version.parse::<Version>().expect("Invalid version");
-        // TODO: Pass the actual namespace instead of using a placeholder
         let namespace = "_"
             .parse::<Namespace>()
             .expect("'_' should be a valid namespace");

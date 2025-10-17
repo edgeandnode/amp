@@ -1602,8 +1602,9 @@
       },
       "RegisterRequest": {
         "type": "object",
-        "description": "Request payload for dataset registration\n\nContains the dataset name, version, and manifest.\nThe manifest will be registered in the local registry.",
+        "description": "Request payload for dataset registration\n\nContains the dataset namespace, name, version, and manifest.\nThe manifest will be registered in the local registry.",
         "required": [
+          "namespace",
           "name",
           "version",
           "manifest"
@@ -1616,6 +1617,10 @@
           "name": {
             "type": "string",
             "description": "Name of the dataset to be registered (validated identifier format)"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace for the dataset (validated identifier format)"
           },
           "version": {
             "type": "string",
