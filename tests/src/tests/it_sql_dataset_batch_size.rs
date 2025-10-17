@@ -177,8 +177,9 @@ impl TestCtx {
         let mut task = AmpCompactor::start(table, cache, &opts, None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            tokio::task::yield_now().await;
         }
+        tokio::time::sleep(Duration::from_millis(50)).await; // Ensure file locks have expired
     }
 
     /// Spawn collection for a table and wait for completion.
@@ -186,8 +187,8 @@ impl TestCtx {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
         let mut opts = parquet_opts(&config.parquet);
-        opts.compactor.active.swap(true, Ordering::SeqCst);
-        opts.collector.active.swap(false, Ordering::SeqCst);
+        opts.compactor.active.swap(false, Ordering::SeqCst);
+        opts.collector.active.swap(true, Ordering::SeqCst);
         let opts_mut = Arc::make_mut(&mut opts);
         opts_mut.collector.file_lock_duration = Duration::ZERO;
         opts_mut.collector.interval = Duration::ZERO;
@@ -197,7 +198,7 @@ impl TestCtx {
         let mut task = AmpCompactor::start(table, cache, &opts, None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::task::yield_now().await;
         }
     }
 }

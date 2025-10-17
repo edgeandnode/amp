@@ -153,11 +153,12 @@ impl InnerTask {
 
     pub async fn try_collect(self) -> TaskResult<Self> {
         // If collection is active and the interval has elapsed, run collection
-        if self.props.collector.active.load(SeqCst)
-            && Timestamp::now()
-                .0
-                .saturating_sub(self.previous_collection.0)
-                >= self.props.collector.interval
+        let is_active = self.props.collector.active.load(SeqCst);
+        let has_elapsed = Timestamp::now()
+            .0
+            .saturating_sub(self.previous_collection.0)
+            > self.props.collector.interval;
+        if is_active && has_elapsed
         {
             Ok(self.collect().await?)
         // Otherwise, return self without doing anything
@@ -168,11 +169,12 @@ impl InnerTask {
 
     pub async fn try_compact(self) -> TaskResult<Self> {
         // If compaction is active and the interval has elapsed, run compaction
-        if self.props.compactor.active.load(SeqCst)
-            && Timestamp::now()
-                .0
-                .saturating_sub(self.previous_compaction.0)
-                >= self.props.compactor.interval
+        let is_active = self.props.compactor.active.load(SeqCst);
+        let has_elapsed = Timestamp::now()
+            .0
+            .saturating_sub(self.previous_compaction.0)
+            > self.props.compactor.interval;
+        if is_active && has_elapsed
         {
             Ok(self.compact().await?)
         // Otherwise, return self without doing anything
@@ -275,7 +277,7 @@ impl AmpCompactor {
             }
         };
 
-        self.task.inner = tokio::spawn(inner.run());
+        self.task.inner = tokio::spawn(inner.try_run());
 
         Ok(())
     }
