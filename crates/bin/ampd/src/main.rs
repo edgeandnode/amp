@@ -268,15 +268,7 @@ async fn main_inner() -> Result<(), BoxError> {
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = worker_cmd::run(
-                config,
-                metadata_db,
-                node_id,
-                metrics_meter
-                    .clone()
-                    .expect("metrics_meter should always be initialized"),
-            )
-            .await;
+            let result = worker_cmd::run(config, metadata_db, node_id, metrics_meter).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
