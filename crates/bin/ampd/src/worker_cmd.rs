@@ -8,10 +8,10 @@ pub async fn run(
     config: Config,
     metadata_db: MetadataDb,
     node_id: NodeId,
-    meter: monitoring::telemetry::metrics::Meter,
+    meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), worker::Error> {
     let config = Arc::new(config);
 
-    let worker = Worker::new(config, metadata_db, node_id, Some(meter));
+    let worker = Worker::new(config, metadata_db, node_id, meter);
     worker.run().await
 }
