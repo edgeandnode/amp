@@ -118,6 +118,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addSuccess(Schema.Void, { status: 201 })
   .setPayload(
     Schema.Struct({
+      namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
       name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
       version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
       manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
@@ -694,6 +695,8 @@ export const make = Effect.fn(function*(url: string) {
     function*(name: string, version: string, manifest: Model.DatasetManifest | Model.DatasetRpc) {
       const request = client.dataset.registerDataset({
         payload: {
+          // TODO: Extract namespace from dataset config's owner field instead of using placeholder
+          namespace: "_",
           name,
           version,
           manifest,

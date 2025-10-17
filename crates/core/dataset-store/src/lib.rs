@@ -103,12 +103,13 @@ impl DatasetStore {
         &self.provider_configs_store
     }
 
-    /// Register a dataset manifest in both the dataset store and metadata database.
+    /// Register a dataset manifest with a specific version in both the dataset store and metadata database.
     ///
     /// The operation is atomic - either both the store and metadata database are updated
     /// or neither is updated.
-    pub async fn register_manifest<M>(
+    pub async fn register_manifest_with_version<M>(
         &self,
+        namespace: &Namespace,
         name: &Name,
         version: &Version,
         manifest_hash: &Hash,
@@ -118,7 +119,7 @@ impl DatasetStore {
         M: serde::Serialize,
     {
         // Check for existing datasets with the same name and version
-        if self.is_registered(name, version).await? {
+        if self.is_registered(namespace, name, version).await? {
             tracing::error!(
                 dataset_name = %name,
                 dataset_version = %version,
@@ -136,10 +137,6 @@ impl DatasetStore {
             .store(name, version, manifest)
             .await?;
 
-        // TODO: Pass the actual namespace instead of using a placeholder
-        let namespace = "_"
-            .parse::<Namespace>()
-            .expect("'_' should be a valid namespace");
         self.metadata_db
             .register_dataset(
                 namespace,
@@ -154,19 +151,42 @@ impl DatasetStore {
         Ok(())
     }
 
+    /// Register a dataset manifest using the default version (0.0.0) in both the dataset store and metadata database.
+    ///
+    /// This is a convenience method that calls `register_manifest_with_version` with `Version::default()`.
+    ///
+    /// The operation is atomic - either both the store and metadata database are updated
+    /// or neither is updated.
+    pub async fn register_manifest<M>(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        manifest_hash: &Hash,
+        manifest: &M,
+    ) -> Result<(), RegisterManifestError>
+    where
+        M: serde::Serialize,
+    {
+        self.register_manifest_with_version(
+            namespace,
+            name,
+            &Version::default(),
+            manifest_hash,
+            manifest,
+        )
+        .await
+    }
+
     /// Check if a dataset with the given name and version is registered
     ///
     /// Returns true if the dataset is registered, false otherwise.
     /// This operation queries the metadata database directly.
     pub async fn is_registered(
         &self,
+        namespace: &Namespace,
         name: &Name,
         version: &Version,
     ) -> Result<bool, IsRegisteredError> {
-        // TODO: Pass the actual namespace instead of using a placeholder
-        let namespace = "_"
-            .parse::<Namespace>()
-            .expect("'_' should be a valid namespace");
         self.metadata_db
             .dataset_exists(namespace, name, version)
             .await

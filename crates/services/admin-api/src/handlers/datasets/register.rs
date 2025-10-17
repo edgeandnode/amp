@@ -6,7 +6,8 @@ use axum::{
 use common::BoxError;
 use dataset_store::{DatasetKind, RegisterManifestError};
 use datasets_common::{
-    hash::hash, manifest::Manifest as CommonManifest, name::Name, version::Version,
+    hash::hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
+    version::Version,
 };
 use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
@@ -100,10 +101,11 @@ pub async fn handler(
     // Early check if dataset already exists in the store to avoid unnecessary processing
     let dataset_exists = ctx
         .dataset_store
-        .is_registered(&payload.name, &payload.version)
+        .is_registered(&payload.namespace, &payload.name, &payload.version)
         .await
         .map_err(|err| {
             tracing::error!(
+                namespace = %payload.namespace,
                 name = %payload.name,
                 version = %payload.version,
                 error = ?err,
@@ -171,10 +173,17 @@ pub async fn handler(
             })?;
 
             ctx.dataset_store
-                .register_manifest(&payload.name, &payload.version, &manifest_hash, &manifest)
+                .register_manifest_with_version(
+                    &payload.namespace,
+                    &payload.name,
+                    &payload.version,
+                    &manifest_hash,
+                    &manifest,
+                )
                 .await
                 .map_err(|err| {
                     tracing::error!(
+                        namespace = %payload.namespace,
                         name = %payload.name,
                         version = %payload.version,
                         kind = %dataset_kind,
@@ -205,10 +214,17 @@ pub async fn handler(
                 })?;
 
             ctx.dataset_store
-                .register_manifest(&payload.name, &payload.version, &manifest_hash, &manifest)
+                .register_manifest_with_version(
+                    &payload.namespace,
+                    &payload.name,
+                    &payload.version,
+                    &manifest_hash,
+                    &manifest,
+                )
                 .await
                 .map_err(|err| {
                     tracing::error!(
+                        namespace = %payload.namespace,
                         name = %payload.name,
                         version = %payload.version,
                         kind = %dataset_kind,
@@ -234,11 +250,14 @@ pub async fn handler(
 
 /// Request payload for dataset registration
 ///
-/// Contains the dataset name, version, and manifest.
+/// Contains the dataset namespace, name, version, and manifest.
 /// The manifest will be registered in the local registry.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RegisterRequest {
+    /// Namespace for the dataset (validated identifier format)
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub namespace: Namespace,
     /// Name of the dataset to be registered (validated identifier format)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: Name,
