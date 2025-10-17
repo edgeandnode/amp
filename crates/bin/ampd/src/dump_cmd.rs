@@ -10,7 +10,8 @@ use common::{
     utils::dfs,
 };
 use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, datasets_and_dependencies, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
 use datasets_common::version_tag::VersionTag;
 use datasets_derived::DerivedDatasetKind;
@@ -222,45 +223,6 @@ pub async fn dump(
     Ok(all_tables)
 }
 
-/// Return the input datasets and their dataset dependencies. The output set is ordered such that
-/// each dataset comes after all datasets it depends on.
-pub async fn datasets_and_dependencies(
-    store: &Arc<DatasetStore>,
-    mut datasets: Vec<String>,
-) -> Result<Vec<String>, BoxError> {
-    let mut deps: BTreeMap<String, Vec<String>> = Default::default();
-    while let Some(dataset_name) = datasets.pop() {
-        let Some(dataset) = store.get_dataset(&dataset_name, None).await? else {
-            return Err(format!("Dataset '{}' not found", dataset_name).into());
-        };
-
-        if dataset.kind != DerivedDatasetKind {
-            deps.insert(dataset.name.to_string(), vec![]);
-            continue;
-        }
-
-        let manifest = store
-            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
-            .await?
-            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
-
-        let refs: Vec<String> = manifest
-            .dependencies
-            .into_values()
-            .map(|d| d.name().to_string())
-            .collect();
-        let mut untracked_refs = refs
-            .iter()
-            .filter(|r| deps.keys().all(|d| d != *r))
-            .cloned()
-            .collect();
-        datasets.append(&mut untracked_refs);
-        deps.insert(dataset.to_identifier(), refs);
-    }
-
-    dependency_sort(deps)
-}
-
 pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
     match metrics_export_interval {
         Some(export_interval) => {
@@ -287,56 +249,3 @@ pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
     }
 }
 
-/// Given a map of values to their dependencies, return a set where each value is ordered after
-/// all of its dependencies. An error is returned if a cycle is detected.
-fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
-    let nodes: BTreeSet<&String> = deps
-        .iter()
-        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
-        .collect();
-    let mut ordered: Vec<String> = Default::default();
-    let mut visited: BTreeSet<&String> = Default::default();
-    let mut visited_cycle: BTreeSet<&String> = Default::default();
-    for node in nodes {
-        if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
-        }
-    }
-    Ok(ordered)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dependency_sort_order() {
-        #[allow(clippy::type_complexity)]
-        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
-            (&[("a", &["b"]), ("b", &["a"])], None),
-            (&[("a", &["b"])], Some(&["b", "a"])),
-            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
-            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
-            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
-            (
-                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
-                Some(&["d", "b", "c", "a"]),
-            ),
-            (
-                &[("a", &["b", "c"]), ("b", &["c", "d"])],
-                Some(&["c", "d", "b", "a"]),
-            ),
-        ];
-        for (input, expected) in cases {
-            let deps = input
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(ToString::to_string).collect()))
-                .collect();
-            let result = dependency_sort(deps);
-            match expected {
-                Some(expected) => assert_eq!(*expected, result.unwrap()),
-                None => assert!(result.is_err()),
-            }
-        }
-    }
-}

@@ -35,7 +35,7 @@ use crate::{
 /// `pkg:amp/<namespace>/<name>@<version>`
 ///
 /// All three components must follow their respective validation rules.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(with = "String"))]
 #[cfg_attr(

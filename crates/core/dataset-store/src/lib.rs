@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, num::NonZeroU32, str::FromStr, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroU32,
+    str::FromStr,
+    sync::Arc,
+};
 
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
@@ -13,7 +18,7 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
+    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, reference::Reference,
     version_hash::VersionHash, version_tag::VersionTag,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
@@ -1027,4 +1032,106 @@ pub async fn resolve_blocks_table(
                 table.name()
             ))
         })
+}
+
+/// Return the input datasets and their dataset dependencies. The output set is ordered such that
+/// each dataset comes after all datasets it depends on.
+pub async fn datasets_and_dependencies(
+    store: &Arc<DatasetStore>,
+    mut datasets: Vec<Reference>,
+) -> Result<Vec<Reference>, BoxError> {
+    let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
+    while let Some(dataset_ref) = datasets.pop() {
+        let Some(dataset) = store
+            .get_dataset(
+                dataset_ref.name(),
+                &dataset_ref.version().clone().into_tag(),
+            )
+            .await?
+        else {
+            return Err(format!("Dataset '{}' not found", dataset_ref).into());
+        };
+
+        if dataset.kind != DerivedDatasetKind {
+            deps.insert(dataset_ref, vec![]);
+            continue;
+        }
+
+        let manifest = store
+            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .await?
+            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
+
+        let refs: Vec<Reference> = manifest.dependencies.into_values().collect();
+        let mut untracked_refs = refs
+            .iter()
+            .filter(|r| deps.keys().all(|d| d != *r))
+            .cloned()
+            .collect();
+        datasets.append(&mut untracked_refs);
+        deps.insert(dataset_ref, refs);
+    }
+
+    dependency_sort(deps)
+}
+
+/// Given a map of values to their dependencies, return a set where each value is ordered after
+/// all of its dependencies. An error is returned if a cycle is detected.
+fn dependency_sort(deps: BTreeMap<Reference, Vec<Reference>>) -> Result<Vec<Reference>, BoxError> {
+    let nodes: BTreeSet<&Reference> = deps
+        .iter()
+        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
+        .collect();
+    let mut ordered: Vec<Reference> = Default::default();
+    let mut visited: BTreeSet<&Reference> = Default::default();
+    let mut visited_cycle: BTreeSet<&Reference> = Default::default();
+    for node in nodes {
+        if !visited.contains(node) {
+            common::utils::dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+        }
+    }
+    Ok(ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dependency_sort_order() {
+        #[allow(clippy::type_complexity)]
+        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
+            (&[("a", &["b"]), ("b", &["a"])], None),
+            (&[("a", &["b"])], Some(&["b", "a"])),
+            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
+            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
+            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
+            (
+                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
+                Some(&["d", "b", "c", "a"]),
+            ),
+            (
+                &[("a", &["b", "c"]), ("b", &["c", "d"])],
+                Some(&["c", "d", "b", "a"]),
+            ),
+        ];
+        let name_to_ref = |name: &str| {
+            datasets_common::reference::Reference::new(
+                "_".parse().unwrap(),
+                name.parse().unwrap(),
+                datasets_common::version::Version::Dev,
+            )
+        };
+        for (input, expected) in cases {
+            let deps = input
+                .into_iter()
+                .map(|(k, v)| (name_to_ref(k), v.iter().map(|n| name_to_ref(n)).collect()))
+                .collect();
+            let expected: Option<Vec<datasets_common::reference::Reference>> =
+                expected.map(|n| n.iter().map(|n| name_to_ref(n)).collect());
+            let result = super::dependency_sort(deps);
+            match expected {
+                Some(expected) => assert_eq!(*expected, result.unwrap()),
+                None => assert!(result.is_err()),
+            }
+        }
+    }
 }

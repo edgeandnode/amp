@@ -12,7 +12,7 @@ use crate::{version_hash::VersionHash, version_tag::VersionTag};
 /// - `Hash`: A 32-byte SHA-256 content hash
 /// - `Latest`: The latest tagged semver version
 /// - `Dev`: The latest hash based on timestamp ordering
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Version {
     /// A semantic version tag
