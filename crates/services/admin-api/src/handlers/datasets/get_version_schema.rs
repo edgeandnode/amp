@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{manifest::DataType, name::Name, version_tag::VersionTag};
+use datasets_common::{manifest::DataType, name::Name, version::Version};
 use datasets_derived::manifest::{ArrowSchema, Field, TableSchema};
 
 use crate::{
@@ -58,7 +58,7 @@ use crate::{
 )]
 pub async fn handler_with_version(
     State(ctx): State<Ctx>,
-    path: Result<Path<(Name, VersionTag)>, PathRejection>,
+    path: Result<Path<(Name, Version)>, PathRejection>,
 ) -> Result<Json<DatasetSchemaResponse>, ErrorResponse> {
     let (name, version) = match path {
         Ok(Path((name, version))) => (name, version),
@@ -146,7 +146,7 @@ pub struct DatasetSchemaResponse {
     pub name: Name,
     /// The version of the dataset using semantic versioning (e.g., "1.0.0")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: VersionTag,
+    pub version: Version,
     /// List of tables with their schemas
     pub tables: Vec<TableSchemaInfo>,
 }
@@ -187,7 +187,7 @@ pub enum Error {
     /// - The dataset has been deleted or moved
     /// - Dataset configuration is missing
     #[error("dataset '{name}' version '{version}' not found")]
-    NotFound { name: Name, version: VersionTag },
+    NotFound { name: Name, version: Version },
 
     /// Dataset store error while getting the dataset
     ///

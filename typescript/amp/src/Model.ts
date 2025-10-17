@@ -1,10 +1,5 @@
 import * as Schema from "effect/Schema"
 
-export class Dependency extends Schema.Class<Dependency>("Dependency")({
-  name: Schema.String,
-  version: Schema.String,
-}) {}
-
 export class TableDefinition extends Schema.Class<TableDefinition>(
   "TableDefinition",
 )({
@@ -18,6 +13,37 @@ export const DatasetName = Schema.Lowercase.pipe(
     examples: ["uniswap"],
   }),
 )
+
+export const Reference = Schema.String.pipe(
+  Schema.pattern(/^[a-z0-9_]+\/[a-z_][a-z0-9_]*@.+$/),
+  Schema.annotations({
+    title: "Reference",
+    description: "a dataset reference in the format namespace/name@version",
+    examples: ["edgeandnode/mainnet@0.0.0", "0xdeadbeef/eth_firehose@0.0.0"],
+  }),
+)
+
+/**
+ * Parses a Reference to extract the namespace, name, and version components.
+ *
+ * @param reference - The Reference string to parse in format "namespace/name@version"
+ * @returns An object with namespace, name, and version properties
+ *
+ * @example
+ * const { namespace, name, version } = parseReference("edgeandnode/mainnet@1.0.0")
+ * // { namespace: "edgeandnode", name: "mainnet", version: "1.0.0" }
+ */
+export const parseReference = (reference: string): { namespace: string; name: string; version: string } => {
+  const atIndex = reference.lastIndexOf("@")
+  const slashIndex = reference.indexOf("/")
+
+  // Since the reference passed schema validation, we know it has the correct format
+  const namespace = reference.substring(0, slashIndex)
+  const name = reference.substring(slashIndex + 1, atIndex)
+  const version = reference.substring(atIndex + 1)
+
+  return { namespace, name, version }
+}
 
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
@@ -95,7 +121,7 @@ export class DatasetDefinition extends Schema.Class<DatasetDefinition>(
   version: DatasetVersion,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
-  dependencies: Schema.Record({ key: Schema.String, value: Dependency }),
+  dependencies: Schema.Record({ key: Schema.String, value: Reference }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
 }) {}
@@ -242,7 +268,7 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>(
   network: Network,
   name: DatasetName,
   version: DatasetVersion,
-  dependencies: Schema.Record({ key: Schema.String, value: Dependency }),
+  dependencies: Schema.Record({ key: Schema.String, value: Reference }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
 }) {}

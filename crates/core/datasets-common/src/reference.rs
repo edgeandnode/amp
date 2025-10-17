@@ -1,23 +1,23 @@
-//! Dataset reference types combining namespace, name, and version.
+//! Dataset reference types combining namespace, name, and revision.
 //!
 //! This module provides the `Reference` type that combines a namespace, dataset name,
-//! and version to create a complete, versioned dataset identifier.
+//! and revision to create a complete, versioned dataset identifier.
 
 use crate::{
     fqn::FullyQualifiedName,
     name::{Name, NameError},
     namespace::{Namespace, NamespaceError},
-    version::{Version, VersionParseError},
+    revision::{Revision, RevisionParseError},
 };
 
-/// A complete dataset reference combining namespace, name, and version.
+/// A complete dataset reference combining namespace, name, and revision.
 ///
 /// This type provides a fully versioned identifier for datasets by combining
-/// a namespace, dataset name, and version using `/` and `@` separators.
+/// a namespace, dataset name, and revision using `/` and `@` separators.
 ///
 /// ## Format
 ///
-/// The string representation follows the format: `<namespace>/<name>@<version>`
+/// The string representation follows the format: `<namespace>/<name>@<revision>`
 ///
 /// ## Examples
 ///
@@ -32,10 +32,10 @@ use crate::{
 /// ## PURL Format
 ///
 /// References can also be represented as Package URLs (PURLs) with the format:
-/// `pkg:amp/<namespace>/<name>@<version>`
+/// `pkg:amp/<namespace>/<name>@<revision>`
 ///
 /// All three components must follow their respective validation rules.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(with = "String"))]
 #[cfg_attr(
@@ -52,12 +52,12 @@ use crate::{
         ])
     )
 )]
-pub struct Reference(Namespace, Name, Version);
+pub struct Reference(Namespace, Name, Revision);
 
 impl Reference {
     /// Create a new reference from components.
-    pub fn new(namespace: Namespace, name: Name, version: Version) -> Self {
-        Self(namespace, name, version)
+    pub fn new(namespace: Namespace, name: Name, revision: Revision) -> Self {
+        Self(namespace, name, revision)
     }
 
     /// Access the namespace component.
@@ -70,24 +70,24 @@ impl Reference {
         &self.1
     }
 
-    /// Access the version component.
-    pub fn version(&self) -> &Version {
+    /// Access the revision component.
+    pub fn revision(&self) -> &Revision {
         &self.2
     }
 
-    /// Consume the reference and return the fully qualified name (namespace and name without version).
+    /// Consume the reference and return the fully qualified name (namespace and name without revision).
     pub fn into_fqn(self) -> FullyQualifiedName {
         FullyQualifiedName::new(self.0, self.1)
     }
 
     /// Consume the reference and return the inner components.
-    pub fn into_parts(self) -> (Namespace, Name, Version) {
+    pub fn into_parts(self) -> (Namespace, Name, Revision) {
         (self.0, self.1, self.2)
     }
 
     /// Convert this reference to a Package URL (PURL) format.
     ///
-    /// Returns a string in the format: `pkg:amp/<namespace>/<name>@<version>`
+    /// Returns a string in the format: `pkg:amp/<namespace>/<name>@<revision>`
     ///
     /// ## Example
     ///
@@ -100,7 +100,7 @@ impl Reference {
 
     /// Parse a Package URL (PURL) into a Reference.
     ///
-    /// The input must be in the format: `pkg:amp/<namespace>/<name>@<version>`
+    /// The input must be in the format: `pkg:amp/<namespace>/<name>@<revision>`
     ///
     /// ## Example
     ///
@@ -136,12 +136,12 @@ impl std::str::FromStr for Reference {
     }
 }
 
-/// Parse reference parts from a string in the format `<namespace>/<name>@<version>`.
+/// Parse reference parts from a string in the format `<namespace>/<name>@<revision>`.
 fn parse_reference_parts(s: &str) -> Result<Reference, ReferenceError> {
-    // Split by '@' to separate version
-    let (fqn_part, version_str) = s
+    // Split by '@' to separate revision
+    let (fqn_part, revision_str) = s
         .split_once('@')
-        .ok_or_else(|| ReferenceError::MissingVersionSeparator(s.to_string()))?;
+        .ok_or_else(|| ReferenceError::MissingRevisionSeparator(s.to_string()))?;
 
     // Split by '/' to separate namespace and name
     let (namespace_str, name_str) = fqn_part
@@ -153,11 +153,11 @@ fn parse_reference_parts(s: &str) -> Result<Reference, ReferenceError> {
         .parse()
         .map_err(ReferenceError::InvalidNamespace)?;
     let name = name_str.parse().map_err(ReferenceError::InvalidName)?;
-    let version = version_str
+    let revision = revision_str
         .parse()
-        .map_err(ReferenceError::InvalidVersion)?;
+        .map_err(ReferenceError::InvalidRevision)?;
 
-    Ok(Reference(namespace, name, version))
+    Ok(Reference(namespace, name, revision))
 }
 
 impl serde::Serialize for Reference {
@@ -182,9 +182,9 @@ impl<'de> serde::Deserialize<'de> for Reference {
 /// Errors that can occur when parsing a [`Reference`] from string.
 #[derive(Debug, thiserror::Error)]
 pub enum ReferenceError {
-    /// The reference format is missing the '@' separator for version
-    #[error("invalid reference format '{0}', missing '@' separator for version")]
-    MissingVersionSeparator(String),
+    /// The reference format is missing the '@' separator for revision
+    #[error("invalid reference format '{0}', missing '@' separator for revision")]
+    MissingRevisionSeparator(String),
 
     /// The reference format is missing the '/' separator for namespace and name
     #[error("invalid reference format '{0}', missing '/' separator between namespace and name")]
@@ -198,16 +198,16 @@ pub enum ReferenceError {
     #[error("invalid name in reference: {0}")]
     InvalidName(NameError),
 
-    /// The version component is invalid
-    #[error("invalid version in reference: {0}")]
-    InvalidVersion(VersionParseError),
+    /// The revision component is invalid
+    #[error("invalid revision in reference: {0}")]
+    InvalidRevision(RevisionParseError),
 }
 
 /// Errors that can occur when parsing a PURL (Package URL).
 #[derive(Debug, thiserror::Error)]
 pub enum PurlParseError {
     /// The PURL prefix is invalid or missing
-    #[error("invalid PURL format '{0}', expected format 'pkg:amp/<namespace>/<name>@<version>'")]
+    #[error("invalid PURL format '{0}', expected format 'pkg:amp/<namespace>/<name>@<revision>'")]
     InvalidPrefix(String),
 
     /// Error parsing the reference portion of the PURL
@@ -220,7 +220,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_str_with_valid_tag_version_succeeds() {
+    fn from_str_with_valid_version_succeeds() {
         //* Given
         let input = "my_namespace/my_dataset@1.0.0";
 
@@ -230,9 +230,9 @@ mod tests {
         //* Then
         assert!(
             result.is_ok(),
-            "from_str should succeed with valid semver tag format"
+            "from_str should succeed with valid semver version format"
         );
-        let reference = result.expect("from_str should return valid Reference with semver tag");
+        let reference = result.expect("from_str should return valid Reference with semver version");
         assert_eq!(
             reference.namespace().as_str(),
             "my_namespace",
@@ -244,8 +244,8 @@ mod tests {
             "name should match input"
         );
         assert!(
-            reference.version().is_tag(),
-            "version should be parsed as Tag variant"
+            reference.revision().is_version(),
+            "revision should be parsed as Version variant"
         );
         assert_eq!(
             reference.to_string(),
@@ -279,8 +279,8 @@ mod tests {
             "name should match input"
         );
         assert!(
-            reference.version().is_tag(),
-            "version should be parsed as Tag variant"
+            reference.revision().is_version(),
+            "revision should be parsed as Version variant"
         );
         assert_eq!(
             reference.to_string(),
@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_with_latest_version_succeeds() {
+    fn from_str_with_latest_revision_succeeds() {
         //* Given
         let input = "my_namespace/my_dataset@latest";
 
@@ -300,12 +300,12 @@ mod tests {
         //* Then
         assert!(
             result.is_ok(),
-            "parsing should succeed with 'latest' version"
+            "parsing should succeed with 'latest' revision"
         );
         let reference = result.expect("should return valid Reference");
         assert!(
-            reference.version().is_latest(),
-            "version should be parsed as Latest variant"
+            reference.revision().is_latest(),
+            "revision should be parsed as Latest variant"
         );
         assert_eq!(
             reference.to_string(),
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_with_dev_version_succeeds() {
+    fn from_str_with_dev_revision_succeeds() {
         //* Given
         let input = "my_namespace/my_dataset@dev";
 
@@ -323,11 +323,11 @@ mod tests {
         let result: Result<Reference, _> = input.parse();
 
         //* Then
-        assert!(result.is_ok(), "parsing should succeed with 'dev' version");
+        assert!(result.is_ok(), "parsing should succeed with 'dev' revision");
         let reference = result.expect("should return valid Reference");
         assert!(
-            reference.version().is_dev(),
-            "version should be parsed as Dev variant"
+            reference.revision().is_dev(),
+            "revision should be parsed as Dev variant"
         );
         assert_eq!(
             reference.to_string(),
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_with_hash_version_succeeds() {
+    fn from_str_with_hash_revision_succeeds() {
         //* Given
         let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         let input = format!("my_namespace/my_dataset@{}", hash);
@@ -346,11 +346,11 @@ mod tests {
         let result: Result<Reference, _> = input.parse();
 
         //* Then
-        assert!(result.is_ok(), "parsing should succeed with hash version");
+        assert!(result.is_ok(), "parsing should succeed with hash revision");
         let reference = result.expect("should return valid Reference");
         assert!(
-            reference.version().is_hash(),
-            "version should be parsed as Hash variant"
+            reference.revision().is_hash(),
+            "revision should be parsed as Hash variant"
         );
         assert_eq!(
             reference.to_string(),
@@ -381,8 +381,8 @@ mod tests {
             "name should match input"
         );
         assert!(
-            reference.version().is_tag(),
-            "version should be parsed as Tag variant"
+            reference.revision().is_version(),
+            "revision should be parsed as Version variant"
         );
     }
 
@@ -455,7 +455,7 @@ mod tests {
             .expect("should create valid Reference");
 
         //* When
-        let (namespace, name, version) = reference.into_parts();
+        let (namespace, name, revision) = reference.into_parts();
 
         //* Then
         assert_eq!(
@@ -464,11 +464,11 @@ mod tests {
             "namespace should match input"
         );
         assert_eq!(name.as_str(), "my_dataset", "name should match input");
-        assert!(version.is_tag(), "version should be Tag variant");
+        assert!(revision.is_version(), "revision should be Version variant");
     }
 
     #[test]
-    fn from_str_with_missing_version_separator_fails() {
+    fn from_str_with_missing_revision_separator_fails() {
         //* Given
         let input = "my_namespace/my_dataset";
 
@@ -478,12 +478,12 @@ mod tests {
         //* Then
         assert!(
             result.is_err(),
-            "parsing should fail without version separator"
+            "parsing should fail without revision separator"
         );
         let error = result.expect_err("should return error");
         assert!(
-            matches!(error, ReferenceError::MissingVersionSeparator(_)),
-            "Expected MissingVersionSeparator error, got {:?}",
+            matches!(error, ReferenceError::MissingRevisionSeparator(_)),
+            "Expected MissingRevisionSeparator error, got {:?}",
             error
         );
     }
@@ -549,19 +549,19 @@ mod tests {
     }
 
     #[test]
-    fn from_str_with_invalid_version_fails() {
+    fn from_str_with_invalid_revision_fails() {
         //* Given
-        let input = "my_namespace/my_dataset@not-a-version";
+        let input = "my_namespace/my_dataset@not-a-revision";
 
         //* When
         let result: Result<Reference, _> = input.parse();
 
         //* Then
-        assert!(result.is_err(), "parsing should fail with invalid version");
+        assert!(result.is_err(), "parsing should fail with invalid revision");
         let error = result.expect_err("should return error");
         assert!(
-            matches!(error, ReferenceError::InvalidVersion(_)),
-            "Expected InvalidVersion error, got {:?}",
+            matches!(error, ReferenceError::InvalidRevision(_)),
+            "Expected InvalidRevision error, got {:?}",
             error
         );
     }
@@ -610,8 +610,8 @@ mod tests {
             "name should match input"
         );
         assert!(
-            reference.version().is_tag(),
-            "version should be parsed as Tag variant"
+            reference.revision().is_version(),
+            "revision should be parsed as Version variant"
         );
     }
 }

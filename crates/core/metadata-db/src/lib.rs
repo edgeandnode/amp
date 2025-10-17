@@ -26,10 +26,11 @@ use self::conn::{DbConn, DbConnPool};
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
-        Dataset, DatasetWithDetails, Name as DatasetName, NameOwned as DatasetNameOwned,
-        Namespace as DatasetNamespace, NamespaceOwned as DatasetNamespaceOwned,
-        VersionHash as DatasetVersionHash, VersionHashOwned as DatasetVersionHashOwned,
-        VersionTag as DatasetVersionTag, VersionTagOwned as DatasetVersionTagOwned,
+        Dataset, DatasetWithDetails, Hash as DatasetHash, Hash as DatasetVersionHash,
+        HashOwned as DatasetHashOwned, HashOwned as DatasetVersionHashOwned, Name as DatasetName,
+        NameOwned as DatasetNameOwned, Namespace as DatasetNamespace,
+        NamespaceOwned as DatasetNamespaceOwned, Version as DatasetVersion,
+        VersionOwned as DatasetVersionOwned,
     },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
@@ -432,7 +433,7 @@ impl MetadataDb {
     pub async fn get_jobs_by_dataset(
         &self,
         dataset_name: impl Into<DatasetName<'_>>,
-        dataset_version: Option<impl Into<DatasetVersionTag<'_>>>,
+        dataset_version: Option<impl Into<DatasetVersion<'_>>>,
     ) -> Result<Vec<Job>, Error> {
         Ok(jobs::get_jobs_by_dataset(
             &*self.pool,
@@ -803,8 +804,8 @@ impl MetadataDb {
         &self,
         namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
         name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        version: impl Into<DatasetVersionTag<'_>> + std::fmt::Debug,
-        manifest_hash: impl Into<DatasetVersionHash<'_>> + std::fmt::Debug,
+        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
         datasets::insert(
@@ -825,7 +826,7 @@ impl MetadataDb {
     pub async fn dataset_exists(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersionTag<'_>>,
+        version: impl Into<DatasetVersion<'_>>,
     ) -> Result<bool, Error> {
         datasets::exists_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
@@ -839,7 +840,7 @@ impl MetadataDb {
     pub async fn get_dataset_with_details(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersionTag<'_>>,
+        version: impl Into<DatasetVersion<'_>>,
     ) -> Result<Option<DatasetWithDetails>, Error> {
         datasets::get_by_name_and_version_with_details(&*self.pool, name.into(), version.into())
             .await
@@ -853,7 +854,7 @@ impl MetadataDb {
     pub async fn get_dataset_manifest_path(
         &self,
         name: impl Into<DatasetName<'_>>,
-        version: impl Into<DatasetVersionTag<'_>>,
+        version: impl Into<DatasetVersion<'_>>,
     ) -> Result<Option<String>, Error> {
         datasets::get_manifest_path_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
@@ -895,7 +896,7 @@ impl MetadataDb {
     pub async fn list_dataset_versions<'a, N>(
         &self,
         name: N,
-    ) -> Result<Vec<DatasetVersionTagOwned>, Error>
+    ) -> Result<Vec<DatasetVersionOwned>, Error>
     where
         N: Into<DatasetName<'a>>,
     {

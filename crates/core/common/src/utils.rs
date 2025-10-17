@@ -25,15 +25,18 @@ pub async fn shutdown_signal() {
     }
 }
 
-pub fn dfs<'a>(
-    node: &'a String,
-    deps: &'a BTreeMap<String, Vec<String>>,
-    ordered: &mut Vec<String>,
-    visited: &mut BTreeSet<&'a String>,
-    visited_cycle: &mut BTreeSet<&'a String>,
-) -> Result<(), BoxError> {
+pub fn dfs<'a, N>(
+    node: &'a N,
+    deps: &'a BTreeMap<N, Vec<N>>,
+    ordered: &mut Vec<N>,
+    visited: &mut BTreeSet<&'a N>,
+    visited_cycle: &mut BTreeSet<&'a N>,
+) -> Result<(), BoxError>
+where
+    N: Clone + std::fmt::Display + Ord,
+{
     if visited_cycle.contains(node) {
-        return Err(format!("dependency cycle detected on dataset {node}").into());
+        return Err(format!("dependency cycle detected on {node}").into());
     }
     if visited.contains(node) {
         return Ok(());
@@ -44,6 +47,6 @@ pub fn dfs<'a>(
     }
     visited_cycle.remove(node);
     visited.insert(node);
-    ordered.push(node.to_string());
+    ordered.push(node.clone());
     Ok(())
 }

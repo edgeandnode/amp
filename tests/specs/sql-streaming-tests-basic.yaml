@@ -1,5 +1,5 @@
 - name: restore_eth_rpc
-  restore: eth_rpc
+  restore: _/eth_rpc@0.0.0
 
 - name: invalid_streaming_query1
   query: SELECT count(*) FROM eth_rpc.blocks SETTINGS stream = true

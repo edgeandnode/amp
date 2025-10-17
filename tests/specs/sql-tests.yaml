@@ -1,5 +1,5 @@
 - name: restore_eth_rpc
-  restore: eth_rpc
+  restore: _/eth_rpc@0.0.0
 
 - name: select_alias_special_block_num_empty_relation
   query: |

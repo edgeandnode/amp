@@ -1,5 +1,5 @@
 use admin_api::handlers::{datasets::register::RegisterRequest, error::ErrorResponse};
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use reqwest::StatusCode;
 
@@ -332,7 +332,7 @@ impl TestCtx {
 
     async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
         let name = name.parse::<Name>().expect("Invalid name");
-        let version = version.parse::<VersionTag>().expect("Invalid version");
+        let version = version.parse::<Version>().expect("Invalid version");
         self.ctx
             .metadata_db()
             .dataset_exists(name, version)
@@ -348,10 +348,7 @@ fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
             "version": "{version}",
             "kind": "manifest",
             "dependencies": {{
-                "raw_mainnet": {{
-                    "name": "eth_firehose",
-                    "version": "0.0.1"
-                }}
+                "raw_mainnet": "_/eth_firehose@0.0.1"
             }},
             "tables": {{
                 "test_table": {{

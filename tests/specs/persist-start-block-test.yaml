@@ -2,11 +2,11 @@
   clean_dump_location: anvil_rpc
 
 - name: dump_initial_range
-  dataset: anvil_rpc
+  dataset: _/anvil_rpc@0.0.0
   end: 9
 
 - name: dump_conflicting_range
-  dataset: anvil_rpc
+  dataset: _/anvil_rpc@0.0.0
   start: 1
   end: 10
   failure: |

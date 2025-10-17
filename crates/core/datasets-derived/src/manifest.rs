@@ -13,11 +13,7 @@ use datafusion::{
     arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
-use datasets_common::{
-    manifest::{DataType, VersionReq},
-    name::Name,
-    version_tag::VersionTag,
-};
+use datasets_common::{manifest::DataType, name::Name, reference::Reference, version::Version};
 
 use crate::dataset_kind::DerivedDatasetKind;
 
@@ -33,31 +29,19 @@ pub struct Manifest {
     /// Dataset name
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
-    pub version: VersionTag,
+    pub version: Version,
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
 
     /// External dataset dependencies with version requirements
     #[serde(default)]
-    pub dependencies: BTreeMap<String, Dependency>,
+    pub dependencies: BTreeMap<String, Reference>,
     /// Table definitions mapped by table name
     #[serde(default)]
     pub tables: BTreeMap<String, Table>,
     /// User-defined function definitions mapped by function name
     #[serde(default)]
     pub functions: BTreeMap<String, Function>,
-}
-
-/// External dataset dependency specification.
-///
-/// Defines a dependency on another dataset with version constraints.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Dependency {
-    /// Name of the dependency dataset
-    pub name: String,
-    /// Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`
-    pub version: VersionReq,
 }
 
 /// Table definition within a derived dataset.
@@ -214,7 +198,7 @@ impl Manifest {
         let declared_deps: BTreeSet<String> = self
             .dependencies
             .values()
-            .map(|dep| dep.name.to_string())
+            .map(|dep| dep.name().to_string())
             .collect();
         let missing_deps: Vec<String> = sql_deps.difference(&declared_deps).cloned().collect();
         if !missing_deps.is_empty() {

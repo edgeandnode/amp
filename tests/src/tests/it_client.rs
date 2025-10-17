@@ -19,7 +19,7 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
     let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
     let last_block = 3;
     let mut client = test.new_amp_client().await;
-    test.dump("anvil_rpc", 0).await;
+    test.dump("_/anvil_rpc@0.0.0", 0).await;
     let stream = client
         .query(query, None, None)
         .await
@@ -58,13 +58,13 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
     });
 
     test.mine(1).await;
-    test.dump("anvil_rpc", 1).await;
+    test.dump("_/anvil_rpc@0.0.0", 1).await;
     test.mine(1).await;
-    test.dump("anvil_rpc", 2).await;
+    test.dump("_/anvil_rpc@0.0.0", 2).await;
     test.reorg(1).await;
     test.mine(1).await;
-    test.dump("anvil_rpc", 3).await;
-    test.dump("anvil_rpc", 3).await;
+    test.dump("_/anvil_rpc@0.0.0", 3).await;
+    test.dump("_/anvil_rpc@0.0.0", 3).await;
 
     assert_eq!(
         handle.await.expect("Failed to await control messages task"),
@@ -85,13 +85,13 @@ async fn stream_with_resume_watermark_returns_incremental_blocks() {
     let mut client = test.new_amp_client().await;
 
     test.mine(1).await;
-    test.dump("anvil_rpc", 1).await;
+    test.dump("_/anvil_rpc@0.0.0", 1).await;
     let stream1 = stream_blocks(&mut client, query, 1, None).await;
     // stream blocks [0, 1]
     assert_eq!(stream1.records, test.query_blocks("anvil_rpc", None).await);
 
     test.mine(1).await;
-    test.dump("anvil_rpc", 2).await;
+    test.dump("_/anvil_rpc@0.0.0", 2).await;
     let stream2 = stream_blocks(&mut client, query, 2, Some(&stream1.watermark)).await;
     // stream blocks [2]
     assert_eq!(
@@ -101,9 +101,9 @@ async fn stream_with_resume_watermark_returns_incremental_blocks() {
 
     test.reorg(2).await;
     test.mine(1).await;
-    test.dump("anvil_rpc", 3).await;
-    test.dump("anvil_rpc", 3).await;
-    test.dump("anvil_rpc", 3).await;
+    test.dump("_/anvil_rpc@0.0.0", 3).await;
+    test.dump("_/anvil_rpc@0.0.0", 3).await;
+    test.dump("_/anvil_rpc@0.0.0", 3).await;
     let stream3 = stream_blocks(&mut client, query, 3, Some(&stream2.watermark)).await;
     // stream blocks [1', 2', 3]
     assert_eq!(
@@ -158,7 +158,7 @@ impl TestCtx {
         test_helpers::dump_dataset(
             self.ctx.daemon_server().config(),
             self.ctx.metadata_db(),
-            dataset,
+            dataset.parse().expect("failed to parse dataset reference"),
             end,
             1,
             None,

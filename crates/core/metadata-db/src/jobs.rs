@@ -18,7 +18,7 @@ pub use self::{
     pagination::{list_first_page, list_next_page},
 };
 use crate::{
-    DatasetName, DatasetVersionTag,
+    datasets::{Name as DatasetName, Version as DatasetVersion},
     workers::{NodeId, NodeIdOwned},
 };
 
@@ -194,7 +194,7 @@ where
 pub async fn get_jobs_by_dataset<'c, E>(
     exe: E,
     dataset: DatasetName<'_>,
-    version: Option<DatasetVersionTag<'_>>,
+    version: Option<DatasetVersion<'_>>,
 ) -> Result<Vec<Job>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,

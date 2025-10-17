@@ -5,10 +5,7 @@ export default defineDataset((ctx) => ({
   network: "mainnet",
   version: "0.1.0",
   dependencies: {
-    mainnet: {
-      name: "mainnet",
-      version: "0.0.0",
-    },
+    mainnet: "_/mainnet@0.0.0",
   },
   tables: {},
   functions: {

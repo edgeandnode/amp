@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use tracing::{debug, info, warn};
 
 use crate::manifest;
@@ -30,9 +30,9 @@ use crate::manifest;
 pub async fn version_poll_task(
     admin_api_addr: String,
     dataset_name: Name,
-    mut current_version: VersionTag,
+    mut current_version: Version,
     poll_interval_secs: u64,
-    tx: tokio::sync::watch::Sender<VersionTag>,
+    tx: tokio::sync::watch::Sender<Version>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(poll_interval_secs));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

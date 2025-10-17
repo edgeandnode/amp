@@ -7,6 +7,7 @@ use common::{
     BoxError, ParquetFooterCache, catalog::physical::PhysicalTable, metadata::Generation,
 };
 use dataset_store::DatasetStore;
+use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
@@ -31,15 +32,14 @@ async fn sql_dataset_input_batch_size() {
         .unwrap();
     let end = start + 3;
 
-    test.dump_dataset("eth_rpc", end, 1, None).await;
+    test.dump_dataset("_/eth_rpc@0.0.0", end, 1, None).await;
 
     // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
-    let dataset_name = "sql_stream_ds";
-
-    test.dump_dataset(dataset_name, end, 1, Some(1)).await;
+    test.dump_dataset("_/sql_stream_ds@0.1.0", end, 1, Some(1))
+        .await;
 
     // 4. Get catalog and count files
-    let catalog = test.catalog_for_dataset(dataset_name).await.unwrap();
+    let catalog = test.catalog_for_dataset("sql_stream_ds").await.unwrap();
 
     // Find the even_blocks table
     let table = catalog
@@ -131,15 +131,16 @@ impl TestCtx {
     /// Dump a dataset using testlib dump_dataset helper.
     async fn dump_dataset(
         &self,
-        dataset_name: &str,
+        dataset: &str,
         end: u64,
         n_jobs: u16,
         microbatch_max_interval: impl Into<Option<u64>>,
     ) {
+        let dataset_ref: Reference = dataset.parse().unwrap();
         test_helpers::dump_dataset(
             self.ctx.daemon_server().config(),
             self.ctx.metadata_db(),
-            dataset_name,
+            dataset_ref,
             end,
             n_jobs,
             microbatch_max_interval,

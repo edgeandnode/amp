@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, num::NonZeroU32, str::FromStr, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroU32,
+    str::FromStr,
+    sync::Arc,
+};
 
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
@@ -13,8 +18,8 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
-    version_hash::VersionHash, version_tag::VersionTag,
+    hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
+    reference::Reference, version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -105,8 +110,8 @@ impl DatasetStore {
     pub async fn register_manifest<M>(
         &self,
         name: &Name,
-        version: &VersionTag,
-        manifest_hash: &VersionHash,
+        version: &Version,
+        manifest_hash: &Hash,
         manifest: &M,
     ) -> Result<(), RegisterManifestError>
     where
@@ -156,7 +161,7 @@ impl DatasetStore {
     pub async fn is_registered(
         &self,
         name: &Name,
-        version: &VersionTag,
+        version: &Version,
     ) -> Result<bool, IsRegisteredError> {
         self.metadata_db
             .dataset_exists(name, version)
@@ -167,7 +172,7 @@ impl DatasetStore {
     pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&VersionTag>>,
+        version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
         let name = &name
             .parse::<Name>()
@@ -333,7 +338,7 @@ impl DatasetStore {
     pub async fn get_derived_manifest(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
+        version: impl Into<Option<&Version>> + std::fmt::Debug,
     ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
         // Validate dataset name
         let name =
@@ -406,7 +411,7 @@ impl DatasetStore {
     pub async fn get_client(
         &self,
         dataset_name: &str,
-        dataset_version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
+        dataset_version: impl Into<Option<&Version>> + std::fmt::Debug,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Option<impl BlockStreamer>, GetClientError> {
         let dataset_name =
@@ -849,7 +854,7 @@ impl DatasetStore {
 /// A set of unique (dataset_name, version) tuples extracted from the table references.
 fn dataset_versions_from_table_refs<'a>(
     table_refs: impl Iterator<Item = &'a TableReference>,
-) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromTableRefsError> {
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromTableRefsError> {
     let mut datasets = BTreeSet::new();
 
     for table_ref in table_refs {
@@ -882,12 +887,11 @@ fn dataset_versions_from_table_refs<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<VersionTag>().map_err(|_| {
-                    ExtractDatasetFromTableRefsError::InvalidVersion {
+                v.parse::<Version>()
+                    .map_err(|_| ExtractDatasetFromTableRefsError::InvalidVersion {
                         version: v,
                         schema: catalog_schema.to_string(),
-                    }
-                })
+                    })
             })
             .transpose()?;
 
@@ -911,7 +915,7 @@ fn dataset_versions_from_table_refs<'a>(
 /// A set of unique (dataset_name, version) tuples extracted from the function names.
 fn dataset_versions_from_function_names<'a>(
     function_names: impl IntoIterator<Item = &'a str>,
-) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromFunctionNamesError> {
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromFunctionNamesError> {
     let mut datasets = BTreeSet::new();
 
     for func_name in function_names {
@@ -946,7 +950,7 @@ fn dataset_versions_from_function_names<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<VersionTag>().map_err(|_| {
+                v.parse::<Version>().map_err(|_| {
                     ExtractDatasetFromFunctionNamesError::InvalidVersion {
                         version: v,
                         function: fn_dataset.to_string(),
@@ -1027,4 +1031,106 @@ pub async fn resolve_blocks_table(
                 table.name()
             ))
         })
+}
+
+/// Return the input datasets and their dataset dependencies. The output set is ordered such that
+/// each dataset comes after all datasets it depends on.
+pub async fn dataset_and_dependencies(
+    store: &Arc<DatasetStore>,
+    dataset: Reference,
+) -> Result<Vec<Reference>, BoxError> {
+    let mut datasets = vec![dataset];
+    let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
+    while let Some(dataset_ref) = datasets.pop() {
+        let Some(dataset) = store
+            .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+            .await?
+        else {
+            return Err(format!("Dataset '{}' not found", dataset_ref).into());
+        };
+
+        if dataset.kind != DerivedDatasetKind {
+            deps.insert(dataset_ref, vec![]);
+            continue;
+        }
+
+        let manifest = store
+            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .await?
+            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
+
+        let refs: Vec<Reference> = manifest.dependencies.into_values().collect();
+        let mut untracked_refs = refs
+            .iter()
+            .filter(|r| deps.keys().all(|d| d != *r))
+            .cloned()
+            .collect();
+        datasets.append(&mut untracked_refs);
+        deps.insert(dataset_ref, refs);
+    }
+
+    dependency_sort(deps)
+}
+
+/// Given a map of values to their dependencies, return a set where each value is ordered after
+/// all of its dependencies. An error is returned if a cycle is detected.
+fn dependency_sort(deps: BTreeMap<Reference, Vec<Reference>>) -> Result<Vec<Reference>, BoxError> {
+    let nodes: BTreeSet<&Reference> = deps
+        .iter()
+        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
+        .collect();
+    let mut ordered: Vec<Reference> = Default::default();
+    let mut visited: BTreeSet<&Reference> = Default::default();
+    let mut visited_cycle: BTreeSet<&Reference> = Default::default();
+    for node in nodes {
+        if !visited.contains(node) {
+            common::utils::dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+        }
+    }
+    Ok(ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    use datasets_common::revision::Revision;
+
+    #[test]
+    fn dependency_sort_order() {
+        #[allow(clippy::type_complexity)]
+        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
+            (&[("a", &["b"]), ("b", &["a"])], None),
+            (&[("a", &["b"])], Some(&["b", "a"])),
+            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
+            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
+            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
+            (
+                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
+                Some(&["d", "b", "c", "a"]),
+            ),
+            (
+                &[("a", &["b", "c"]), ("b", &["c", "d"])],
+                Some(&["c", "d", "b", "a"]),
+            ),
+        ];
+        let name_to_ref = |name: &str| {
+            datasets_common::reference::Reference::new(
+                "_".parse().unwrap(),
+                name.parse().unwrap(),
+                Revision::Dev,
+            )
+        };
+        for (input, expected) in cases {
+            let deps = input
+                .into_iter()
+                .map(|(k, v)| (name_to_ref(k), v.iter().map(|n| name_to_ref(n)).collect()))
+                .collect();
+            let expected: Option<Vec<datasets_common::reference::Reference>> =
+                expected.map(|n| n.iter().map(|n| name_to_ref(n)).collect());
+            let result = super::dependency_sort(deps);
+            match expected {
+                Some(expected) => assert_eq!(*expected, result.unwrap()),
+                None => assert!(result.is_err()),
+            }
+        }
+    }
 }

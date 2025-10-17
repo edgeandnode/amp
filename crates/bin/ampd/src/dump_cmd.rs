@@ -1,19 +1,13 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs, sync::Arc, time::Duration};
 
 use common::{
     BoxError, Store, catalog::physical::PhysicalTable, config::Config, store::ObjectStoreUrl,
-    utils::dfs,
 };
 use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
-use datasets_common::version_tag::VersionTag;
-use datasets_derived::DerivedDatasetKind;
+use datasets_common::reference::Reference;
 use dump::EndBlock;
 use metadata_db::{MetadataDb, notification_multiplexer};
 use static_assertions::const_assert;
@@ -22,7 +16,7 @@ use static_assertions::const_assert;
 pub async fn run(
     mut config: Config,
     metadata_db: MetadataDb,
-    datasets: Vec<String>,
+    dataset: Reference,
     ignore_deps: bool,
     end_block: Option<EndBlock>,
     n_jobs: u16,
@@ -46,18 +40,10 @@ pub async fn run(
         .or(run_every_mins.and(Some(EndBlock::Latest)))
         .unwrap_or(EndBlock::None);
 
-    if end_block == EndBlock::None && datasets.len() > 1 {
-        return Err(
-            "Continuous mode (no end_block) is not supported when dumping multiple datasets. \
-                    Please specify an end_block value or dump datasets individually."
-                .into(),
-        );
-    }
-
     dump(
         config.into(),
         metadata_db,
-        datasets,
+        dataset,
         ignore_deps,
         end_block,
         n_jobs,
@@ -74,7 +60,7 @@ pub async fn run(
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    mut datasets: Vec<String>,
+    dataset: Reference,
     ignore_deps: bool,
     end_block: EndBlock,
     n_jobs: u16,
@@ -111,42 +97,29 @@ pub async fn dump(
     };
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
-    if !ignore_deps {
-        datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
-    }
-
-    let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
-    tracing::info!("dump order: {}", dump_order.join(", "));
+    let datasets = match ignore_deps {
+        true => vec![dataset],
+        false => {
+            let datasets = dataset_and_dependencies(&dataset_store, dataset).await?;
+            let dump_order: Vec<String> = datasets.iter().map(ToString::to_string).collect();
+            tracing::info!("dump order: {}", dump_order.join(", "));
+            datasets
+        }
+    };
 
     let mut physical_datasets = vec![];
-    for dataset_name in datasets {
-        let (dataset_name, version) =
-            if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match VersionTag::try_from_underscore_version(version_str) {
-                    Ok(v) => (name, Some(v)),
-                    Err(err) => {
-                        tracing::warn!(
-                            "Skipping dataset {} due to invalid version: {}",
-                            dataset_name,
-                            err
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                (dataset_name.as_str(), None)
-            };
+    for dataset_ref in datasets {
         let dataset = dataset_store
-            .get_dataset(dataset_name, version.as_ref())
+            .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
             .await?
-            .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
+            .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
             let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
             tracing::info!(
                 "Table dump order for dataset {}: {:?}",
-                dataset_name,
+                dataset_ref,
                 table_names
             );
         }
@@ -222,45 +195,6 @@ pub async fn dump(
     Ok(all_tables)
 }
 
-/// Return the input datasets and their dataset dependencies. The output set is ordered such that
-/// each dataset comes after all datasets it depends on.
-pub async fn datasets_and_dependencies(
-    store: &Arc<DatasetStore>,
-    mut datasets: Vec<String>,
-) -> Result<Vec<String>, BoxError> {
-    let mut deps: BTreeMap<String, Vec<String>> = Default::default();
-    while let Some(dataset_name) = datasets.pop() {
-        let Some(dataset) = store.get_dataset(&dataset_name, None).await? else {
-            return Err(format!("Dataset '{}' not found", dataset_name).into());
-        };
-
-        if dataset.kind != DerivedDatasetKind {
-            deps.insert(dataset.name.to_string(), vec![]);
-            continue;
-        }
-
-        let manifest = store
-            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
-            .await?
-            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
-
-        let refs: Vec<String> = manifest
-            .dependencies
-            .into_values()
-            .map(|d| d.name)
-            .collect();
-        let mut untracked_refs = refs
-            .iter()
-            .filter(|r| deps.keys().all(|d| d != *r))
-            .cloned()
-            .collect();
-        datasets.append(&mut untracked_refs);
-        deps.insert(dataset.to_identifier(), refs);
-    }
-
-    dependency_sort(deps)
-}
-
 pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
     match metrics_export_interval {
         Some(export_interval) => {
@@ -283,60 +217,6 @@ pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
                 "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
                 This could lead to less precise metrics."
             );
-        }
-    }
-}
-
-/// Given a map of values to their dependencies, return a set where each value is ordered after
-/// all of its dependencies. An error is returned if a cycle is detected.
-fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
-    let nodes: BTreeSet<&String> = deps
-        .iter()
-        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
-        .collect();
-    let mut ordered: Vec<String> = Default::default();
-    let mut visited: BTreeSet<&String> = Default::default();
-    let mut visited_cycle: BTreeSet<&String> = Default::default();
-    for node in nodes {
-        if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
-        }
-    }
-    Ok(ordered)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dependency_sort_order() {
-        #[allow(clippy::type_complexity)]
-        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
-            (&[("a", &["b"]), ("b", &["a"])], None),
-            (&[("a", &["b"])], Some(&["b", "a"])),
-            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
-            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
-            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
-            (
-                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
-                Some(&["d", "b", "c", "a"]),
-            ),
-            (
-                &[("a", &["b", "c"]), ("b", &["c", "d"])],
-                Some(&["c", "d", "b", "a"]),
-            ),
-        ];
-        for (input, expected) in cases {
-            let deps = input
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(ToString::to_string).collect()))
-                .collect();
-            let result = dependency_sort(deps);
-            match expected {
-                Some(expected) => assert_eq!(*expected, result.unwrap()),
-                None => assert!(result.is_err()),
-            }
         }
     }
 }

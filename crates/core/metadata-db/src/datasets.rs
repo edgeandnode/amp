@@ -7,16 +7,16 @@
 use futures::stream::Stream;
 use sqlx::{Executor, Postgres};
 
+mod hash;
 mod name;
 mod namespace;
-mod version_hash;
-mod version_tag;
+mod version;
 
 pub use self::{
+    hash::{Hash, HashOwned},
     name::{Name, NameOwned},
     namespace::{Namespace, NamespaceOwned},
-    version_hash::{VersionHash, VersionHashOwned},
-    version_tag::{VersionTag, VersionTagOwned},
+    version::{Version, VersionOwned},
 };
 
 /// Insert a new dataset registry entry
@@ -27,20 +27,27 @@ pub async fn insert<'c, E>(
     exe: E,
     namespace: Namespace<'_>,
     name: Name<'_>,
-    version: VersionTag<'_>,
+    version: Version<'_>,
     path: &str,
-    hash: VersionHash<'_>,
+    hash: Hash<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    // Insert into both manifests and tags tables using CTE
+    // Insert into manifest_files, dataset_manifests, and tags tables using CTE
     // Hash is provided by the caller (computed from manifest content)
     let query = indoc::indoc! {r#"
         WITH manifest_insert AS (
-          INSERT INTO manifests (hash, path)
+          INSERT INTO manifest_files (hash, path)
           VALUES ($5, $4)
           ON CONFLICT (hash) DO NOTHING
+          RETURNING hash
+        ),
+        dataset_manifest_insert AS (
+          INSERT INTO dataset_manifests (namespace, name, hash)
+          VALUES ($1, $2, $5)
+          ON CONFLICT (namespace, name, hash) DO NOTHING
+          RETURNING namespace, name, hash
         )
         INSERT INTO tags (namespace, name, version, hash)
         VALUES ($1, $2, $3, $5)
@@ -62,7 +69,7 @@ where
 pub async fn get_by_name_and_version_with_details<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: VersionTag<'_>,
+    version: Version<'_>,
 ) -> Result<Option<DatasetWithDetails>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -72,9 +79,10 @@ where
             t.namespace,
             t.name,
             t.version,
-            m.path
+            mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1 AND t.version = $2
     "#};
 
@@ -91,7 +99,7 @@ where
 pub async fn exists_by_name_and_version<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: VersionTag<'_>,
+    version: Version<'_>,
 ) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -111,15 +119,16 @@ where
 pub async fn get_manifest_path_by_name_and_version<'c, E>(
     exe: E,
     name: Name<'_>,
-    version: VersionTag<'_>,
+    version: Version<'_>,
 ) -> Result<Option<String>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT m.path
+        SELECT mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1 AND t.version = $2
     "#};
 
@@ -145,9 +154,10 @@ where
             t.namespace,
             t.name,
             t.version,
-            m.path
+            mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1
         ORDER BY t.version DESC
         LIMIT 1
@@ -183,7 +193,7 @@ where
 pub async fn list_versions_by_name<'c, E>(
     exe: E,
     name: Name<'_>,
-) -> Result<Vec<VersionTagOwned>, sqlx::Error>
+) -> Result<Vec<VersionOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -225,7 +235,7 @@ pub struct Dataset {
     /// Dataset name
     pub name: NameOwned,
     /// Dataset version
-    pub version: VersionTagOwned,
+    pub version: VersionOwned,
 }
 
 /// Dataset registry entry representing a dataset registration
@@ -236,7 +246,7 @@ pub struct DatasetWithDetails {
     /// Dataset name
     pub name: NameOwned,
     /// Dataset version
-    pub version: VersionTagOwned,
+    pub version: VersionOwned,
     /// Dataset manifest content
     #[sqlx(rename = "path")]
     pub manifest_path: String,

@@ -57,7 +57,10 @@ export const make = Effect.gen(function*() {
       const dependencies = Object.values(manifest.dependencies)
       yield* Effect.forEach(
         dependencies,
-        (dependency) => admin.dumpDatasetVersion(dependency.name, dependency.version),
+        (dependency) => {
+          const { name, version } = Model.parseReference(dependency)
+          return admin.dumpDatasetVersion(name, version)
+        },
         {
           concurrency: "unbounded",
           discard: true,
