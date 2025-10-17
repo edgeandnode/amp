@@ -5,10 +5,7 @@ export default defineDataset(() => ({
   network: "mainnet",
   version: "0.1.0",
   dependencies: {
-    eth_firehose: {
-      name: "eth_firehose",
-      version: "0.0.0",
-    },
+    eth_firehose: "_/eth_firehose@0.0.0",
   },
   tables: {
     /// base table - Added zz prefix to test dump order, it should be according to the dependency order, not alphanumeric

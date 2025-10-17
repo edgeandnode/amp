@@ -16,10 +16,7 @@ export default defineDataset(() => ({
   version: "0.1.0",
   network: "mainnet",
   dependencies: {
-    anvil: {
-      name: "anvil",
-      version: "0.1.0",
-    },
+    anvil: "_/anvil@0.1.0",
   },
   tables: {
     counts: {

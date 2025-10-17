@@ -5,10 +5,7 @@ export default defineDataset(() => ({
   network: "anvil",
   version: "0.0.0",
   dependencies: {
-    anvil_rpc: {
-      name: "anvil_rpc",
-      version: "0.0.0",
-    },
+    anvil_rpc: "_/anvil_rpc@0.0.0",
   },
   tables: {
     blocks: {
