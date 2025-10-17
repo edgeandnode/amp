@@ -176,7 +176,6 @@ export const parseDatasetCursor = (cursor: DatasetCursor): { name: string; versi
 
 export class DatasetsResponse extends Schema.Class<DatasetsResponse>("DatasetsResponse")({
   datasets: Schema.Array(DatasetRegistryInfo),
-  nextCursor: Schema.optional(DatasetCursor).pipe(Schema.fromKey("next_cursor")),
 }) {}
 
 /**
@@ -196,7 +195,6 @@ export type DatasetVersionCursor = Schema.Schema.Type<typeof DatasetVersionCurso
  */
 export class DatasetVersionsResponse extends Schema.Class<DatasetVersionsResponse>("DatasetVersionsResponse")({
   versions: Schema.Array(DatasetVersion),
-  nextCursor: Schema.optional(DatasetVersionCursor).pipe(Schema.fromKey("next_cursor")),
 }) {}
 
 export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({

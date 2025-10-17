@@ -882,57 +882,24 @@ impl MetadataDb {
         datasets::stream(&*self.pool).map(|result| result.map_err(Error::DbError))
     }
 
-    /// List datasets with cursor-based pagination support
+    /// List all datasets from the registry
     ///
-    /// Uses cursor-based pagination where `last_dataset` is a tuple of `(dataset_name, version)` from the last dataset
-    /// from the previous page. For the first page, pass `None`.
-    pub async fn list_datasets<'a, N, V>(
-        &self,
-        limit: i64,
-        last_dataset: Option<(N, V)>,
-    ) -> Result<Vec<Dataset>, Error>
-    where
-        N: Into<DatasetName<'a>>,
-        V: Into<DatasetVersionTag<'a>>,
-    {
-        let res = match last_dataset {
-            Some((name, version)) => {
-                datasets::list_next_page(&*self.pool, limit, (name.into(), version.into())).await?
-            }
-            None => datasets::list_first_page(&*self.pool, limit).await?,
-        };
-        Ok(res)
+    /// Returns all dataset records ordered by dataset name ASC and version DESC.
+    pub async fn list_datasets(&self) -> Result<Vec<Dataset>, Error> {
+        Ok(datasets::list_all(&*self.pool).await?)
     }
 
-    /// List versions for a dataset with cursor-based pagination support
+    /// List all versions for a dataset
     ///
-    /// Uses cursor-based pagination where `last_version` is the version from the last dataset
-    /// from the previous page. For the first page, pass `None` for `last_version`.
-    pub async fn list_dataset_versions<'a, N, V>(
+    /// Returns all versions for the specified dataset ordered by version DESC.
+    pub async fn list_dataset_versions<'a, N>(
         &self,
         name: N,
-        limit: i64,
-        last_version: Option<V>,
     ) -> Result<Vec<DatasetVersionTagOwned>, Error>
     where
         N: Into<DatasetName<'a>>,
-        V: Into<DatasetVersionTag<'a>>,
     {
-        let res = match last_version {
-            Some(version) => {
-                datasets::list_versions_by_name_next_page(
-                    &*self.pool,
-                    name.into(),
-                    limit,
-                    version.into(),
-                )
-                .await?
-            }
-            None => {
-                datasets::list_versions_by_name_first_page(&*self.pool, name.into(), limit).await?
-            }
-        };
-        Ok(res)
+        Ok(datasets::list_versions_by_name(&*self.pool, name.into()).await?)
     }
 }
 

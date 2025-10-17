@@ -2,10 +2,7 @@
 
 use axum::{
     Json,
-    extract::{
-        Path, Query, State,
-        rejection::{PathRejection, QueryRejection},
-    },
+    extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
 use datasets_common::{name::Name, version_tag::VersionTag};
@@ -15,69 +12,32 @@ use crate::{
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
-/// Default number of dataset versions returned per page
-const DEFAULT_PAGE_LIMIT: usize = 50;
-
-/// Maximum number of dataset versions allowed per page
-const MAX_PAGE_LIMIT: usize = 1000;
-
-/// Query parameters for the dataset versions listing endpoint
-#[serde_with::serde_as]
-#[derive(Debug, serde::Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::IntoParams))]
-#[cfg_attr(feature = "utoipa", into_params(parameter_in = Query))]
-pub struct QueryParams {
-    /// Maximum number of dataset versions to return (default: 50, max: 1000)
-    #[serde(default = "default_limit")]
-    #[cfg_attr(feature = "utoipa", param(minimum = 1, maximum = 1000))]
-    limit: usize,
-
-    /// Last version from the previous page for pagination
-    #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
-    #[cfg_attr(feature = "utoipa", param(value_type = Option<String>))]
-    last_version: Option<VersionTag>,
-}
-
-fn default_limit() -> usize {
-    DEFAULT_PAGE_LIMIT
-}
-
 /// Handler for the `GET /datasets/{name}/versions` endpoint
 ///
-/// Retrieves and returns a paginated list of versions for a specific dataset from the metadata database registry.
+/// Retrieves and returns a complete list of all versions for a specific dataset from the metadata database registry.
 ///
 /// ## Path Parameters
 /// - `name`: Dataset name
 ///
-/// ## Query Parameters
-/// - `limit`: Maximum number of versions to return (default: 50, max: 1000)
-/// - `last_version`: Last version from previous page for pagination - version string (e.g., "1.0.0")
-///
 /// ## Response
-/// - **200 OK**: Returns paginated dataset versions with next cursor
-/// - **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000) or cursor format
-/// - **404 Not Found**: Dataset with the given name does not exist
+/// - **200 OK**: Returns all dataset versions
+/// - **400 Bad Request**: Invalid dataset name format
 /// - **500 Internal Server Error**: Database connection or query error
 ///
 /// ## Error Codes
 /// - `INVALID_SELECTOR`: Invalid dataset name format
-/// - `INVALID_QUERY_PARAMETERS`: Invalid query parameters format
-/// - `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value
-/// - `LIMIT_INVALID`: Limit is zero or negative
 /// - `METADATA_DB_ERROR`: Internal database error occurred
 ///
 /// ## Behavior
 /// This handler provides comprehensive dataset version information from the registry including:
 /// - All versions for the specified dataset from the metadata database
-/// - Cursor-based pagination for efficient traversal of large version lists
 /// - Lexicographical ordering by version string DESC (e.g., "2.0.0" > "1.9.0" > "1.2.3" > "1.10.0")
 ///
 /// The handler:
-/// - Accepts path parameter for dataset name and query parameters for pagination (limit, last_version)
-/// - Validates the dataset name and limit parameter (max 1000)
-/// - Parses and validates version string format
-/// - Calls the metadata DB to list dataset versions with pagination
-/// - Returns a structured response with versions and next cursor
+/// - Accepts path parameter for dataset name
+/// - Validates the dataset name
+/// - Calls the metadata DB to list all dataset versions
+/// - Returns a structured response with all versions
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -88,12 +48,10 @@ fn default_limit() -> usize {
         operation_id = "datasets_list_versions",
         params(
             ("name" = String, Path, description = "Dataset name"),
-            QueryParams
         ),
         responses(
-            (status = 200, description = "Returns paginated dataset versions with next cursor", body = DatasetVersionsResponse),
-            (status = 400, description = "Invalid limit parameter or cursor format"),
-            (status = 404, description = "Dataset with the given name does not exist"),
+            (status = 200, description = "Returns all dataset versions", body = DatasetVersionsResponse),
+            (status = 400, description = "Invalid dataset name format"),
             (status = 500, description = "Internal server error")
         )
     )
@@ -101,7 +59,6 @@ fn default_limit() -> usize {
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<Name>, PathRejection>,
-    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<Json<DatasetVersionsResponse>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
@@ -111,68 +68,34 @@ pub async fn handler(
         }
     };
 
-    let query = match query {
-        Ok(Query(params)) => params,
-        Err(err) => {
-            tracing::debug!(error=?err, "invalid query parameters");
-            return Err(Error::InvalidQueryParams { err }.into());
-        }
-    };
-
-    // Validate limit
-    let limit = if query.limit > MAX_PAGE_LIMIT {
-        return Err(Error::LimitTooLarge {
-            limit: query.limit,
-            max: MAX_PAGE_LIMIT,
-        }
-        .into());
-    } else if query.limit == 0 {
-        return Err(Error::LimitInvalid.into());
-    } else {
-        query.limit
-    };
-
-    // Fetch dataset versions from metadata DB
-    let last_version = query.last_version.as_ref();
-
+    // Fetch all dataset versions from metadata DB
     let versions = ctx
         .metadata_db
-        .list_dataset_versions(&name, limit as i64, last_version)
+        .list_dataset_versions(&name)
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, dataset_name=%name, "failed to list dataset versions");
             Error::MetadataDbError(err)
         })?;
 
-    // Determine next cursor (version of the last dataset version in this page)
-    let next_cursor = versions.last().cloned().map(Into::into);
-    let versions = versions.into_iter().take(limit).map(Into::into).collect();
+    let versions = versions.into_iter().map(Into::into).collect();
 
-    Ok(Json(DatasetVersionsResponse {
-        versions,
-        next_cursor,
-    }))
+    Ok(Json(DatasetVersionsResponse { versions }))
 }
 
-/// Collection response for dataset versions listing with cursor-based pagination
-#[serde_with::serde_as]
+/// Collection response for dataset versions listing
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetVersionsResponse {
-    /// List of dataset versions in this page
+    /// List of all dataset versions
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
     pub versions: Vec<VersionTag>,
-    /// Cursor for the next page of results (None if no more results)
-    #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub next_cursor: Option<VersionTag>,
 }
 
 /// Errors that can occur during dataset versions listing
 ///
 /// This enum represents all possible error conditions that can occur
-/// when handling a `GET /datasets/{name}/versions` request with pagination parameters.
+/// when handling a `GET /datasets/{name}/versions` request.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The dataset name selector is invalid
@@ -183,37 +106,6 @@ pub enum Error {
     /// - Path parameter extraction fails for dataset name
     #[error("invalid dataset selector: {0}")]
     InvalidSelector(PathRejection),
-
-    /// The query parameters are invalid or malformed
-    ///
-    /// This occurs when query parameters cannot be parsed, such as:
-    /// - Invalid integer format for limit
-    /// - Invalid version format for last_version
-    /// - Malformed query string syntax
-    #[error("invalid query parameters: {err}")]
-    InvalidQueryParams {
-        /// The rejection details from Axum's query extractor
-        err: QueryRejection,
-    },
-
-    /// The requested limit exceeds the maximum allowed value
-    ///
-    /// This occurs when the limit parameter is greater than the maximum
-    /// allowed page size.
-    #[error("limit {limit} exceeds maximum allowed limit of {max}")]
-    LimitTooLarge {
-        /// The requested limit value
-        limit: usize,
-        /// The maximum allowed limit
-        max: usize,
-    },
-
-    /// The requested limit is invalid (zero or negative)
-    ///
-    /// This occurs when the limit parameter is 0, which would result
-    /// in no items being returned.
-    #[error("limit must be greater than 0")]
-    LimitInvalid,
 
     /// An error occurred while querying the metadata database
     ///
@@ -231,9 +123,6 @@ impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidSelector(_) => "INVALID_SELECTOR",
-            Error::InvalidQueryParams { .. } => "INVALID_QUERY_PARAMETERS",
-            Error::LimitTooLarge { .. } => "LIMIT_TOO_LARGE",
-            Error::LimitInvalid => "LIMIT_INVALID",
             Error::MetadataDbError(_) => "METADATA_DB_ERROR",
         }
     }
@@ -246,9 +135,6 @@ impl IntoErrorResponse for Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Error::InvalidSelector(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidQueryParams { .. } => StatusCode::BAD_REQUEST,
-            Error::LimitTooLarge { .. } => StatusCode::BAD_REQUEST,
-            Error::LimitInvalid => StatusCode::BAD_REQUEST,
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

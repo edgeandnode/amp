@@ -5,36 +5,18 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Admin from "../../api/Admin.ts"
-import type * as Model from "../../Model.ts"
 import { adminUrl } from "../common.ts"
 
 const list = Command.make("list", {
   args: {
-    limit: Options.integer("limit").pipe(
-      Options.withAlias("l"),
-      Options.withDescription("Maximum number of datasets to return (default: 50, max: 1000)"),
-      Options.withDefault(50),
-      Options.optional,
-    ),
-    after: Options.text("after").pipe(
-      Options.withAlias("a"),
-      Options.withDescription("Dataset cursor to paginate after (format: name:version)"),
-      Options.optional,
-    ),
     adminUrl,
   },
 }).pipe(
-  Command.withDescription("List all datasets with pagination"),
+  Command.withDescription("List all datasets"),
   Command.withHandler(
-    Effect.fn(function*({ args }) {
+    Effect.fn(function*(_args) {
       const admin = yield* Admin.Admin
-      const response = yield* admin.getDatasets({
-        limit: args.limit.pipe(Option.getOrUndefined),
-        lastDatasetId: args.after.pipe(
-          Option.map((cursor) => cursor as Model.DatasetCursor),
-          Option.getOrUndefined,
-        ),
-      })
+      const response = yield* admin.getDatasets()
 
       if (response.datasets.length === 0) {
         return yield* Console.log("No datasets found")
@@ -44,11 +26,6 @@ const list = Command.make("list", {
         Name: dataset.name,
         Version: dataset.version,
       })))
-
-      if (response.nextCursor) {
-        yield* Console.log(`\nNext cursor: ${response.nextCursor}`)
-        yield* Console.log(`Use --after "${response.nextCursor}" to get the next page`)
-      }
     }),
   ),
   Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
@@ -108,17 +85,6 @@ const versions = Command.make("versions", {
     name: Args.text({ name: "name" }).pipe(
       Args.withDescription("The dataset name to list versions for"),
     ),
-    limit: Options.integer("limit").pipe(
-      Options.withAlias("l"),
-      Options.withDescription("Maximum number of versions to return (default: 50, max: 1000)"),
-      Options.withDefault(50),
-      Options.optional,
-    ),
-    after: Options.text("after").pipe(
-      Options.withAlias("a"),
-      Options.withDescription("Version to paginate after (e.g., '1.0.0')"),
-      Options.optional,
-    ),
     adminUrl,
   },
 }).pipe(
@@ -126,13 +92,7 @@ const versions = Command.make("versions", {
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const admin = yield* Admin.Admin
-      const response = yield* admin.getDatasetVersions(args.name, {
-        limit: args.limit.pipe(Option.getOrUndefined),
-        lastVersion: args.after.pipe(
-          Option.map((version) => version as Model.DatasetVersionCursor),
-          Option.getOrUndefined,
-        ),
-      }).pipe(
+      const response = yield* admin.getDatasetVersions(args.name).pipe(
         Effect.catchTags({
           InvalidSelector: () => Effect.dieMessage(`Invalid dataset name: ${args.name}`),
         }),
@@ -146,11 +106,6 @@ const versions = Command.make("versions", {
 
       for (const version of response.versions) {
         yield* Console.log(`  ${version}`)
-      }
-
-      if (response.nextCursor) {
-        yield* Console.log(`\nNext cursor: ${response.nextCursor}`)
-        yield* Console.log(`Use --after "${response.nextCursor}" to get the next page`)
       }
     }),
   ),

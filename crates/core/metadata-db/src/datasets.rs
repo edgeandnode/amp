@@ -9,17 +9,12 @@ use sqlx::{Executor, Postgres};
 
 mod name;
 mod namespace;
-mod pagination;
 mod version_hash;
 mod version_tag;
 
 pub use self::{
     name::{Name, NameOwned},
     namespace::{Namespace, NamespaceOwned},
-    pagination::{
-        list_first_page, list_next_page, list_versions_by_name_first_page,
-        list_versions_by_name_next_page,
-    },
     version_hash::{VersionHash, VersionHashOwned},
     version_tag::{VersionTag, VersionTagOwned},
 };
@@ -163,13 +158,52 @@ where
     Ok(result)
 }
 
+/// List all datasets from the registry
+///
+/// Returns all dataset records ordered by dataset name ASC and version DESC.
+pub async fn list_all<'c, E>(exe: E) -> Result<Vec<Dataset>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            namespace,
+            name,
+            version
+        FROM tags
+        ORDER BY name ASC, version DESC
+    "#};
+
+    sqlx::query_as(query).fetch_all(exe).await
+}
+
+/// List all versions for a dataset
+///
+/// Returns all versions for the specified dataset ordered by version DESC.
+pub async fn list_versions_by_name<'c, E>(
+    exe: E,
+    name: Name<'_>,
+) -> Result<Vec<VersionTagOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT version
+        FROM tags
+        WHERE name = $1
+        ORDER BY version DESC
+    "#};
+
+    sqlx::query_scalar(query).bind(name).fetch_all(exe).await
+}
+
 /// Stream all datasets from the registry
 ///
 /// Returns a stream of all dataset records with basic information (namespace, name, version),
 /// ordered by dataset name first, then by version.
 pub fn stream<'e, E>(executor: E) -> impl Stream<Item = Result<Dataset, sqlx::Error>> + 'e
 where
-    E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e,
+    E: Executor<'e, Database = Postgres> + 'e,
 {
     let query = indoc::indoc! {r#"
         SELECT
