@@ -34,13 +34,20 @@ pub async fn insert<'c, E>(
 where
     E: Executor<'c, Database = Postgres>,
 {
-    // Insert into both manifests and tags tables using CTE
+    // Insert into manifest_files, dataset_manifests, and tags tables using CTE
     // Hash is provided by the caller (computed from manifest content)
     let query = indoc::indoc! {r#"
         WITH manifest_insert AS (
-          INSERT INTO manifests (hash, path)
+          INSERT INTO manifest_files (hash, path)
           VALUES ($5, $4)
           ON CONFLICT (hash) DO NOTHING
+          RETURNING hash
+        ),
+        dataset_manifest_insert AS (
+          INSERT INTO dataset_manifests (namespace, name, hash)
+          VALUES ($1, $2, $5)
+          ON CONFLICT (namespace, name, hash) DO NOTHING
+          RETURNING namespace, name, hash
         )
         INSERT INTO tags (namespace, name, version, hash)
         VALUES ($1, $2, $3, $5)
@@ -72,9 +79,10 @@ where
             t.namespace,
             t.name,
             t.version,
-            m.path
+            mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1 AND t.version = $2
     "#};
 
@@ -117,9 +125,10 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT m.path
+        SELECT mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1 AND t.version = $2
     "#};
 
@@ -145,9 +154,10 @@ where
             t.namespace,
             t.name,
             t.version,
-            m.path
+            mf.path
         FROM tags t
-        JOIN manifests m ON t.hash = m.hash
+        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
+        JOIN manifest_files mf ON dm.hash = mf.hash
         WHERE t.name = $1
         ORDER BY t.version DESC
         LIMIT 1
