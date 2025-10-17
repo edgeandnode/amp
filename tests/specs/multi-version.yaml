@@ -1,5 +1,5 @@
 - name: restore_eth_firehose
-  restore: eth_firehose
+  restore: _/eth_firehose@0.0.0
 
 - name: deploy_multi_version_v1
   deploy: multi_version
@@ -7,7 +7,7 @@
   end: 15000000
 
 - name: dump_multi_version_v1
-  dataset: multi_version
+  dataset: _/multi_version@0.0.1
   config: v1.config.ts
   end: 15000000
 
@@ -17,7 +17,7 @@
   end: 15000000
 
 - name: dump_multi_version_v2
-  dataset: multi_version
+  dataset: _/multi_version@0.0.2
   config: v2.config.ts
   end: 15000000
 

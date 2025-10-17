@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use ampd::{dev_cmd, dump_cmd, gen_manifest_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
 use dataset_store::DatasetKind;
+use datasets_common::reference::Reference;
 use dump::EndBlock;
 
 #[cfg(feature = "snmalloc")]
@@ -27,11 +28,9 @@ struct Args {
 enum Command {
     Dump {
         /// The name or path of the dataset to dump. This will be looked up in the dataset definition directory.
-        /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
-        ///
-        /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
+        /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset_name>`.
         #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
-        dataset: Vec<String>,
+        dataset: Reference,
 
         /// If set to true, only the listed datasets will be dumped in the order they are listed.
         /// By default, dump listed datasets and their dependencies, ordered such that each dataset
@@ -198,7 +197,7 @@ async fn main_inner() -> Result<(), BoxError> {
             end_block,
             n_jobs,
             partition_size_mb,
-            dataset: datasets,
+            dataset,
             ignore_deps,
             run_every_mins,
             location,
@@ -213,7 +212,7 @@ async fn main_inner() -> Result<(), BoxError> {
             let result = dump_cmd::run(
                 config,
                 metadata_db,
-                datasets,
+                dataset,
                 ignore_deps,
                 end_block,
                 n_jobs,

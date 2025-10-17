@@ -1,20 +1,13 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs, sync::Arc, time::Duration};
 
 use common::{
     BoxError, Store, catalog::physical::PhysicalTable, config::Config, store::ObjectStoreUrl,
-    utils::dfs,
 };
 use dataset_store::{
-    DatasetStore, datasets_and_dependencies, manifests::DatasetManifestsStore,
+    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
 };
-use datasets_common::version_tag::VersionTag;
-use datasets_derived::DerivedDatasetKind;
+use datasets_common::reference::Reference;
 use dump::EndBlock;
 use metadata_db::{MetadataDb, notification_multiplexer};
 use static_assertions::const_assert;
@@ -23,7 +16,7 @@ use static_assertions::const_assert;
 pub async fn run(
     mut config: Config,
     metadata_db: MetadataDb,
-    datasets: Vec<String>,
+    dataset: Reference,
     ignore_deps: bool,
     end_block: Option<EndBlock>,
     n_jobs: u16,
@@ -47,18 +40,10 @@ pub async fn run(
         .or(run_every_mins.and(Some(EndBlock::Latest)))
         .unwrap_or(EndBlock::None);
 
-    if end_block == EndBlock::None && datasets.len() > 1 {
-        return Err(
-            "Continuous mode (no end_block) is not supported when dumping multiple datasets. \
-                    Please specify an end_block value or dump datasets individually."
-                .into(),
-        );
-    }
-
     dump(
         config.into(),
         metadata_db,
-        datasets,
+        dataset,
         ignore_deps,
         end_block,
         n_jobs,
@@ -75,7 +60,7 @@ pub async fn run(
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    mut datasets: Vec<String>,
+    dataset: Reference,
     ignore_deps: bool,
     end_block: EndBlock,
     n_jobs: u16,
@@ -112,42 +97,29 @@ pub async fn dump(
     };
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
-    if !ignore_deps {
-        datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
-    }
-
-    let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
-    tracing::info!("dump order: {}", dump_order.join(", "));
+    let datasets = match ignore_deps {
+        true => vec![dataset],
+        false => {
+            let datasets = dataset_and_dependencies(&dataset_store, dataset).await?;
+            let dump_order: Vec<String> = datasets.iter().map(ToString::to_string).collect();
+            tracing::info!("dump order: {}", dump_order.join(", "));
+            datasets
+        }
+    };
 
     let mut physical_datasets = vec![];
-    for dataset_name in datasets {
-        let (dataset_name, version) =
-            if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match VersionTag::try_from_underscore_version(version_str) {
-                    Ok(v) => (name, Some(v)),
-                    Err(err) => {
-                        tracing::warn!(
-                            "Skipping dataset {} due to invalid version: {}",
-                            dataset_name,
-                            err
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                (dataset_name.as_str(), None)
-            };
+    for dataset_ref in datasets {
         let dataset = dataset_store
-            .get_dataset(dataset_name, version.as_ref())
+            .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
             .await?
-            .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
+            .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
             let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
             tracing::info!(
                 "Table dump order for dataset {}: {:?}",
-                dataset_name,
+                dataset_ref,
                 table_names
             );
         }
@@ -248,4 +220,3 @@ pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
         }
     }
 }
-

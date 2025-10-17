@@ -1,6 +1,7 @@
 //! Test step for restoring dataset snapshots.
 
 use common::BoxError;
+use datasets_common::reference::Reference;
 
 use crate::testlib::{ctx::TestCtx, helpers as test_helpers};
 
@@ -14,7 +15,7 @@ pub struct Step {
     pub name: String,
     /// The name of the dataset snapshot to restore.
     #[serde(rename = "restore")]
-    pub snapshot_name: String,
+    pub snapshot_name: Reference,
 }
 
 impl Step {

@@ -1,4 +1,5 @@
 use ampd::dump_cmd::dump;
+use datasets_common::reference::Reference;
 use dump::EndBlock;
 use monitoring::logging;
 
@@ -9,11 +10,11 @@ async fn evm_rpc_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_name = "eth_rpc";
+    let dataset_ref: Reference = "_/eth_rpc@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("evm_rpc_single_dump")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("rpc_eth_mainnet")
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -21,7 +22,7 @@ async fn evm_rpc_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -36,7 +37,7 @@ async fn evm_rpc_single_dump() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -52,7 +53,7 @@ async fn evm_rpc_single_dump() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
+            dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
@@ -87,11 +88,11 @@ async fn eth_beacon_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_name = "eth_beacon";
+    let dataset_ref: Reference = "_/eth_beacon@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("eth_beacon_single_dump")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("beacon_eth_mainnet")
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -99,7 +100,7 @@ async fn eth_beacon_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -114,7 +115,7 @@ async fn eth_beacon_single_dump() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -130,13 +131,13 @@ async fn eth_beacon_single_dump() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                      // force_reprocess
+            dataset_ref,
+            true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            None,                      // start_block
-            None,                      // microbatch_max_interval
-            None,                      // microbatch_max_rows
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
             false,                     // fresh
             None,                      // meter
         )
@@ -165,11 +166,11 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
     // * Given
-    let dataset_name = "eth_rpc";
+    let dataset_ref: Reference = "_/eth_rpc@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("evm_rpc_single_dump_fetch_receipts_per_tx")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("per_tx_receipt/rpc_eth_mainnet") // Special provider with fetch_receipts_per_tx = true
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -177,7 +178,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -192,7 +193,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -208,14 +209,14 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                      // force_reprocess
+            dataset_ref,
+            true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            None,                      // microbatch_max_interval
-            None,                      // microbatch_max_rows
-            None,                      // skip_consistency_check
-            false,                     // metrics
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
+            false,                     // fresh
             None,                      // meter
         )
         .await
@@ -243,11 +244,11 @@ async fn evm_rpc_base_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_name = "base_rpc";
+    let dataset_ref: Reference = "_/base_rpc@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("evm_rpc_base_single_dump")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("rpc_eth_base")
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -255,7 +256,7 @@ async fn evm_rpc_base_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -270,7 +271,7 @@ async fn evm_rpc_base_single_dump() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -286,15 +287,15 @@ async fn evm_rpc_base_single_dump() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                      // force_reprocess
+            dataset_ref,
+            true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            None,
-            None, // microbatch_max_interval
-            None, // skip_consistency_check
-            false,
-            None, // meter
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
+            false,                     // fresh
+            None,                      // meter
         )
         .await
         .expect("Failed to dump dataset");
@@ -321,11 +322,11 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
     // * Given
-    let dataset_name = "base_rpc";
+    let dataset_ref: Reference = "_/base_rpc@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("evm_rpc_base_single_dump_fetch_receipts_per_tx")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("per_tx_receipt/rpc_eth_base") // Special provider with fetch_receipts_per_tx = true
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -333,7 +334,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -348,7 +349,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -364,15 +365,15 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                      // force_reprocess
+            dataset_ref,
+            true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            None,                      // start_block
-            None,                      // microbatch_max_interval
-            None,                      // microbatch_max_rows
-            false,                     // skip_consistency_check
-            None,                      // metrics
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
+            false,                     // fresh
+            None,                      // meter
         )
         .await
         .expect("Failed to dump dataset");
@@ -399,11 +400,11 @@ async fn eth_firehose_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_name = "eth_firehose";
+    let dataset_ref: Reference = "_/eth_firehose@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("eth_firehose_single_dump")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("firehose_eth_mainnet")
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -411,7 +412,7 @@ async fn eth_firehose_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -426,7 +427,7 @@ async fn eth_firehose_single_dump() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -442,15 +443,15 @@ async fn eth_firehose_single_dump() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,
-            EndBlock::Absolute(block),
-            1,
-            None,
-            None,
-            None,
-            false,
-            None,
+            dataset_ref,
+            true,                      // ignore_deps
+            EndBlock::Absolute(block), // end_block
+            1,                         // n_jobs
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
+            false,                     // fresh
+            None,                      // meter
         )
         .await
         .expect("Failed to dump dataset");
@@ -477,11 +478,11 @@ async fn base_firehose_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_name = "base_firehose";
+    let dataset_ref: Reference = "_/base_firehose@0.0.0".parse().unwrap();
     let test_env = TestCtxBuilder::new("base_firehose_single_dump")
-        .with_dataset_manifest(dataset_name)
+        .with_dataset_manifest(dataset_ref.name().to_string())
         .with_provider_config("firehose_eth_base")
-        .with_dataset_snapshot(dataset_name)
+        .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await
         .expect("Failed to build test environment");
@@ -489,7 +490,7 @@ async fn base_firehose_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await
         .expect("Failed to load dataset")
         .expect("Dataset should exist");
@@ -504,7 +505,7 @@ async fn base_firehose_single_dump() {
             test_env.daemon_server().config(),
             test_env.metadata_db(),
             test_env.daemon_server().dataset_store(),
-            dataset_name,
+            &dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
@@ -520,15 +521,15 @@ async fn base_firehose_single_dump() {
         let dumped_tables = dump(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
-            vec![dataset_name.to_string()],
-            true,                      // force_reprocess
+            dataset_ref,
+            true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
             1,                         // n_jobs
-            None,                      // start_block
-            None,                      // microbatch_max_interval
-            None,                      // microbatch_max_rows
-            false,                     // skip_consistency_check
-            None,                      // metrics
+            None,                      // run_every_mins
+            None,                      // microbatch_max_interval_override
+            None,                      // new_location
+            false,                     // fresh
+            None,                      // meter
         )
         .await
         .expect("Failed to dump dataset");

@@ -47,12 +47,14 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::dump_cmd::{datasets_and_dependencies, dump};
+use ampd::dump_cmd::dump;
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
+use datasets_common::reference::Reference;
 use dump::{EndBlock, consistency_check};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -99,7 +101,7 @@ enum Command {
         ///
         /// This should match a dataset name defined in the `manifests` directory.
         /// The dataset and all its dependencies will be processed.
-        dataset: String,
+        dataset: Reference,
 
         /// End block number (inclusive) for the dataset snapshot.
         ///
@@ -223,26 +225,26 @@ async fn bless(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     dataset_store: Arc<DatasetStore>,
-    dataset_name: String,
+    dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {
     // Resolve dataset dependencies and restore them first
-    tracing::debug!(dataset=%dataset_name, "Resolving dataset dependencies");
+    tracing::debug!(%dataset, "Resolving dataset dependencies");
     let deps = {
-        let mut ds_and_deps = datasets_and_dependencies(&dataset_store, vec![dataset_name.clone()])
+        let mut ds_and_deps = dataset_and_dependencies(&dataset_store, dataset.clone())
             .await
             .map_err(|err| {
                 format!(
                     "Failed to resolve dependencies for dataset '{}': {}",
-                    dataset_name, err
+                    dataset, err
                 )
             })?;
 
         // Remove the dataset itself from the list, leaving only dependencies
-        if ds_and_deps.pop() != Some(dataset_name.clone()) {
+        if ds_and_deps.pop() != Some(dataset.clone()) {
             return Err(format!(
                 "Dataset '{}' not found in resolved dependencies list",
-                dataset_name
+                dataset
             )
             .into());
         }
@@ -250,27 +252,27 @@ async fn bless(
         ds_and_deps
     };
 
-    tracing::debug!(dataset=%dataset_name, ?deps, "Restoring dataset dependencies");
+    tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
         test_helpers::restore_dataset_snapshot(&config, &metadata_db, &dataset_store, &dep)
             .await
             .map_err(|err| {
                 format!(
                     "Failed to restore dependency '{}' for dataset '{}': {}",
-                    dep, dataset_name, err
+                    dep, dataset, err
                 )
             })?;
     }
 
     // Clear existing dataset data if it exists
     let store = config.data_store.prefixed_store();
-    let path = object_store::path::Path::parse(&dataset_name)
-        .map_err(|err| format!("Invalid dataset name '{}': {}", dataset_name, err))?;
+    let path = object_store::path::Path::parse(dataset.name())
+        .map_err(|err| format!("Invalid dataset name '{}': {}", dataset.name(), err))?;
 
     // Check if dataset exists using head operation
     match store.head(&path).await {
         Ok(_) => {
-            tracing::debug!(dataset=%dataset_name, "Dataset exists, clearing existing data");
+            tracing::debug!(%dataset, "Dataset exists, clearing existing data");
             let path_stream = store.list(Some(&path)).map_ok(|obj| obj.location).boxed();
             store
                 .delete_stream(path_stream)
@@ -279,21 +281,21 @@ async fn bless(
                 .map_err(|err| {
                     format!(
                         "Failed to clear existing data for dataset '{}': {}",
-                        dataset_name, err
+                        dataset, err
                     )
                 })?;
         }
         Err(_) => {
-            tracing::debug!(dataset=%dataset_name, "No existing data found, skipping cleanup");
+            tracing::debug!(%dataset, "No existing data found, skipping cleanup");
         }
     }
 
     // Dump the dataset
-    tracing::debug!(dataset=%dataset_name, end_block=end, "Dumping dataset");
+    tracing::debug!(%dataset, end_block=end, "Dumping dataset");
     let physical_tables = dump(
         config,
         metadata_db,
-        vec![dataset_name.clone()],
+        dataset.clone(),
         true,                    // force_reprocess
         EndBlock::Absolute(end), // end_block
         BLESS_JOB_COUNT,         // n_jobs
@@ -307,17 +309,17 @@ async fn bless(
     .map_err(|err| {
         format!(
             "Failed to dump dataset '{}' to block {}: {}",
-            dataset_name, end, err
+            dataset, end, err
         )
     })?;
 
     // Run consistency check on all tables after dump
-    tracing::debug!(dataset=%dataset_name, "Running consistency checks on dumped tables");
+    tracing::debug!(%dataset, "Running consistency checks on dumped tables");
     for physical_table in physical_tables {
         consistency_check(&physical_table).await.map_err(|err| {
             format!(
                 "Consistency check failed for dataset '{}': {}",
-                dataset_name, err
+                dataset, err
             )
         })?;
     }
