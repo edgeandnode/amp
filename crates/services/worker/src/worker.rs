@@ -178,7 +178,7 @@ impl Worker {
                         Ok(Some(notif)) => notif,
                         Ok(None) => {
                             tracing::error!(node_id=%self.node_id, "job notification stream closed");
-                            continue;
+                            return Err(Error::MainLoop(MainLoopError::NotificationHandling(NotificationError::StreamClosed)));
                         }
                         Err(NotificationError::DeserializationFailed(err)) => {
                             tracing::error!(node_id=%self.node_id, error=%err, "job notification deserialization failed, skipping");
