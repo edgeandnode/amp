@@ -163,8 +163,12 @@ impl DatasetStore {
         name: &Name,
         version: &Version,
     ) -> Result<bool, IsRegisteredError> {
+        // TODO: Pass the actual namespace instead of using a placeholder
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
         self.metadata_db
-            .dataset_exists(name, version)
+            .dataset_exists(namespace, name, version)
             .await
             .map_err(IsRegisteredError)
     }

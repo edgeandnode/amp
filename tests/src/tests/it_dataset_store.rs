@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use dataset_store::DatasetKind;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 
 use crate::testlib::{self, fixtures::DatasetPackage};
 
@@ -43,8 +43,12 @@ async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
     );
 
     // Assert that the dataset is registered in the metadata DB
+    // TODO: Pass the actual namespace instead of using a placeholder
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
     let db_dataset = metadata_db
-        .get_dataset_latest_version_with_details(&result.name)
+        .get_dataset_latest_version_with_details(&namespace, &result.name)
         .await
         .expect("should query metadata DB");
     assert!(
@@ -87,8 +91,12 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
     );
 
     // Assert that the dataset is registered in the metadata DB
+    // TODO: Pass the actual namespace instead of using a placeholder
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
     let db_dataset = metadata_db
-        .get_dataset_with_details(&name, &version)
+        .get_dataset_with_details(&namespace, &name, &version)
         .await
         .expect("should query metadata DB");
     assert!(
@@ -144,9 +152,13 @@ async fn all_datasets_returns_available_datasets_without_error() {
     );
 
     // Assert that the dataset is registered in the metadata DB
+    // TODO: Pass the actual namespace instead of using a placeholder
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
     for dataset in result {
         let db_dataset = metadata_db
-            .get_dataset_latest_version_with_details(&dataset.name)
+            .get_dataset_latest_version_with_details(&namespace, &dataset.name)
             .await
             .expect("should query metadata DB");
         assert!(
