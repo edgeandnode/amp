@@ -16,6 +16,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
+use datasets_common::reference::Reference;
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 
@@ -31,7 +32,7 @@ use super::fixtures::SnapshotContext;
 pub async fn dump_dataset(
     config: &Arc<Config>,
     metadata_db: &MetadataDb,
-    dataset_name: &str,
+    dataset: Reference,
     end: u64,
     n_jobs: u16,
     microbatch_max_interval: impl Into<Option<u64>>,
@@ -39,7 +40,7 @@ pub async fn dump_dataset(
     dump(
         config.clone(),
         metadata_db.clone(),
-        vec![dataset_name.to_string()],
+        dataset,
         true,
         EndBlock::Absolute(end),
         n_jobs,
@@ -72,12 +73,12 @@ pub async fn restore_dataset_snapshot(
     config: &Arc<Config>,
     metadata_db: &MetadataDb,
     dataset_store: &Arc<DatasetStore>,
-    dataset_name: &str,
+    dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let dataset = dataset_store
-        .get_dataset(dataset_name, None)
+        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
         .await?
-        .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
+        .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
     for table in Arc::new(dataset).resolved_tables() {
@@ -93,9 +94,9 @@ pub async fn restore_dataset_snapshot(
             the dataset or table being deleted. \n\
             Create the dataset snapshot again by running \
             `cargo run -p tests -- bless {} <start_block> <end_block>`",
-                dataset_name,
+                dataset_ref.name(),
                 table.name(),
-                dataset_name
+                dataset_ref,
             )
         });
 

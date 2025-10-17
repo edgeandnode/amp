@@ -1,6 +1,6 @@
 # # Dump initial blocks
 - name: dump_eth_rpc
-  dataset: eth_rpc
+  dataset: _/eth_rpc@0.0.0
   end: 15000001
 
 # # Declare initial streams
@@ -30,7 +30,7 @@
 
 #   # Dump more blocks and check stream progress
 - name: dump_eth_rpc
-  dataset: eth_rpc
+  dataset: _/eth_rpc@0.0.0
   end: 15000004
 
 - name: select_block_num_5
@@ -57,7 +57,7 @@
   deploy: sql_stream_ds
 
 - name: dump_sql_stream_ds
-  dataset: sql_stream_ds
+  dataset: _/sql_stream_ds@0.1.0
   end: 15000004
 
 - name: sql_dataset_even_blocks

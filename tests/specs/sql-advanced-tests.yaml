@@ -1,8 +1,8 @@
 - name: restore_eth_rpc
-  restore: eth_rpc
+  restore: _/eth_rpc@0.0.0
 
 - name: restore_eth_firehose
-  restore: eth_firehose
+  restore: _/eth_firehose@0.0.0
 
 # Test NOT EXISTS pattern rewritten as anti-join (due to Flight protocol limitation)
 - name: not_exists_basic_rewritten_as_antijoin

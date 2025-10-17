@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use datasets_common::reference::Reference;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
@@ -119,18 +120,19 @@ async fn dump_finalized() {
         let config = test.ctx.daemon_server().config().clone();
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
+            let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
             ampd::dump_cmd::dump(
                 config,
                 metadata_db,
-                vec!["anvil_rpc_finalized".to_string()],
-                false,
+                dataset_ref,
+                true, // ignore_deps
                 dump::EndBlock::None,
                 1,
-                None,
-                None,
-                None,
-                false,
-                None,
+                None,  // run_every_mins
+                None,  // microbatch_max_interval_override
+                None,  // new_location
+                false, // fresh
+                None,  // meter
             )
             .await
             .expect("Failed to start continuous dump task");
@@ -445,10 +447,11 @@ impl ReorgTestCtx {
 
     /// Dump dataset up to the specified end block.
     async fn dump(&self, dataset: &str, end: BlockNum) {
+        let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
         test_helpers::dump_dataset(
             self.ctx.daemon_server().config(),
             self.ctx.metadata_db(),
-            dataset,
+            dataset_ref,
             end,
             1,
             None,
