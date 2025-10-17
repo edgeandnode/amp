@@ -13,9 +13,7 @@ use datafusion::{
     arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
-use datasets_common::{
-    manifest::DataType, name::Name, reference::Reference, version_tag::VersionTag,
-};
+use datasets_common::{manifest::DataType, name::Name, reference::Reference, version::Version};
 
 use crate::dataset_kind::DerivedDatasetKind;
 
@@ -31,7 +29,7 @@ pub struct Manifest {
     /// Dataset name
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
-    pub version: VersionTag,
+    pub version: Version,
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
 

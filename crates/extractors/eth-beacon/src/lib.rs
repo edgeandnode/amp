@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use common::{BlockNum, Dataset};
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use reqwest::Url;
 
 mod block;
@@ -20,7 +20,7 @@ pub struct Manifest {
     pub name: Name,
     /// Dataset version, e.g., `1.0.0`
     #[serde(default)]
-    pub version: VersionTag,
+    pub version: Version,
     /// Dataset kind, must be `eth-beacon`.
     pub kind: EthBeaconDatasetKind,
     /// Network name, e.g., `mainnet-beacon`.

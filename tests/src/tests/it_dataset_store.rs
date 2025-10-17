@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use dataset_store::DatasetKind;
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 
 use crate::testlib::{self, fixtures::DatasetPackage};
 
@@ -70,7 +70,7 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
     let name = "register_test_dataset"
         .parse::<Name>()
         .expect("name should be a valid identifier");
-    let version = "1.0.0".parse::<VersionTag>().expect("should parse version");
+    let version = "1.0.0".parse::<Version>().expect("should parse version");
 
     //* When
     let result = dataset_store

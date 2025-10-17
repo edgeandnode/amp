@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 
 use crate::{
     ctx::Ctx,
@@ -89,7 +89,7 @@ pub async fn handler(
 pub struct DatasetVersionsResponse {
     /// List of all dataset versions
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub versions: Vec<VersionTag>,
+    pub versions: Vec<Version>,
 }
 
 /// Errors that can occur during dataset versions listing

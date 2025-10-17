@@ -1,6 +1,6 @@
 //! Integration tests for the Admin API dataset schema endpoint.
 
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
 
@@ -248,7 +248,7 @@ impl TestCtx {
 
     async fn get_schema(&self, name: &str, version: &str) -> reqwest::Response {
         let name = name.parse::<Name>().expect("valid dataset name");
-        let version = version.parse::<VersionTag>().expect("valid version");
+        let version = version.parse::<Version>().expect("valid version");
 
         self.client
             .get(&format!(

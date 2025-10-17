@@ -6,7 +6,7 @@
 use std::{sync::Arc, time::Duration};
 
 use common::BoxError;
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 use datasets_derived::Manifest;
 
 use crate::manifest;
@@ -22,7 +22,7 @@ pub struct AmpsyncConfig {
     /// Dataset name (from AMP_DATASET_NAME env var).
     pub dataset_name: Name,
     /// Optional dataset version (from AMP_DATASET_VERSION env var). If None, uses latest version.
-    pub dataset_version: Option<VersionTag>,
+    pub dataset_version: Option<Version>,
     /// Interval in seconds for polling new versions (only when dataset_version is None).
     pub version_poll_interval_secs: u64,
     /// Database pool size
@@ -49,7 +49,7 @@ impl AmpsyncConfig {
     #[allow(clippy::too_many_arguments)]
     pub async fn from_cmd(
         dataset_name: Name,
-        dataset_version: Option<VersionTag>,
+        dataset_version: Option<Version>,
         amp_admin_api_addr: String,
         amp_flight_addr: String,
         version_poll_interval_secs: u64,

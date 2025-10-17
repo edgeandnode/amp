@@ -76,7 +76,7 @@ pub async fn restore_dataset_snapshot(
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let dataset = dataset_store
-        .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
+        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
         .await?
         .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
     let mut tables = Vec::<Arc<PhysicalTable>>::new();

@@ -18,8 +18,8 @@ use datafusion::{
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
-    manifest::Manifest as CommonManifest, name::Name, namespace::Namespace, reference::Reference,
-    version_hash::VersionHash, version_tag::VersionTag,
+    hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
+    reference::Reference, version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -110,8 +110,8 @@ impl DatasetStore {
     pub async fn register_manifest<M>(
         &self,
         name: &Name,
-        version: &VersionTag,
-        manifest_hash: &VersionHash,
+        version: &Version,
+        manifest_hash: &Hash,
         manifest: &M,
     ) -> Result<(), RegisterManifestError>
     where
@@ -161,7 +161,7 @@ impl DatasetStore {
     pub async fn is_registered(
         &self,
         name: &Name,
-        version: &VersionTag,
+        version: &Version,
     ) -> Result<bool, IsRegisteredError> {
         self.metadata_db
             .dataset_exists(name, version)
@@ -172,7 +172,7 @@ impl DatasetStore {
     pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&VersionTag>>,
+        version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
         let name = &name
             .parse::<Name>()
@@ -338,7 +338,7 @@ impl DatasetStore {
     pub async fn get_derived_manifest(
         self: &Arc<Self>,
         name: &str,
-        version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
+        version: impl Into<Option<&Version>> + std::fmt::Debug,
     ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
         // Validate dataset name
         let name =
@@ -411,7 +411,7 @@ impl DatasetStore {
     pub async fn get_client(
         &self,
         dataset_name: &str,
-        dataset_version: impl Into<Option<&VersionTag>> + std::fmt::Debug,
+        dataset_version: impl Into<Option<&Version>> + std::fmt::Debug,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Option<impl BlockStreamer>, GetClientError> {
         let dataset_name =
@@ -854,7 +854,7 @@ impl DatasetStore {
 /// A set of unique (dataset_name, version) tuples extracted from the table references.
 fn dataset_versions_from_table_refs<'a>(
     table_refs: impl Iterator<Item = &'a TableReference>,
-) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromTableRefsError> {
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromTableRefsError> {
     let mut datasets = BTreeSet::new();
 
     for table_ref in table_refs {
@@ -887,12 +887,11 @@ fn dataset_versions_from_table_refs<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<VersionTag>().map_err(|_| {
-                    ExtractDatasetFromTableRefsError::InvalidVersion {
+                v.parse::<Version>()
+                    .map_err(|_| ExtractDatasetFromTableRefsError::InvalidVersion {
                         version: v,
                         schema: catalog_schema.to_string(),
-                    }
-                })
+                    })
             })
             .transpose()?;
 
@@ -916,7 +915,7 @@ fn dataset_versions_from_table_refs<'a>(
 /// A set of unique (dataset_name, version) tuples extracted from the function names.
 fn dataset_versions_from_function_names<'a>(
     function_names: impl IntoIterator<Item = &'a str>,
-) -> Result<BTreeSet<(Name, Option<VersionTag>)>, ExtractDatasetFromFunctionNamesError> {
+) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromFunctionNamesError> {
     let mut datasets = BTreeSet::new();
 
     for func_name in function_names {
@@ -951,7 +950,7 @@ fn dataset_versions_from_function_names<'a>(
         let version = version_str
             .map(|v| v.replace("_", "."))
             .map(|v| {
-                v.parse::<VersionTag>().map_err(|_| {
+                v.parse::<Version>().map_err(|_| {
                     ExtractDatasetFromFunctionNamesError::InvalidVersion {
                         version: v,
                         function: fn_dataset.to_string(),
@@ -1044,7 +1043,7 @@ pub async fn dataset_and_dependencies(
     let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
     while let Some(dataset_ref) = datasets.pop() {
         let Some(dataset) = store
-            .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
+            .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
             .await?
         else {
             return Err(format!("Dataset '{}' not found", dataset_ref).into());
@@ -1093,6 +1092,8 @@ fn dependency_sort(deps: BTreeMap<Reference, Vec<Reference>>) -> Result<Vec<Refe
 
 #[cfg(test)]
 mod tests {
+    use datasets_common::revision::Revision;
+
     #[test]
     fn dependency_sort_order() {
         #[allow(clippy::type_complexity)]
@@ -1115,7 +1116,7 @@ mod tests {
             datasets_common::reference::Reference::new(
                 "_".parse().unwrap(),
                 name.parse().unwrap(),
-                datasets_common::version::Version::Dev,
+                Revision::Dev,
             )
         };
         for (input, expected) in cases {

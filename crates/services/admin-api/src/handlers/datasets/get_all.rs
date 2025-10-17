@@ -1,7 +1,7 @@
 //! Datasets get all handler
 
 use axum::{Json, extract::State, http::StatusCode};
-use datasets_common::{name::Name, version_tag::VersionTag};
+use datasets_common::{name::Name, version::Version};
 
 use crate::{
     ctx::Ctx,
@@ -62,7 +62,7 @@ pub struct DatasetRegistryInfo {
     pub name: Name,
     /// The version of the dataset
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: VersionTag,
+    pub version: Version,
 }
 
 impl From<metadata_db::Dataset> for DatasetRegistryInfo {

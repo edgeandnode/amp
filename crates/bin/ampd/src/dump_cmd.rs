@@ -110,7 +110,7 @@ pub async fn dump(
     let mut physical_datasets = vec![];
     for dataset_ref in datasets {
         let dataset = dataset_store
-            .get_dataset(dataset_ref.name(), dataset_ref.version().as_tag())
+            .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
             .await?
             .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
