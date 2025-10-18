@@ -27,6 +27,10 @@ export const query = Command.make("query", {
       Options.withDescription("The format to output the results in"),
       Options.withDefault("table"),
     ),
+    bearerToken: Options.text("bearer-token").pipe(
+      Options.withDescription("Bearer auth token"),
+      Options.optional,
+    ),
     flightUrl,
   },
 }).pipe(
@@ -77,5 +81,21 @@ export const query = Command.make("query", {
       }))
     }),
   ),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
+  Command.provide(({ args }) => {
+    const transportOptions: Parameters<typeof createGrpcTransport>[0] = {
+      baseUrl: `${args.flightUrl}`,
+    }
+
+    if (Option.isSome(args.bearerToken)) {
+      const token = args.bearerToken.value
+      transportOptions.interceptors = [
+        (next) => (req) => {
+          req.header.set("Authorization", `Bearer ${token}`)
+          return next(req)
+        },
+      ]
+    }
+
+    return ArrowFlight.layer(createGrpcTransport(transportOptions))
+  }),
 )
