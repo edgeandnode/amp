@@ -47,6 +47,28 @@ impl From<StoreError> for RegisterManifestError {
     }
 }
 
+/// Errors specific to version tagging operations
+#[derive(Debug, thiserror::Error)]
+pub enum TagVersionError {
+    /// Dataset version already exists in the registry
+    #[error("Dataset '{name}' version '{version}' already registered")]
+    DatasetExists { name: Name, version: Version },
+
+    /// Failed to tag version in metadata database
+    #[error("Failed to tag version in metadata database: {0}")]
+    MetadataOperation(#[source] metadata_db::Error),
+
+    /// Failed to check if dataset is registered in metadata database
+    #[error("Failed to check dataset registration in metadata database: {0}")]
+    ExistenceCheck(#[source] metadata_db::Error),
+}
+
+impl From<IsRegisteredError> for TagVersionError {
+    fn from(IsRegisteredError(err): IsRegisteredError) -> Self {
+        TagVersionError::ExistenceCheck(err)
+    }
+}
+
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetDatasetError {
@@ -124,13 +146,17 @@ pub enum GetDatasetError {
     },
 }
 
-/// Error that occurs when getting all datasets from the manifest store.
-///
-/// This error wraps a `GetDatasetError` that occurred while getting one of the
-/// datasets during the iteration through all registered datasets.
+/// Errors that can occur when retrieving all datasets from the store.
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to get dataset: {0}")]
-pub struct GetAllDatasetsError(#[from] pub GetDatasetError);
+pub enum GetAllDatasetsError {
+    /// Failed to query the metadata database for the list of datasets
+    #[error("Failed to query metadata database: {0}")]
+    MetadataDbQuery(#[source] metadata_db::Error),
+
+    /// Failed to get a specific dataset during iteration
+    #[error("Failed to get dataset: {0}")]
+    GetDataset(#[from] GetDatasetError),
+}
 
 /// Errors specific to getting derived dataset manifest operations
 #[derive(Debug, thiserror::Error)]
@@ -301,7 +327,7 @@ pub enum GetLogicalCatalogError {
     /// Dataset not found.
     ///
     /// This occurs when a dataset referenced in the query does not exist in the dataset store.
-    #[error("Dataset '{name}' version '{}' not found", version.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "latest".to_string()))]
+    #[error("Dataset '{name}' version '{}' not found", version.as_ref().map_or_else(|| "latest".to_string(), |v| v.to_string()))]
     DatasetNotFound {
         name: String,
         version: Option<Version>,

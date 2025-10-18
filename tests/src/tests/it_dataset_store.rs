@@ -65,6 +65,8 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
     //* Given
     let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_manifest_dataset")
         .with_dataset_manifest("register_test_dataset__1_0_0")
+        .with_dataset_manifest("eth_firehose")
+        .with_dataset_snapshot("eth_firehose")
         .build()
         .await
         .expect("should create test context");

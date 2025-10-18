@@ -3,6 +3,7 @@ use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::Stream;
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
     EthBeacon(eth_beacon_datasets::BeaconClient),

@@ -59,7 +59,7 @@ use crate::{
 /// - **Eth Beacon dataset** (kind="eth-beacon"): Registers a raw dataset that extracts Ethereum Beacon Chain data
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
-/// All dataset types are registered using the same underlying `register_manifest_with_version` method to ensure consistency.
+/// All dataset types are registered using the same underlying `register_manifest` method to ensure consistency.
 ///
 /// The handler:
 /// - Validates dataset name and version format
@@ -151,35 +151,126 @@ pub async fn handler(
 
     // Validate and serialize manifest based on dataset kind
     let manifest_str = match dataset_kind {
-        DatasetKind::Derived => {
-            parse_validate_and_canonicalize_derived_dataset_manifest(&payload.manifest)
-                .map_err(Error::from)?
-        }
+        DatasetKind::Derived => parse_validate_and_canonicalize_derived_dataset_manifest(
+            &payload.manifest,
+        )
+        .map_err(|err| match err {
+            ParseDerivedManifestError::Deserialization(err) => {
+                tracing::error!(
+                    namespace = %payload.namespace,
+                    name = %payload.name,
+                    version = %payload.version,
+                    kind = %dataset_kind,
+                    error = ?err,
+                    "Failed to parse derived dataset manifest JSON"
+                );
+                Error::InvalidManifest(err)
+            }
+            ParseDerivedManifestError::DependencyValidation(err) => {
+                tracing::error!(
+                    namespace = %payload.namespace,
+                    name = %payload.name,
+                    version = %payload.version,
+                    kind = %dataset_kind,
+                    error = ?err,
+                    "Manifest dependency validation failed"
+                );
+                Error::DependencyValidationError(err)
+            }
+            ParseDerivedManifestError::Serialization(err) => {
+                tracing::error!(
+                    namespace = %payload.namespace,
+                    name = %payload.name,
+                    version = %payload.version,
+                    kind = %dataset_kind,
+                    error = ?err,
+                    "Failed to serialize manifest"
+                );
+                Error::InvalidManifest(err)
+            }
+        })?,
         DatasetKind::EvmRpc => {
             parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&payload.manifest)
-                .map_err(Error::from)?
+                .map_err(|err| {
+                    tracing::error!(
+                        namespace = %payload.namespace,
+                        name = %payload.name,
+                        version = %payload.version,
+                        kind = %dataset_kind,
+                        error = ?err,
+                        "Failed to parse and canonicalize evm-rpc dataset manifest"
+                    );
+                    Error::InvalidManifest(err)
+                })?
         }
         DatasetKind::Firehose => {
             parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&payload.manifest)
-                .map_err(Error::from)?
+                .map_err(|err| {
+                    tracing::error!(
+                        namespace = %payload.namespace,
+                        name = %payload.name,
+                        version = %payload.version,
+                        kind = %dataset_kind,
+                        error = ?err,
+                        "Failed to parse and canonicalize firehose dataset manifest"
+                    );
+                    Error::InvalidManifest(err)
+                })?
         }
         DatasetKind::EthBeacon => {
             parse_and_canonicalize_raw_dataset_manifest::<EthBeaconManifest>(&payload.manifest)
-                .map_err(Error::from)?
+                .map_err(|err| {
+                    tracing::error!(
+                        namespace = %payload.namespace,
+                        name = %payload.name,
+                        version = %payload.version,
+                        kind = %dataset_kind,
+                        error = ?err,
+                        "Failed to parse and canonicalize eth-beacon dataset manifest"
+                    );
+                    Error::InvalidManifest(err)
+                })?
         }
     };
 
     // Compute manifest hash from canonical serialization
     let manifest_hash = hash(&manifest_str);
 
-    // Register the manifest with version
+    // Register the manifest (idempotent)
     ctx.dataset_store
-        .register_manifest_with_version(
+        .register_manifest(
+            &payload.namespace,
+            &payload.name,
+            &manifest_hash,
+            manifest_str,
+        )
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                namespace = %payload.namespace,
+                name = %payload.name,
+                manifest_hash = %manifest_hash,
+                kind = %dataset_kind,
+                error = ?err,
+                "Failed to register manifest"
+            );
+            Error::ManifestRegistrationError(err)
+        })?;
+
+    tracing::info!(
+        "Registered manifest for dataset '{}/{}' with hash '{}'",
+        payload.namespace,
+        payload.name,
+        manifest_hash
+    );
+
+    // Tag the manifest with the version
+    ctx.dataset_store
+        .tag_version(
             &payload.namespace,
             &payload.name,
             &payload.version,
             &manifest_hash,
-            manifest_str,
         )
         .await
         .map_err(|err| {
@@ -190,16 +281,16 @@ pub async fn handler(
                 manifest_hash = %manifest_hash,
                 kind = %dataset_kind,
                 error = ?err,
-                "Failed to register manifest"
+                "Failed to tag version"
             );
-            Error::ManifestRegistrationError(err)
+            Error::TagVersionError(err)
         })?;
 
     tracing::info!(
-        "Registered manifest for dataset '{}/{}' version '{}' (hash: {})",
+        "Tagged version '{}' for dataset '{}/{}' (hash: {})",
+        payload.version,
         payload.namespace,
         payload.name,
-        payload.version,
         manifest_hash
     );
 
@@ -268,6 +359,14 @@ pub enum Error {
     #[error("Failed to register manifest: {0}")]
     ManifestRegistrationError(#[from] RegisterManifestError),
 
+    /// Failed to tag version in the system
+    ///
+    /// This occurs when:
+    /// - Version tag already exists
+    /// - Error during version tagging in metadata database
+    #[error("Failed to tag version: {0}")]
+    TagVersionError(#[from] dataset_store::TagVersionError),
+
     /// Unsupported dataset kind
     ///
     /// This occurs when:
@@ -303,6 +402,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
             Error::DependencyValidationError(_) => "DEPENDENCY_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
+            Error::TagVersionError(_) => "TAG_VERSION_ERROR",
             Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
             Error::StoreError(_) => "STORE_ERROR",
             Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
@@ -315,6 +415,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
             Error::DependencyValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TagVersionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
@@ -322,25 +423,21 @@ impl IntoErrorResponse for Error {
     }
 }
 
-impl From<ParseDerivedManifestError> for Error {
-    fn from(err: ParseDerivedManifestError) -> Self {
-        match err {
-            ParseDerivedManifestError::Deserialization(e) => Error::InvalidManifest(e),
-            ParseDerivedManifestError::DependencyValidation(e) => {
-                Error::DependencyValidationError(e)
-            }
-            ParseDerivedManifestError::Serialization(e) => Error::InvalidManifest(e),
-        }
-    }
-}
-
-impl From<ParseRawManifestError> for Error {
-    fn from(err: ParseRawManifestError) -> Self {
-        match err {
-            ParseRawManifestError::Deserialization(e) => Error::InvalidManifest(e),
-            ParseRawManifestError::Serialization(e) => Error::InvalidManifest(e),
-        }
-    }
+/// Parse and re-serialize a raw dataset manifest to canonical JSON format
+///
+/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, EthBeacon):
+/// 1. Deserialize from JSON string
+/// 2. Re-serialize to canonical JSON
+///
+/// Returns canonical JSON string on success
+fn parse_and_canonicalize_raw_dataset_manifest<T>(
+    manifest_str: impl AsRef<str>,
+) -> Result<String, serde_json::Error>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let manifest: T = serde_json::from_str(manifest_str.as_ref())?;
+    serde_json::to_string(&manifest)
 }
 
 /// Parse, validate, and re-serialize a derived dataset manifest to canonical JSON format
@@ -364,81 +461,10 @@ fn parse_validate_and_canonicalize_derived_dataset_manifest(
     serde_json::to_string(&manifest).map_err(ParseDerivedManifestError::Serialization)
 }
 
-/// Error type for derived dataset manifest parsing and validation
-///
-/// Represents the different failure points when processing a derived dataset manifest
-/// through the parse → validate → canonicalize pipeline.
-#[derive(Debug, thiserror::Error)]
+/// Error type for derived dataset manifest parsing
+#[derive(Debug)]
 enum ParseDerivedManifestError {
-    /// Failed to deserialize the JSON string into a `DerivedDatasetManifest` struct
-    ///
-    /// This occurs when:
-    /// - JSON syntax is invalid
-    /// - JSON structure doesn't match the manifest schema
-    /// - Required fields are missing or have wrong types
-    #[error("failed to deserialize manifest: {0}")]
-    Deserialization(#[source] serde_json::Error),
-
-    /// Failed dependency validation after successful deserialization
-    ///
-    /// This occurs when:
-    /// - SQL queries reference datasets not declared in the dependencies list
-    /// - Circular dependencies are detected
-    /// - Other domain-specific validation rules are violated
-    #[error("dependency validation failed: {0}")]
-    DependencyValidation(#[source] DependencyValidationError),
-
-    /// Failed to serialize the validated manifest back to canonical JSON
-    ///
-    /// This occurs when:
-    /// - The manifest structure cannot be serialized (rare, indicates a bug)
-    /// - Memory allocation fails during serialization
-    ///
-    /// Note: This should rarely happen since we already deserialized successfully
-    #[error("failed to serialize manifest: {0}")]
-    Serialization(#[source] serde_json::Error),
-}
-
-/// Parse and re-serialize a raw dataset manifest to canonical JSON format
-///
-/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, EthBeacon):
-/// 1. Deserialize from JSON string
-/// 2. Re-serialize to canonical JSON
-///
-/// Returns canonical JSON string on success
-fn parse_and_canonicalize_raw_dataset_manifest<T>(
-    manifest_str: impl AsRef<str>,
-) -> Result<String, ParseRawManifestError>
-where
-    T: serde::de::DeserializeOwned + serde::Serialize,
-{
-    let manifest: T = serde_json::from_str(manifest_str.as_ref())
-        .map_err(ParseRawManifestError::Deserialization)?;
-    serde_json::to_string(&manifest).map_err(ParseRawManifestError::Serialization)
-}
-
-/// Error type for raw dataset manifest parsing and canonicalization
-///
-/// Represents the different failure points when processing raw dataset manifests
-/// (EvmRpc, Firehose, EthBeacon) through the parse → canonicalize pipeline.
-#[derive(Debug, thiserror::Error)]
-enum ParseRawManifestError {
-    /// Failed to deserialize the JSON string into the manifest struct
-    ///
-    /// This occurs when:
-    /// - JSON syntax is invalid
-    /// - JSON structure doesn't match the manifest schema
-    /// - Required fields are missing or have wrong types
-    #[error("failed to deserialize manifest: {0}")]
-    Deserialization(#[source] serde_json::Error),
-
-    /// Failed to serialize the manifest back to canonical JSON
-    ///
-    /// This occurs when:
-    /// - The manifest structure cannot be serialized (rare, indicates a bug)
-    /// - Memory allocation fails during serialization
-    ///
-    /// Note: This should rarely happen since we already deserialized successfully
-    #[error("failed to serialize manifest: {0}")]
-    Serialization(#[source] serde_json::Error),
+    Deserialization(serde_json::Error),
+    DependencyValidation(DependencyValidationError),
+    Serialization(serde_json::Error),
 }

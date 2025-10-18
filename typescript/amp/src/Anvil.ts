@@ -75,7 +75,7 @@ export const script = (script: string, options: ScriptOptions = {}) =>
 export const dataset = new Model.DatasetRpc({
   "kind": "evm-rpc",
   "name": "anvil",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "network": "anvil",
   "schema": {
     "blocks": {

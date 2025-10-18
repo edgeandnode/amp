@@ -3,7 +3,7 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 
 use crate::{
     ctx::Ctx,
@@ -12,7 +12,9 @@ use crate::{
 
 /// Handler for the `GET /datasets/{name}/versions/{version}/manifest` endpoint
 ///
-/// Retrieves the raw manifest JSON for a specific version of a dataset.
+/// Retrieves the raw manifest JSON for a specific version of a dataset using a
+/// two-step resolution process: first resolving the manifest hash from the metadata
+/// database, then fetching the manifest content from the object store.
 ///
 /// ## Path Parameters
 /// - `name`: Dataset name (validated identifier)
@@ -22,17 +24,19 @@ use crate::{
 /// - **200 OK**: Returns the raw manifest JSON
 /// - **400 Bad Request**: Invalid dataset name or version format
 /// - **404 Not Found**: Dataset with the given name/version does not exist
-/// - **500 Internal Server Error**: Dataset store error
+/// - **500 Internal Server Error**: Database or object store error
 ///
 /// ## Error Codes
 /// - `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)
 /// - `MANIFEST_NOT_FOUND`: No manifest exists with the given name/version
-/// - `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store
+/// - `HASH_RESOLUTION_ERROR`: Failed to resolve manifest hash from the metadata database
+/// - `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest content from the object store
 ///
-/// This handler:
-/// - Validates and extracts the dataset name and version from the URL path
-/// - Retrieves the raw manifest JSON directly from the dataset manifests store
-/// - Returns the manifest as a JSON response with proper Content-Type header
+/// ## Resolution Flow
+/// 1. Validates and extracts the dataset name and version from the URL path
+/// 2. Resolves the manifest hash from the metadata database using namespace+name+version
+/// 3. Fetches the manifest content from the object store using the resolved hash
+/// 4. Returns the manifest as a JSON response with proper Content-Type header
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -65,17 +69,28 @@ pub async fn handler(
         }
     };
 
+    // TODO: Pass the actual namespace instead of using a placeholder
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
+
     tracing::debug!(
+        dataset_namespace=%namespace,
         dataset_name=%name,
         dataset_version=%version,
         "retrieving manifest from store"
     );
 
-    // Get the raw manifest JSON from the dataset manifests store
-    let manifest_content = match ctx.dataset_manifests_store.get(&name, &version).await {
-        Ok(Some(content)) => content,
+    // Resolve the manifest hash from namespace+name+version
+    let manifest_hash = match ctx
+        .metadata_db
+        .resolve_tag_hash(&namespace, &name, &version)
+        .await
+    {
+        Ok(Some(hash)) => hash.into(),
         Ok(None) => {
             tracing::debug!(
+                dataset_namespace=%namespace,
                 dataset_name=%name,
                 dataset_version=%version,
                 "manifest not found"
@@ -88,16 +103,48 @@ pub async fn handler(
         }
         Err(err) => {
             tracing::debug!(
+                dataset_namespace=%namespace,
                 dataset_name=%name,
                 dataset_version=%version,
                 error=?err,
-                "failed to retrieve manifest"
+                "failed to resolve manifest hash"
+            );
+            return Err(Error::HashResolutionError(err).into());
+        }
+    };
+
+    // Fetch the manifest content by hash
+    let manifest_content = match ctx.dataset_manifests_store.get(&manifest_hash).await {
+        Ok(Some(content)) => content,
+        Ok(None) => {
+            tracing::debug!(
+                dataset_namespace=%namespace,
+                dataset_name=%name,
+                dataset_version=%version,
+                manifest_hash=%manifest_hash,
+                "manifest content not found by hash"
+            );
+            return Err(Error::NotFound {
+                name: name.clone(),
+                version: version.clone(),
+            }
+            .into());
+        }
+        Err(err) => {
+            tracing::debug!(
+                dataset_namespace=%namespace,
+                dataset_name=%name,
+                dataset_version=%version,
+                manifest_hash=%manifest_hash,
+                error=?err,
+                "failed to retrieve manifest content"
             );
             return Err(Error::ManifestRetrievalError(err).into());
         }
     };
 
     tracing::debug!(
+        dataset_namespace=%namespace,
         dataset_name=%name,
         dataset_version=%version,
         "manifest retrieved successfully"
@@ -136,6 +183,14 @@ pub enum Error {
     #[error("manifest '{name}' version '{version}' not found")]
     NotFound { name: Name, version: Version },
 
+    /// Hash resolution error from the metadata database
+    ///
+    /// This occurs when:
+    /// - The metadata database is not accessible
+    /// - There's a database query error
+    #[error("hash resolution error: {0}")]
+    HashResolutionError(#[source] metadata_db::Error),
+
     /// Manifest retrieval error from the dataset manifests store
     ///
     /// This occurs when:
@@ -152,6 +207,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidSelector(_) => "INVALID_SELECTOR",
             Error::NotFound { .. } => "MANIFEST_NOT_FOUND",
+            Error::HashResolutionError(_) => "HASH_RESOLUTION_ERROR",
             Error::ManifestRetrievalError(_) => "MANIFEST_RETRIEVAL_ERROR",
         }
     }
@@ -160,6 +216,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidSelector(_) => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
+            Error::HashResolutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ManifestRetrievalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

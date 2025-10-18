@@ -63,8 +63,13 @@ async fn resolve_schema_with_filtered_query_succeeds() {
     let resp = ctx.send_shema_request(sql_query, false).await;
 
     //* Then
+    let status = resp.status();
+    if status != StatusCode::OK {
+        let error_body = resp.text().await.unwrap();
+        panic!("Expected 200 OK but got {}: {}", status, error_body);
+    }
     assert_eq!(
-        resp.status(),
+        status,
         StatusCode::OK,
         "schema resolution should succeed for filtered query"
     );
