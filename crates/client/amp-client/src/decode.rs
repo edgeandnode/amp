@@ -15,7 +15,7 @@ use common::arrow::{
 };
 use futures::{Stream, ready};
 
-use crate::{Error, ResponseBatch};
+use crate::{client::ResponseBatch, error::Error};
 
 pub struct FlightDataDecoder<S> {
     flight_data: S,

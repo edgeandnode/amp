@@ -201,7 +201,7 @@ pub async fn dump_table(
         };
 
         let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
-        let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
+        let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
         dump_sql_query(
             &ctx,
             &env,

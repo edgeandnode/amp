@@ -1,49 +1,39 @@
-use std::sync::Arc;
+use std::ops::RangeInclusive;
 
-use amp_client::InvalidationRange;
 use async_trait::async_trait;
-use common::{BlockNum, arrow::array::RecordBatch};
+use common::arrow::array::RecordBatch;
 
-use crate::{error::Result, types::StoredBatch};
+use crate::error::Result;
 
-/// Trait for storing and retrieving batches to support reorg handling.
+/// Trait for storing and managing batches.
 ///
-/// Implementations track emitted batches with their associated block ranges.
-/// A single batch can span multiple networks. When a reorg occurs on any network,
-/// all batches whose ranges intersect with that network's invalidation range are retracted.
+/// Implementations track emitted batches by sequence ID and handle
+/// all stream event types (Data, Watermark, Reorg, Rewind).
 #[async_trait]
 pub trait StateStore: Send + Sync {
-    /// Insert a batch with all its ranges and records.
+    /// Append a batch to the store.
     ///
     /// # Arguments
-    /// * `batch` - The stored batch with ranges and all records
-    async fn insert(&mut self, batch: StoredBatch) -> Result<()>;
+    /// * `batch` - The RecordBatch data
+    /// * `id` - Unique identifier
+    async fn append(&mut self, batch: RecordBatch, id: u64) -> Result<()>;
 
-    /// Retrieve all batches whose ranges intersect with any of the given invalidation ranges.
-    ///
-    /// Used during reorg handling to find batches that need to be retracted.
-    /// Returns batches where ANY range overlaps with ANY invalidation range.
-    /// ALL records from matching batches should be retracted (batch-level granularity).
+    /// Prune old batches from the store.
     ///
     /// # Arguments
-    /// * `ranges` - The invalidation ranges (network + block number ranges)
+    /// * `cutoff` - Prune all batches before this id
+    async fn prune(&mut self, cutoff: u64) -> Result<()>;
+
+    /// Retract invalidated batches from the store.
+    ///
+    /// Returns the batches that were retracted (for emitting delete records).
+    ///
+    /// # Arguments
+    /// * `ids` - The unique identifier range that was invalidated
     ///
     /// # Returns
-    /// A vector of RecordBatch references for all batches that overlap
-    async fn get_in_ranges(&self, ranges: &[InvalidationRange]) -> Result<Vec<Arc<RecordBatch>>>;
-
-    /// Remove batches based on multi-network watermarks.
-    ///
-    /// Used to maintain a sliding window of recent batches and prevent
-    /// unbounded memory growth. A batch is only deleted when ALL its ranges
-    /// are beyond their respective network's reorg window (conservative approach).
-    ///
-    /// # Arguments
-    /// * `watermarks` - Map of network name to block number watermark
-    async fn prune(
-        &mut self,
-        watermarks: &std::collections::BTreeMap<String, BlockNum>,
-    ) -> Result<()>;
+    /// A vector of RecordBatch references for all retracted batches
+    async fn retract(&mut self, ids: RangeInclusive<u64>) -> Result<Vec<RecordBatch>>;
 }
 
 mod memory;

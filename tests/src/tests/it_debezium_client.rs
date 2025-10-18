@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use amp_debezium_client::{DebeziumClient, DebeziumOp, InMemoryStore};
+use amp_debezium_client::{DebeziumClient, DebeziumOp};
 use common::BlockNum;
 use futures::StreamExt;
 use monitoring::logging;
-use tests::testlib::{self, helpers as test_helpers};
+
+use crate::testlib::{self, helpers as test_helpers};
 
 #[tokio::test]
 async fn debezium_stream_emits_create_events() {
@@ -18,30 +19,29 @@ async fn debezium_stream_emits_create_events() {
     // Create Debezium client with streaming query
     let client = test.new_debezium_client().await;
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
-    let mut stream = client
-        .stream(query, None)
-        .await
-        .expect("Failed to create stream");
+    let mut stream = client.stream(query).await.expect("Failed to create stream");
 
     //* When - Spawn task to consume stream, then mine/dump blocks
     let handle = tokio::spawn(async move {
         let mut records = Vec::new();
         while let Some(result) = stream.next().await {
-            let record = result.expect("Failed to get record");
+            let batch = result.expect("Failed to get record batch");
 
-            // Check block number to know when to stop
-            let block_num = record
-                .after
-                .as_ref()
-                .and_then(|v| v.get("block_num"))
-                .and_then(|v| v.as_u64())
-                .unwrap();
+            for record in batch {
+                // Check block number to know when to stop
+                let block_num = record
+                    .after
+                    .as_ref()
+                    .and_then(|v| v.get("block_num"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap();
 
-            records.push(record);
+                records.push(record);
 
-            // Stop after receiving last expected block
-            if block_num == last_block {
-                break;
+                // Stop after receiving last expected block
+                if block_num == last_block {
+                    return records;
+                }
             }
         }
         records
@@ -93,34 +93,33 @@ async fn debezium_stream_emits_delete_events_on_reorg() {
     // Create Debezium client with streaming query
     let client = test.new_debezium_client().await;
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
-    let mut stream = client
-        .stream(query, None)
-        .await
-        .expect("Failed to create stream");
+    let mut stream = client.stream(query).await.expect("Failed to create stream");
 
     //* When - Spawn task to collect events, then mine/reorg
     let handle = tokio::spawn(async move {
         let mut all_records = Vec::new();
 
         while let Some(result) = stream.next().await {
-            let record = result.expect("Failed to get record");
+            let batch = result.expect("Failed to get record batch");
 
-            // Get block number (handle both create and delete)
-            let block_num = if record.op == DebeziumOp::Delete {
-                record.before.as_ref()
-            } else {
-                record.after.as_ref()
-            }
-            .and_then(|v| v.get("block_num"))
-            .and_then(|v| v.as_u64())
-            .unwrap();
+            for record in batch {
+                // Get block number (handle both create and delete)
+                let block_num = if record.op == DebeziumOp::Delete {
+                    record.before.as_ref()
+                } else {
+                    record.after.as_ref()
+                }
+                .and_then(|v| v.get("block_num"))
+                .and_then(|v| v.as_u64())
+                .unwrap();
 
-            all_records.push(record);
+                all_records.push(record);
 
-            // Stop after we've seen the final block (after reorg)
-            // We're looking for block 3 as a create (after reorg completes)
-            if block_num >= last_block && all_records.last().unwrap().op == DebeziumOp::Create {
-                break;
+                // Stop after we've seen the final block (after reorg)
+                // We're looking for block 3 as a create (after reorg completes)
+                if block_num >= last_block && all_records.last().unwrap().op == DebeziumOp::Create {
+                    return all_records;
+                }
             }
         }
 
@@ -242,39 +241,38 @@ async fn debezium_stream_basic_functionality() {
 
     // Create client
     let endpoint = test.ctx.daemon_server().flight_server_url();
-    let amp_client = amp_client::SqlClient::new(&endpoint)
+    let amp_client = amp_client::AmpClient::from_endpoint(&endpoint)
         .await
         .expect("Failed to create amp client");
-    let client = DebeziumClient::new(amp_client, InMemoryStore::new(64));
+    let client = DebeziumClient::new(amp_client, None);
 
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
-    let mut stream = client
-        .stream(query, None)
-        .await
-        .expect("Failed to create stream");
+    let mut stream = client.stream(query).await.expect("Failed to create stream");
 
     //* When - Spawn task, then mine blocks
     let handle = tokio::spawn(async move {
         let mut records = Vec::new();
         let mut seen_keys = HashMap::new();
 
-        while let Some(Ok(record)) = stream.next().await {
-            // Track combinations of block_num + hash to verify data structure
-            if let Some(after) = &record.after {
-                let block_num = after.get("block_num").unwrap().as_u64().unwrap();
-                let hash = after.get("hash").unwrap().as_str().unwrap().to_string();
-                let key = (block_num, hash);
+        while let Some(Ok(batch)) = stream.next().await {
+            for record in batch {
+                // Track combinations of block_num + hash to verify data structure
+                if let Some(after) = &record.after {
+                    let block_num = after.get("block_num").unwrap().as_u64().unwrap();
+                    let hash = after.get("hash").unwrap().as_str().unwrap().to_string();
+                    let key = (block_num, hash);
 
-                if seen_keys.contains_key(&key) {
-                    panic!("Duplicate key detected: {:?}", key);
-                }
-                seen_keys.insert(key, ());
+                    if seen_keys.contains_key(&key) {
+                        panic!("Duplicate key detected: {:?}", key);
+                    }
+                    seen_keys.insert(key, ());
 
-                records.push(record);
+                    records.push(record);
 
-                // Stop after we reach last block
-                if block_num >= last_block {
-                    break;
+                    // Stop after we reach last block
+                    if block_num >= last_block {
+                        return (records, seen_keys);
+                    }
                 }
             }
         }
@@ -341,7 +339,7 @@ impl TestCtx {
         test_helpers::dump_dataset(
             self.ctx.daemon_server().config(),
             self.ctx.metadata_db(),
-            dataset,
+            format!("default/{}@dev", dataset).parse().unwrap(),
             end,
             1,
             None,
@@ -353,10 +351,10 @@ impl TestCtx {
     /// Create a new DebeziumClient for this test context.
     async fn new_debezium_client(&self) -> DebeziumClient {
         let endpoint = self.ctx.daemon_server().flight_server_url();
-        let amp_client = amp_client::SqlClient::new(&endpoint)
+        let amp_client = amp_client::AmpClient::from_endpoint(&endpoint)
             .await
             .expect("Failed to create amp client");
 
-        DebeziumClient::new(amp_client, InMemoryStore::new(64))
+        DebeziumClient::new(amp_client, None)
     }
 }

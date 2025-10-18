@@ -63,7 +63,6 @@ const AMP_CRATES: &[&str] = &[
     "amp_debezium_client",
     "ampctl",
     "ampd",
-    "ampsync",
     "ampup",
     "arrow_to_postgres",
     "auth_http",

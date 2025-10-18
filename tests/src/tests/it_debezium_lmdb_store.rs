@@ -1,18 +1,14 @@
 //! Integration tests for LMDB state store.
 //!
 //! These tests verify the LMDB backend works correctly with the StateStore trait,
-//! including persistence across restarts and multi-network scenarios.
+//! including data persistence, handle_data, handle_watermark, and handle_invalidation.
 
 use std::sync::Arc;
 
-use amp_client::InvalidationRange;
-use amp_debezium_client::{LmdbStore, StateStore, StoredBatch};
-use common::{
-    arrow::{
-        array::{Int64Array, RecordBatch, StringArray},
-        datatypes::{DataType, Field, Schema},
-    },
-    metadata::segments::BlockRange,
+use amp_debezium_client::{LmdbStore, StateStore};
+use common::arrow::{
+    array::{Int64Array, RecordBatch, StringArray},
+    datatypes::{DataType, Field, Schema},
 };
 use tempfile::TempDir;
 
@@ -32,207 +28,133 @@ fn create_test_batch(block_nums: Vec<i64>) -> RecordBatch {
 }
 
 #[tokio::test]
-async fn lmdb_basic_operations() {
-    //* Given - A RocksDB store with test data
+async fn lmdb_append_stores_batch() {
+    //* Given - An LMDB store
     let temp_dir = TempDir::new().unwrap();
-    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
 
-    let batch = Arc::new(create_test_batch(vec![100, 101, 102]));
-    let stored_batch = StoredBatch {
-        batch: batch.clone(),
-        ranges: vec![BlockRange {
-            network: "ethereum".to_string(),
-            numbers: 100..=102,
-            hash: [1u8; 32].into(),
-            prev_hash: Some([0u8; 32].into()),
-        }],
-    };
+    //* When - Store a batch
+    let batch = create_test_batch(vec![100, 101, 102]);
+    store.append(batch.clone(), 0).await.unwrap();
 
-    //* When - Insert and retrieve
-    store.insert(stored_batch).await.unwrap();
-
-    let ranges = vec![InvalidationRange {
-        network: "ethereum".to_string(),
-        numbers: 100..=102,
-    }];
-    let batches = store.get_in_ranges(&ranges).await.unwrap();
-
-    //* Then - Data is retrievable
-    assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].num_rows(), 3);
+    //* Then - Batch is stored (verify by reopening and checking retraction)
+    let retracted = store.retract(0..=0).await.unwrap();
+    assert_eq!(retracted.len(), 1);
+    assert_eq!(retracted[0].num_rows(), 3);
 }
 
 #[tokio::test]
-async fn lmdb_multi_network_storage() {
-    //* Given - A RocksDB store with data from multiple networks
+async fn lmdb_handle_invalidation_retracts_batches() {
+    //* Given - LMDB store with multiple batches
     let temp_dir = TempDir::new().unwrap();
-    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
 
-    // Insert batch spanning multiple networks
-    let batch = Arc::new(create_test_batch(vec![100, 200]));
-    let stored_batch = StoredBatch {
-        batch: batch.clone(),
-        ranges: vec![
-            BlockRange {
-                network: "ethereum".to_string(),
-                numbers: 100..=100,
-                hash: [1u8; 32].into(),
-                prev_hash: None,
-            },
-            BlockRange {
-                network: "polygon".to_string(),
-                numbers: 200..=200,
-                hash: [2u8; 32].into(),
-                prev_hash: None,
-            },
-        ],
-    };
+    let batch = create_test_batch(vec![100, 101, 102]);
 
-    store.insert(stored_batch).await.unwrap();
+    // Store batches with IDs 0, 1, 2, 3, 4
+    for id in 0..=4 {
+        store.append(batch.clone(), id).await.unwrap();
+    }
 
-    //* When - Query by different networks
-    let eth_ranges = vec![InvalidationRange {
-        network: "ethereum".to_string(),
-        numbers: 100..=100,
-    }];
-    let poly_ranges = vec![InvalidationRange {
-        network: "polygon".to_string(),
-        numbers: 200..=200,
-    }];
+    //* When - Invalidate IDs 1..=3
+    let retracted = store.retract(1..=3).await.unwrap();
 
-    let eth_batches = store.get_in_ranges(&eth_ranges).await.unwrap();
-    let poly_batches = store.get_in_ranges(&poly_ranges).await.unwrap();
+    //* Then - 3 batches retracted
+    assert_eq!(retracted.len(), 3);
+    for batch in &retracted {
+        assert_eq!(batch.num_rows(), 3);
+    }
 
-    //* Then - Both queries return the same batch
-    assert_eq!(eth_batches.len(), 1);
-    assert_eq!(poly_batches.len(), 1);
-    assert_eq!(eth_batches[0].num_rows(), 2);
-    assert_eq!(poly_batches[0].num_rows(), 2);
+    // Verify IDs 0 and 4 still exist
+    let remaining = store.retract(0..=0).await.unwrap();
+    assert_eq!(remaining.len(), 1);
+
+    let remaining = store.retract(4..=4).await.unwrap();
+    assert_eq!(remaining.len(), 1);
 }
 
 #[tokio::test]
-async fn lmdb_persistence_with_multiple_batches() {
-    //* Given - Multiple batches stored in RocksDB
+async fn lmdb_handle_watermark_prunes_old_batches() {
+    //* Given - LMDB store with batches 0..=20
+    let temp_dir = TempDir::new().unwrap();
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
+
+    let batch = create_test_batch(vec![100]);
+
+    for id in 0..=20 {
+        store.append(batch.clone(), id).await.unwrap();
+    }
+
+    //* When - Prune batches with ID < 10
+    store.prune(10).await.unwrap();
+
+    //* Then - Only batches 10..=20 remain (11 batches)
+    // Try to invalidate 0..=9 (should return empty)
+    let pruned = store.retract(0..=9).await.unwrap();
+    assert_eq!(pruned.len(), 0, "Batches 0-9 should be pruned");
+
+    // Verify 10..=20 still exist
+    let remaining = store.retract(10..=20).await.unwrap();
+    assert_eq!(remaining.len(), 11, "Batches 10-20 should remain");
+}
+
+#[tokio::test]
+async fn lmdb_persistence_across_restarts() {
+    //* Given - Store batches then close
     let temp_dir = TempDir::new().unwrap();
 
     {
-        let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
+        let mut store = LmdbStore::new(temp_dir.path()).unwrap();
+        let batch = create_test_batch(vec![100, 200, 300]);
 
-        for block_num in [100u64, 200, 300] {
-            let batch = Arc::new(create_test_batch(vec![block_num as i64]));
-            let stored_batch = StoredBatch {
-                batch: batch.clone(),
-                ranges: vec![BlockRange {
-                    network: "ethereum".to_string(),
-                    numbers: block_num..=block_num,
-                    hash: [block_num as u8; 32].into(),
-                    prev_hash: None,
-                }],
-            };
-            store.insert(stored_batch).await.unwrap();
+        for id in 0..=4 {
+            store.append(batch.clone(), id).await.unwrap();
         }
     }
 
-    //* When - Reopen database and query
-    let store = LmdbStore::new(temp_dir.path(), 64).unwrap();
-    let ranges = vec![InvalidationRange {
-        network: "ethereum".to_string(),
-        numbers: 100..=300,
-    }];
-    let batches = store.get_in_ranges(&ranges).await.unwrap();
+    //* When - Reopen and query
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
+    let retracted = store.retract(0..=4).await.unwrap();
 
-    //* Then - All batches are still there
-    assert_eq!(batches.len(), 3);
-    for batch in &batches {
-        assert_eq!(batch.num_rows(), 1);
+    //* Then - All 5 batches are still there
+    assert_eq!(retracted.len(), 5);
+    for batch in &retracted {
+        assert_eq!(batch.num_rows(), 3);
     }
 }
 
 #[tokio::test]
-async fn lmdb_prune_respects_multi_network_watermarks() {
-    //* Given - Batches with ranges from multiple networks
+async fn lmdb_empty_invalidation_range() {
+    //* Given - LMDB store with some batches
     let temp_dir = TempDir::new().unwrap();
-    let mut store = LmdbStore::new(temp_dir.path(), 10).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
 
-    // Insert a batch spanning two networks
-    for block_num in 0u64..=20u64 {
-        let batch = Arc::new(create_test_batch(vec![block_num as i64]));
-        let stored_batch = StoredBatch {
-            batch: batch.clone(),
-            ranges: vec![
-                BlockRange {
-                    network: "fast_chain".to_string(),
-                    numbers: block_num..=block_num,
-                    hash: [block_num as u8; 32].into(),
-                    prev_hash: None,
-                },
-                BlockRange {
-                    network: "slow_chain".to_string(),
-                    numbers: block_num..=block_num,
-                    hash: [(block_num + 100) as u8; 32].into(),
-                    prev_hash: None,
-                },
-            ],
-        };
-        store.insert(stored_batch).await.unwrap();
-    }
+    let batch = create_test_batch(vec![100]);
+    store.append(batch.clone(), 5).await.unwrap();
+    store.append(batch.clone(), 10).await.unwrap();
 
-    //* When - Prune with different watermarks
-    let mut watermarks = std::collections::BTreeMap::new();
-    watermarks.insert("fast_chain".to_string(), 20);
-    watermarks.insert("slow_chain".to_string(), 15);
-    store.prune(&watermarks).await.unwrap();
+    //* When - Invalidate non-existent range
+    let retracted = store.retract(0..=4).await.unwrap();
 
-    //* Then - Only batches safe for both networks are pruned
-    // prune_before for slow_chain = 15 - 10 = 5
-    // So blocks 0-4 should be pruned, 5-20 should remain
-    let all_ranges = vec![
-        InvalidationRange {
-            network: "fast_chain".to_string(),
-            numbers: 0..=100,
-        },
-        InvalidationRange {
-            network: "slow_chain".to_string(),
-            numbers: 0..=100,
-        },
-    ];
-    let remaining = store.get_in_ranges(&all_ranges).await.unwrap();
-
-    // Should have 16 batches (blocks 5-20)
-    assert_eq!(remaining.len(), 16);
+    //* Then - No batches retracted
+    assert_eq!(retracted.len(), 0);
 }
 
 #[tokio::test]
-async fn lmdb_range_overlap_detection() {
-    //* Given - Multiple overlapping batches
+async fn lmdb_watermark_with_zero_cutoff() {
+    //* Given - LMDB store with batches
     let temp_dir = TempDir::new().unwrap();
-    let mut store = LmdbStore::new(temp_dir.path(), 64).unwrap();
+    let mut store = LmdbStore::new(temp_dir.path()).unwrap();
 
-    // Insert batches with overlapping ranges
-    for start_block in [100u64, 105, 110, 115, 120] {
-        let batch = Arc::new(create_test_batch(vec![start_block as i64]));
-        let stored_batch = StoredBatch {
-            batch: batch.clone(),
-            ranges: vec![BlockRange {
-                network: "ethereum".to_string(),
-                numbers: start_block..=start_block + 2,
-                hash: [start_block as u8; 32].into(),
-                prev_hash: None,
-            }],
-        };
-        store.insert(stored_batch).await.unwrap();
+    let batch = create_test_batch(vec![100]);
+    for id in 0..=5 {
+        store.append(batch.clone(), id).await.unwrap();
     }
 
-    //* When - Query a range that overlaps multiple batches
-    let ranges = vec![InvalidationRange {
-        network: "ethereum".to_string(),
-        numbers: 107..=113,
-    }];
-    let batches = store.get_in_ranges(&ranges).await.unwrap();
+    //* When - Prune with cutoff = 0 (should be a no-op)
+    store.prune(0).await.unwrap();
 
-    //* Then - All overlapping batches are returned
-    // Ranges: 100-102, 105-107, 110-112, 115-117, 120-122
-    // Query: 107-113
-    // Should match: 105-107 (overlap at 107), 110-112 (fully contained)
-    assert_eq!(batches.len(), 2);
+    //* Then - All batches remain
+    let remaining = store.retract(0..=5).await.unwrap();
+    assert_eq!(remaining.len(), 6);
 }

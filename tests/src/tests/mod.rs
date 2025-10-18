@@ -2,6 +2,8 @@ mod it_admin_api_datasets_manifest;
 mod it_admin_api_datasets_register;
 mod it_admin_api_schema;
 mod it_client;
+mod it_debezium_client;
+mod it_debezium_lmdb_store;
 mod it_dependencies;
 mod it_dump;
 mod it_functions;
