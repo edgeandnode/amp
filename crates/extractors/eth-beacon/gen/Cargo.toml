@@ -1,0 +1,17 @@
+[package]
+name = "datasets-eth-beacon-gen"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+publish = false
+
+# Schema generation dependencies (see README.md "JSON Schema Generation" section)
+# These dependencies are only included when the gen_schema cfg flag is enabled
+[target.'cfg(gen_schema)'.build-dependencies]
+eth-beacon-datasets = { path = "..", features = ["schemars"] }
+schemars = { workspace = true }
+serde_json = { workspace = true }
+
+[lints.rust]
+# Allow the gen_schema cfg flag used for conditional JSON schema generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_schema)'] }

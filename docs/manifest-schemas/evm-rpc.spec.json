@@ -20,6 +20,10 @@
       "description": "Network name, e.g., `anvil`, `mainnet`",
       "type": "string"
     },
+    "schema": {
+      "description": "Dataset schema. Lists the tables defined by this dataset.",
+      "$ref": "#/$defs/Schema"
+    },
     "start_block": {
       "description": "Dataset start block",
       "type": "integer",
@@ -39,11 +43,25 @@
     "network"
   ],
   "$defs": {
+    "DataType": {
+      "description": "Arrow data type, e.g. `Int32`, `Utf8`, etc.",
+      "type": "string"
+    },
     "Name": {
       "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
       "type": "string",
       "minLength": 1,
       "pattern": "^[a-z_][a-z0-9_]*$"
+    },
+    "Schema": {
+      "description": "A serializable representation of a collection of Arrow schemas without metadata.\n\nThis structure maps table names to their field definitions, providing a way to serialize\nand deserialize Arrow schemas while filtering out the special `SPECIAL_BLOCK_NUM` field.\n\nStructure: table name -> field name -> data type",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/DataType"
+        }
+      }
     },
     "Version": {
       "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",

@@ -13,7 +13,7 @@ use crate::{name::Name, version::Version};
 ///
 /// All dataset definitions must have a kind, network and name. The name must match the filename.
 /// Schema is optional for TOML dataset format.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset name
@@ -25,29 +25,11 @@ pub struct Manifest {
     ///
     /// Common values include: `manifest`, `evm-rpc`, `firehose`.
     pub kind: String,
-    /// Network name, e.g., `mainnet`, `sepolia`
-    pub network: Option<String>,
-    /// Dataset schema. Lists the tables defined by this dataset.
-    pub schema: Option<Schema>,
-}
 
-impl std::fmt::Debug for Manifest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Manifest")
-            .field("name", &self.name)
-            .field("kind", &self.kind)
-            .field("version", &self.version)
-            .field("network", &self.network)
-            .field(
-                "schema",
-                if self.schema.is_some() {
-                    &"Some(Schema { ... })"
-                } else {
-                    &"None"
-                },
-            )
-            .finish()
-    }
+    /// Network name, e.g., `mainnet`, `sepolia`
+    ///
+    /// Raw datasets' specific
+    pub network: Option<String>,
 }
 
 /// A serializable representation of a collection of Arrow schemas without metadata.
@@ -126,51 +108,5 @@ impl std::ops::Deref for DataType {
 impl From<ArrowDataType> for DataType {
     fn from(value: ArrowDataType) -> Self {
         Self(value)
-    }
-}
-
-/// Semver version requirement wrapper with JSON schema support.
-///
-/// Used for specifying dependency version constraints in derived datasets.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schemars", schemars(transparent))]
-pub struct VersionReq(
-    #[cfg_attr(feature = "schemars", schemars(with = "String"))] semver::VersionReq,
-);
-
-impl std::ops::Deref for VersionReq {
-    type Target = semver::VersionReq;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl PartialEq<semver::VersionReq> for VersionReq {
-    fn eq(&self, other: &semver::VersionReq) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialEq<VersionReq> for semver::VersionReq {
-    fn eq(&self, other: &VersionReq) -> bool {
-        *self == other.0
-    }
-}
-
-impl std::fmt::Display for VersionReq {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::str::FromStr for VersionReq {
-    type Err = semver::Error;
-
-    #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(Self)
     }
 }

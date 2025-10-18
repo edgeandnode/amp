@@ -1,7 +1,7 @@
 use std::{num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{manifest::Schema, name::Name, version::Version};
 use serde_with::serde_as;
 use url::Url;
 
@@ -33,6 +33,7 @@ pub struct Manifest {
     pub version: Version,
     /// Dataset kind, must be `evm-rpc`
     pub kind: EvmRpcDatasetKind,
+
     /// Network name, e.g., `anvil`, `mainnet`
     pub network: String,
     /// Dataset start block
@@ -41,6 +42,11 @@ pub struct Manifest {
     /// Only include finalized block data
     #[serde(default)]
     pub finalized_blocks_only: bool,
+
+    /// Dataset schema. Lists the tables defined by this dataset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Schema"))]
+    pub schema: Option<Schema>,
 }
 
 #[serde_as]

@@ -9,19 +9,19 @@
       "default": false
     },
     "kind": {
-      "description": "Dataset kind, must be `firehose`.",
-      "const": "firehose"
+      "description": "Dataset kind, must be `eth-beacon`.",
+      "const": "eth-beacon"
     },
     "name": {
       "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
     "network": {
-      "description": "Network name, e.g., `mainnet`.",
+      "description": "Network name, e.g., `mainnet-beacon`.",
       "type": "string"
     },
     "schema": {
-      "description": "Dataset schema.\n\nLists the tables defined by this dataset.",
+      "description": "Dataset schema. Lists the tables defined by this dataset.",
       "$ref": "#/$defs/Schema"
     },
     "start_block": {

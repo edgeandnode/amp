@@ -20,6 +20,7 @@ members = [
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",
     "crates/extractors/eth-beacon",
+    "crates/extractors/eth-beacon/gen",
     "crates/extractors/firehose",
     "crates/extractors/firehose/gen",
     "crates/services/admin-api",
