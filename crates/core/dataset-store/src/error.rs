@@ -61,8 +61,9 @@ pub enum GetDatasetError {
     ///
     /// This occurs when no specific version is provided and the system attempts to
     /// query the metadata database for the most recent version of the dataset.
-    #[error("Failed to get latest version for dataset '{name}': {source}")]
+    #[error("Failed to get latest version for dataset '{namespace}/{name}': {source}")]
     GetLatestVersion {
+        namespace: String,
         name: String,
         source: metadata_db::Error,
     },
@@ -71,8 +72,9 @@ pub enum GetDatasetError {
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
     /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
+    #[error("Failed to retrieve manifest for dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
     ManifestRetrievalError {
+        namespace: String,
         name: String,
         version: Option<String>,
         source: BoxError,
@@ -87,8 +89,9 @@ pub enum GetDatasetError {
     ///
     /// Can happen during parsing of the common manifest or any dataset-specific
     /// manifest type (EVM RPC, Firehose, Derived, SQL).
-    #[error("Failed to parse manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
+    #[error("Failed to parse manifest for dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
     ManifestParseError {
+        namespace: String,
         name: String,
         version: Option<String>,
         source: ManifestParseError,
@@ -99,8 +102,9 @@ pub enum GetDatasetError {
     /// This occurs when the `kind` field in the manifest contains a value that
     /// doesn't match any of the supported dataset types (evm-rpc, eth-beacon,
     /// firehose, derived, sql).
-    #[error("Unsupported dataset kind '{kind}' for dataset '{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
+    #[error("Unsupported dataset kind '{kind}' for dataset '{namespace}/{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
     UnsupportedKind {
+        namespace: String,
         name: String,
         version: Option<String>,
         kind: String,
@@ -111,8 +115,9 @@ pub enum GetDatasetError {
     /// This occurs when processing a derived dataset manifest, which may fail due to
     /// invalid SQL queries, dependency resolution issues, or logical errors in the
     /// dataset definition.
-    #[error("Failed to create Derived dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
+    #[error("Failed to create Derived dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
     DerivedCreationError {
+        namespace: String,
         name: String,
         version: Option<String>,
         source: BoxError,

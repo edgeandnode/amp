@@ -191,58 +191,118 @@ impl DatasetStore {
             .map_err(IsRegisteredError)
     }
 
+    /// Retrieves a dataset by name and optional version, with in-memory caching.
+    ///
+    /// This method resolves the dataset information from the `<namespace>/<name>@<version>` tuple,
+    /// checks an in-memory cache keyed by `<namespace>/<name>@<version>`, and loads the dataset
+    /// from storage on cache miss:
+    ///
+    /// 1. Validate the dataset name and resolves the version (uses latest if not provided)
+    /// 2. Check the in-memory cache using `<namespace>/<name>@<version>` as the key
+    /// 3. On cache miss, load the dataset from storage and cache it
+    ///
+    /// Returns `None` if the dataset cannot be found in the metadata database or manifest store.
     pub async fn get_dataset(
         self: &Arc<Self>,
         name: &str,
         version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
-        let name = &name
-            .parse::<Name>()
-            .map_err(|err| GetDatasetError::InvalidDatasetName {
-                name: name.to_string(),
-                source: err,
-            })?;
+        let (namespace, name, version) = {
+            // TODO: Pass the actual namespace instead of using a placeholder
+            let namespace = "_"
+                .parse::<Namespace>()
+                .expect("'_' should be a valid namespace");
+            let name = name
+                .parse::<Name>()
+                .map_err(|err| GetDatasetError::InvalidDatasetName {
+                    name: name.to_string(),
+                    source: err,
+                })?;
 
-        // If no version is provided, try to get the latest version from the mainfests store
-        // or use a placeholder version (default version, i.e., v0.0.0) if not found.
-        let version = match version.into() {
-            Some(v) => v.clone(),
-            None => self
-                .dataset_manifests_store
-                .get_latest_version(name)
-                .await
-                .map_err(
-                    |GetLatestVersionError(source)| GetDatasetError::GetLatestVersion {
-                        name: name.to_string(),
-                        source,
-                    },
-                )?
-                .unwrap_or_default(),
+            // If no version is provided, try to get the latest version from the manifests store
+            // or use a placeholder version (default version, i.e., v0.0.0) if not found.
+            let version = match version.into() {
+                Some(v) => v.clone(),
+                None => self
+                    .dataset_manifests_store
+                    .get_latest_version(&name)
+                    .await
+                    .map_err(
+                        |GetLatestVersionError(source)| GetDatasetError::GetLatestVersion {
+                            namespace: namespace.to_string(),
+                            name: name.to_string(),
+                            source,
+                        },
+                    )?
+                    .unwrap_or_default(),
+            };
+
+            (namespace, name, version)
         };
 
-        let cache_key = format!("{}__{}", name, version.to_underscore_version());
-        if let Some(dataset) = self.dataset_cache.read().get(&cache_key) {
+        // Check cache using `<namespace>/<name>@<version>` as the key
+        let cache_key = format!("{}/{}@{}", &namespace, &name, &version);
+        if let Some(dataset) = self.dataset_cache.read().get(&cache_key).cloned() {
             tracing::trace!(
+                dataset_namespace = %namespace,
                 dataset_name = %name,
                 dataset_version = %version,
                 "Cache hit, returning cached dataset"
             );
-
-            return Ok(Some(dataset.clone()));
+            return Ok(Some(dataset));
         }
 
         tracing::debug!(
+            dataset_namespace = %namespace,
             dataset_name = %name,
             dataset_version = %version,
             "Cache miss, loading from store"
         );
 
+        let Some(dataset) = self.load_dataset(&namespace, &name, &version).await? else {
+            return Ok(None);
+        };
+
+        // Cache the dataset.
+        self.dataset_cache
+            .write()
+            .insert(cache_key, dataset.clone());
+
+        tracing::debug!(
+            dataset_namespace = %namespace,
+            dataset_name = %name,
+            dataset_version = %version,
+            "Dataset loaded (and cached) successfully"
+        );
+
+        Ok(Some(dataset))
+    }
+
+    /// Loads a dataset by retrieving and parsing its manifest content.
+    ///
+    /// This function fetches the manifest from the object store using the provided `<namespace>/<name>@<version>`,
+    /// parses it to determine the dataset kind, and creates the appropriate dataset instance:
+    ///
+    /// 1. Retrieve the manifest content from the manifest store
+    /// 2. Parse the common manifest structure to identify the dataset kind
+    /// 3. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
+    /// 4. Create and return the typed dataset instance
+    ///
+    /// Returns `None` if the manifest cannot be found in the store, or an error if parsing or
+    /// [`Dataset`] instance creation fails.
+    async fn load_dataset(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        version: &Version,
+    ) -> Result<Option<Dataset>, GetDatasetError> {
         // Try to load the dataset manifest using ManifestsStore
         let Some(manifest_content) = self
             .dataset_manifests_store
-            .get(name, &version)
+            .get(name, version)
             .await
             .map_err(|err| GetDatasetError::ManifestRetrievalError {
+                namespace: namespace.to_string(),
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: Box::new(err),
@@ -254,12 +314,14 @@ impl DatasetStore {
         let manifest = manifest_content
             .try_into_manifest::<CommonManifest>()
             .map_err(|err| GetDatasetError::ManifestParseError {
+                namespace: namespace.to_string(),
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 source: err,
             })?;
 
         tracing::debug!(
+            dataset_namespace = %namespace,
             dataset_name = %name,
             dataset_version = %version,
             dataset_kind = %manifest.kind,
@@ -268,6 +330,7 @@ impl DatasetStore {
 
         let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
             GetDatasetError::UnsupportedKind {
+                namespace: namespace.to_string(),
                 name: name.to_string(),
                 version: Some(version.to_string()),
                 kind: err.kind,
@@ -279,6 +342,7 @@ impl DatasetStore {
                 let manifest = manifest_content
                     .try_into_manifest::<EvmRpcManifest>()
                     .map_err(|err| GetDatasetError::ManifestParseError {
+                        namespace: namespace.to_string(),
                         name: name.to_string(),
                         version: Some(version.to_string()),
                         source: err,
@@ -289,6 +353,7 @@ impl DatasetStore {
                 let manifest = manifest_content
                     .try_into_manifest::<EthBeaconManifest>()
                     .map_err(|err| GetDatasetError::ManifestParseError {
+                        namespace: namespace.to_string(),
                         name: name.to_string(),
                         version: Some(version.to_string()),
                         source: err,
@@ -299,6 +364,7 @@ impl DatasetStore {
                 let manifest = manifest_content
                     .try_into_manifest::<FirehoseManifest>()
                     .map_err(|err| GetDatasetError::ManifestParseError {
+                        namespace: namespace.to_string(),
                         name: name.to_string(),
                         version: Some(version.to_string()),
                         source: err,
@@ -309,29 +375,19 @@ impl DatasetStore {
                 let manifest = manifest_content
                     .try_into_manifest::<DerivedManifest>()
                     .map_err(|err| GetDatasetError::ManifestParseError {
+                        namespace: namespace.to_string(),
                         name: name.to_string(),
                         version: Some(version.to_string()),
                         source: err,
                     })?;
                 derived::dataset(manifest).map_err(|err| GetDatasetError::DerivedCreationError {
+                    namespace: namespace.to_string(),
                     name: name.to_string(),
                     version: Some(version.to_string()),
                     source: err,
                 })?
             }
         };
-
-        // Cache the dataset.
-        self.dataset_cache
-            .write()
-            .insert(cache_key.to_string(), dataset.clone());
-
-        tracing::debug!(
-            dataset_name = %name,
-            dataset_version = %version,
-            dataset_kind = %kind,
-            "Dataset loaded (and cached) successfully"
-        );
 
         Ok(Some(dataset))
     }
