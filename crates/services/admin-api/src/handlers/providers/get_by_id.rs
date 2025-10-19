@@ -56,9 +56,9 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully retrieved provider information", body = ProviderInfo),
-            (status = 400, description = "Invalid provider name"),
-            (status = 404, description = "Provider not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid provider name", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Provider not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

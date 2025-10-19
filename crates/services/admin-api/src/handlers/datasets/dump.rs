@@ -49,9 +49,9 @@ use crate::{
         request_body = DumpOptions,
         responses(
             (status = 200, description = "Successfully scheduled dump job", body = DumpResponse),
-            (status = 400, description = "Invalid dataset name or request parameters"),
-            (status = 404, description = "Dataset not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid dataset name or request parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]
@@ -109,9 +109,9 @@ pub async fn handler(
         request_body = DumpOptions,
         responses(
             (status = 200, description = "Successfully scheduled dump job", body = DumpResponse),
-            (status = 400, description = "Invalid dataset name or version"),
-            (status = 404, description = "Dataset not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid dataset name or version", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

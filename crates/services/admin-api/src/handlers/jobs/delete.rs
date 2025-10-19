@@ -77,8 +77,8 @@ pub struct QueryParams {
         ),
         responses(
             (status = 204, description = "Jobs deleted successfully"),
-            (status = 400, description = "Invalid query parameters"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid query parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

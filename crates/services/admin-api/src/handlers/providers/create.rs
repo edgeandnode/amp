@@ -52,9 +52,9 @@ use crate::{
         request_body = ProviderInfo,
         responses(
             (status = 201, description = "Provider created successfully"),
-            (status = 400, description = "Invalid request body or provider configuration"),
-            (status = 409, description = "Provider with the same name already exists"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid request body or provider configuration", body = crate::handlers::error::ErrorResponse),
+            (status = 409, description = "Provider with the same name already exists", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

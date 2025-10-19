@@ -64,10 +64,10 @@ use crate::{
         ),
         responses(
             (status = 204, description = "Job deleted successfully"),
-            (status = 400, description = "Invalid job ID"),
-            (status = 404, description = "Job not found"),
-            (status = 409, description = "Job cannot be deleted (not in terminal state)"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid job ID", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Job not found", body = crate::handlers::error::ErrorResponse),
+            (status = 409, description = "Job cannot be deleted (not in terminal state)", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

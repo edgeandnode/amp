@@ -37,7 +37,7 @@ use crate::{
         operation_id = "datasets_list",
         responses(
             (status = 200, description = "Returns all datasets", body = DatasetsResponse),
-            (status = 500, description = "Internal server error")
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

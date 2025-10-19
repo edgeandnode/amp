@@ -47,9 +47,9 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully retrieved file information", body = FileInfo),
-            (status = 400, description = "Invalid file ID"),
-            (status = 404, description = "File not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid file ID", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "File not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

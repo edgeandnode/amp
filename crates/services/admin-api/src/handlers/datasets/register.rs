@@ -83,9 +83,9 @@ use crate::{
         request_body = RegisterRequest,
         responses(
             (status = 201, description = "Dataset successfully registered"),
-            (status = 400, description = "Invalid request format or manifest"),
-            (status = 409, description = "Dataset already exists"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid request format or manifest", body = crate::handlers::error::ErrorResponse),
+            (status = 409, description = "Dataset already exists", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]
