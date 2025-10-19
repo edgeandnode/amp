@@ -8,10 +8,12 @@ default:
 alias clean := cargo-clean
 
 # Clean cargo workspace (cargo clean)
+[group: 'workspace']
 cargo-clean:
     cargo clean
 
 # PNPM install (pnpm install)
+[group: 'workspace']
 pnpm-install:
     pnpm install
 
@@ -22,6 +24,7 @@ alias fmt := fmt-rs
 alias fmt-check := fmt-rs-check
 
 # Format specific files (Rust or TypeScript based on extension)
+[group: 'format']
 fmt-file FILE:
     #!/usr/bin/env bash
     case "{{FILE}}" in
@@ -30,26 +33,32 @@ fmt-file FILE:
     esac
 
 # Format Rust code (cargo fmt --all)
+[group: 'format']
 fmt-rs:
     cargo +nightly fmt --all
 
 # Check Rust code format (cargo fmt --check)
+[group: 'format']
 fmt-rs-check:
     cargo +nightly fmt --all -- --check
 
 # Format specific Rust file (cargo fmt <file>)
+[group: 'format']
 fmt-rs-file FILE:
     cargo +nightly fmt -- {{FILE}}
 
 # Format TypeScript code (pnpm format)
+[group: 'format']
 fmt-ts:
     pnpm format
 
 # Check TypeScript code format (pnpm lint)
+[group: 'format']
 fmt-ts-check:
     pnpm lint
 
 # Format specific TypeScript file (pnpm lint --fix <file>)
+[group: 'format']
 fmt-ts-file FILE:
     #!/usr/bin/env bash
     file="{{FILE}}"; [[ "$file" =~ ^(/|typescript/) ]] || file="typescript/$file"; pnpm lint --fix "$file"
@@ -60,25 +69,31 @@ fmt-ts-file FILE:
 alias check := check-rs
 
 # Check Rust and TypeScript code
+[group: 'check']
 check-all: check-rs check-ts
 
 # Check Rust code (cargo check --all-targets)
+[group: 'check']
 check-rs *EXTRA_FLAGS:
     cargo check --all-targets {{EXTRA_FLAGS}}
 
 # Check specific crate with tests (cargo check -p <crate> --all-targets)
+[group: 'check']
 check-crate CRATE *EXTRA_FLAGS:
     cargo check --package {{CRATE}} --all-targets {{EXTRA_FLAGS}}
 
 # Lint Rust code (cargo clippy --all-targets)
+[group: 'check']
 clippy *EXTRA_FLAGS:
     cargo clippy --all-targets {{EXTRA_FLAGS}}
 
-# Lint specific crate (cargo clippy -p <crate> --all-targets)
+# Lint specific crate (cargo clippy -p <crate> --all-targets --no-deps)
+[group: 'check']
 clippy-crate CRATE *EXTRA_FLAGS:
-    cargo clippy --package {{CRATE}} --all-targets {{EXTRA_FLAGS}}
+    cargo clippy --package {{CRATE}} --all-targets --no-deps {{EXTRA_FLAGS}}
 
 # Check typescript code (pnpm check)
+[group: 'check']
 check-ts:
     pnpm check
 
@@ -86,6 +101,7 @@ check-ts:
 ## Testing
 
 # Run all tests (unit and integration)
+[group: 'test']
 test *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -104,6 +120,7 @@ test *EXTRA_FLAGS:
     fi
 
 # Run unit tests
+[group: 'test']
 test-unit *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -122,6 +139,7 @@ test-unit *EXTRA_FLAGS:
     fi
 
 # Run integration tests
+[group: 'test']
 test-it *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -140,6 +158,7 @@ test-it *EXTRA_FLAGS:
     fi
 
 # Run only tests without external dependencies
+[group: 'test']
 test-local *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -157,6 +176,7 @@ test-local *EXTRA_FLAGS:
     fi
 
 # Run ampup tests
+[group: 'test']
 test-ampup *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -183,6 +203,7 @@ GEN_MANIFEST_SCHEMAS_OUTDIR := "docs/manifest-schemas"
 GEN_OPENAPI_SCHEMAS_OUTDIR := "docs/openapi-specs"
 
 # Run all codegen tasks
+[group: 'codegen']
 gen:
     RUSTFLAGS="--cfg gen_schema --cfg gen_openapi_spec" cargo check --workspace
     @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}}
@@ -203,6 +224,7 @@ gen:
 ### JSON Schema generation
 
 # Generate the common dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+[group: 'codegen']
 gen-common-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-common-gen
     @mkdir -p {{DEST_DIR}}
@@ -210,6 +232,7 @@ gen-common-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/common.spec.json"
 
 # Generate the common derived dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+[group: 'codegen']
 gen-derived-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-derived-gen
     @mkdir -p {{DEST_DIR}}
@@ -217,6 +240,7 @@ gen-derived-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
 
 # Generate the ETH Beacon dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+[group: 'codegen']
 gen-eth-beacon-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-eth-beacon-gen
     @mkdir -p {{DEST_DIR}}
@@ -224,6 +248,7 @@ gen-eth-beacon-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/eth-beacon.spec.json"
 
 # Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+[group: 'codegen']
 gen-evm-rpc-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-evm-rpc-gen
     @mkdir -p {{DEST_DIR}}
@@ -231,6 +256,7 @@ gen-evm-rpc-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/evm-rpc.spec.json"
 
 # Generate the Firehose dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+[group: 'codegen']
 gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-firehose-gen
     @mkdir -p {{DEST_DIR}}
@@ -240,6 +266,7 @@ gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
 ### OpenAPI specification generation
 
 # Generate the admin API OpenAPI specification
+[group: 'codegen']
 gen-admin-api-openapi-spec DEST_DIR=GEN_OPENAPI_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_openapi_spec" cargo check -p admin-api-gen
     @mkdir -p {{DEST_DIR}}
@@ -249,6 +276,7 @@ gen-admin-api-openapi-spec DEST_DIR=GEN_OPENAPI_SCHEMAS_OUTDIR:
 ### Protobuf bindings generation
 
 # Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
+[group: 'codegen']
 gen-firehose-datasets-proto:
     RUSTFLAGS="--cfg gen_proto" cargo check -p firehose-datasets
 
@@ -259,6 +287,7 @@ PRECOMMIT_CONFIG := ".github/pre-commit-config.yaml"
 PRECOMMIT_DEFAULT_HOOKS := "pre-commit pre-push"
 
 # Install Git hooks
+[group: 'misc']
 install-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -281,6 +310,7 @@ install-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
     pre-commit install --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
 
 # Remove Git hooks
+[group: 'misc']
 remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
     #!/usr/bin/env bash
     set -e # Exit on error
