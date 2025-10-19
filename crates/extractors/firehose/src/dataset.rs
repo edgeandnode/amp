@@ -1,5 +1,5 @@
 use common::BlockNum;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{manifest::Schema, name::Name, version::Version};
 
 use crate::dataset_kind::FirehoseDatasetKind;
 
@@ -13,6 +13,7 @@ pub struct Manifest {
     pub version: Version,
     /// Dataset kind, must be `firehose`.
     pub kind: FirehoseDatasetKind,
+
     /// Network name, e.g., `mainnet`.
     pub network: String,
     /// Dataset start block.
@@ -21,6 +22,13 @@ pub struct Manifest {
     /// Only include finalized block data.
     #[serde(default)]
     pub finalized_blocks_only: bool,
+
+    /// Dataset schema.
+    ///
+    /// Lists the tables defined by this dataset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Schema"))]
+    pub schema: Option<Schema>,
 }
 
 #[derive(Debug, serde::Deserialize)]

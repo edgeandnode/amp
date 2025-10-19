@@ -179,55 +179,69 @@ test-ampup *EXTRA_FLAGS:
 
 alias codegen := gen
 
+GEN_MANIFEST_SCHEMAS_OUTDIR := "docs/manifest-schemas"
+GEN_OPENAPI_SCHEMAS_OUTDIR := "docs/openapi-specs"
+
 # Run all codegen tasks
-gen: \
-    gen-common-dataset-manifest-schema \
-    gen-derived-dataset-manifest-schema \
-    gen-evm-rpc-dataset-manifest-schema \
-    gen-firehose-dataset-manifest-schema \
-    gen-admin-api-openapi-spec
-# TODO: Uncomment to enable protobuf bindings generation
-#    gen-firehose-datasets-proto \
+gen:
+    RUSTFLAGS="--cfg gen_schema --cfg gen_openapi_spec" cargo check --workspace
+    @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}}
+    @cp -f $(ls -t target/debug/build/datasets-common-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/common.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json
+    @cp -f $(ls -t target/debug/build/admin-api-gen-*/out/openapi.spec.json | head -1) {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json
+    @echo "Schemas generated and copied:"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/common.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json"
+    @echo "  {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json"
 
 ### JSON Schema generation
 
-SCHEMAS_DIR := "docs/manifest-schemas"
-
 # Generate the common dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-gen-common-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-common-gen
+gen-common-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-common-gen
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-common-gen-*/out/schema.json | head -1) {{DEST_DIR}}/common.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/common.spec.json"
 
 # Generate the common derived dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-gen-derived-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-derived-gen
+gen-derived-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-derived-gen
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
 
+# Generate the ETH Beacon dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-eth-beacon-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-eth-beacon-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/schema.json | head -1) {{DEST_DIR}}/eth-beacon.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/eth-beacon.spec.json"
+
 # Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-gen-evm-rpc-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-evm-rpc-gen
+gen-evm-rpc-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-evm-rpc-gen
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{DEST_DIR}}/evm-rpc.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/evm-rpc.spec.json"
 
 # Generate the Firehose dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-gen-firehose-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-firehose-gen
+gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-firehose-gen
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
 
 ### OpenAPI specification generation
 
-OPENAPI_SCHEMAS_DIR := "docs/openapi-specs"
-
 # Generate the admin API OpenAPI specification
-gen-admin-api-openapi-spec DEST_DIR=OPENAPI_SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_openapi_spec" cargo build -p admin-api-gen
+gen-admin-api-openapi-spec DEST_DIR=GEN_OPENAPI_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_openapi_spec" cargo check -p admin-api-gen
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/admin-api-gen-*/out/openapi.spec.json | head -1) {{DEST_DIR}}/admin.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/admin.spec.json"
@@ -236,7 +250,7 @@ gen-admin-api-openapi-spec DEST_DIR=OPENAPI_SCHEMAS_DIR:
 
 # Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
 gen-firehose-datasets-proto:
-    RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
+    RUSTFLAGS="--cfg gen_proto" cargo check -p firehose-datasets
 
 
 ## Misc

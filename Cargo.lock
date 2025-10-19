@@ -3444,6 +3444,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "datasets-eth-beacon-gen"
+version = "0.1.0"
+dependencies = [
+ "eth-beacon-datasets",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
 name = "datasets-evm-rpc-gen"
 version = "0.1.0"
 dependencies = [

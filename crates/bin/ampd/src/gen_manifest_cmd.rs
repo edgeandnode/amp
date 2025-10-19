@@ -22,6 +22,7 @@ pub async fn run(
                 network,
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
+                schema: None,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
@@ -33,6 +34,7 @@ pub async fn run(
                 network,
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
+                schema: None,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
@@ -44,6 +46,7 @@ pub async fn run(
                 network,
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
+                schema: None,
             };
             serde_json::to_vec(&manifest).map_err(Error::Serialization)?
         }
