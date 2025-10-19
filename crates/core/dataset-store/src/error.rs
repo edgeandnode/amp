@@ -22,10 +22,6 @@ pub enum RegisterManifestError {
     #[error("Dataset '{name}' version '{version}' already registered")]
     DatasetExists { name: Name, version: Version },
 
-    /// Failed to serialize manifest to JSON
-    #[error("Failed to serialize manifest to JSON: {0}")]
-    ManifestSerialization(#[source] serde_json::Error),
-
     /// Failed to store manifest in dataset definitions store
     #[error("Failed to store manifest in dataset definitions store: {0}")]
     ManifestStorage(#[source] object_store::Error),
@@ -46,11 +42,8 @@ impl From<IsRegisteredError> for RegisterManifestError {
 }
 
 impl From<StoreError> for RegisterManifestError {
-    fn from(err: StoreError) -> Self {
-        match err {
-            StoreError::ManifestSerialization(e) => RegisterManifestError::ManifestSerialization(e),
-            StoreError::ManifestStorage(e) => RegisterManifestError::ManifestStorage(e),
-        }
+    fn from(StoreError(err): StoreError) -> Self {
+        RegisterManifestError::ManifestStorage(err)
     }
 }
 

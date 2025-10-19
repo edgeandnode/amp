@@ -161,10 +161,30 @@ pub struct Field {
     pub nullable: bool,
 }
 
+/// Errors that occur during derived dataset dependency validation
+///
+/// This validation ensures that all datasets referenced in SQL queries
+/// are properly declared in the manifest's dependencies list.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum DependencyValidationError {
+    /// SQL query is syntactically invalid or structurally malformed
+    ///
+    /// This occurs when:
+    /// - SQL syntax is incorrect
+    /// - Multiple SQL statements are provided (only single statements allowed)
+    /// - Table references cannot be resolved from the query
+    /// - DataFusion parser/resolver encounters an error
     #[error("invalid SQL query: {0}")]
     InvalidSql(String),
+
+    /// SQL query references datasets not declared in the dependencies list
+    ///
+    /// This occurs when:
+    /// - A SQL query references a schema (dataset) via `schema.table`
+    /// - That schema name is not found in the manifest's `dependencies` map
+    ///
+    /// The error contains a list of all undeclared dataset names that need to be added
+    /// to the manifest's dependencies section.
     #[error("undeclared dependencies of SQL query: {0:?}")]
     Missing(Vec<String>),
 }

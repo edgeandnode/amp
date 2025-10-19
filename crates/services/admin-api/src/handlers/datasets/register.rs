@@ -10,7 +10,9 @@ use datasets_common::{
     version::Version,
 };
 use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
+use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
+use firehose_datasets::dataset::Manifest as FirehoseManifest;
 
 use crate::{
     ctx::Ctx,
@@ -46,21 +48,22 @@ use crate::{
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
 /// - `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists
-/// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not "manifest" or "evm-rpc" (only derived and evm-rpc datasets supported)
+/// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
 /// - `STORE_ERROR`: Failed to load or access dataset store
 ///
 /// ## Behavior
-/// This handler supports derived and evm-rpc dataset registration:
+/// This handler supports multiple dataset kinds for registration:
 /// - **Derived dataset** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
 /// - **EVM-RPC dataset** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
-/// - **Other raw datasets** (firehose, etc.) are **not supported** and will return an error
+/// - **Firehose dataset** (kind="firehose"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol
+/// - **Eth Beacon dataset** (kind="eth-beacon"): Registers a raw dataset that extracts Ethereum Beacon Chain data
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
-/// Both dataset types are registered using the same underlying `register_manifest` method to ensure consistency.
+/// All dataset types are registered using the same underlying `register_manifest_with_version` method to ensure consistency.
 ///
 /// The handler:
 /// - Validates dataset name and version format
-/// - Checks that dataset kind is "manifest" or "evm-rpc"
+/// - Checks that dataset kind is supported
 /// - Attempts to load existing dataset from store
 /// - Handles manifest registration in the server's local registry
 /// - Returns appropriate status codes and error messages
@@ -117,7 +120,8 @@ pub async fn handler(
     // Check if dataset already exists with this name and version
     if dataset_exists {
         tracing::error!(
-            "Dataset '{}' version '{}' already exists",
+            "Dataset '{}/{}' version '{}' already exists",
+            payload.namespace,
             payload.name,
             payload.version
         );
@@ -131,6 +135,7 @@ pub async fn handler(
     let manifest =
         serde_json::from_str::<CommonManifest>(payload.manifest.as_str()).map_err(|err| {
             tracing::error!(
+                namespace = %payload.namespace,
                 name = %payload.name,
                 version = %payload.version,
                 error = ?err,
@@ -144,106 +149,59 @@ pub async fn handler(
         .parse()
         .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
 
-    // Compute hash from the manifest JSON string
-    let manifest_hash = hash(&payload.manifest);
-
-    match dataset_kind {
+    // Validate and serialize manifest based on dataset kind
+    let manifest_str = match dataset_kind {
         DatasetKind::Derived => {
-            let manifest: DerivedDatasetManifest = serde_json::from_str(payload.manifest.as_str())
-                .map_err(|err| {
-                    tracing::error!(
-                        name = %payload.name,
-                        version = %payload.version,
-                        kind = %dataset_kind,
-                        error = ?err,
-                        "Failed to parse derived dataset manifest JSON"
-                    );
-                    Error::InvalidManifest(err)
-                })?;
-
-            manifest.validate_dependencies().map_err(|err| {
-                tracing::error!(
-                    name = %payload.name,
-                    version = %payload.version,
-                    kind = %dataset_kind,
-                    error = ?err,
-                    "Manifest dependency validation failed"
-                );
-                Error::DependencyValidationError(err)
-            })?;
-
-            ctx.dataset_store
-                .register_manifest_with_version(
-                    &payload.namespace,
-                    &payload.name,
-                    &payload.version,
-                    &manifest_hash,
-                    &manifest,
-                )
-                .await
-                .map_err(|err| {
-                    tracing::error!(
-                        namespace = %payload.namespace,
-                        name = %payload.name,
-                        version = %payload.version,
-                        kind = %dataset_kind,
-                        error = ?err,
-                        "Failed to register derived dataset manifest"
-                    );
-                    Error::ManifestRegistrationError(err)
-                })?;
-
-            tracing::info!(
-                "Registered manifest for derived dataset '{}' version '{}'",
-                payload.name,
-                payload.version
-            );
+            parse_validate_and_canonicalize_derived_dataset_manifest(&payload.manifest)
+                .map_err(Error::from)?
         }
         DatasetKind::EvmRpc => {
-            // Validate evm-rpc dataset definition structure
-            let manifest: EvmRpcManifest = serde_json::from_str(payload.manifest.as_str())
-                .map_err(|err| {
-                    tracing::error!(
-                        name = %payload.name,
-                        version = %payload.version,
-                        kind = %dataset_kind,
-                        error = ?err,
-                        "Failed to parse evm-rpc dataset manifest JSON"
-                    );
-                    Error::InvalidManifest(err)
-                })?;
+            parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&payload.manifest)
+                .map_err(Error::from)?
+        }
+        DatasetKind::Firehose => {
+            parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&payload.manifest)
+                .map_err(Error::from)?
+        }
+        DatasetKind::EthBeacon => {
+            parse_and_canonicalize_raw_dataset_manifest::<EthBeaconManifest>(&payload.manifest)
+                .map_err(Error::from)?
+        }
+    };
 
-            ctx.dataset_store
-                .register_manifest_with_version(
-                    &payload.namespace,
-                    &payload.name,
-                    &payload.version,
-                    &manifest_hash,
-                    &manifest,
-                )
-                .await
-                .map_err(|err| {
-                    tracing::error!(
-                        namespace = %payload.namespace,
-                        name = %payload.name,
-                        version = %payload.version,
-                        kind = %dataset_kind,
-                        error = ?err,
-                        "Failed to register evm-rpc dataset manifest"
-                    );
-                    Error::ManifestRegistrationError(err)
-                })?;
+    // Compute manifest hash from canonical serialization
+    let manifest_hash = hash(&manifest_str);
 
-            tracing::info!(
-                "Registered manifest for evm-rpc dataset '{}' version '{}'",
-                payload.name,
-                payload.version
+    // Register the manifest with version
+    ctx.dataset_store
+        .register_manifest_with_version(
+            &payload.namespace,
+            &payload.name,
+            &payload.version,
+            &manifest_hash,
+            manifest_str,
+        )
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                namespace = %payload.namespace,
+                name = %payload.name,
+                version = %payload.version,
+                manifest_hash = %manifest_hash,
+                kind = %dataset_kind,
+                error = ?err,
+                "Failed to register manifest"
             );
-        }
-        _ => {
-            return Err(Error::UnsupportedDatasetKind(dataset_kind.to_string()).into());
-        }
-    }
+            Error::ManifestRegistrationError(err)
+        })?;
+
+    tracing::info!(
+        "Registered manifest for dataset '{}/{}' version '{}' (hash: {})",
+        payload.namespace,
+        payload.name,
+        payload.version,
+        manifest_hash
+    );
 
     Ok(StatusCode::CREATED)
 }
@@ -313,9 +271,9 @@ pub enum Error {
     /// Unsupported dataset kind
     ///
     /// This occurs when:
-    /// - Dataset kind is not "manifest" or "evm-rpc" (only derived and evm-rpc datasets are supported)
+    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
     #[error(
-        "unsupported kind '{0}' - only derived datasets (kind='manifest') and evm-rpc datasets (kind='evm-rpc') are supported for registration"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'eth-beacon'"
     )]
     UnsupportedDatasetKind(String),
 
@@ -362,4 +320,125 @@ impl IntoErrorResponse for Error {
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
         }
     }
+}
+
+impl From<ParseDerivedManifestError> for Error {
+    fn from(err: ParseDerivedManifestError) -> Self {
+        match err {
+            ParseDerivedManifestError::Deserialization(e) => Error::InvalidManifest(e),
+            ParseDerivedManifestError::DependencyValidation(e) => {
+                Error::DependencyValidationError(e)
+            }
+            ParseDerivedManifestError::Serialization(e) => Error::InvalidManifest(e),
+        }
+    }
+}
+
+impl From<ParseRawManifestError> for Error {
+    fn from(err: ParseRawManifestError) -> Self {
+        match err {
+            ParseRawManifestError::Deserialization(e) => Error::InvalidManifest(e),
+            ParseRawManifestError::Serialization(e) => Error::InvalidManifest(e),
+        }
+    }
+}
+
+/// Parse, validate, and re-serialize a derived dataset manifest to canonical JSON format
+///
+/// This function handles derived datasets which require dependency validation:
+/// 1. Deserialize from JSON string
+/// 2. Validate dependencies using `manifest.validate_dependencies()`
+/// 3. Re-serialize to canonical JSON
+///
+/// Returns canonical JSON string on success
+fn parse_validate_and_canonicalize_derived_dataset_manifest(
+    manifest_str: impl AsRef<str>,
+) -> Result<String, ParseDerivedManifestError> {
+    let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
+        .map_err(ParseDerivedManifestError::Deserialization)?;
+
+    manifest
+        .validate_dependencies()
+        .map_err(ParseDerivedManifestError::DependencyValidation)?;
+
+    serde_json::to_string(&manifest).map_err(ParseDerivedManifestError::Serialization)
+}
+
+/// Error type for derived dataset manifest parsing and validation
+///
+/// Represents the different failure points when processing a derived dataset manifest
+/// through the parse → validate → canonicalize pipeline.
+#[derive(Debug, thiserror::Error)]
+enum ParseDerivedManifestError {
+    /// Failed to deserialize the JSON string into a `DerivedDatasetManifest` struct
+    ///
+    /// This occurs when:
+    /// - JSON syntax is invalid
+    /// - JSON structure doesn't match the manifest schema
+    /// - Required fields are missing or have wrong types
+    #[error("failed to deserialize manifest: {0}")]
+    Deserialization(#[source] serde_json::Error),
+
+    /// Failed dependency validation after successful deserialization
+    ///
+    /// This occurs when:
+    /// - SQL queries reference datasets not declared in the dependencies list
+    /// - Circular dependencies are detected
+    /// - Other domain-specific validation rules are violated
+    #[error("dependency validation failed: {0}")]
+    DependencyValidation(#[source] DependencyValidationError),
+
+    /// Failed to serialize the validated manifest back to canonical JSON
+    ///
+    /// This occurs when:
+    /// - The manifest structure cannot be serialized (rare, indicates a bug)
+    /// - Memory allocation fails during serialization
+    ///
+    /// Note: This should rarely happen since we already deserialized successfully
+    #[error("failed to serialize manifest: {0}")]
+    Serialization(#[source] serde_json::Error),
+}
+
+/// Parse and re-serialize a raw dataset manifest to canonical JSON format
+///
+/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, EthBeacon):
+/// 1. Deserialize from JSON string
+/// 2. Re-serialize to canonical JSON
+///
+/// Returns canonical JSON string on success
+fn parse_and_canonicalize_raw_dataset_manifest<T>(
+    manifest_str: impl AsRef<str>,
+) -> Result<String, ParseRawManifestError>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let manifest: T = serde_json::from_str(manifest_str.as_ref())
+        .map_err(ParseRawManifestError::Deserialization)?;
+    serde_json::to_string(&manifest).map_err(ParseRawManifestError::Serialization)
+}
+
+/// Error type for raw dataset manifest parsing and canonicalization
+///
+/// Represents the different failure points when processing raw dataset manifests
+/// (EvmRpc, Firehose, EthBeacon) through the parse → canonicalize pipeline.
+#[derive(Debug, thiserror::Error)]
+enum ParseRawManifestError {
+    /// Failed to deserialize the JSON string into the manifest struct
+    ///
+    /// This occurs when:
+    /// - JSON syntax is invalid
+    /// - JSON structure doesn't match the manifest schema
+    /// - Required fields are missing or have wrong types
+    #[error("failed to deserialize manifest: {0}")]
+    Deserialization(#[source] serde_json::Error),
+
+    /// Failed to serialize the manifest back to canonical JSON
+    ///
+    /// This occurs when:
+    /// - The manifest structure cannot be serialized (rare, indicates a bug)
+    /// - Memory allocation fails during serialization
+    ///
+    /// Note: This should rarely happen since we already deserialized successfully
+    #[error("failed to serialize manifest: {0}")]
+    Serialization(#[source] serde_json::Error),
 }

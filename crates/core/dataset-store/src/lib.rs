@@ -105,19 +105,18 @@ impl DatasetStore {
 
     /// Register a dataset manifest with a specific version in both the dataset store and metadata database.
     ///
+    /// The manifest must be provided as a JSON string (canonical serialized form).
+    ///
     /// The operation is atomic - either both the store and metadata database are updated
     /// or neither is updated.
-    pub async fn register_manifest_with_version<M>(
+    pub async fn register_manifest_with_version(
         &self,
         namespace: &Namespace,
         name: &Name,
         version: &Version,
         manifest_hash: &Hash,
-        manifest: &M,
-    ) -> Result<(), RegisterManifestError>
-    where
-        M: serde::Serialize,
-    {
+        manifest_str: String,
+    ) -> Result<(), RegisterManifestError> {
         // Check for existing datasets with the same name and version
         if self.is_registered(namespace, name, version).await? {
             tracing::error!(
@@ -134,7 +133,7 @@ impl DatasetStore {
         // Store manifest in the underlying store first
         let manifest_path = self
             .dataset_manifests_store
-            .store(name, version, manifest)
+            .store(name, version, manifest_str)
             .await?;
 
         self.metadata_db
@@ -153,26 +152,25 @@ impl DatasetStore {
 
     /// Register a dataset manifest using the default version (0.0.0) in both the dataset store and metadata database.
     ///
+    /// The manifest must be provided as a JSON string (canonical serialized form).
+    ///
     /// This is a convenience method that calls `register_manifest_with_version` with `Version::default()`.
     ///
     /// The operation is atomic - either both the store and metadata database are updated
     /// or neither is updated.
-    pub async fn register_manifest<M>(
+    pub async fn register_manifest(
         &self,
         namespace: &Namespace,
         name: &Name,
         manifest_hash: &Hash,
-        manifest: &M,
-    ) -> Result<(), RegisterManifestError>
-    where
-        M: serde::Serialize,
-    {
+        manifest_str: String,
+    ) -> Result<(), RegisterManifestError> {
         self.register_manifest_with_version(
             namespace,
             name,
             &Version::default(),
             manifest_hash,
-            manifest,
+            manifest_str,
         )
         .await
     }
