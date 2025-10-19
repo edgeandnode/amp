@@ -164,20 +164,13 @@ where
     /// Returns the path where the manifest was stored.
     /// Note: This function only stores the manifest file, it does not register
     /// the dataset in the metadata database. The caller is responsible for that.
-    pub async fn store<M>(
+    pub async fn store(
         &self,
         name: &Name,
         version: &Version,
-        manifest: &M,
-    ) -> Result<ObjectStorePath, StoreError>
-    where
-        M: serde::Serialize,
-    {
+        manifest_str: String,
+    ) -> Result<ObjectStorePath, StoreError> {
         self.init().await;
-
-        // Prepare manifest data for storage
-        let manifest_json =
-            serde_json::to_string(&manifest).map_err(StoreError::ManifestSerialization)?;
 
         // Store manifest in underlying store
         let manifest_path = ObjectStorePath::from(format!(
@@ -187,9 +180,9 @@ where
         ));
 
         self.store
-            .put(&manifest_path, manifest_json.into())
+            .put(&manifest_path, manifest_str.into())
             .await
-            .map_err(StoreError::ManifestStorage)?;
+            .map_err(StoreError)?;
 
         Ok(manifest_path)
     }
@@ -383,17 +376,10 @@ where
     set
 }
 
-/// Errors specific to manifest storage operations
+/// Error when storing manifest in object store
 #[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    /// Failed to serialize manifest to JSON
-    #[error("Failed to serialize manifest to JSON: {0}")]
-    ManifestSerialization(#[source] serde_json::Error),
-
-    /// Failed to store manifest in object store
-    #[error("Failed to store manifest in object store: {0}")]
-    ManifestStorage(#[source] object_store::Error),
-}
+#[error("Failed to store manifest in object store: {0}")]
+pub struct StoreError(#[source] pub object_store::Error);
 
 /// Errors specific to manifest retrieval operations
 #[derive(Debug, thiserror::Error)]
