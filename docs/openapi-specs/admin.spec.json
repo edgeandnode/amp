@@ -1081,6 +1081,38 @@
           }
         }
       }
+    },
+    "/workers": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "Handler for the `GET /workers` endpoint",
+        "description": "Retrieves and returns a list of all workers from the metadata database.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Fetches all workers from the metadata database\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
+        "operationId": "workers_list",
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved workers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkersResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1684,6 +1716,40 @@
             "description": "The schema for this table"
           }
         }
+      },
+      "WorkerInfo": {
+        "type": "object",
+        "description": "Worker information returned by the API",
+        "required": [
+          "node_id",
+          "last_heartbeat"
+        ],
+        "properties": {
+          "last_heartbeat": {
+            "type": "string",
+            "description": "Last heartbeat timestamp in ISO 8601 RFC3339 format"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node"
+          }
+        }
+      },
+      "WorkersResponse": {
+        "type": "object",
+        "description": "Collection response for worker listings",
+        "required": [
+          "workers"
+        ],
+        "properties": {
+          "workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkerInfo"
+            },
+            "description": "List of workers"
+          }
+        }
       }
     }
   },
@@ -1711,6 +1777,10 @@
     {
       "name": "schema",
       "description": "Schema generation endpoints"
+    },
+    {
+      "name": "workers",
+      "description": "Worker management endpoints"
     }
   ]
 }

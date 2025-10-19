@@ -16,7 +16,7 @@ mod scheduler;
 
 use ctx::Ctx;
 use dataset_store::{manifests::DatasetManifestsStore, providers::ProviderConfigsStore};
-use handlers::{datasets, files, jobs, locations, providers, schema};
+use handlers::{datasets, files, jobs, locations, providers, schema, workers};
 use scheduler::Scheduler;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
@@ -103,6 +103,7 @@ pub async fn serve(
             get(providers::get_by_id::handler).delete(providers::delete_by_id::handler),
         )
         .route("/schema", post(schema::handler))
+        .route("/workers", get(workers::get_all::handler))
         .with_state(ctx);
 
     // Add OpenTelemetry HTTP metrics middleware if meter is provided
@@ -167,6 +168,8 @@ pub async fn serve(
         handlers::files::get_by_id::handler,
         // Schema endpoints
         handlers::schema::handler,
+        // Worker endpoints
+        handlers::workers::get_all::handler,
     ),
     components(schemas(
         // Common schemas
@@ -200,6 +203,9 @@ pub async fn serve(
         // Schema schemas
         handlers::schema::OutputSchemaRequest,
         handlers::schema::OutputSchemaResponse,
+        // Worker schemas
+        handlers::workers::get_all::WorkerInfo,
+        handlers::workers::get_all::WorkersResponse,
     )),
     tags(
         (name = "datasets", description = "Dataset management endpoints"),
@@ -207,7 +213,8 @@ pub async fn serve(
         (name = "locations", description = "Location management endpoints"),
         (name = "providers", description = "Provider management endpoints"),
         (name = "files", description = "File access endpoints"),
-        (name = "schema", description = "Schema generation endpoints")
+        (name = "schema", description = "Schema generation endpoints"),
+        (name = "workers", description = "Worker management endpoints"),
     )
 )]
 struct ApiDoc;

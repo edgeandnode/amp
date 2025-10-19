@@ -6,7 +6,7 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    workers::{NodeId, heartbeat},
+    workers::{self, NodeId},
 };
 
 /// The interval used for testing the active workers list
@@ -26,12 +26,12 @@ async fn new_worker_is_active_on_registration() {
     let worker_id = NodeId::from_ref_unchecked("test-worker-new");
 
     //* When
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     //* Then
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(
@@ -54,7 +54,7 @@ async fn reregistration_updates_heartbeat() {
     let worker_id = NodeId::from_ref_unchecked("test-worker-reregister");
 
     // Initial registration
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to initially register worker");
 
@@ -63,7 +63,7 @@ async fn reregistration_updates_heartbeat() {
 
     //* When
     // Re-register the worker (this should update the heartbeat)
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to re-register worker");
 
@@ -71,7 +71,7 @@ async fn reregistration_updates_heartbeat() {
     // Wait for a period that would make the initial registration inactive
     tokio::time::sleep(TEST_ACTIVE_INTERVAL / 2 + Duration::from_millis(100)).await;
 
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(
@@ -93,7 +93,7 @@ async fn heartbeat_update_maintains_activity() {
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-heartbeat");
 
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -101,7 +101,7 @@ async fn heartbeat_update_maintains_activity() {
     tokio::time::sleep(TEST_ACTIVE_INTERVAL / 2).await;
 
     //* When
-    heartbeat::update_heartbeat(&mut *conn, worker_id.clone())
+    workers::update_heartbeat(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to update heartbeat");
 
@@ -109,7 +109,7 @@ async fn heartbeat_update_maintains_activity() {
     tokio::time::sleep(TEST_ACTIVE_INTERVAL / 2 + Duration::from_millis(100)).await;
 
     //* Then
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(
@@ -131,12 +131,12 @@ async fn worker_is_inactive_after_interval() {
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-inactive");
 
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
     // Check it's active initially
-    let active_workers_initial = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers_initial = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(
@@ -149,7 +149,7 @@ async fn worker_is_inactive_after_interval() {
     tokio::time::sleep(2 * TEST_ACTIVE_INTERVAL).await;
 
     //* Then
-    let active_workers_after_wait = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers_after_wait = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers after wait");
     assert!(
@@ -175,7 +175,7 @@ async fn heartbeat_on_unknown_worker_is_noop() {
     let non_existent_worker_id = NodeId::from_ref_unchecked("worker-does-not-exist");
 
     //* When
-    let res = heartbeat::update_heartbeat(&mut *conn, non_existent_worker_id.clone()).await;
+    let res = workers::update_heartbeat(&mut *conn, non_existent_worker_id.clone()).await;
 
     //* Then
     assert!(
@@ -183,7 +183,7 @@ async fn heartbeat_on_unknown_worker_is_noop() {
         "Updating heartbeat for a non-existent worker should not return an error"
     );
 
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(
@@ -204,7 +204,7 @@ async fn active_workers_empty_when_none_registered() {
         .expect("Failed to run migrations");
 
     //* When
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
 
@@ -230,7 +230,7 @@ async fn registration_conflict_updates_timestamp() {
     let worker_id = NodeId::from_ref_unchecked("conflict-worker");
 
     // First registration
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker initially");
 
@@ -240,13 +240,13 @@ async fn registration_conflict_updates_timestamp() {
 
     //* When
     // Second registration of the same worker ID (triggers ON CONFLICT DO UPDATE)
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker on conflict");
 
     //* Then
     // If the timestamp was updated, the worker should now be active again.
-    let active_workers = heartbeat::get_active_workers(&mut *conn, TEST_ACTIVE_INTERVAL)
+    let active_workers = workers::list_active(&mut *conn, TEST_ACTIVE_INTERVAL)
         .await
         .expect("Failed to get active workers");
     assert!(

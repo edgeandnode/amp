@@ -8,7 +8,7 @@ use crate::{
     conn::DbConn,
     jobs::{self, JobId},
     locations::{self, LocationId},
-    workers::heartbeat,
+    workers,
 };
 
 #[tokio::test]
@@ -403,7 +403,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
@@ -510,7 +510,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    heartbeat::register_worker(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone())
         .await
         .expect("Failed to register worker");
 
