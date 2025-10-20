@@ -16,6 +16,7 @@ use crate::{
     metadata::parquet::{PARQUET_METADATA_KEY, ParquetMeta},
 };
 
+mod free_candy;
 pub mod parquet;
 pub mod segments;
 mod size;
