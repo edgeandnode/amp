@@ -192,6 +192,17 @@ pub async fn handler(
         "Starting bulk deletion of files"
     );
 
+    let _ = ctx
+        .metadata_db
+        .delete_location_by_id(location_id)
+        .await
+        .map_err(Error::MetadataDbError)?;
+
+    tracing::info!(
+        location_id = %location.id,
+        "Location metadata deleted from database, proceeding to delete files"
+    );
+
     let paths_stream = Box::pin(stream::iter(file_paths.into_iter().map(Ok)));
     let deleted_paths = store
         .delete_stream(paths_stream)
@@ -221,11 +232,6 @@ pub async fn handler(
         );
     }
 
-    let _ = ctx
-        .metadata_db
-        .delete_location_by_id(location_id)
-        .await
-        .map_err(Error::MetadataDbError)?;
     tracing::info!(
         location_id = %location_id,
         "Successfully deleted location files and metadata"
