@@ -133,7 +133,7 @@ impl AmpCollectorInnerTask {
     /// This will only run compaction and/or collection if the
     /// configured intervals have elapsed for both or either
     /// tasks and if they are enabled. If neither is enabled,
-    /// and/or niether respective interval has elapsed this is
+    /// and/or neither respective interval has elapsed this is
     /// a no-op
     pub async fn try_run(self) -> TaskResult<Self> {
         Ok(self.try_compact().await?.try_collect().await?)
