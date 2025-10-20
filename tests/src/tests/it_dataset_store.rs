@@ -158,13 +158,13 @@ async fn all_datasets_returns_available_datasets_without_error() {
         .expect("'_' should be a valid namespace");
     for dataset in result {
         let db_dataset = metadata_db
-            .get_dataset_latest_version_with_details(&namespace, &dataset.name)
+            .get_dataset_latest_version_with_details(&namespace, dataset.reference.name())
             .await
             .expect("should query metadata DB");
         assert!(
             db_dataset.is_some(),
             "dataset {} should be registered in metadata DB",
-            dataset.name
+            dataset.reference.name()
         );
     }
 }

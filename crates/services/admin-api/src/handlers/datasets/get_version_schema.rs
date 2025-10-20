@@ -131,8 +131,13 @@ pub async fn handler_with_version(
     }
 
     Ok(Json(DatasetSchemaResponse {
-        name: dataset.name,
-        version: dataset.version.unwrap_or_default(),
+        name: dataset.reference.name().clone(),
+        version: dataset
+            .reference
+            .revision()
+            .as_version()
+            .cloned()
+            .unwrap_or_default(),
         tables,
     }))
 }

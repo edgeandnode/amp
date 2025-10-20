@@ -300,7 +300,7 @@ async fn dump_sql_query(
     let mut microbatch_start = start;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
-    let dataset_name = physical_table.dataset().name.clone();
+    let dataset_name = physical_table.dataset().reference.name();
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 

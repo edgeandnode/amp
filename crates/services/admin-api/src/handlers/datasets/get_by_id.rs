@@ -173,7 +173,7 @@ async fn handler_inner(
 
         // Resolve active location for this table
         let table_id = TableId {
-            dataset: &dataset.name,
+            dataset: dataset.reference.name(),
             dataset_version: dataset_version.as_deref(),
             table: table.name(),
         };
@@ -202,8 +202,13 @@ async fn handler_inner(
     }
 
     Ok(Json(DatasetInfo {
-        name: dataset.name,
-        version: dataset.version.unwrap_or_default(),
+        name: dataset.reference.name().clone(),
+        version: dataset
+            .reference
+            .revision()
+            .as_version()
+            .cloned()
+            .unwrap_or_default(),
         kind: dataset.kind,
         tables,
     }))

@@ -64,7 +64,7 @@ impl Collector {
 
     #[tracing::instrument(skip_all, err, fields(location_id=%self.table.location_id(), table=%self.table.table_ref()))]
     pub(super) async fn collect(self) -> CollectionResult<Self> {
-        let dataset_name: Arc<str> = Arc::from(self.table.dataset().name.as_str());
+        let dataset_name: Arc<str> = Arc::from(self.table.dataset().reference.name().as_str());
         let table_name: Arc<str> = Arc::from(self.table.table_name());
 
         let metadata_db = self.table.metadata_db();
@@ -101,7 +101,7 @@ impl Collector {
         if let Some(metrics) = &self.metrics {
             metrics.inc_expired_files_found(
                 found_file_ids_to_paths.len(),
-                self.table.dataset().name.to_string(),
+                self.table.dataset().reference.name().to_string(),
                 self.table.table_name().to_string(),
             );
         }
@@ -121,7 +121,7 @@ impl Collector {
         if let Some(metrics) = &self.metrics {
             metrics.inc_expired_entries_deleted(
                 paths_to_remove.len(),
-                self.table.dataset().name.to_string(),
+                self.table.dataset().reference.name().to_string(),
                 self.table.table_name().to_string(),
             );
         }

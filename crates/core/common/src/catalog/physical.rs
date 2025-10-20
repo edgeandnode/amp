@@ -208,7 +208,7 @@ impl PhysicalTable {
         metadata_db: MetadataDb,
         set_active: bool,
     ) -> Result<Self, BoxError> {
-        let dataset_name = &table.dataset().name;
+        let dataset_name = table.dataset().reference.name();
         let dataset_version = match table.dataset().kind.as_str() {
             "manifest" => table.dataset_version(),
             _ => None,
@@ -253,18 +253,18 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
-        let dataset_name = &table.dataset().name;
+        let dataset_name = table.dataset().reference.name();
         let dataset_version = match table.dataset().kind.as_str() {
             "manifest" => table.dataset_version(),
             _ => None,
         };
         let table_id = TableId {
-            dataset: &table.dataset().name,
+            dataset: table.dataset().reference.name(),
             dataset_version: dataset_version.as_deref(),
             table: table.name(),
         };
 
-        let prefix = format!("{}/{}/", &dataset_name, table.name());
+        let prefix = format!("{}/{}/", dataset_name, table.name());
         let url = data_store.url().join(&prefix)?;
         let path = Path::from_url_path(url.path()).unwrap();
         let revisions = list_revisions(&data_store, &prefix, &path).await?;
@@ -283,7 +283,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
-        let dataset_name = &table.dataset().name;
+        let dataset_name = table.dataset().reference.name();
         let dataset_version = match table.dataset().kind.as_str() {
             "manifest" => table.dataset_version(),
             _ => None,

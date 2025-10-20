@@ -845,8 +845,13 @@ impl DatasetStore {
         &self,
         dataset: &Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        let name = &dataset.name;
-        let version = dataset.version.clone().unwrap_or_default();
+        let name = dataset.reference.name();
+        let version = dataset
+            .reference
+            .revision()
+            .as_version()
+            .cloned()
+            .unwrap_or_default();
 
         if dataset.kind != EvmRpcDatasetKind {
             return Ok(None);
@@ -908,8 +913,8 @@ impl DatasetStore {
             evm::provider::new(provider.url, provider.rate_limit_per_minute)
         };
 
-        let udf =
-            AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
+        let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(dataset.reference.name(), provider)))
+            .into_scalar_udf();
 
         // Cache the EthCall UDF
         self.eth_call_cache.write().insert(cache_key, udf.clone());
@@ -1071,16 +1076,16 @@ pub async fn resolve_blocks_table(
 
         match datasets
             .iter()
-            .position(|d| src_datasets.contains(d.name.as_str()))
+            .position(|d| src_datasets.contains(d.reference.name().as_str()))
         {
             Some(index) => datasets.remove(index),
             None => {
                 // Make sure fallback provider selection is deterministic.
-                datasets.sort_by(|a, b| a.name.cmp(&b.name));
+                datasets.sort_by(|a, b| a.reference.name().cmp(b.reference.name()));
                 if datasets.len() > 1 {
                     tracing::debug!(
                         "selecting provider {} for network {}",
-                        datasets[0].name,
+                        datasets[0].reference.name(),
                         network
                     );
                 }
@@ -1089,7 +1094,7 @@ pub async fn resolve_blocks_table(
         }
     };
 
-    let dataset_name = dataset.name.clone();
+    let dataset_name = dataset.reference.name().to_string();
     let table = Arc::new(dataset)
         .resolved_tables()
         .find(|t| t.name() == "blocks")
@@ -1133,9 +1138,12 @@ pub async fn dataset_and_dependencies(
         }
 
         let manifest = store
-            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .get_derived_manifest(
+                dataset.reference.name(),
+                dataset.reference.revision().as_version(),
+            )
             .await?
-            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.name))?;
+            .ok_or_else(|| format!("Derived dataset '{}' not found", dataset.reference.name()))?;
 
         let refs: Vec<Reference> = manifest.dependencies.into_values().collect();
         let mut untracked_refs = refs

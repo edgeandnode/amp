@@ -209,7 +209,10 @@ impl StreamingQuery {
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
-        let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
+        let src_datasets = tables
+            .iter()
+            .map(|t| t.dataset().reference.name().as_str())
+            .collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark

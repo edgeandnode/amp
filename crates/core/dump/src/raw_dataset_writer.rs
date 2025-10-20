@@ -231,7 +231,7 @@ impl RawTableWriter {
 
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
-            let dataset_name = self.table.dataset().name.clone();
+            let dataset_name = self.table.dataset().reference.name();
             let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();
@@ -279,7 +279,7 @@ impl RawTableWriter {
         let metadata = file.close(range, vec![], Generation::default()).await?;
 
         if let Some(ref metrics) = self.metrics {
-            let dataset_name = self.table.dataset().name.clone();
+            let dataset_name = self.table.dataset().reference.name();
             let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();

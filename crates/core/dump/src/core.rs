@@ -70,8 +70,13 @@ pub async fn dump_raw_tables(
     let dataset = {
         let ds = tables[0].table().dataset();
         for table in tables {
-            if table.dataset().name != ds.name {
-                return Err(format!("Table {} is not in {}", table.table_ref(), ds.name).into());
+            if table.dataset().reference.name() != ds.reference.name() {
+                return Err(format!(
+                    "Table {} is not in {}",
+                    table.table_ref(),
+                    ds.reference.name()
+                )
+                .into());
             }
         }
         ds
@@ -95,7 +100,7 @@ pub async fn dump_raw_tables(
                 tables,
                 parquet_opts,
                 end,
-                &dataset.name,
+                dataset.reference.name(),
                 metrics,
                 meter,
                 dataset.finalized_blocks_only,
@@ -105,13 +110,17 @@ pub async fn dump_raw_tables(
         DatasetKind::Derived => {
             return Err(format!(
                 "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
-                dataset.name, kind,
+                dataset.reference.name(),
+                kind,
             )
             .into());
         }
     }
 
-    tracing::info!("dump of dataset {} completed successfully", dataset.name);
+    tracing::info!(
+        "dump of dataset {} completed successfully",
+        dataset.reference.name()
+    );
 
     Ok(())
 }
@@ -147,15 +156,19 @@ pub async fn dump_user_tables(
 
         let manifest = ctx
             .dataset_store
-            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
+            .get_derived_manifest(
+                dataset.reference.name(),
+                dataset.reference.revision().as_version(),
+            )
             .await?
             .ok_or_else(|| {
                 format!(
                     "Derived dataset '{}' version '{}' not found",
-                    dataset.name,
+                    dataset.reference.name(),
                     dataset
-                        .version
-                        .as_ref()
+                        .reference
+                        .revision()
+                        .as_version()
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "latest".to_string())
                 )

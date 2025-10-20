@@ -5,7 +5,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::reference::Reference;
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -14,8 +14,8 @@ use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
-    pub name: Name,
-    pub version: Option<Version>,
+    /// Dataset reference, used for logs/tracing
+    pub reference: Reference,
     pub kind: String,
     pub network: Option<String>,
     pub start_block: Option<BlockNum>,
@@ -45,7 +45,7 @@ impl Dataset {
         self.functions.iter().map(move |f| {
             AsyncScalarUDF::new(Arc::new(JsUdf::new(
                 isolate_pool.clone(),
-                &self.name,
+                self.reference.name(),
                 f.source.source.clone(),
                 f.source.filename.clone().into(),
                 f.name.clone().into(),
@@ -56,20 +56,24 @@ impl Dataset {
     }
 
     pub fn dataset_version(&self) -> Option<String> {
-        self.version.as_ref().map(|v| v.to_string())
+        self.reference
+            .revision()
+            .as_version()
+            .map(|v| v.to_string())
     }
 
     pub fn to_identifier(&self) -> String {
         match self.kind.as_str() {
             "manifest" => format!(
                 "{}__{}",
-                self.name,
-                self.version
-                    .as_ref()
+                self.reference.name(),
+                self.reference
+                    .revision()
+                    .as_version()
                     .map(|v| v.to_underscore_version())
                     .unwrap_or_default()
             ),
-            _ => self.name.to_string(),
+            _ => self.reference.name().to_string(),
         }
     }
 }
@@ -132,7 +136,10 @@ impl ResolvedTable {
     pub fn new(table: Table, dataset: Arc<Dataset>) -> Result<Self, BoxError> {
         validate_name(table.name())?;
 
-        let table_ref = TableReference::partial(dataset.name.to_string(), table.name().to_string());
+        let table_ref = TableReference::partial(
+            dataset.reference.name().to_string(),
+            table.name().to_string(),
+        );
         Ok(Self {
             table,
             dataset,

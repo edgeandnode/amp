@@ -70,8 +70,11 @@ pub struct ProviderConfig {
 
 pub fn dataset(manifest: Manifest) -> Dataset {
     Dataset {
-        name: manifest.name,
-        version: Some(manifest.version),
+        reference: datasets_common::reference::Reference::new(
+            "_".parse().unwrap(),
+            manifest.name,
+            datasets_common::revision::Revision::Version(manifest.version),
+        ),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
