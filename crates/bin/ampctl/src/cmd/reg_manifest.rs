@@ -12,7 +12,7 @@
 //! - GCS: `gs://bucket-name/path/manifest.json`
 //! - Azure: `az://container/path/manifest.json`
 //!
-//! # Manifest Reference Format
+//! # Dataset Reference Format
 //!
 //! Pattern: `namespace/name@version` (e.g., `graph/eth_mainnet@1.0.0`)
 //!
@@ -33,11 +33,11 @@ pub struct Args {
     #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
     pub admin_url: Url,
 
-    /// The manifest reference in format: namespace/name@version
+    /// The dataset reference in format: namespace/name@version
     ///
     /// Examples: my_namespace/my_dataset@1.0.0, my_namespace/my_dataset@latest
     #[arg(value_name = "REFERENCE", required = true, value_parser = clap::value_parser!(Reference))]
-    pub manifest_ref: Reference,
+    pub dataset_ref: Reference,
 
     /// Path or URL to the manifest file (local path, file://, s3://, gs://, or az://)
     #[arg(value_name = "FILE", required = true, value_parser = clap::value_parser!(ManifestFilePath))]
@@ -56,19 +56,19 @@ pub struct Args {
 pub async fn run(
     Args {
         admin_url,
-        manifest_ref,
+        dataset_ref,
         manifest_file,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!(
         manifest_path = %manifest_file,
-        manifest_ref = %manifest_ref,
+        dataset_ref = %dataset_ref,
         "Loading and registering manifest"
     );
 
-    let manifest_content = load_manifest(&manifest_file).await?;
+    let manifest_str = load_manifest(&manifest_file).await?;
 
-    register_manifest(&admin_url, &manifest_ref, &manifest_content).await?;
+    register_manifest(&admin_url, &dataset_ref, &manifest_str).await?;
 
     Ok(())
 }
@@ -127,7 +127,7 @@ async fn register_manifest(
 
     tracing::debug!(
         url = %url,
-        manifest_ref = %dataset_ref,
+        dataset_ref = %dataset_ref,
         "Sending registration request"
     );
 
