@@ -76,10 +76,10 @@ pub struct QueryParams {
         ),
         responses(
             (status = 204, description = "Location successfully deleted"),
-            (status = 400, description = "Invalid location ID or query parameters"),
-            (status = 404, description = "Location not found"),
-            (status = 409, description = "Location is active or has ongoing job"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid location ID or query parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Location not found", body = crate::handlers::error::ErrorResponse),
+            (status = 409, description = "Location is active or has ongoing job", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

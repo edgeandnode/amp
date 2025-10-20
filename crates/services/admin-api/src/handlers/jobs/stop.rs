@@ -69,10 +69,10 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Job stop request processed successfully"),
-            (status = 400, description = "Invalid job ID"),
-            (status = 404, description = "Job not found"),
-            (status = 409, description = "Job cannot be stopped from current state"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid job ID", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Job not found", body = crate::handlers::error::ErrorResponse),
+            (status = 409, description = "Job cannot be stopped from current state", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

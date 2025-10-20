@@ -51,8 +51,8 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Returns all dataset versions", body = DatasetVersionsResponse),
-            (status = 400, description = "Invalid dataset name format"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid dataset name format", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

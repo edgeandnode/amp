@@ -48,9 +48,9 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully retrieved location information", body = LocationInfoWithDetails),
-            (status = 400, description = "Invalid location ID"),
-            (status = 404, description = "Location not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid location ID", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Location not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

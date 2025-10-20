@@ -128,8 +128,8 @@ pub struct LocationFilesResponse {
         ),
         responses(
             (status = 200, description = "Successfully retrieved location files", body = LocationFilesResponse),
-            (status = 400, description = "Invalid location ID or query parameters"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid location ID or query parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

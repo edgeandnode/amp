@@ -73,8 +73,8 @@ fn default_limit() -> usize {
         ),
         responses(
             (status = 200, description = "Successfully retrieved jobs", body = JobsResponse),
-            (status = 400, description = "Invalid query parameters"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid query parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

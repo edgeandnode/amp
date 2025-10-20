@@ -52,8 +52,8 @@ use crate::{
         request_body = OutputSchemaRequest,
         responses(
             (status = 200, description = "Successfully analyzed SQL query and returned schema", body = OutputSchemaResponse),
-            (status = 400, description = "SQL parse error"),
-            (status = 500, description = "Dataset store or planning error")
+            (status = 400, description = "SQL parse error", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Dataset store or planning error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]

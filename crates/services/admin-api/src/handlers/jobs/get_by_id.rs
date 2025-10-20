@@ -48,9 +48,9 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully retrieved job information", body = JobInfo),
-            (status = 400, description = "Invalid job ID"),
-            (status = 404, description = "Job not found"),
-            (status = 500, description = "Internal server error")
+            (status = 400, description = "Invalid job ID", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Job not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]
