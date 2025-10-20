@@ -49,28 +49,28 @@ async fn get_dataset_version_manifest_with_valid_dataset_succeeds() {
         "manifest should contain correct network"
     );
     assert!(
-        manifest.get("schema").is_some(),
-        "manifest should contain schema field"
+        manifest.get("tables").is_some(),
+        "manifest should contain tables field"
     );
 
-    // Verify schema contains expected tables
-    let schema = manifest
-        .get("schema")
-        .expect("schema field should exist")
+    // Verify tables contains expected tables
+    let tables = manifest
+        .get("tables")
+        .expect("tables field should exist")
         .as_object()
-        .expect("schema should be an object");
+        .expect("tables should be an object");
 
     assert!(
-        schema.contains_key("blocks"),
-        "schema should contain blocks table"
+        tables.contains_key("blocks"),
+        "tables should contain blocks table"
     );
     assert!(
-        schema.contains_key("logs"),
-        "schema should contain logs table"
+        tables.contains_key("logs"),
+        "tables should contain logs table"
     );
     assert!(
-        schema.contains_key("transactions"),
-        "schema should contain transactions table"
+        tables.contains_key("transactions"),
+        "tables should contain transactions table"
     );
 }
 

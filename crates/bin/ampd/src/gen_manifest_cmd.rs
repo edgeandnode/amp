@@ -1,7 +1,29 @@
 use std::io;
 
 use dataset_store::DatasetKind;
-use datasets_common::name::Name;
+use datasets_common::{
+    manifest::{ArrowSchema, Field, TableSchema},
+    name::Name,
+};
+
+/// Create a TableSchema from a logical table
+fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
+    let fields: Vec<Field> = table
+        .schema()
+        .fields()
+        .iter()
+        .filter(|field| field.name() != common::SPECIAL_BLOCK_NUM)
+        .map(|field| Field {
+            name: field.name().clone(),
+            type_: field.data_type().clone().into(),
+            nullable: field.is_nullable(),
+        })
+        .collect();
+
+    TableSchema {
+        arrow: ArrowSchema { fields },
+    }
+}
 
 pub async fn run(
     name: Name,
@@ -15,40 +37,65 @@ pub async fn run(
 
     let dataset_bytes = match kind {
         dataset_store::DatasetKind::EvmRpc => {
+            let tables = evm_rpc_datasets::tables::all(&network)
+                .iter()
+                .map(|table| {
+                    let schema = table_schema_from_logical_table(table);
+                    let manifest_table = evm_rpc_datasets::Table::new(schema, network.clone());
+                    (table.name().to_string(), manifest_table)
+                })
+                .collect();
             let manifest = evm_rpc_datasets::Manifest {
                 name,
                 version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
-                network,
+                network: network.clone(),
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
-                schema: None,
+                tables,
             };
-            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
+            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::EthBeacon => {
+            let tables = eth_beacon_datasets::all_tables(network.clone())
+                .iter()
+                .map(|table| {
+                    let schema = table_schema_from_logical_table(table);
+                    let manifest_table = eth_beacon_datasets::Table::new(schema, network.clone());
+                    (table.name().to_string(), manifest_table)
+                })
+                .collect();
             let manifest = eth_beacon_datasets::Manifest {
                 name,
                 version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
-                network,
+                network: network.clone(),
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
-                schema: None,
+                tables,
             };
-            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
+            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::Firehose => {
+            let tables = firehose_datasets::evm::tables::all(&network)
+                .iter()
+                .map(|table| {
+                    let schema = table_schema_from_logical_table(table);
+                    let manifest_table =
+                        firehose_datasets::dataset::Table::new(schema, network.clone());
+                    (table.name().to_string(), manifest_table)
+                })
+                .collect();
             let manifest = firehose_datasets::dataset::Manifest {
                 name,
                 version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
-                network,
+                network: network.clone(),
                 start_block: start_block.unwrap_or(0),
                 finalized_blocks_only,
-                schema: None,
+                tables,
             };
-            serde_json::to_vec(&manifest).map_err(Error::Serialization)?
+            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
         dataset_store::DatasetKind::Derived => {
             return Err(Error::DerivedNotSupported);
