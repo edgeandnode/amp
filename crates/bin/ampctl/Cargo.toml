@@ -18,15 +18,20 @@ anyhow.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }
 console = "0.16.1"
+dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
+eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
 monitoring = { path = "../../core/monitoring" }
 object_store.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
 
 [build-dependencies]
-vergen-gitcl = { version = "1.0", features = ["build"] }
+vergen-gitcl = { version = "1.0.8", features = ["build"] }

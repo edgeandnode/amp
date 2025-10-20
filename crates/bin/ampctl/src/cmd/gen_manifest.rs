@@ -1,10 +1,66 @@
-use std::io;
+//! Dataset manifest generation command.
+//!
+//! Generates a dataset manifest file for supported dataset kinds by:
+//! 1. Accepting dataset configuration parameters (name, kind, network, etc.)
+//! 2. Creating a manifest structure appropriate for the dataset kind
+//! 3. Serializing to JSON and writing to output (file or stdout)
+//!
+//! # Supported Dataset Kinds
+//!
+//! - **evm-rpc**: EVM RPC dataset manifests
+//! - **eth-beacon**: Ethereum Beacon chain dataset manifests
+//! - **firehose**: Firehose dataset manifests
+//!
+//! Note: Derived datasets are not supported for automatic generation as they
+//! require custom SQL transformation definitions.
+//!
+//! # Configuration
+//!
+//! - Dataset Name: `--name` flag or `GM_NAME` env var
+//! - Dataset Kind: `--kind` flag or `GM_KIND` env var
+//! - Network: `--network` flag or `GM_NETWORK` env var
+//! - Output: `--out` flag or `GM_OUT` env var (optional, defaults to stdout)
+//! - Start Block: `--start-block` flag or `GM_START_BLOCK` env var (optional, defaults to 0)
+//! - Finalized Blocks Only: `--finalized-blocks-only` flag or `GM_FINALIZED_BLOCKS_ONLY` env var
+
+use std::path::PathBuf;
 
 use dataset_store::DatasetKind;
 use datasets_common::{
     manifest::{ArrowSchema, Field, TableSchema},
     name::Name,
 };
+
+/// Command-line arguments for the `gen-manifest` command.
+#[derive(Debug, clap::Args)]
+pub struct Args {
+    /// The name of the dataset.
+    #[arg(long, required = true, env = "GM_NAME", value_parser = clap::value_parser!(Name))]
+    pub name: Name,
+
+    /// Kind of the dataset (evm-rpc, eth-beacon, firehose).
+    #[arg(long, required = true, env = "GM_KIND", value_parser = clap::value_parser!(DatasetKind))]
+    pub kind: DatasetKind,
+
+    /// The name of the network.
+    #[arg(long, required = true, env = "GM_NETWORK")]
+    pub network: String,
+
+    /// Output file or directory. If it's a directory, the generated file name will
+    /// match the `kind` parameter.
+    ///
+    /// If not specified, the manifest will be printed to stdout.
+    #[arg(short, long, env = "GM_OUT")]
+    pub out: Option<PathBuf>,
+
+    /// The starting block number for the dataset. Defaults to 0.
+    #[arg(long, env = "GM_START_BLOCK")]
+    pub start_block: Option<u64>,
+
+    /// Only include finalized block data.
+    #[arg(long, env = "GM_FINALIZED_BLOCKS_ONLY")]
+    pub finalized_blocks_only: bool,
+}
 
 /// Create a TableSchema from a logical table
 fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
@@ -25,14 +81,27 @@ fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
     }
 }
 
-pub async fn run(
+/// Generate a dataset manifest and write to the specified output.
+///
+/// Creates a manifest appropriate for the dataset kind and writes it as JSON.
+/// This is the core business logic function used by the CLI and tests.
+///
+/// # Errors
+///
+/// Returns [`Error`] for unsupported dataset kinds, serialization failures,
+/// or write errors.
+#[tracing::instrument(skip(writer))]
+pub async fn generate_manifest<W>(
     name: Name,
-    kind: impl Into<DatasetKind>,
+    kind: impl Into<DatasetKind> + std::fmt::Debug,
     network: String,
     start_block: Option<u64>,
     finalized_blocks_only: bool,
-    writer: &mut impl io::Write,
-) -> Result<(), Error> {
+    writer: &mut W,
+) -> Result<(), Error>
+where
+    W: std::io::Write + ?Sized,
+{
     let kind = kind.into();
 
     let dataset_bytes = match kind {
@@ -109,6 +178,57 @@ pub async fn run(
     Ok(())
 }
 
+/// CLI command handler for generating dataset manifests.
+///
+/// Handles output destination (file vs stdout) and delegates manifest generation
+/// to [`generate_manifest`]. This function serves as the entry point from the CLI.
+///
+/// If `out` is a directory, the filename will be derived from the dataset kind.
+/// If `out` is None, output will be written to stdout.
+///
+/// # Errors
+///
+/// Returns [`Error`] for unsupported dataset kinds, serialization failures,
+/// or write errors.
+#[tracing::instrument]
+pub async fn run(
+    Args {
+        name,
+        kind,
+        network,
+        out,
+        start_block,
+        finalized_blocks_only,
+    }: Args,
+) -> Result<(), Error> {
+    // Determine the output destination (file or stdout)
+    let mut writer: Box<dyn std::io::Write> = if let Some(mut out_path) = out {
+        // If output is a directory, append the filename based on kind
+        if out_path.is_dir() {
+            out_path.push(format!("{}.json", &kind));
+        }
+
+        let file = std::fs::File::create(&out_path).map_err(|err| {
+            tracing::error!(path = %out_path.display(), error = %err, "Failed to create output file");
+            Error::WriteOutput(err)
+        })?;
+
+        Box::new(file)
+    } else {
+        Box::new(std::io::stdout())
+    };
+
+    generate_manifest(
+        name,
+        kind,
+        network,
+        start_block,
+        finalized_blocks_only,
+        &mut writer,
+    )
+    .await
+}
+
 /// Errors specific to generate manifest operations
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -154,5 +274,5 @@ pub enum Error {
     /// - Invalid file path
     /// - Closed or broken output stream
     #[error("Failed to write output: {0}")]
-    WriteOutput(#[source] io::Error),
+    WriteOutput(#[source] std::io::Error),
 }

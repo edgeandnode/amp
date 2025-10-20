@@ -1,9 +1,9 @@
 {
   "opencli": "1.0.0",
   "info": {
-    "title": "Amp CLI",
+    "title": "ampd - Amp Daemon",
     "description": "High-performance ETL (Extract, Transform, Load) architecture for blockchain data services. Extracts blockchain data from various sources, transforms it via SQL queries, and serves it through multiple query interfaces.",
-    "version": "0.1.0-20251005",
+    "version": "0.1.0-20251021",
     "contact": {
       "name": "Edge & Node",
       "url": "https://github.com/edgeandnode/amp"
@@ -12,7 +12,7 @@
   "environment": [
     {
       "name": "AMP_CONFIG",
-      "description": "The configuration file to use. This file defines where to look for dataset definitions and providers, along with many other configuration options. This argument is optional for the generate-manifest command."
+      "description": "The configuration file to use. This file defines where to look for dataset definitions and providers, along with many other configuration options."
     }
   ],
   "commands": {
@@ -85,72 +85,6 @@
         {
           "command": "ampd --config config.toml controller",
           "description": "Start the controller with Admin API"
-        }
-      ]
-    },
-    "generate-manifest": {
-      "summary": "Generate dataset manifests",
-      "description": "Generates dataset manifest files for different dataset types (firehose, evm-rpc, etc.). The manifest can be output to a file, directory, or stdout. The --config parameter is NOT required for this command (unlike other commands). If --out is omitted, the manifest is printed to stdout for easy piping. If --out points to a directory, the output file will be named after the 'kind' parameter. The generated manifest is in JSON format and can be used with the dump command.",
-      "parameters": [
-        {
-          "name": "network",
-          "in": "option",
-          "description": "The name of the network for which the dataset manifest is being generated (e.g., mainnet, sepolia, polygon).",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "x-environment": "GM_NETWORK"
-        },
-        {
-          "name": "kind",
-          "in": "option",
-          "description": "The kind/type of the dataset (e.g., firehose, evm-rpc). This determines the dataset extractor type and structure.",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "x-environment": "GM_KIND"
-        },
-        {
-          "name": "name",
-          "in": "option",
-          "description": "The name of the dataset. This will be used as the dataset identifier in the system.",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "x-environment": "GM_NAME"
-        },
-        {
-          "name": "out",
-          "in": "option",
-          "alias": ["o"],
-          "description": "Output file or directory path. If a directory is specified, the file will be named '{kind}.json'. If not specified, the manifest will be printed to stdout.",
-          "required": false,
-          "schema": {
-            "type": "string",
-            "format": "path"
-          },
-          "x-environment": "GM_OUT"
-        }
-      ],
-      "responses": {
-        "0": {
-          "description": "Manifest generated successfully"
-        },
-        "1": {
-          "description": "Error occurred during manifest generation or invalid parameters"
-        }
-      },
-      "x-examples": [
-        {
-          "command": "ampd generate-manifest --network mainnet --kind firehose --name eth_firehose",
-          "description": "Generate a firehose dataset manifest and output to stdout"
-        },
-        {
-          "command": "ampd generate-manifest --network mainnet --kind evm-rpc --name eth_rpc -o manifests/",
-          "description": "Generate an EVM RPC dataset manifest and save to manifests/evm-rpc.json"
         }
       ]
     },

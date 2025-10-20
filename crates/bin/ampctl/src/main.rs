@@ -26,6 +26,15 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Commands {
+    /// Generate a dataset manifest file
+    ///
+    /// Creates a dataset manifest for supported dataset kinds (evm-rpc, eth-beacon,
+    /// firehose). The manifest can be written to a file or printed to stdout.
+    ///
+    /// If the output is a directory, the filename will match the dataset kind.
+    /// If no output is specified, the manifest will be printed to stdout.
+    GenManifest(cmd::gen_manifest::Args),
+
     /// Register a dataset manifest with the engine admin interface
     ///
     /// Loads a dataset manifest from local or remote storage and registers it
@@ -43,9 +52,9 @@ async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::RegManifest(args) => {
-            cmd::reg_manifest::run(args).await?;
-            Ok(())
-        }
+        Commands::GenManifest(args) => cmd::gen_manifest::run(args).await?,
+        Commands::RegManifest(args) => cmd::reg_manifest::run(args).await?,
     }
+
+    Ok(())
 }
