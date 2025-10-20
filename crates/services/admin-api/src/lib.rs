@@ -38,6 +38,9 @@ pub async fn serve(
         dataset_manifests_store.clone(),
     );
 
+    // Initialize the dataset store (scans the object store for manifests to preload)
+    dataset_store.init().await;
+
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     let ctx = Ctx {

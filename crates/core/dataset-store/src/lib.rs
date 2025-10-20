@@ -35,6 +35,7 @@ use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use parking_lot::RwLock;
 use rand::seq::SliceRandom as _;
+use tokio::sync::OnceCell;
 use url::Url;
 
 mod block_stream_client;
@@ -60,6 +61,9 @@ pub use self::{
     },
     manifests::StoreError,
 };
+
+/// Module-level initialization state to ensure the store is only initialized once
+static INITIALIZED: OnceCell<()> = OnceCell::const_new();
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -93,9 +97,13 @@ impl DatasetStore {
     ///
     /// This method ensures that all manifests present in the object store are registered in the
     /// metadata database. It's idempotent and will only register manifests that don't already exist.
-    /// The initialization runs only once per instance.
+    /// The initialization runs only once per process.
     pub async fn init(&self) {
-        self.dataset_manifests_store.init().await
+        INITIALIZED
+            .get_or_init(|| async {
+                manifests::init(&self.dataset_manifests_store, &self.metadata_db).await
+            })
+            .await;
     }
 
     /// Get a reference to the providers configuration store

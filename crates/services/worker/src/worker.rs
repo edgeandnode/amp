@@ -90,6 +90,9 @@ impl Worker {
     ///
     /// Returns an error if a fatal condition occurs that prevents the worker from continuing.
     pub async fn run(mut self) -> Result<(), Error> {
+        // Initialize the dataset store (scans the object store for manifests to preload)
+        self.job_ctx.dataset_store.init().await;
+
         // Register the worker in the Metadata DB. and update the latest heartbeat timestamp.
         // Retry on failure
         self.meta

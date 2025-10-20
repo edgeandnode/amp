@@ -48,6 +48,8 @@ impl DaemonWorker {
                 dataset_manifests_store,
             )
         };
+        // Initialize the dataset store (scans the object store for manifests to preload)
+        dataset_store.init().await;
 
         let worker = Worker::new(config.clone(), metadb, node_id.clone(), meter);
 

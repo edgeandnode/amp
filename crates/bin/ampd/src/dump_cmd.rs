@@ -95,6 +95,8 @@ pub async fn dump(
             dataset_manifests_store,
         )
     };
+    dataset_store.init().await;
+
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     let datasets = match ignore_deps {

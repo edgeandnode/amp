@@ -248,6 +248,9 @@ impl Service {
                 dataset_manifests_store,
             )
         };
+        // Initialize the dataset store (scans the object store for manifests to preload)
+        dataset_store.init().await;
+
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
         let metrics = meter.map(|m| Arc::new(crate::metrics::MetricsRegistry::new(m)));

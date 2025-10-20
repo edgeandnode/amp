@@ -5,7 +5,6 @@ use datasets_common::{hash::hash, name::Name, namespace::Namespace, version::Ver
 use futures::{StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
-use tokio::sync::OnceCell;
 
 /// Manages dataset manifest configurations combining ObjectStore and MetadataDb operations
 ///
@@ -32,7 +31,6 @@ use tokio::sync::OnceCell;
 pub struct DatasetManifestsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
     metadata_db: MetadataDb,
     store: S,
-    initialized: Arc<OnceCell<()>>,
 }
 
 impl<S> DatasetManifestsStore<S>
@@ -41,24 +39,7 @@ where
 {
     /// Create a new [`DatasetManifestsStore`] instance with the given metadata database and underlying store.
     pub fn new(metadata_db: MetadataDb, store: S) -> Self {
-        Self {
-            metadata_db,
-            store,
-            initialized: Arc::new(OnceCell::new()),
-        }
-    }
-
-    /// Initialize the manifests store by loading existing manifests into the metadata database
-    ///
-    /// This method ensures that all manifests present in the object store are registered in the
-    /// metadata database. It's idempotent and will only register manifests that don't already exist.
-    /// The initialization runs only once per instance using OnceCell.
-    pub async fn init(&self) {
-        self.initialized
-            .get_or_init(|| async {
-                self.init_metadata_db().await;
-            })
-            .await;
+        Self { metadata_db, store }
     }
 
     /// Get the latest version for a given dataset name
@@ -68,8 +49,6 @@ where
         &self,
         name: &Name,
     ) -> Result<Option<Version>, GetLatestVersionError> {
-        self.init().await;
-
         // TODO: Pass the actual namespace instead of using a placeholder
         let namespace = "_"
             .parse::<Namespace>()
@@ -88,8 +67,6 @@ where
     /// Returns a set of all available manifests with their name, version, and path information.
     /// This operation directly queries the underlying store without caching.
     pub async fn list(&self) -> Vec<(Name, Version)> {
-        self.init().await;
-
         // Get all datasets from metadata database
         let datasets = match self
             .metadata_db
@@ -129,8 +106,6 @@ where
         name: &Name,
         version: impl Into<Option<&Version>>,
     ) -> Result<Option<ManifestContent>, GetError> {
-        self.init().await;
-
         // TODO: Pass the actual namespace instead of using a placeholder
         let namespace = "_"
             .parse::<Namespace>()
@@ -170,8 +145,6 @@ where
         version: &Version,
         manifest_str: String,
     ) -> Result<ObjectStorePath, StoreError> {
-        self.init().await;
-
         // Store manifest in underlying store
         let manifest_path = ObjectStorePath::from(format!(
             "{}__{}.json",
@@ -186,138 +159,161 @@ where
 
         Ok(manifest_path)
     }
+}
 
-    /// Internal method that performs the actual async initialization work
-    async fn init_metadata_db(&self) {
-        tracing::info!(
-            "Initializing ManifestsStore: loading manifests from store into metadata database"
-        );
+/// Initialize the manifests store by loading existing manifests into the metadata database
+///
+/// This function ensures that all manifests present in the object store are registered in the
+/// metadata database. It's idempotent and will only register manifests that don't already exist.
+///
+/// **IMPORTANT**: This function must be called explicitly before using the DatasetManifestsStore.
+/// The initialization runs only once per process using module-level state in DatasetStore.
+pub async fn init<S>(store: &DatasetManifestsStore<S>, metadata_db: &MetadataDb)
+where
+    S: ObjectStore + Clone,
+{
+    let manifests = list(&store.store).await;
+    register_manifests_batch(&store.store, metadata_db, manifests).await;
+}
 
-        let manifests_list = list(&self.store).await;
-        let mut total_count = 0;
-        let mut registered_count = 0;
-        let mut error_count = 0;
+/// Register manifests in batch from name-based files
+///
+/// Takes an iterator of manifest tuples (namespace, name, version, path) from name-based
+/// `.json` files and registers them in the metadata database.
+///
+/// For each manifest:
+/// 1. Checks if it already exists in the metadata database (skips if so)
+/// 2. Fetches the manifest content from the object store
+/// 3. Computes the manifest hash
+/// 4. Registers in metadata database with the computed hash
+async fn register_manifests_batch<S, I>(store: &S, metadata_db: &MetadataDb, manifests: I)
+where
+    S: ObjectStore,
+    I: IntoIterator<Item = (Namespace, Name, Version, ManifestPath)>,
+{
+    tracing::info!(
+        "Initializing ManifestsStore: loading manifests from store into metadata database"
+    );
 
-        for (name, version, path) in manifests_list {
-            total_count += 1;
+    let mut total_count = 0;
+    let mut registered_count = 0;
+    let mut error_count = 0;
 
-            // Check if the dataset already exists in the metadata database
-            // TODO: Pass the actual namespace instead of using a placeholder
-            let namespace = "_"
-                .parse::<Namespace>()
-                .expect("'_' should be a valid namespace");
-            let dataset_exists = match self
-                .metadata_db
-                .dataset_exists(&namespace, &name, &version)
-                .await
-            {
-                Ok(exists) => exists,
-                Err(err) => {
-                    error_count += 1;
-                    tracing::warn!(
-                        dataset_name = %name,
-                        dataset_version = %version,
-                        error = %err,
-                        "Failed to check dataset existence in metadata database"
-                    );
-                    continue;
-                }
-            };
+    for (namespace, name, version, path) in manifests {
+        total_count += 1;
 
-            if dataset_exists {
-                tracing::debug!(
+        // Check if the dataset already exists in the metadata database
+        let dataset_exists = match metadata_db
+            .dataset_exists(&namespace, &name, &version)
+            .await
+        {
+            Ok(exists) => exists,
+            Err(err) => {
+                error_count += 1;
+                tracing::warn!(
+                    dataset_namespace = %namespace,
                     dataset_name = %name,
                     dataset_version = %version,
-                    "Dataset already exists in metadata database, skipping"
+                    error = %err,
+                    "Failed to check dataset existence in metadata database"
                 );
                 continue;
             }
+        };
 
-            // Fetch manifest content to compute hash
-            let manifest_content = match fetch_manifest_content(&self.store, path.clone()).await {
-                Ok(Some(content)) => content,
-                Ok(None) => {
-                    error_count += 1;
-                    tracing::warn!(
-                        dataset_name = %name,
-                        dataset_version = %version,
-                        manifest_path = %path,
-                        "Manifest file not found in object store"
-                    );
-                    continue;
-                }
-                Err(err) => {
-                    error_count += 1;
-                    tracing::warn!(
-                        dataset_name = %name,
-                        dataset_version = %version,
-                        manifest_path = %path,
-                        error = %err,
-                        "Failed to fetch manifest content from object store"
-                    );
-                    continue;
-                }
-            };
+        if dataset_exists {
+            tracing::debug!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                dataset_version = %version,
+                "Dataset already exists in metadata database, skipping"
+            );
+            continue;
+        }
 
-            // Compute hash from manifest content
-            let manifest_hash = hash(manifest_content);
+        // Fetch manifest content to compute hash
+        let manifest_content = match fetch_manifest_content(store, path.clone()).await {
+            Ok(Some(content)) => content,
+            Ok(None) => {
+                error_count += 1;
+                tracing::warn!(
+                    dataset_namespace = %namespace,
+                    dataset_name = %name,
+                    dataset_version = %version,
+                    manifest_path = %path,
+                    "Manifest file not found in object store"
+                );
+                continue;
+            }
+            Err(err) => {
+                error_count += 1;
+                tracing::warn!(
+                    dataset_namespace = %namespace,
+                    dataset_name = %name,
+                    dataset_version = %version,
+                    manifest_path = %path,
+                    error = %err,
+                    "Failed to fetch manifest content from object store"
+                );
+                continue;
+            }
+        };
 
-            // Register the dataset in the metadata database
-            // TODO: Pass the actual namespace instead of using a placeholder
-            let namespace = "_"
-                .parse::<Namespace>()
-                .expect("'_' should be a valid namespace");
-            match self
-                .metadata_db
-                .register_dataset(
-                    &namespace,
-                    &name,
-                    &version,
-                    &manifest_hash,
-                    &path.to_string(),
-                )
-                .await
-            {
-                Ok(()) => {
-                    registered_count += 1;
-                    tracing::debug!(
-                        dataset_name = %name,
-                        dataset_version = %version,
-                        manifest_path = %path,
-                        "Successfully registered manifest in metadata database"
-                    );
-                }
-                Err(err) => {
-                    error_count += 1;
-                    tracing::warn!(
-                        dataset_name = %name,
-                        dataset_version = %version,
-                        manifest_path = %path,
-                        error = %err,
-                        "Failed to register manifest in metadata database"
-                    );
-                }
+        // Compute hash from manifest content
+        let manifest_hash = hash(manifest_content);
+
+        // Register the dataset in the metadata database
+        match metadata_db
+            .register_dataset(
+                &namespace,
+                &name,
+                &version,
+                &manifest_hash,
+                &path.to_string(),
+            )
+            .await
+        {
+            Ok(()) => {
+                registered_count += 1;
+                tracing::debug!(
+                    dataset_namespace = %namespace,
+                    dataset_name = %name,
+                    dataset_version = %version,
+                    manifest_path = %path,
+                    "Successfully registered manifest in metadata database"
+                );
+            }
+            Err(err) => {
+                error_count += 1;
+                tracing::warn!(
+                    dataset_namespace = %namespace,
+                    dataset_name = %name,
+                    dataset_version = %version,
+                    manifest_path = %path,
+                    error = %err,
+                    "Failed to register manifest in metadata database"
+                );
             }
         }
+    }
 
-        if error_count > 0 {
-            tracing::warn!(
-                total_manifests = total_count,
-                registered_manifests = registered_count,
-                failed_registrations = error_count,
-                "ManifestsStore initialization completed with some failures"
-            );
-        } else {
-            tracing::info!(
-                total_manifests = total_count,
-                registered_manifests = registered_count,
-                "Successfully initialized ManifestsStore with all manifests"
-            );
-        }
+    if error_count > 0 {
+        tracing::warn!(
+            total_manifests = total_count,
+            registered_manifests = registered_count,
+            failed_registrations = error_count,
+            "ManifestsStore initialization completed with some failures"
+        );
+    } else {
+        tracing::info!(
+            total_manifests = total_count,
+            registered_manifests = registered_count,
+            "Successfully initialized ManifestsStore with all manifests"
+        );
     }
 }
 
-async fn list<S>(store: &S) -> BTreeSet<(Name, Version, ManifestPath)>
+async fn list<S>(store: &S) -> BTreeSet<(Namespace, Name, Version, ManifestPath)>
 where
     S: ObjectStore,
 {
@@ -351,7 +347,30 @@ where
 
         let stem = file_name.trim_end_matches(".json");
 
-        let (name_str, version_str) = stem.rsplit_once("__").unwrap_or((stem, "0_0_0"));
+        // Parse name-based fallback formats by splitting on "__"
+        let parts: Vec<&str> = stem.split("__").collect();
+        let (namespace_str, name_str, version_str) = match parts.as_slice() {
+            // {namespace}__{name}__{version}.json
+            [namespace, name, version] => (*namespace, *name, *version),
+            // {name}__{version}.json (default namespace: _)
+            [name, version] => ("_", *name, *version),
+            // {name}.json (default namespace: _, version: 0.0.0)
+            [name] => ("_", *name, "0_0_0"),
+            // Invalid format
+            _ => {
+                tracing::debug!(file_path = %manifest_path, "Skipping file with invalid format (too many parts)");
+                continue;
+            }
+        };
+
+        // Parse namespace
+        let namespace = match namespace_str.parse::<Namespace>() {
+            Ok(namespace) => namespace,
+            Err(err) => {
+                tracing::debug!(file_path = %manifest_path, error = ?err, "Skipping file with invalid namespace");
+                continue;
+            }
+        };
 
         // Skip any file with an invalid name or version
         let name = match name_str.parse::<Name>() {
@@ -370,7 +389,7 @@ where
             }
         };
 
-        set.insert((name, version, manifest_path));
+        set.insert((namespace, name, version, manifest_path));
     }
 
     set

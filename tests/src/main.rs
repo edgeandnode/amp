@@ -175,6 +175,7 @@ async fn main() {
                     dataset_manifests_store,
                 )
             };
+            dataset_store.init().await;
 
             // Run blessing procedure
             bless(

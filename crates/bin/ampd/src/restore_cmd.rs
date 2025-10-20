@@ -31,6 +31,7 @@ pub async fn run(
             dataset_manifests_store,
         )
     };
+    dataset_store.init().await;
 
     let mut all_tables = Vec::new();
 

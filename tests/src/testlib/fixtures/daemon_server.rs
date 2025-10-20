@@ -54,6 +54,9 @@ impl DaemonServer {
             )
         };
 
+        // Initialize the dataset store (scans the object store for manifests to preload)
+        dataset_store.init().await;
+
         // For tests, leak the meter to get a 'static reference
         // This is acceptable in tests since they're short-lived
         let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
