@@ -12,9 +12,7 @@
 //! test__<test-name>__<rand-id>/
 //! └── .amp/                         # Daemon state directory
 //!     ├── config.toml               # Main config (dynamically generated)
-//!     ├── manifests/                # Dataset manifests (only copied if explicitly requested)
-//!     │   ├── eth_rpc.json
-//!     │   └── anvil_rpc.json
+//!     ├── manifests/                # Dataset manifests directory (initially empty, manifests registered via Admin API)
 //!     ├── providers/                # Provider configs (only copied if explicitly requested)
 //!     │   ├── rpc_eth_mainnet.toml
 //!     │   ├── firehose_eth_mainnet.toml
@@ -32,17 +30,18 @@
 //! - **Builder pattern**: Fluent API for environment customization
 //! - **Automatic cleanup**: Temporary directories cleaned up on drop (unless `TESTS_KEEP_TEMP_DIRS=1` is set)
 
-use std::{collections::BTreeSet, path::Path, str::FromStr as _, sync::Arc};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use common::{BoxError, config::Config};
+use datasets_common::reference::Reference;
 use worker::NodeId;
 
 use super::fixtures::{
-    AmpCli, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
+    AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
     DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, TempMetadataDb as MetadataDbFixture,
     builder as daemon_state_dir_builder,
 };
-use crate::testlib::env_dir::TestEnvDir;
+use crate::testlib::{config::read_manifest_fixture, env_dir::TestEnvDir};
 
 enum AnvilMode {
     Ipc,
@@ -53,7 +52,7 @@ pub struct TestCtxBuilder {
     test_name: String,
     daemon_config: DaemonConfig,
     anvil_fixture: Option<AnvilMode>,
-    dataset_manifests_to_preload: BTreeSet<String>,
+    manifests_to_register: Vec<ManifestRegistration>,
     provider_configs_to_preload: BTreeSet<String>,
     dataset_snapshots_to_preload: BTreeSet<String>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
@@ -66,7 +65,7 @@ impl TestCtxBuilder {
             test_name: test_name.into(),
             daemon_config: Default::default(),
             anvil_fixture: None,
-            dataset_manifests_to_preload: Default::default(),
+            manifests_to_register: Default::default(),
             provider_configs_to_preload: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
             meter: None,
@@ -93,58 +92,58 @@ impl TestCtxBuilder {
 
     /// Add a single dataset manifest that this test environment needs.
     ///
-    /// Only the specified dataset manifest will be copied from the source directory to the test environment.
-    /// This is a convenience method for adding one dataset at a time.
+    /// The manifest will be registered with the Admin API after the controller starts.
+    /// This is a convenience method for adding one manifest at a time.
+    ///
+    /// Accepts either a simple string for auto-inferred reference, or a tuple
+    /// for explicit reference specification:
+    /// - `"eth_rpc"` → registers as `_/eth_rpc@0.0.0`
+    /// - `("eth_rpc", "_/eth_rpc@1.0.0")` → registers with explicit version
     ///
     /// # Panics
     ///
     /// Panics if the manifest name is an absolute path or contains '..' segments.
-    pub fn with_dataset_manifest(mut self, manifest: impl Into<String>) -> Self {
-        let manifest = manifest.into();
+    pub fn with_dataset_manifest(mut self, manifest: impl Into<ManifestRegistration>) -> Self {
+        let registration = manifest.into();
 
-        if manifest.starts_with("/") {
-            panic!("The manifest name cannot be an absolute path: {}", manifest);
-        }
-
-        if manifest.contains("..") {
+        // Validate file name
+        if registration.manifest_file.starts_with("/") {
             panic!(
-                "The manifest name cannot contain '..' path segments: {}",
-                manifest
+                "The manifest name cannot be an absolute path: {}",
+                registration.manifest_file
             );
         }
 
-        self.dataset_manifests_to_preload.insert(manifest);
+        if registration.manifest_file.contains("..") {
+            panic!(
+                "The manifest name cannot contain '..' path segments: {}",
+                registration.manifest_file
+            );
+        }
+
+        self.manifests_to_register.push(registration);
         self
     }
 
     /// Add dataset manifests that this test environment needs.
     ///
-    /// Only the specified dataset manifests will be copied from the source directory to the test environment.
-    /// If no dataset manifests are specified, the manifests directory will remain empty.
+    /// The manifests will be registered with the Admin API after the controller starts.
+    ///
+    /// Each item can be either a simple string for auto-inferred reference, or a tuple
+    /// for explicit reference specification:
+    /// - `"eth_rpc"` → registers as `_/eth_rpc@0.0.0`
+    /// - `("eth_rpc", "_/eth_rpc@1.0.0")` → registers with explicit version
     ///
     /// # Panics
     ///
     /// Panics if any manifest name is an absolute path or contains '..' segments.
     pub fn with_dataset_manifests(
         mut self,
-        manifests: impl IntoIterator<Item = impl Into<String>>,
+        manifests: impl IntoIterator<Item = impl Into<ManifestRegistration>>,
     ) -> Self {
-        let manifests = manifests.into_iter().map(Into::into).collect::<Vec<_>>();
-
-        for manifest in &manifests {
-            if manifest.starts_with("/") {
-                panic!("The manifest name cannot be an absolute path: {}", manifest);
-            }
-
-            if manifest.contains("..") {
-                panic!(
-                    "The manifest name cannot contain '..' path segments: {}",
-                    manifest
-                );
-            }
+        for manifest in manifests {
+            self = self.with_dataset_manifest(manifest);
         }
-
-        self.dataset_manifests_to_preload.extend(manifests);
         self
     }
 
@@ -328,15 +327,6 @@ impl TestCtxBuilder {
         daemon_state_dir.create_data_dir()?;
 
         // Preload test resources in the daemon state dir as requested
-        if !self.dataset_manifests_to_preload.is_empty() {
-            tracing::info!(
-                "Preloading dataset manifests: {:?}",
-                self.dataset_manifests_to_preload
-            );
-            daemon_state_dir
-                .preload_dataset_manifests(&self.dataset_manifests_to_preload)
-                .await?;
-        }
         if !self.provider_configs_to_preload.is_empty() {
             tracing::info!(
                 "Preloading provider configs: {:?}",
@@ -406,14 +396,51 @@ impl TestCtxBuilder {
         // Start controller using the fixture (Admin API)
         let controller = DaemonController::new(config.clone(), controller_meter).await?;
 
+        // Register manifests with the Admin API (after controller is running)
+        if !self.manifests_to_register.is_empty() {
+            tracing::info!(
+                "Registering {} dataset manifests with Admin API",
+                self.manifests_to_register.len()
+            );
+
+            let ampctl = Ampctl::new(controller.admin_api_url());
+
+            for registration in &self.manifests_to_register {
+                tracing::debug!(
+                    file_name = %registration.manifest_file,
+                    reference = %registration.dataset_ref,
+                    "Registering manifest"
+                );
+
+                // Read manifest content from fixtures
+                let manifest_content = read_manifest_fixture(&registration.manifest_file).await?;
+
+                // Register with Admin API
+                ampctl
+                    .register_manifest(&registration.dataset_ref, &manifest_content)
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "Failed to register manifest '{}' as '{}': {}",
+                            registration.manifest_file, registration.dataset_ref, err
+                        )
+                    })?;
+
+                tracing::info!(
+                    file_name = %registration.manifest_file,
+                    reference = %registration.dataset_ref,
+                    "Successfully registered manifest"
+                );
+            }
+        }
+
         // Start worker using the fixture
-        let worker = DaemonWorker::new(
-            NodeId::from_str(&self.test_name).expect("test name should be a valid WorkerNodeId"),
-            config,
-            temp_db.metadata_db().clone(),
-            worker_meter,
-        )
-        .await?;
+        let node_id: NodeId = self
+            .test_name
+            .parse()
+            .expect("test name should be a valid WorkerNodeId");
+        let worker =
+            DaemonWorker::new(node_id, config, temp_db.metadata_db().clone(), worker_meter).await?;
 
         // Wait for Anvil service to be ready (if enabled)
         Ok(TestCtx {
@@ -527,5 +554,72 @@ impl TestCtx {
     /// Returns a new [`AmpCli`] instance ready to execute CLI commands.
     pub fn new_amp_cli(&self) -> AmpCli {
         AmpCli::new(self.daemon_controller_fixture.admin_api_url())
+    }
+
+    /// Create a new `ampctl` fixture connected to this test environment's controller.
+    ///
+    /// This convenience method creates a new [`Ampctl`] instance connected to the
+    /// daemon controller's admin API endpoint for registering dataset manifests in tests.
+    ///
+    /// Returns a new [`Ampctl`] instance ready to register manifests.
+    pub fn new_ampctl(&self) -> Ampctl {
+        Ampctl::new(self.daemon_controller_fixture.admin_api_url())
+    }
+}
+
+/// Helper type for specifying dataset manifest registrations.
+///
+/// This type encapsulates the information needed to register a dataset manifest:
+/// - The filename (without extension) of the manifest in the fixtures directory
+/// - The dataset reference (namespace/name@version) to use for registration
+///
+/// It provides convenient `From` implementations to support both explicit
+/// and inferred reference strings.
+#[derive(Debug, Clone)]
+pub struct ManifestRegistration {
+    manifest_file: String,
+    dataset_ref: Reference,
+}
+
+impl From<&str> for ManifestRegistration {
+    /// Create a manifest registration with auto-inferred reference.
+    ///
+    /// The reference is inferred as `_/{file_name}@0.0.0` where `_` is the default namespace.
+    /// If the file name ends with `.json`, the extension is stripped before creating the reference.
+    fn from(file_name: &str) -> Self {
+        let name_without_ext = file_name.strip_suffix(".json").unwrap_or(file_name);
+        let dataset_ref = format!("_/{}@0.0.0", name_without_ext)
+            .parse()
+            .expect("auto-inferred reference should be valid");
+
+        Self {
+            manifest_file: file_name.to_string(),
+            dataset_ref,
+        }
+    }
+}
+
+impl From<String> for ManifestRegistration {
+    fn from(file_name: String) -> Self {
+        Self::from(file_name.as_str())
+    }
+}
+
+impl<M, R> From<(M, R)> for ManifestRegistration
+where
+    M: AsRef<str>,
+    R: AsRef<str>,
+{
+    /// Create a manifest registration with an explicit reference string.
+    fn from((file_name, dataset_ref): (M, R)) -> Self {
+        let dataset_ref = dataset_ref
+            .as_ref()
+            .parse()
+            .unwrap_or_else(|_| panic!("Invalid reference string: {}", dataset_ref.as_ref()));
+
+        Self {
+            manifest_file: file_name.as_ref().to_string(),
+            dataset_ref,
+        }
     }
 }

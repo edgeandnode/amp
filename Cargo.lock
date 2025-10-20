@@ -8082,6 +8082,7 @@ dependencies = [
  "alloy",
  "amp-client",
  "amp-debezium-client",
+ "ampctl",
  "ampd",
  "arrow-flight",
  "backon",
@@ -8118,6 +8119,7 @@ dependencies = [
  "toml 0.8.23",
  "tonic 0.12.3",
  "tracing",
+ "url",
  "worker",
 ]
 

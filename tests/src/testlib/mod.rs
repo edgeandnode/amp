@@ -13,7 +13,7 @@
 //! configuration. Tests cannot interfere with each other, ensuring reliable and
 //! reproducible test execution.
 //!
-//! ## SelectiveTempWorkspace Resource Loading
+//! ## Selective Resource Loading
 //! Only explicitly requested datasets and provider configurations are copied to test
 //! environments, improving performance and reducing test setup overhead.
 //!
@@ -34,6 +34,7 @@
 //! - [`helpers`]: Common test helper functions for data extraction and validation
 //! - [`debug`]: Debug utilities and environment variable handling for test development
 
+mod config;
 pub mod ctx;
 pub mod debug;
 mod env_dir;
@@ -51,6 +52,7 @@ pub mod metrics;
 /// All fixture types maintain the same isolation and cleanup guarantees as the
 /// parent testlib infrastructure.
 pub mod fixtures {
+    mod ampctl;
     mod anvil;
     mod cli;
     mod daemon_config;
@@ -65,6 +67,7 @@ pub mod fixtures {
     mod temp_db;
 
     // Re-export commonly used types for convenience
+    pub use ampctl::*;
     pub use anvil::*;
     pub use cli::*;
     pub use daemon_config::*;

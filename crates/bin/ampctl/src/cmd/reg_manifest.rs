@@ -112,7 +112,7 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 ///
 /// POSTs to `/datasets` endpoint with namespace, name, version, and manifest content.
 #[tracing::instrument(skip(dataset_manifest))]
-async fn register_manifest(
+pub async fn register_manifest(
     admin_url: &Url,
     dataset_ref: &Reference,
     dataset_manifest: &str,

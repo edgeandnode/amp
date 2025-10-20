@@ -143,7 +143,8 @@ async fn resolve_schema_with_non_existent_table_fails() {
 
     assert_eq!(
         response.error_code, "PLANNING_ERROR",
-        "should return PLANNING_ERROR for non-existent table in valid dataset"
+        "should return PLANNING_ERROR for non-existent table in valid dataset\n {}: {}",
+        response.error_code, response.error_message,
     );
 }
 
@@ -166,13 +167,11 @@ impl TestCtx {
         let client = reqwest::Client::new();
         let admin_api_url = ctx.daemon_controller().admin_api_url();
 
-        let test_ctx = Self {
+        Self {
             _ctx: ctx,
             client,
             schema_api_url: format!("{}/schema", admin_api_url),
-        };
-
-        test_ctx
+        }
     }
 
     async fn send_shema_request(&self, sql_query: &str, is_sql_dataset: bool) -> reqwest::Response {
@@ -209,4 +208,5 @@ struct ArrowSchema {
 #[derive(Debug, serde::Deserialize)]
 struct ErrorResponse {
     error_code: String,
+    error_message: String,
 }

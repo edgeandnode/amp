@@ -264,7 +264,7 @@ mod tests {
         let version = Version::from_ref_unchecked(version_str);
 
         //* When
-        let deref_str: &str = &*version;
+        let deref_str: &str = &version;
 
         //* Then
         assert_eq!(deref_str, "1.2.3", "should deref to str");

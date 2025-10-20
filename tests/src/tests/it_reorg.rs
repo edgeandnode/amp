@@ -501,7 +501,7 @@ impl ReorgTestCtx {
             .iter()
             .find(|t| t.table_name() == "blocks")
             .expect("Failed to find blocks table in catalog");
-        test_helpers::get_table_block_ranges(&table).await
+        test_helpers::get_table_block_ranges(table).await
     }
 
     /// Get information about the latest block.
