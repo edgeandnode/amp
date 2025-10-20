@@ -319,7 +319,7 @@ impl ObjectStoreUrl {
     ///
     /// # Safety
     /// The caller must ensure that the URL is a valid object store URL.
-    pub unsafe fn new_unchecked(url: Url) -> Self {
+    pub fn new_unchecked(url: Url) -> Self {
         Self(url)
     }
 
