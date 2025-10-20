@@ -15,46 +15,15 @@ use metadata_db::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::{
-    ConsistencyCheckError, WriterProperties,
-    compaction::{AmpCompactorTaskType, Collector, compactor::Compactor},
-};
+use crate::{ConsistencyCheckError, WriterProperties};
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
 
-pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
-    type Task: AmpCompactorTaskType<Error = Self>;
-    /// Whether the error is merely for debugging and does not indicate a failure
-    /// Default implementation returns false for all error variants
-    fn is_debug(&self) -> bool {
-        false
-    }
-    /// Whether the error is merely informational and does not indicate a failure
-    /// Default implementation returns false for all error variants
-    fn is_informational(&self) -> bool {
-        false
-    }
-
-    /// Whether the error is recoverable and the task can continue running
-    /// Default implementation returns true for all error variants
-    fn is_recoverable(&self) -> bool {
-        true
-    }
-
-    /// Whether the error indicates that the task was cancelled
-    fn is_cancellation(&self) -> bool;
-}
-
 #[derive(Debug)]
-pub enum CompactorError
-where
-    Self: CompactionErrorExt,
-{
+pub enum CompactorError {
     /// Catching errors while building the canonical chain for a table
     CanonicalChainError { err: BoxError },
-    /// Catching cases where the canonical chain is None or empty
-    EmptyChain,
     /// Catching errors while creating a compaction writer
     CreateWriterError {
         err: BoxError,
@@ -64,8 +33,6 @@ where
     FileWriteError { err: BoxError },
     /// Catching errors while reading data and metadata from parquet files
     FileStreamError { err: DataFusionError },
-    /// Catching send errors while building compaction futures
-    SendError,
     /// Catching join errors while awaiting compaction futures
     JoinError { err: JoinError },
     /// Catching errors while updating the gc manifest in the metadata db
@@ -83,10 +50,6 @@ where
 }
 
 impl CompactorError {
-    pub fn empty_chain() -> Self {
-        Self::EmptyChain
-    }
-
     pub fn chain_error(err: BoxError) -> Self {
         Self::CanonicalChainError { err }
     }
@@ -155,14 +118,8 @@ impl Display for CompactorError {
             CompactorError::CanonicalChainError { err, .. } => {
                 write!(f, "Error building canonical chain: {err}")
             }
-            CompactorError::EmptyChain => {
-                write!(f, "Canonical chain is empty or None")
-            }
             CompactorError::FileStreamError { err, .. } => {
                 write!(f, "Error reading data or metadata from parquet file: {err}")
-            }
-            CompactorError::SendError => {
-                write!(f, "Error sending data to compaction task")
             }
         }
     }
@@ -179,8 +136,6 @@ impl Error for CompactorError {
             CompactorError::CanonicalChainError { err, .. } => err.source(),
             CompactorError::FileStreamError { err, .. } => err.source(),
             CompactorError::CreateWriterError { err, .. } => err.source(),
-            CompactorError::SendError => None,
-            CompactorError::EmptyChain => None,
         }
     }
 }
@@ -191,26 +146,8 @@ impl From<JoinError> for CompactorError {
     }
 }
 
-impl CompactionErrorExt for CompactorError {
-    type Task = Compactor;
-
-    fn is_debug(&self) -> bool {
-        matches!(self, CompactorError::EmptyChain)
-    }
-
-    fn is_cancellation(&self) -> bool {
-        match self {
-            CompactorError::JoinError { err, .. } => err.is_cancelled(),
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug)]
-pub enum CollectorError
-where
-    Self: CompactionErrorExt,
-{
+pub enum CollectorError {
     Consistency {
         error: ConsistencyCheckError,
     },
@@ -258,17 +195,6 @@ impl From<ObjectStoreError> for CollectorError {
     }
 }
 
-impl CompactionErrorExt for CollectorError {
-    type Task = Collector;
-
-    fn is_cancellation(&self) -> bool {
-        match self {
-            CollectorError::JoinError { err, .. } => err.is_cancelled(),
-            _ => false,
-        }
-    }
-}
-
 impl CollectorError {
     pub fn consistency_check_error(error: ConsistencyCheckError) -> Self {
         Self::Consistency { error }
@@ -278,8 +204,13 @@ impl CollectorError {
         Self::FileStreamError { err }
     }
 
-    pub fn file_metadata_delete(file_ids: Vec<FileId>, err: metadata_db::Error) -> Self {
-        CollectorError::FileMetadataDeleteError { err, file_ids }
+    pub fn file_metadata_delete<'a>(
+        file_ids: impl Iterator<Item = &'a FileId>,
+    ) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| CollectorError::FileMetadataDeleteError {
+            err,
+            file_ids: file_ids.cloned().collect(),
+        }
     }
 
     pub fn gc_manifest_delete(file_id: FileId) -> impl FnOnce(metadata_db::Error) -> Self {

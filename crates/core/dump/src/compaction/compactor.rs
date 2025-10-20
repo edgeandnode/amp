@@ -1,7 +1,10 @@
 use std::{
     fmt::{Debug, Display, Formatter},
     ops::RangeInclusive,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -11,13 +14,13 @@ use common::{
     config::ParquetConfig,
     metadata::{SegmentSize, segments::BlockRange},
 };
-use futures::{FutureExt, StreamExt, TryStreamExt, future::BoxFuture};
+use futures::{StreamExt, TryStreamExt};
 use metadata_db::MetadataDb;
 
 use crate::{
     WriterProperties,
     compaction::{
-        AmpCompactorTaskType, CompactionAlgorithm, CompactionResult, CompactorError,
+        CompactionAlgorithm, CompactionResult, CompactorError,
         plan::{CompactionFile, CompactionPlan},
     },
     metrics::MetricsRegistry,
@@ -76,8 +79,26 @@ impl Display for Compactor {
 }
 
 impl Compactor {
-    #[tracing::instrument(skip_all, fields(table = self.table.table_name()))]
+    pub fn new(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: &Option<Arc<MetricsRegistry>>,
+    ) -> Self {
+        Compactor {
+            table: Arc::clone(table),
+            cache: cache.clone(),
+            opts: Arc::clone(opts),
+            metrics: metrics.clone(),
+        }
+    }
+
+    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
+        if self.opts.compactor.active.load(Ordering::SeqCst) == false {
+            return Ok(self);
+        }
+
         let snapshot = self
             .table
             .snapshot(false, self.cache.clone())
@@ -86,9 +107,13 @@ impl Compactor {
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics)
-            .await?
-            .try_compact_all();
+        let mut join_set = if let Some(plan) =
+            CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
+        {
+            plan.try_compact_all()
+        } else {
+            return Ok(self);
+        };
 
         // await: We need to await all the compaction tasks to finish before returning
         while let Some(result) = join_set.next().await {
@@ -112,44 +137,6 @@ impl Compactor {
         }
 
         Ok(self)
-    }
-}
-
-impl AmpCompactorTaskType for Compactor {
-    type Error = CompactorError;
-
-    fn new(
-        table: &Arc<PhysicalTable>,
-        cache: &ParquetFooterCache,
-        opts: &Arc<WriterProperties>,
-        metrics: &Option<Arc<MetricsRegistry>>,
-    ) -> Self {
-        Compactor {
-            table: Arc::clone(table),
-            cache: cache.clone(),
-            opts: Arc::clone(opts),
-            metrics: metrics.clone(),
-        }
-    }
-
-    fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>> {
-        self.compact().boxed()
-    }
-
-    fn interval(opts: &Arc<WriterProperties>) -> std::time::Duration {
-        opts.compactor.interval
-    }
-
-    fn active(opts: &Arc<WriterProperties>) -> bool {
-        opts.compactor
-            .active
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn deactivate(opts: &mut Arc<WriterProperties>) {
-        opts.compactor
-            .active
-            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

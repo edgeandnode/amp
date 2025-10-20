@@ -200,6 +200,62 @@ Time spent in compaction operations. Use to estimate compaction windows, identif
 
 **Note:** Compaction ratio can be calculated in Prometheus as `compaction_bytes_written_total / compaction_bytes_read_total`. The dedicated `compaction_ratio` histogram metric was removed to reduce cardinality.
 
+### successful_compactions
+
+**Type:** Counter
+**Labels:** `dataset`, `table`, `range_start`
+
+Count of successful compaction operations. Tracks each successful compaction job by dataset, table, and the starting block number of the compacted range. Use to monitor compaction success rate, verify compaction jobs are completing successfully, identify which block ranges have been compacted, and calculate compaction success/failure ratios. Essential for understanding compaction reliability and troubleshooting compaction issues.
+
+### failed_compactions
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Count of failed compaction operations. Incremented when compaction jobs encounter errors or fail to complete. Use with `successful_compactions` to calculate compaction reliability metrics, identify datasets with compaction issues, prioritize compaction bug fixes, and alert on compaction failures that could lead to storage inefficiency or query performance degradation.
+
+### files_deleted
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Number of files successfully deleted by the garbage collector. Tracks physical file deletions from storage (local filesystem or object storage). Use to monitor garbage collection effectiveness, verify that obsolete files are being cleaned up, estimate storage reclamation, and validate that compaction cleanup is working correctly.
+
+### files_not_found
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Number of files that were not found during garbage collection attempts. Incremented when the garbage collector tries to delete a file that doesn't exist in storage. High counts may indicate metadata inconsistencies or external file deletion. Use to detect synchronization issues between metadata and storage, identify potential data loss scenarios, and troubleshoot garbage collection problems.
+
+### expired_files_found
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Number of expired files discovered during garbage collection scans. These are files marked for deletion but not yet physically removed from storage. Use to understand the backlog of files waiting for cleanup, estimate pending storage reclamation, tune garbage collection frequency, and monitor the lag between marking files as expired and actual deletion.
+
+### expired_entries_deleted
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Number of expired metadata entries successfully removed from the metadata database. Tracks cleanup of database records for files that have been marked as expired. Use to monitor metadata cleanup effectiveness, ensure metadata doesn't grow unbounded, verify garbage collection is progressing through all phases (metadata and storage), and detect metadata cleanup bottlenecks.
+
+### successful_collections
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Count of successful garbage collection cycles. Incremented when a complete garbage collection pass finishes without errors. Use to monitor garbage collection reliability, calculate collection frequency, verify that cleanup jobs are running as scheduled, and establish baseline metrics for garbage collection health.
+
+### failed_collections
+
+**Type:** Counter
+**Labels:** `dataset`, `table`
+
+Count of failed garbage collection cycles. Incremented when garbage collection encounters errors that prevent completion. Use with `successful_collections` to calculate garbage collection reliability, identify datasets with cleanup issues, prioritize garbage collection bug fixes, and alert on failures that could lead to storage bloat or metadata corruption.
+
 ## EVM RPC Metrics
 
 **Location:** `crates/extractors/evm-rpc/src/metrics.rs`
@@ -347,6 +403,27 @@ max(ethereum_latest_block) - max(latest_block_number) by (dataset)
 
 # Compaction efficiency ratio
 rate(compaction_bytes_written_total[5m]) / rate(compaction_bytes_read_total[5m])
+
+# Compaction success rate
+rate(successful_compactions[5m]) / (rate(successful_compactions[5m]) + rate(failed_compactions[5m]))
+
+# Total compaction operations per second
+rate(successful_compactions[5m]) + rate(failed_compactions[5m])
+
+# Garbage collection file deletion rate (files/sec)
+rate(files_deleted[5m]) by (dataset, table)
+
+# Files not found rate (potential metadata issues)
+rate(files_not_found[5m]) by (dataset, table)
+
+# Expired files backlog
+sum(expired_files_found) by (dataset, table)
+
+# Garbage collection success rate
+rate(successful_collections[5m]) / (rate(successful_collections[5m]) + rate(failed_collections[5m]))
+
+# Storage reclamation rate (bytes/sec) - requires tracking file sizes
+rate(files_deleted[5m]) * avg(bytes_written_total / files_written_total)
 ```
 
 ### EVM-RPC Metrics

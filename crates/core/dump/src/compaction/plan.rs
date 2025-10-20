@@ -136,12 +136,12 @@ impl<'a> CompactionPlan<'a> {
         table: &'a TableSnapshot,
         opts: Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
-    ) -> CompactionResult<Self> {
+    ) -> CompactionResult<Option<Self>> {
         let chain = table.canonical_segments();
 
         let size = chain.len();
         if size == 0 {
-            return Err(CompactorError::EmptyChain);
+            return Ok(None);
         }
 
         tracing::info!("Scanning {size} segments for compaction");
@@ -160,7 +160,7 @@ impl<'a> CompactionPlan<'a> {
             .boxed();
         let current_group = CompactionGroup::new_empty(&opts, metrics, table.physical_table());
 
-        Ok(Self {
+        Ok(Some(Self {
             files,
             opts,
             metrics: metrics.as_ref().map(Arc::clone),
@@ -170,7 +170,7 @@ impl<'a> CompactionPlan<'a> {
             current_candidate: None,
             done: false,
             group_count: 0,
-        })
+        }))
     }
 
     pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<BlockNum>> {
@@ -184,7 +184,7 @@ impl<'a> CompactionPlan<'a> {
 impl<'a> Stream for CompactionPlan<'a> {
     type Item = CompactionGroup;
 
-    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref(), group_count = self.group_count))]
+    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref(), group_count = self.group_count + 1))]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 

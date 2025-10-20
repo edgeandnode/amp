@@ -1048,18 +1048,20 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
+    pub async fn delete_file_ids(
+        &self,
+        file_ids: impl Iterator<Item = &FileId>,
+    ) -> Result<Vec<FileId>, Error> {
         let sql = "
         DELETE FROM file_metadata
-         WHERE id = ANY($1);
+         WHERE id = ANY($1)
+        RETURNING id;
         ";
 
-        sqlx::query(sql)
-            .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
+        Ok(sqlx::query_scalar(sql)
+            .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
+            .fetch_all(&*self.pool)
+            .await?)
     }
 
     /// Inserts or updates the GC manifest for the given file IDs.
@@ -1073,7 +1075,7 @@ impl MetadataDb {
         duration: Duration,
     ) -> Result<(), Error> {
         let interval = PgInterval {
-            microseconds: duration.as_micros() as i64,
+            microseconds: (duration.as_micros() as u64) as i64,
             ..Default::default()
         };
 
@@ -1089,7 +1091,7 @@ impl MetadataDb {
         ";
         sqlx::query(sql)
             .bind(location_id)
-            .bind(file_ids.as_ref())
+            .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
             .bind(interval)
             .execute(&*self.pool)
             .await?;
@@ -1108,7 +1110,7 @@ impl MetadataDb {
              , expiration
           FROM gc_manifest
          WHERE location_id = $1
-               AND expiration <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC';
+               AND expiration < CURRENT_TIMESTAMP AT TIME ZONE 'UTC';
         ";
 
         sqlx::query_as(sql)
