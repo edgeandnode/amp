@@ -31,7 +31,7 @@ use sqlx::{
 };
 
 use super::{
-    hash::Hash,
+    hash::{Hash, HashOwned},
     name::{Name, NameOwned},
     namespace::{Namespace, NamespaceOwned},
     version::{Version, VersionOwned},
@@ -125,6 +125,30 @@ where
         .await?;
 
     Ok(result > 0)
+}
+
+/// Get manifest hash by namespace, name and version
+///
+/// Resolves the manifest hash for a specific dataset version without fetching
+/// additional manifest details. This is more efficient than full tag queries
+/// when only the hash is needed.
+pub async fn get_hash_by_namespace_name_version<'c, E>(
+    exe: E,
+    namespace: &Namespace<'_>,
+    name: &Name<'_>,
+    version: &Version<'_>,
+) -> Result<Option<HashOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = "SELECT hash FROM tags WHERE namespace = $1 AND name = $2 AND version = $3";
+
+    sqlx::query_scalar(query)
+        .bind(namespace)
+        .bind(name)
+        .bind(version)
+        .fetch_optional(exe)
+        .await
 }
 
 /// Get the latest version tag for a dataset by namespace and name
@@ -247,7 +271,7 @@ pub struct Tag {
     /// Version tag
     pub version: VersionOwned,
     /// Manifest hash this tag references
-    pub hash: String,
+    pub hash: HashOwned,
     /// File path where the manifest is stored
     #[sqlx(rename = "path")]
     pub manifest_path: String,

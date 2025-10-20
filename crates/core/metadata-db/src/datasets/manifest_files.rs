@@ -30,3 +30,23 @@ where
 
     Ok(())
 }
+
+/// Get manifest path by hash
+///
+/// Retrieves the file path for a manifest identified by its content hash.
+/// Returns None if no manifest with the given hash exists.
+pub async fn get_by_hash<'c, E>(exe: E, hash: &Hash<'_>) -> Result<Option<String>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT path
+        FROM manifest_files
+        WHERE hash = $1
+    "#};
+
+    sqlx::query_scalar(query)
+        .bind(hash)
+        .fetch_optional(exe)
+        .await
+}
