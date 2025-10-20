@@ -849,6 +849,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ampctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "common",
+ "console 0.16.1",
+ "datasets-common",
+ "monitoring",
+ "object_store",
+ "reqwest",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+ "vergen-gitcl",
+]
+
+[[package]]
 name = "ampd"
 version = "0.1.0"
 dependencies = [
@@ -915,7 +935,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "console",
+ "console 0.15.11",
  "dialoguer",
  "fs-err",
  "futures",
@@ -1884,7 +1904,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2348,6 +2368,19 @@ dependencies = [
  "once_cell",
  "unicode-width",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "console"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b430743a6eb14e9764d4260d4c0d8123087d504eeb9c48f2b2a5e810dd369df4"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "once_cell",
+ "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3602,7 +3635,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "658bce805d770f407bc62102fca7c2c64ceef2fbcb2b8bd19d2765ce093980de"
 dependencies = [
- "console",
+ "console 0.15.11",
  "shell-words",
  "tempfile",
  "thiserror 1.0.69",
@@ -4964,7 +4997,7 @@ version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
 dependencies = [
- "console",
+ "console 0.15.11",
  "number_prefix",
  "portable-atomic",
  "unicode-width",
