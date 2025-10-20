@@ -830,18 +830,113 @@ impl MetadataDb {
 
         let mut tx = self.pool.begin().await?;
 
-        // Step 1: Insert manifest (idempotent)
+        // Insert manifest (idempotent)
         datasets::manifest_files::insert(&mut *tx, &manifest_hash, manifest_path).await?;
 
-        // Step 2: Link manifest to dataset (idempotent)
+        // Link manifest to dataset (idempotent)
         datasets::manifests::insert(&mut *tx, &namespace, &name, &manifest_hash).await?;
 
-        // Step 3: Insert version tag
+        // Insert version tag
         datasets::tags::insert(&mut *tx, &namespace, &name, &version, &manifest_hash).await?;
 
         tx.commit().await?;
 
         Ok(())
+    }
+
+    /// Register a dataset manifest in the registry
+    ///
+    /// This operation atomically stores the manifest file reference and links it to a dataset.
+    /// The operation is idempotent - if the manifest or link already exists, no error is raised.
+    ///
+    /// # Steps performed (in transaction)
+    /// 1. Insert manifest file reference (idempotent - no error if hash already exists)
+    /// 2. Link manifest to dataset (idempotent - no error if link already exists)
+    #[instrument(skip(self), err)]
+    pub async fn register_manifest(
+        &self,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+        manifest_path: &str,
+    ) -> Result<(), Error> {
+        let namespace = namespace.into();
+        let name = name.into();
+        let manifest_hash = manifest_hash.into();
+
+        let mut tx = self.pool.begin().await?;
+
+        // Insert manifest (idempotent)
+        datasets::manifest_files::insert(&mut *tx, &manifest_hash, manifest_path).await?;
+
+        // Link manifest to dataset (idempotent)
+        datasets::manifests::insert(&mut *tx, &namespace, &name, &manifest_hash).await?;
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    /// Tag a manifest hash with a version tag for a dataset
+    ///
+    /// Associates a version identifier with an existing manifest. The manifest must
+    /// already be registered and linked to the dataset, otherwise a foreign key
+    /// constraint error will occur.
+    ///
+    /// The combination of (namespace, name, version) must be unique.
+    #[instrument(skip(self), err)]
+    pub async fn register_tag(
+        &self,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    ) -> Result<(), Error> {
+        datasets::tags::insert(
+            &*self.pool,
+            &namespace.into(),
+            &name.into(),
+            &version.into(),
+            &manifest_hash.into(),
+        )
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Get manifest file path by hash
+    ///
+    /// Retrieves the file path for a manifest identified by its content hash.
+    /// Returns `None` if no manifest with the given hash exists.
+    #[instrument(skip(self), err)]
+    pub async fn get_manifest_path(
+        &self,
+        hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    ) -> Result<Option<String>, Error> {
+        datasets::manifest_files::get_by_hash(&*self.pool, &hash.into())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Resolve manifest hash from namespace, name, and version
+    ///
+    /// Retrieves the manifest hash for a specific dataset version. This is more efficient
+    /// than fetching full dataset details when only the hash is needed.
+    /// Returns `None` if no dataset with the specified namespace, name, and version exists.
+    #[instrument(skip(self), err)]
+    pub async fn resolve_tag_hash(
+        &self,
+        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+    ) -> Result<Option<DatasetHashOwned>, Error> {
+        datasets::tags::get_hash_by_namespace_name_version(
+            &*self.pool,
+            &namespace.into(),
+            &name.into(),
+            &version.into(),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Check if a dataset exists for the given name and version
