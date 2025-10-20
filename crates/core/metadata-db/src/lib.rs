@@ -243,7 +243,7 @@ impl MetadataDb {
     ///
     /// This operation is idempotent.
     pub async fn register_worker(&self, node_id: impl Into<WorkerNodeId<'_>>) -> Result<(), Error> {
-        workers::heartbeat::register_worker(&*self.pool, node_id.into()).await?;
+        workers::register(&*self.pool, node_id.into()).await?;
         Ok(())
     }
 
@@ -263,7 +263,7 @@ impl MetadataDb {
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
                 interval.tick().await;
-                workers::heartbeat::update_heartbeat(&mut *conn, node_id.clone()).await?;
+                workers::update_heartbeat(&mut *conn, node_id.clone()).await?;
             }
         };
 
@@ -276,7 +276,15 @@ impl MetadataDb {
     ///
     /// The dead worker interval can be configured when instantiating the metadata DB.
     pub async fn active_workers(&self) -> Result<Vec<WorkerNodeIdOwned>, Error> {
-        Ok(workers::heartbeat::get_active_workers(&*self.pool, self.dead_worker_interval).await?)
+        Ok(workers::list_active(&*self.pool, self.dead_worker_interval).await?)
+    }
+
+    /// Returns a list of all workers.
+    ///
+    /// Returns all workers in the database with their complete information including
+    /// id, node_id, and last_heartbeat timestamp.
+    pub async fn list_workers(&self) -> Result<Vec<Worker>, Error> {
+        Ok(workers::list(&*self.pool).await?)
     }
 
     /// Listen to the worker actions notification channel for job notifications
