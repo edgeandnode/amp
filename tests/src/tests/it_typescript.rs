@@ -31,7 +31,7 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
 
     // Create isolated test infrastructure using HTTP with auto-allocated port (avoids port conflicts!)
     // This allows forge scripts to work properly (forge doesn't support IPC)
-    let ctx = testlib::ctx::TestCtxBuilder::new(&format!("typescript_{}", name))
+    let ctx = testlib::ctx::TestCtxBuilder::new(format!("typescript_{}", name))
         .with_dataset_manifest("anvil_rpc")
         .with_anvil_http()
         .build()
@@ -42,7 +42,7 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
 
     // Run vitest with isolated infrastructure connection info
     let status = tokio::process::Command::new("pnpm")
-        .args(&["vitest", "run", &path, "--no-file-parallelism"])
+        .args(["vitest", "run", &path, "--no-file-parallelism"])
         .env("AMP_ADMIN_URL", ctx.daemon_controller().admin_api_url())
         .env("AMP_JSONL_URL", ctx.daemon_server().jsonl_server_url())
         .env("AMP_FLIGHT_URL", ctx.daemon_server().flight_server_url())

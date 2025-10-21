@@ -14,50 +14,13 @@
 //! ├── providers/        # Provider configuration files (.toml)
 //! └── data/             # Dataset storage and dataset snapshot reference data
 //! ```
-//!
-//! # Test Resource Preloading
-//!
-//! The fixture supports preloading test resources from predefined source directories:
-//!
-//! ## Dataset Manifests (.json files)
-//! **Source directories searched (in order):**
-//! - `tests/config/manifests/`
-//! - `config/manifests/`
-//!
-//! Pass filename stems (without `.json` extension) to `preload_dataset_manifests()`.
-//! ## Provider Configurations (.toml files)
-//! **Source directories searched (in order):**
-//! - `tests/config/providers/`
-//! - `config/providers/`
-//!
-//! Pass filename stems (without `.toml` extension) to `preload_provider_configs()`.
-//!
-//! ## Dataset Snapshot Reference Data (directory trees)
-//! **Source directories searched (in order):**
-//! - `tests/config/snapshots/`
-//! - `config/snapshots/`
-//!
-//! Pass dataset names to `preload_dataset_snapshots()` to recursively copy directory trees.
-//!
-//! ## Dynamic Provider Configs
-//! Use `create_provider_config()` for runtime-generated configurations with dynamic values like IPC paths.
-//!
-//! # Fixture Resolution Process
-//!
-//! When preloading resources, the fixture uses a search algorithm:
-//! 1. **Search in order**: Each source directory is checked sequentially
-//! 2. **First match wins**: The first existing file/directory is used
-//! 3. **Canonicalization**: Paths are resolved to absolute, canonical paths
-//! 4. **Type verification**: Files must exist as files, directories as directories
-//! 5. **Error on missing**: If no match is found, an error is returned
-//!
-//! This allows tests to work with different project layouts while maintaining
-//! consistent resource loading behavior.
 
 use std::path::{Path, PathBuf};
 
 use common::BoxError;
 use fs_err as fs;
+
+use crate::testlib::config;
 
 /// Default state directory name
 const DEFAULT_STATE_DIRNAME: &str = ".amp";
@@ -73,15 +36,6 @@ const DEFAULT_PROVIDERS_DIRNAME: &str = "providers";
 
 /// Default data directory name
 const DEFAULT_DATA_DIRNAME: &str = "data";
-
-/// Source directories to search for dataset manifests
-const DATASET_MANIFESTS_FIXTURE_DIRS: [&str; 2] = ["tests/config/manifests", "config/manifests"];
-
-/// Source directories to search for provider configs
-const PROVIDERS_FIXTURE_DIRS: [&str; 2] = ["tests/config/providers", "config/providers"];
-
-/// Source directories to search for dataset snapshot data
-const SNAPSHOTS_FIXTURE_DIRS: [&str; 2] = ["tests/config/snapshots", "config/snapshots"];
 
 /// Create a builder for configuring DaemonStateDir with custom paths.
 ///
@@ -232,57 +186,6 @@ impl DaemonStateDir {
         Ok(())
     }
 
-    /// Copy required dataset manifests to the daemon state directory.
-    ///
-    /// The `datasets` parameter should contain filename stems (without extension) that
-    /// correspond to `.json` files located in the fixture directories. For example,
-    /// passing `"eth_mainnet"` will copy `eth_mainnet.json` from the source fixture
-    /// directory to the daemon state's dataset manifests directory.
-    pub async fn preload_dataset_manifests(
-        &self,
-        manifests: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<(), BoxError> {
-        let target_dir = &self.manifests_dir_path;
-
-        // Create directory lazily if it doesn't exist
-        if !target_dir.exists() {
-            tracing::debug!("Dataset manifests directory doesn't exist, creating it lazily");
-            self.create_manifests_dir()?;
-        }
-
-        // Only copy specifically requested datasets
-        for manifest in manifests {
-            let name = manifest.as_ref();
-            let mut path = PathBuf::from(name);
-
-            // Set the extension to .json for dataset manifests
-            path.set_extension("json");
-
-            // Resolve source directory by searching known fixture locations
-            let source_file_path =
-                resolve_fixture_source_file(&DATASET_MANIFESTS_FIXTURE_DIRS, &path).ok_or_else(
-                    || format!("Could not find dataset manifests '{name}' source directory"),
-                )?;
-            let target_file_path = target_dir.join(path);
-
-            tracing::debug!(
-                "Copying dataset manifest: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-
-            copy_file(&source_file_path, &target_file_path)?;
-
-            tracing::trace!(
-                "Copied dataset manifest: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-        }
-
-        Ok(())
-    }
-
     /// Copy required provider configurations to the daemon state directory.
     ///
     /// The `providers` parameter should contain filename stems (without extension) that
@@ -310,8 +213,8 @@ impl DaemonStateDir {
             path.set_extension("toml");
 
             // Resolve source directory by searching known fixture locations
-            let source_file_path = resolve_fixture_source_file(&PROVIDERS_FIXTURE_DIRS, &path)
-                .ok_or_else(|| {
+            let source_file_path =
+                config::resolve_provider_config_source_file(&path).ok_or_else(|| {
                     format!("Could not find provider '{provider_name}' source directory")
                 })?;
             let target_file_path = target_dir.join(path);
@@ -380,10 +283,9 @@ impl DaemonStateDir {
             let path = PathBuf::from(name);
 
             // Resolve source directory by searching known fixture locations
-            let source_dir_path = resolve_fixture_source_dir(&SNAPSHOTS_FIXTURE_DIRS, &path)
-                .ok_or_else(|| {
-                    format!("Could not find dataset snapshot '{name}' source directory",)
-                })?;
+            let source_dir_path = config::resolve_snapshot_source_dir(&path).ok_or_else(|| {
+                format!("Could not find dataset snapshot '{name}' source directory",)
+            })?;
             let target_dir_path = target_dir.join(&path);
 
             tracing::debug!(
@@ -478,30 +380,6 @@ impl DaemonStateDirBuilder {
             root: self.root,
         }
     }
-}
-
-/// Resolves the absolute path to a file by searching through known fixture directories.
-///
-/// Searches through the provided fixture directories in order, looking for the specified file.
-/// Returns the first canonicalized absolute path where the file exists as a regular file.
-fn resolve_fixture_source_file(fixture_dirs: &[&str], name: &Path) -> Option<PathBuf> {
-    fixture_dirs
-        .iter()
-        .map(|dir| Path::new(dir).join(name))
-        .filter_map(|file_path| file_path.canonicalize().ok())
-        .find(|dir| dir.is_file())
-}
-
-/// Resolves the absolute path to a directory by searching through known fixture directories.
-///
-/// Searches through the provided fixture directories in order, looking for the specified directory.
-/// Returns the first canonicalized absolute path where the directory exists as a directory.
-fn resolve_fixture_source_dir(fixture_dirs: &[&str], name: &Path) -> Option<PathBuf> {
-    fixture_dirs
-        .iter()
-        .map(|dir| Path::new(dir).join(name))
-        .filter_map(|dir_path| dir_path.canonicalize().ok())
-        .find(|dir| dir.is_dir())
 }
 
 /// Copy a file, ensuring the parent directory exists.

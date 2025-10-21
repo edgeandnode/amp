@@ -40,7 +40,7 @@ mod tests {
             ("SELECT * FROM test", false),
         ];
         for (sql, expected) in queries {
-            let stmt = parse_sql(&sql).unwrap();
+            let stmt = parse_sql(sql).unwrap();
             assert_eq!(is_streaming(&stmt), expected);
         }
     }

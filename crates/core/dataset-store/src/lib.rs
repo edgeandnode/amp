@@ -89,15 +89,6 @@ impl DatasetStore {
         })
     }
 
-    /// Initialize the dataset store by loading existing manifests into the metadata database
-    ///
-    /// This method ensures that all manifests present in the object store are registered in the
-    /// metadata database. It's idempotent and will only register manifests that don't already exist.
-    /// The initialization runs only once per instance.
-    pub async fn init(&self) {
-        self.dataset_manifests_store.init().await
-    }
-
     /// Get a reference to the providers configuration store
     pub fn providers(&self) -> &ProviderConfigsStore {
         &self.provider_configs_store

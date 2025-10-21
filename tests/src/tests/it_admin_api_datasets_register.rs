@@ -309,7 +309,7 @@ impl TestCtx {
 
     async fn register(&self, request: RegisterRequest) -> reqwest::Response {
         self.client
-            .post(&format!("{}/datasets", self.admin_api_url))
+            .post(format!("{}/datasets", self.admin_api_url))
             .json(&request)
             .send()
             .await
@@ -331,7 +331,7 @@ impl TestCtx {
 
     async fn register_raw_json(&self, json_payload: serde_json::Value) -> reqwest::Response {
         self.client
-            .post(&format!("{}/datasets", &self.admin_api_url))
+            .post(format!("{}/datasets", &self.admin_api_url))
             .json(&json_payload)
             .send()
             .await

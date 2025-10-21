@@ -299,9 +299,9 @@ impl<const DEFAULT_SECS: u64> Default for ConfigDuration<DEFAULT_SECS> {
     }
 }
 
-impl<const DEFAULT_SECS: u64> Into<Duration> for ConfigDuration<DEFAULT_SECS> {
-    fn into(self) -> Duration {
-        self.0
+impl<const DEFAULT_SECS: u64> From<ConfigDuration<DEFAULT_SECS>> for Duration {
+    fn from(val: ConfigDuration<DEFAULT_SECS>) -> Self {
+        val.0
     }
 }
 
@@ -310,7 +310,7 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
     where
         D: serde::Deserializer<'de>,
     {
-        deserialize_duration(deserializer).map(|opt| opt.map_or_else(|| Self::default(), Self))
+        deserialize_duration(deserializer).map(|opt| opt.map_or_else(Self::default, Self))
     }
 }
 

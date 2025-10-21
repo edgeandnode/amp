@@ -119,7 +119,7 @@ impl AmpCli {
     }
 }
 
-/// Execute a amp CLI command with common setup and error handling.
+/// Execute an Amp CLI command with common setup and error handling.
 async fn run_amp_command(
     admin_url: &str,
     path: &Path,

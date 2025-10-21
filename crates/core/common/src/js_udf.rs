@@ -163,7 +163,7 @@ async fn js_udf_smoke_test() {
     let return_field = udf.return_field_from_args(ret_args).unwrap();
 
     let args = ScalarFunctionArgs {
-        args: args.into(),
+        args,
         arg_fields,
         return_field,
         number_rows: 1,

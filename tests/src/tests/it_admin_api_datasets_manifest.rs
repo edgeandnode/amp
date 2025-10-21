@@ -239,7 +239,7 @@ impl TestCtx {
         let version = version.parse::<Version>().expect("valid version");
 
         self.client
-            .get(&format!(
+            .get(format!(
                 "{}/datasets/{}/versions/{}/manifest",
                 &self.admin_api_url, name, version
             ))
@@ -250,7 +250,7 @@ impl TestCtx {
 
     async fn get_manifest_raw(&self, name: &str, version: &str) -> reqwest::Response {
         self.client
-            .get(&format!(
+            .get(format!(
                 "{}/datasets/{}/versions/{}/manifest",
                 &self.admin_api_url, name, version
             ))

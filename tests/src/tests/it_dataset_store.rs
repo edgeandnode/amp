@@ -1,7 +1,6 @@
-use std::str::FromStr;
-
 use dataset_store::DatasetKind;
 use datasets_common::{name::Name, namespace::Namespace, version::Version};
+use datasets_derived::DerivedDatasetKind;
 
 use crate::testlib::{self, fixtures::DatasetPackage};
 
@@ -63,18 +62,23 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
     monitoring::logging::init();
 
     //* Given
-    let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_manifest_dataset")
-        .with_dataset_manifest("register_test_dataset__1_0_0")
-        .build()
-        .await
-        .expect("should create test context");
-    let metadata_db = ctx.metadata_db();
-    let dataset_store = ctx.daemon_server().dataset_store();
-
+    let namespace = "_"
+        .parse::<Namespace>()
+        .expect("'_' should be a valid namespace");
     let name = "register_test_dataset"
         .parse::<Name>()
         .expect("name should be a valid identifier");
     let version = "1.0.0".parse::<Version>().expect("should parse version");
+    let dataset_ref = format!("{}/{}@{}", namespace, name, version);
+
+    let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_manifest_dataset")
+        .with_dataset_manifest(("register_test_dataset__1_0_0", dataset_ref))
+        .build()
+        .await
+        .expect("should create test context");
+
+    let metadata_db = ctx.metadata_db();
+    let dataset_store = ctx.daemon_server().dataset_store();
 
     //* When
     let result = dataset_store
@@ -85,16 +89,11 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
 
     //* Then
     assert_eq!(
-        result.kind.to_string(),
-        "manifest",
+        result.kind, DerivedDatasetKind,
         "dataset kind should be 'manifest'"
     );
 
     // Assert that the dataset is registered in the metadata DB
-    // TODO: Pass the actual namespace instead of using a placeholder
-    let namespace = "_"
-        .parse::<Namespace>()
-        .expect("'_' should be a valid namespace");
     let db_dataset = metadata_db
         .get_dataset_with_details(&namespace, &name, &version)
         .await
@@ -115,7 +114,10 @@ async fn all_datasets_returns_available_datasets_without_error() {
     let ctx = testlib::ctx::TestCtxBuilder::new("dataset_store_all_datasets")
         .with_dataset_manifest("anvil_rpc")
         .with_dataset_manifest("eth_rpc")
-        .with_dataset_manifest("register_test_dataset__1_0_0")
+        .with_dataset_manifest((
+            "register_test_dataset__1_0_0",
+            "_/register_test_dataset@1.0.0",
+        ))
         .with_anvil_ipc()
         .build()
         .await
@@ -147,7 +149,7 @@ async fn all_datasets_returns_available_datasets_without_error() {
     assert!(
         result
             .iter()
-            .all(|dataset| DatasetKind::from_str(&dataset.kind).is_ok()),
+            .all(|dataset| dataset.kind.parse::<DatasetKind>().is_ok()),
         "all dataset kinds should be valid"
     );
 
