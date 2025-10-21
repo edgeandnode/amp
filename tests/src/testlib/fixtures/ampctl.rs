@@ -51,7 +51,6 @@ impl Ampctl {
     /// - The network request fails
     /// - The API returns an error response (400/409/500)
     /// - The API returns an unexpected status code
-    #[tracing::instrument(skip(manifest_content), err)]
     pub async fn register_manifest(
         &self,
         dataset_ref: &Reference,
