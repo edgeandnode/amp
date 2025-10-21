@@ -259,10 +259,7 @@ impl ObjectStoreUrl {
         location: impl Into<String>,
         base: Option<&std::path::Path>,
     ) -> Result<Self, InvalidObjectStoreUrlError> {
-        let mut location = location.into();
-        if !location.ends_with('/') {
-            location.push('/');
-        }
+        let location = location.into();
 
         // If the location is fails to parse as a URL, we assume it's a filesystem path.
         Self::try_from_url(&location).or_else(|_| Self::try_from_filesystem_path(&location, base))
@@ -271,7 +268,6 @@ impl ObjectStoreUrl {
     /// Parses a string as a URL and validates it for object store use.
     ///
     /// The URL must have a supported object store scheme (`file://`, `s3://`, `gs://`, etc.).
-    /// The input URL should have a trailing slash to indicate it's a directory/container.
     fn try_from_url(url: impl AsRef<str>) -> Result<Self, InvalidObjectStoreUrlError> {
         let inner = Url::parse(url.as_ref())?;
 
@@ -287,7 +283,6 @@ impl ObjectStoreUrl {
     /// `base` is ignored.
     ///
     /// The path must exist and must be canonicalized to an absolute path.
-    /// The input location should have a trailing slash to indicate it's a directory.
     fn try_from_filesystem_path(
         location: impl AsRef<str>,
         base: Option<&std::path::Path>,
@@ -658,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn create_object_store_url_automatically_adds_trailing_slash() {
+    fn create_object_store_url_preserves_path_without_trailing_slash() {
         //* Given
         let s3_url_without_slash = "s3://my-bucket/path";
 
@@ -667,7 +662,7 @@ mod tests {
             ObjectStoreUrl::new(s3_url_without_slash).expect("Failed to create ObjectStoreUrl");
 
         //* Then
-        assert_eq!(store_url.path(), "/path/");
+        assert_eq!(store_url.path(), "/path");
     }
 
     #[test]
@@ -856,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn create_object_store_url_filesystem_paths_automatically_add_trailing_slash() {
+    fn create_object_store_url_from_filesystem_path() {
         //* Given
         let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
         let path_without_slash = temp_dir
@@ -871,6 +866,7 @@ mod tests {
 
         //* Then
         assert_eq!(store_url.provider(), ObjectStoreProvider::Local);
+        // Note: Url::from_directory_path automatically adds a trailing slash for directories
         assert!(store_url.path().ends_with('/'));
     }
 }

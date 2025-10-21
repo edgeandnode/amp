@@ -52,7 +52,7 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// API errors (400/409/500), or network failures.
-#[tracing::instrument(skip(manifest_file))]
+#[tracing::instrument(skip_all, fields(%admin_url, %dataset_ref))]
 pub async fn run(
     Args {
         admin_url,
@@ -79,7 +79,7 @@ pub async fn run(
 /// The file path is extracted from the URL and passed to the object store.
 ///
 /// Returns [`Error`] for invalid paths, missing files, or read failures.
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error> {
     // Create object store from the URL
     let (store, _) =
@@ -111,7 +111,7 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 /// Register the manifest with the admin API.
 ///
 /// POSTs to `/datasets` endpoint with namespace, name, version, and manifest content.
-#[tracing::instrument(skip(dataset_manifest))]
+#[tracing::instrument(skip_all)]
 pub async fn register_manifest(
     admin_url: &Url,
     dataset_ref: &Reference,
@@ -125,11 +125,7 @@ pub async fn register_manifest(
         }
     })?;
 
-    tracing::debug!(
-        url = %url,
-        dataset_ref = %dataset_ref,
-        "Sending registration request"
-    );
+    tracing::debug!("Sending registration request");
 
     let client = reqwest::Client::new();
     let response = client
@@ -143,7 +139,7 @@ pub async fn register_manifest(
         .send()
         .await
         .map_err(|err| {
-            tracing::error!(url = %url, error = %err, "Network error during API request");
+            tracing::error!(error = %err, "Network error during API request");
             Error::NetworkError {
                 url: url.to_string(),
                 source: err,
