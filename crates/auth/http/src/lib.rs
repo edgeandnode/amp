@@ -16,7 +16,6 @@ use jsonwebtoken::{
 };
 use lru::LruCache;
 use privy_rs::PrivyClient;
-use thiserror::Error;
 use tokio::sync::RwLock;
 
 mod model;
@@ -39,11 +38,11 @@ pub use privy_rs::generated::types::{
 ///     Ok(Json(result))
 /// }
 /// ```
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct AuthAnyhowError(anyhow::Error);
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("Missing authorization header")]
     MissingAuthHeader,
