@@ -247,6 +247,11 @@ export class Table extends Schema.Class<Table>("Table")({
   network: Network,
 }) {}
 
+export const RawDatasetTable = Schema.Struct({
+  schema: TableSchema,
+  network: Network,
+})
+
 export class OutputSchema extends Schema.Class<OutputSchema>("OutputSchema")({
   schema: TableSchema,
   networks: Schema.Array(Schema.String),
@@ -278,7 +283,9 @@ export class DatasetRpc extends Schema.Class<DatasetRpc>("DatasetRpc")({
   network: Network,
   name: DatasetName,
   version: DatasetVersion,
-  schema: Schema.Record({ key: Schema.String, value: Schema.Any }),
+  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
 export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({
