@@ -40,6 +40,7 @@ fn schema() -> Schema {
         Field::new("receipt_root", BYTES32_TYPE, false),
         Field::new("logs_bloom", DataType::Binary, false),
         Field::new("difficulty", EVM_CURRENCY_TYPE, false),
+        Field::new("total_difficulty", EVM_CURRENCY_TYPE, true),
         Field::new("gas_limit", DataType::UInt64, false),
         Field::new("gas_used", DataType::UInt64, false),
         Field::new("extra_data", DataType::Binary, false),
@@ -70,6 +71,7 @@ pub struct Block {
 
     // Difficulty is not really currency, but fits in a i128 so EvmCurrency is convenient.
     pub difficulty: EvmCurrency,
+    pub total_difficulty: Option<EvmCurrency>,
     pub gas_limit: u64,
     pub gas_used: u64,
     pub extra_data: Vec<u8>,
@@ -95,6 +97,7 @@ pub struct BlockRowsBuilder {
     receipt_root: Bytes32ArrayBuilder,
     logs_bloom: BinaryBuilder,
     difficulty: EvmCurrencyArrayBuilder,
+    total_difficulty: EvmCurrencyArrayBuilder,
     gas_limit: UInt64Builder,
     gas_used: UInt64Builder,
     extra_data: BinaryBuilder,
@@ -122,6 +125,7 @@ impl BlockRowsBuilder {
             receipt_root: Bytes32ArrayBuilder::with_capacity(1),
             logs_bloom: BinaryBuilder::with_capacity(1, header.logs_bloom.len()),
             difficulty: EvmCurrencyArrayBuilder::with_capacity(1),
+            total_difficulty: EvmCurrencyArrayBuilder::with_capacity(1),
             gas_limit: UInt64Builder::with_capacity(1),
             gas_used: UInt64Builder::with_capacity(1),
             extra_data: BinaryBuilder::with_capacity(1, header.extra_data.len()),
@@ -148,6 +152,7 @@ impl BlockRowsBuilder {
             receipt_root,
             logs_bloom,
             difficulty,
+            total_difficulty,
             gas_limit,
             gas_used,
             extra_data,
@@ -172,6 +177,7 @@ impl BlockRowsBuilder {
         self.receipt_root.append_value(*receipt_root);
         self.logs_bloom.append_value(logs_bloom);
         self.difficulty.append_value(*difficulty);
+        self.total_difficulty.append_option(*total_difficulty);
         self.gas_limit.append_value(*gas_limit);
         self.gas_used.append_value(*gas_used);
         self.extra_data.append_value(extra_data);
@@ -198,6 +204,7 @@ impl BlockRowsBuilder {
             receipt_root,
             mut logs_bloom,
             difficulty,
+            total_difficulty,
             mut gas_limit,
             mut gas_used,
             mut extra_data,
@@ -223,6 +230,7 @@ impl BlockRowsBuilder {
             Arc::new(receipt_root.finish()),
             Arc::new(logs_bloom.finish()),
             Arc::new(difficulty.finish()),
+            Arc::new(total_difficulty.finish()),
             Arc::new(gas_limit.finish()),
             Arc::new(gas_used.finish()),
             Arc::new(extra_data.finish()),
@@ -254,6 +262,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 22);
+    assert_eq!(rows.rows.num_columns(), 23);
     assert_eq!(rows.rows.num_rows(), 1);
 }

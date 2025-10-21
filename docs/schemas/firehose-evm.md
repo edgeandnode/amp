@@ -17,6 +17,7 @@ Auto-generated file. See `schema_to_markdown` in `crates/core/common/src/catalog
 | receipt_root       | FixedSizeBinary(32)                   | NO          |
 | logs_bloom         | Binary                                | NO          |
 | difficulty         | Decimal128(38, 0)                     | NO          |
+| total_difficulty   | Decimal128(38, 0)                     | YES         |
 | gas_limit          | UInt64                                | NO          |
 | gas_used           | UInt64                                | NO          |
 | extra_data         | Binary                                | NO          |

@@ -90,6 +90,16 @@
               "nullable": false
             },
             {
+              "name": "total_difficulty",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
               "name": "gas_limit",
               "type": "UInt64",
               "nullable": false

@@ -308,6 +308,10 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .difficulty
             .ok_or(Missing("difficulty"))
             .and_then(|b| non_negative_pb_bigint_to_evm_currency("difficulty", b))?,
+        total_difficulty: header
+            .total_difficulty
+            .map(|b| non_negative_pb_bigint_to_evm_currency("total_difficulty", b))
+            .transpose()?,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         extra_data: header.extra_data,
