@@ -8,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_extra::{TypedHeader, typed_header::TypedHeaderRejectionReason};
-use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
 use headers::{Authorization, authorization::Bearer};
 use jsonwebtoken::{
@@ -16,13 +15,15 @@ use jsonwebtoken::{
     jwk::{AlgorithmParameters, Jwk, JwkSet},
 };
 use lru::LruCache;
+use privy_rs::PrivyClient;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
 mod model;
 
-pub use model::{
-    AuthUser, AuthenticatedUser, Claims, EthereumEmbeddedWallet, EthereumLinkedAccount,
+pub use model::{AuthenticatedUser, Claims, UserExt};
+pub use privy_rs::generated::types::{
+    LinkedAccountEthereum, LinkedAccountEthereumEmbeddedWallet, LinkedAccountSmartWallet, User,
 };
 
 /// Wrapper around `anyhow::Error` that implements `IntoResponse` for Axum handlers.
@@ -74,6 +75,12 @@ pub enum AuthError {
     #[error("Auth service not configured")]
     ServiceNotConfigured,
 
+    #[error("Failed to create auth client: {0}")]
+    AuthClientCreationError(String),
+
+    #[error("Failed to fetch user from auth API: {0}")]
+    AuthApiFetchError(String),
+
     #[error("Internal authentication error")]
     InternalError(#[from] anyhow::Error),
 }
@@ -94,6 +101,8 @@ impl AuthError {
 
             AuthError::JwksFetchError(_)
             | AuthError::ServiceNotConfigured
+            | AuthError::AuthClientCreationError(_)
+            | AuthError::AuthApiFetchError(_)
             | AuthError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -104,6 +113,8 @@ impl AuthError {
             AuthError::UserNotFoundInIdaas(_) => "Access denied".to_string(),
             AuthError::JwksFetchError(_)
             | AuthError::ServiceNotConfigured
+            | AuthError::AuthClientCreationError(_)
+            | AuthError::AuthApiFetchError(_)
             | AuthError::InternalError(_) => "Authentication service error".to_string(),
             _ => self.to_string(),
         }
@@ -131,15 +142,21 @@ impl IntoResponse for AuthAnyhowError {
     }
 }
 
+impl From<privy_rs::PrivyCreateError> for AuthError {
+    fn from(err: privy_rs::PrivyCreateError) -> Self {
+        AuthError::AuthClientCreationError(err.to_string())
+    }
+}
+
 #[derive(Clone)]
 struct CachedJwks {
-    jwks: JwkSet,
+    jwks: Arc<JwkSet>,
     expires_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Clone)]
 struct CachedUser {
-    user: Option<AuthUser>,
+    user: Option<User>,
     expires_at: chrono::DateTime<Utc>,
 }
 
@@ -171,10 +188,9 @@ const DEFAULT_USER_CACHE_SIZE: usize = 1000; // Max 1000 users in cache
 ///
 /// let auth_service = AuthService::new(
 ///     "https://auth.privy.io/.well-known/jwks.json".to_string(),
-///     "https://api.privy.io/v1/users".to_string(),
 ///     "your-app-id".to_string(),
 ///     "your-app-secret".to_string(),
-/// )
+/// )?
 /// .with_audience(vec!["your-app-id".to_string()])
 /// .with_issuer(vec!["https://auth.privy.io".to_string()]);
 ///
@@ -186,20 +202,15 @@ const DEFAULT_USER_CACHE_SIZE: usize = 1000; // Max 1000 users in cache
 pub struct AuthService {
     /// URL to the JWKS endpoint used to validate the bearer JWT parsed from the authorization header
     jwks_url: String,
-    /// URL to fetch the IDaaS users from. Used to get the wallet address of the authenticated user from the IDaaS DID
-    user_api_url: String,
-    /// IDaaS app id, used to authenticate the user api requests
-    app_id: String,
-    /// The base64-encoded token (app_id:app_secret) used in Bearer authorization header
-    /// for authenticated requests to the IDaaS user API
-    user_api_bearer_token: String,
     cache: Arc<RwLock<Option<CachedJwks>>>,
     /// Cache for user data to avoid repeated API calls (LRU with size limit)
     user_cache: Arc<RwLock<LruCache<String, CachedUser>>>,
     cache_duration: Duration,
     validation: Validation,
-    /// HTTP client for making requests
+    /// HTTP client for making JWKS requests
     client: reqwest::Client,
+    /// Privy client for user API operations
+    auth_client: PrivyClient,
 }
 
 impl AuthService {
@@ -207,10 +218,13 @@ impl AuthService {
     ///
     /// Uses 1-hour cache duration for both JWKS and user data, with a maximum of 1000 cached users.
     /// HTTP client has a 10-second timeout and connection pool of 50 per host.
-    pub fn new(jwks_url: String, user_api_url: String, app_id: String, app_secret: String) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the auth client cannot be created with the provided credentials.
+    pub fn new(jwks_url: String, app_id: String, app_secret: String) -> Result<Self, AuthError> {
         Self::with_config(
             jwks_url,
-            user_api_url,
             app_id,
             app_secret,
             Duration::hours(1),
@@ -221,31 +235,30 @@ impl AuthService {
     /// Create a new AuthService with custom cache duration and JWT validation settings.
     ///
     /// Automatically enables `exp` (expiration) and `nbf` (not before) validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the auth client cannot be created with the provided credentials.
     pub fn with_config(
         jwks_url: String,
-        user_api_url: String,
         app_id: String,
         app_secret: String,
         cache_duration: Duration,
         mut validation: Validation,
-    ) -> Self {
+    ) -> Result<Self, AuthError> {
         validation.validate_exp = true;
         validation.validate_nbf = true;
-
-        let basic_auth_token =
-            general_purpose::STANDARD.encode(format!("{}:{}", app_id, app_secret));
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .pool_max_idle_per_host(50)
             .build()
-            .expect("Failed to build HTTP client");
+            .map_err(|e| AuthError::InternalError(anyhow!("Failed to build HTTP client: {}", e)))?;
 
-        Self {
+        let auth_client = PrivyClient::new(app_id, app_secret)?;
+
+        Ok(Self {
             jwks_url,
-            user_api_url,
-            app_id,
-            user_api_bearer_token: basic_auth_token,
             cache: Arc::new(RwLock::new(None)),
             user_cache: Arc::new(RwLock::new(LruCache::new(
                 NonZeroUsize::new(DEFAULT_USER_CACHE_SIZE)
@@ -254,16 +267,21 @@ impl AuthService {
             cache_duration,
             validation,
             client,
-        }
+            auth_client,
+        })
     }
 
     /// Set the maximum number of users to cache (default: 1000).
     ///
     /// Uses LRU eviction when the limit is reached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is 0. Use a non-zero value for the cache size.
     pub fn with_user_cache_size(mut self, size: usize) -> Self {
-        if let Some(cache_size) = NonZeroUsize::new(size) {
-            self.user_cache = Arc::new(RwLock::new(LruCache::new(cache_size)));
-        }
+        let cache_size = NonZeroUsize::new(size)
+            .expect("Cache size must be non-zero. Use a value greater than 0.");
+        self.user_cache = Arc::new(RwLock::new(LruCache::new(cache_size)));
         self
     }
 
@@ -309,13 +327,13 @@ impl AuthService {
         Ok(jwks)
     }
 
-    async fn get_jwks(&self) -> Result<JwkSet> {
+    async fn get_jwks(&self) -> Result<Arc<JwkSet>> {
         let cache_read = self.cache.read().await;
 
         if let Some(cached) = &*cache_read
             && cached.expires_at > Utc::now()
         {
-            return Ok(cached.jwks.clone());
+            return Ok(Arc::clone(&cached.jwks));
         }
         drop(cache_read);
 
@@ -324,13 +342,13 @@ impl AuthService {
         if let Some(cached) = &*cache_write
             && cached.expires_at > Utc::now()
         {
-            return Ok(cached.jwks.clone());
+            return Ok(Arc::clone(&cached.jwks));
         }
 
-        let jwks = self.fetch_jwks().await?;
+        let jwks = Arc::new(self.fetch_jwks().await?);
 
         *cache_write = Some(CachedJwks {
-            jwks: jwks.clone(),
+            jwks: Arc::clone(&jwks),
             expires_at: Utc::now() + self.cache_duration,
         });
 
@@ -383,14 +401,15 @@ impl AuthService {
         Ok(token_data.claims)
     }
 
-    /// Fetch user data from the IDaaS API by user ID.
+    /// Fetch user data from the auth API by user ID.
     ///
     /// Returns `None` if the user doesn't exist (404). Results are cached for the configured
     /// cache duration, including 404 responses to prevent repeated lookups.
-    pub async fn maybe_fetch_auth_user(
-        &self,
-        user_id: &str,
-    ) -> Result<Option<AuthUser>, AuthError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails or returns an unexpected status code.
+    pub async fn maybe_fetch_auth_user(&self, user_id: &str) -> Result<Option<User>, AuthError> {
         // Check cache first (requires write lock for LRU's mutable get)
         {
             let mut cache_write = self.user_cache.write().await;
@@ -402,42 +421,20 @@ impl AuthService {
             // If expired, we'll fetch new data below
         }
 
-        // Cache miss or expired - fetch from API
-        // send a GET request to: {user_api_url}/{user_id} with the derived basic auth header and auth app id
-        // ex: https://api.privy.io/v1/users/cmeizfhee0075jt0cb9sbzvxi
-        let response = self
-            .client
-            .get(format!("{}/{}", &self.user_api_url, user_id))
-            .header(
-                "Authorization",
-                format!("Bearer {}", &self.user_api_bearer_token),
-            )
-            .header("Content-Type", "application/json")
-            .header("privy-app-id", &self.app_id)
-            .send()
-            .await
-            .map_err(|e| AuthError::InternalError(anyhow!("Failed to fetch user: {}", e)))?;
-
-        let user_result = match response.status() {
-            StatusCode::OK => {
-                let user = response.json::<AuthUser>().await.map_err(|e| {
-                    AuthError::InternalError(anyhow!("Failed to parse user response: {}", e))
-                })?;
+        // Cache miss or expired - fetch from API using auth client
+        let user_result = match self.auth_client.users().get(user_id).await {
+            Ok(response) => {
+                let user = response.into_inner();
                 Some(user)
             }
-            StatusCode::NOT_FOUND => {
-                // User not found - return None instead of error
-                None
-            }
-            status => {
-                // Other HTTP errors should be treated as actual errors
-                let error_text = response.text().await.unwrap_or_default();
-                return Err(AuthError::InternalError(anyhow!(
-                    "Failed to fetch user {}: HTTP {} - {}",
-                    user_id,
-                    status,
-                    error_text
-                )));
+            Err(err) => {
+                // Check if it's a 404 (user not found)
+                // TODO: Improve this once privy-rs exposes structured error status codes
+                if err.to_string().contains("404") {
+                    None
+                } else {
+                    return Err(AuthError::AuthApiFetchError(err.to_string()));
+                }
             }
         };
 
