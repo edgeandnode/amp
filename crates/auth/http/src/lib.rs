@@ -213,6 +213,20 @@ pub struct AuthService {
     auth_client: PrivyClient,
 }
 
+/// Truncate sensitive IDs for logging while preserving some debugging utility.
+/// Shows first 6 and last 6 characters for IDs longer than 15 chars.
+fn truncate_id(id: &str) -> String {
+    const PREFIX_LEN: usize = 6;
+    const SUFFIX_LEN: usize = 6;
+    const MIN_LEN_TO_TRUNCATE: usize = PREFIX_LEN + SUFFIX_LEN + 3; // +3 for "..."
+
+    if id.len() <= MIN_LEN_TO_TRUNCATE {
+        id.to_string()
+    } else {
+        format!("{}...{}", &id[..PREFIX_LEN], &id[id.len() - SUFFIX_LEN..])
+    }
+}
+
 impl AuthService {
     /// Create a new AuthService with default settings.
     ///
@@ -377,6 +391,7 @@ impl AuthService {
     /// Verifies the token signature using the JWKS and validates expiration, not-before,
     /// audience, and issuer claims according to the configured validation rules.
     /// Uses ES256 algorithm (Privy-specific).
+    #[tracing::instrument(name = "AuthService.validate_token", skip_all, err)]
     pub async fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
         let header = decode_header(token).map_err(|e| AuthError::InvalidToken(e.to_string()))?;
 
@@ -409,6 +424,12 @@ impl AuthService {
     /// # Errors
     ///
     /// Returns an error if the API request fails or returns an unexpected status code.
+    #[tracing::instrument(
+        name = "AuthService.maybe_fetch_auth_user",
+        skip_all,
+        fields(user_id_truncated = %truncate_id(user_id)),
+        err
+    )]
     pub async fn maybe_fetch_auth_user(&self, user_id: &str) -> Result<Option<User>, AuthError> {
         // Check cache first (requires write lock for LRU's mutable get)
         {
