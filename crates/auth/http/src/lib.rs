@@ -39,7 +39,7 @@ pub use privy_rs::generated::types::{
 ///     Ok(Json(result))
 /// }
 /// ```
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 #[error(transparent)]
 pub struct AuthAnyhowError(anyhow::Error);
 
