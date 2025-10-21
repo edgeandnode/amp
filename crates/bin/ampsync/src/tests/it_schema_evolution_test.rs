@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 use arrow_schema::DataType;
 use datasets_common::manifest::DataType as ManifestDataType;
 use datasets_derived::manifest::{ArrowSchema, Field as ManifestField};
 use pgtemp::PgTempDB;
+
+use crate::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 
 const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
 const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);

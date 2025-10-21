@@ -2,8 +2,9 @@
 
 use std::time::Duration;
 
-use metadata_db::{MetadataDb, WorkerNodeId};
 use pgtemp::PgTempDB;
+
+use crate::{MetadataDb, WorkerNodeId};
 
 #[tokio::test]
 async fn register_worker() {

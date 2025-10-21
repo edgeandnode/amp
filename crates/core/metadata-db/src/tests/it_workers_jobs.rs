@@ -1,7 +1,8 @@
 //! DB integration tests for the workers queue
 
-use metadata_db::{JobStatus, MetadataDb, WorkerNodeId};
 use pgtemp::PgTempDB;
+
+use crate::{JobStatus, MetadataDb, WorkerNodeId};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {

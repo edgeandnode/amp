@@ -1,8 +1,9 @@
 //! DB integration tests for the workers events notifications
 
 use futures::StreamExt;
-use metadata_db::{JobId, JobStatus, MetadataDb, WorkerNodeId};
 use pgtemp::PgTempDB;
+
+use crate::{JobId, JobStatus, MetadataDb, WorkerNodeId};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct JobNotification {

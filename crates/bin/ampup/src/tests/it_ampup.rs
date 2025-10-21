@@ -1,13 +1,11 @@
 use std::env;
 
-use ampup::{DEFAULT_REPO, DEFAULT_REPO_PRIVATE};
 use anyhow::Result;
 use fs_err as fs;
 use tempfile::TempDir;
 
-mod fixtures;
-
-use fixtures::{MockBinary, TempInstallDir};
+use super::fixtures::{MockBinary, TempInstallDir};
+use crate::{DEFAULT_REPO, DEFAULT_REPO_PRIVATE};
 
 fn github_token_required() -> Option<String> {
     env::var("GITHUB_TOKEN").ok()
@@ -17,7 +15,7 @@ fn github_token_required() -> Option<String> {
 async fn init_creates_directory_structure() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
-    ampup::commands::init::run(
+    crate::commands::init::run(
         Some(temp.path().to_path_buf()),
         true, // no_modify_path
         true, // no_install_latest
@@ -40,11 +38,11 @@ async fn init_fails_if_already_initialized() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // First init should succeed
-    ampup::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await?;
+    crate::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await?;
 
     // Second init should fail
     let result =
-        ampup::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await;
+        crate::commands::init::run(Some(temp.path().to_path_buf()), true, true, None).await;
 
     assert!(
         result.is_err(),
@@ -65,7 +63,7 @@ async fn list_shows_no_versions_when_empty() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // Just verify it doesn't crash - actual output goes to stdout
-    ampup::commands::list::run(Some(temp.path().to_path_buf()))?;
+    crate::commands::list::run(Some(temp.path().to_path_buf()))?;
 
     Ok(())
 }
@@ -82,7 +80,7 @@ async fn list_shows_installed_versions() -> Result<()> {
     fs::write(temp.current_version_file(), "v1.0.0")?;
 
     // Just verify it doesn't crash - actual output goes to stdout
-    ampup::commands::list::run(Some(temp.path().to_path_buf()))?;
+    crate::commands::list::run(Some(temp.path().to_path_buf()))?;
 
     Ok(())
 }
@@ -96,7 +94,7 @@ async fn use_switches_to_installed_version() -> Result<()> {
     MockBinary::create(&temp, "v1.1.0")?;
 
     // Switch to v1.0.0
-    ampup::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.0.0".to_string()))?;
+    crate::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.0.0".to_string()))?;
 
     // Verify current version
     let current = fs::read_to_string(temp.current_version_file())?;
@@ -107,7 +105,7 @@ async fn use_switches_to_installed_version() -> Result<()> {
     assert!(active_binary.exists() || active_binary.is_symlink());
 
     // Switch to v1.1.0
-    ampup::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.1.0".to_string()))?;
+    crate::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.1.0".to_string()))?;
 
     let current = fs::read_to_string(temp.current_version_file())?;
     assert_eq!(current.trim(), "v1.1.0");
@@ -119,7 +117,7 @@ async fn use_switches_to_installed_version() -> Result<()> {
 async fn use_fails_for_non_existent_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
-    let result = ampup::commands::use_version::run(
+    let result = crate::commands::use_version::run(
         Some(temp.path().to_path_buf()),
         Some("v99.99.99".to_string()),
     );
@@ -142,10 +140,10 @@ async fn uninstall_removes_version() -> Result<()> {
     MockBinary::create(&temp, "v1.1.0")?;
 
     // Set current version to v1.1.0
-    ampup::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.1.0".to_string()))?;
+    crate::commands::use_version::run(Some(temp.path().to_path_buf()), Some("v1.1.0".to_string()))?;
 
     // Uninstall v1.0.0 (not current)
-    ampup::commands::uninstall::run(Some(temp.path().to_path_buf()), "v1.0.0")?;
+    crate::commands::uninstall::run(Some(temp.path().to_path_buf()), "v1.0.0")?;
 
     assert!(
         !temp.version_dir("v1.0.0").exists(),
@@ -163,7 +161,7 @@ async fn uninstall_removes_version() -> Result<()> {
 async fn uninstall_fails_for_non_existent_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
-    let result = ampup::commands::uninstall::run(Some(temp.path().to_path_buf()), "v99.99.99");
+    let result = crate::commands::uninstall::run(Some(temp.path().to_path_buf()), "v99.99.99");
 
     assert!(
         result.is_err(),
@@ -180,7 +178,7 @@ async fn install_latest_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // Install latest version
-    ampup::commands::install::run(
+    crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
         github_token,
@@ -209,7 +207,7 @@ async fn install_specific_version() -> Result<()> {
 
     // Install a specific version (use a known release)
     let version = "v0.0.14";
-    ampup::commands::install::run(
+    crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
         github_token,
@@ -237,7 +235,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
     let version = "v0.0.14";
 
     // Install once
-    ampup::commands::install::run(
+    crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
         github_token.clone(),
@@ -248,7 +246,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
     .await?;
 
     // Install again - should just switch to it
-    ampup::commands::install::run(
+    crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
         github_token,
@@ -270,7 +268,7 @@ async fn install_without_github_token() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // This should work once the repo is public
-    ampup::commands::install::run(
+    crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO.to_string(),
         None, // No GitHub token
@@ -325,7 +323,7 @@ async fn build_from_local_path_with_custom_name() -> Result<()> {
     }
 
     let custom_name = "my-custom-build";
-    let result = ampup::commands::build::run(
+    let result = crate::commands::build::run(
         Some(temp.path().to_path_buf()),
         Some(DEFAULT_REPO_PRIVATE.to_string()),
         Some(fake_repo.path().to_path_buf()),

@@ -1,12 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
-use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{
     BinaryArray, FixedSizeBinaryArray, Int64Array, RecordBatch, TimestampNanosecondArray,
     UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use pgtemp::PgTempDB;
+
+use crate::sync_engine::AmpsyncDbEngine;
 
 #[tokio::test]
 async fn test_nanosecond_timestamp_insert() {
@@ -141,7 +142,7 @@ async fn test_nanosecond_timestamp_insert() {
 
         // Connect using the DbConnPool wrapper
         let db_pool =
-            ampsync::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
+            crate::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
                 .await
                 .expect("Failed to create DbConnPool");
 
@@ -323,10 +324,9 @@ async fn test_nanosecond_timestamp_batch_insert() {
     );
 
     // Insert batch
-    let db_pool =
-        ampsync::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
-            .await
-            .expect("Failed to create DbConnPool");
+    let db_pool = crate::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
+        .await
+        .expect("Failed to create DbConnPool");
 
     let db_engine = AmpsyncDbEngine::new(&db_pool, Duration::from_secs(60));
 
