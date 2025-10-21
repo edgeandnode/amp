@@ -83,7 +83,7 @@ async fn test_manifest_sql_gets_streaming_settings_added() {
         .await;
 
     // Fetch the manifest
-    let manifest = ampsync::manifest::fetch_manifest(&server.url(), &dataset_name, Some(&version))
+    let manifest = crate::manifest::fetch_manifest(&server.url(), &dataset_name, Some(&version))
         .await
         .expect("Failed to fetch manifest");
 

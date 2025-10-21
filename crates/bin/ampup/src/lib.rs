@@ -16,3 +16,6 @@ pub const DEFAULT_REPO: &str = "edgeandnode/amp";
 
 /// Default GitHub repository for amp development
 pub const DEFAULT_REPO_PRIVATE: &str = "edgeandnode/amp-private";
+
+#[cfg(test)]
+mod tests;

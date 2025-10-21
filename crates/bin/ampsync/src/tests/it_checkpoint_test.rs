@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use ampsync::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 use common::metadata::segments::ResumeWatermark;
 use pgtemp::PgTempDB;
+
+use crate::{conn::DbConnPool, sync_engine::AmpsyncDbEngine};
 
 const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
 const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);
@@ -282,7 +283,7 @@ async fn test_watermark_survives_reconnection() {
 
 #[tokio::test]
 async fn test_incremental_checkpoint_between_watermarks() {
-    use ampsync::sync_engine::ResumePoint;
+    use crate::sync_engine::ResumePoint;
 
     let (db_pool, _pool, _pg_temp) = create_test_pool().await;
     let engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
@@ -464,7 +465,7 @@ async fn test_invalidate_batches_after_watermark() {
             prev_hash: None,
         }];
 
-        ampsync::batch_utils::inject_system_metadata(batch, &ranges)
+        crate::batch_utils::inject_system_metadata(batch, &ranges)
             .expect("Failed to inject metadata")
     };
 

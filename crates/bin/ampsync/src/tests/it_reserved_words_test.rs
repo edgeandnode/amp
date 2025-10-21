@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use pgtemp::PgTempDB;
+
+use crate::sync_engine::AmpsyncDbEngine;
 
 /// Test that we can insert data into tables with SQL reserved word column names
 /// like "to", "from", "select", etc.
@@ -118,10 +119,9 @@ async fn test_insert_with_reserved_word_columns() {
     println!("Created test batch with {} rows", batch.num_rows());
 
     // Connect using the DbConnPool wrapper
-    let db_pool =
-        ampsync::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
-            .await
-            .expect("Failed to create DbConnPool");
+    let db_pool = crate::conn::DbConnPool::connect(&connection_string, 1, Duration::from_secs(300))
+        .await
+        .expect("Failed to create DbConnPool");
 
     let db_engine = AmpsyncDbEngine::new(&db_pool, Duration::from_secs(60));
 

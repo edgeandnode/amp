@@ -2,13 +2,14 @@ use std::{ops::RangeInclusive, sync::Arc, time::Duration};
 
 use alloy::primitives::BlockHash;
 use amp_client::InvalidationRange;
-use ampsync::sync_engine::AmpsyncDbEngine;
 use arrow_array::{Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use common::metadata::segments::BlockRange;
 use datasets_common::manifest::DataType as ManifestDataType;
 use datasets_derived::manifest::{ArrowSchema, Field as ManifestField};
 use pgtemp::PgTempDB;
+
+use crate::sync_engine::AmpsyncDbEngine;
 
 const DEFAULT_DB_OPERATION_RETRY_DURATION_SECS: Duration = Duration::from_secs(60);
 const DEFAULT_DB_MAX_RETRY_DURATION_SECS: Duration = Duration::from_secs(300);
@@ -42,13 +43,10 @@ async fn test_multi_row_batch_without_block_num() {
         .expect("Failed to connect to test database");
 
     // Connect using the DbConnPool wrapper
-    let db_pool = ampsync::conn::DbConnPool::connect(
-        &connection_string,
-        1,
-        DEFAULT_DB_MAX_RETRY_DURATION_SECS,
-    )
-    .await
-    .expect("Failed to create DbConnPool");
+    let db_pool =
+        crate::conn::DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
+            .await
+            .expect("Failed to create DbConnPool");
 
     let db_engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
@@ -146,7 +144,7 @@ async fn test_multi_row_batch_without_block_num() {
     }];
 
     // Inject system metadata columns: _id, _block_num_start, _block_num_end
-    let batch_with_metadata = ampsync::batch_utils::inject_system_metadata(batch, &ranges)
+    let batch_with_metadata = crate::batch_utils::inject_system_metadata(batch, &ranges)
         .expect("Failed to inject metadata columns");
 
     println!(
@@ -232,13 +230,10 @@ async fn test_reorg_with_injected_block_num() {
         .expect("Failed to connect to test database");
 
     // Connect using the DbConnPool wrapper
-    let db_pool = ampsync::conn::DbConnPool::connect(
-        &connection_string,
-        1,
-        DEFAULT_DB_MAX_RETRY_DURATION_SECS,
-    )
-    .await
-    .expect("Failed to create DbConnPool");
+    let db_pool =
+        crate::conn::DbConnPool::connect(&connection_string, 1, DEFAULT_DB_MAX_RETRY_DURATION_SECS)
+            .await
+            .expect("Failed to create DbConnPool");
 
     let db_engine = AmpsyncDbEngine::new(&db_pool, DEFAULT_DB_OPERATION_RETRY_DURATION_SECS);
 
@@ -304,7 +299,7 @@ async fn test_reorg_with_injected_block_num() {
         hash: BlockHash::ZERO,
         prev_hash: None,
     }];
-    let batch_with_metadata = ampsync::batch_utils::inject_system_metadata(batch, &ranges)
+    let batch_with_metadata = crate::batch_utils::inject_system_metadata(batch, &ranges)
         .expect("Failed to inject metadata columns");
 
     // Insert the batch (should now succeed with all 100 rows)

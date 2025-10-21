@@ -48,7 +48,7 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
         .await;
 
     // Call fetch_latest_version
-    let result = ampsync::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
 
     // Verify success
     assert!(result.is_ok(), "fetch_latest_version failed: {:?}", result);
@@ -94,7 +94,7 @@ async fn test_version_polling_detects_changes() {
     let poll_interval_secs = 1; // 1 second for faster test
 
     let poll_handle = tokio::spawn(async move {
-        ampsync::version_polling::version_poll_task(
+        crate::version_polling::version_poll_task(
             admin_api_addr.clone(),
             dataset_name.clone(),
             initial_version,
@@ -159,7 +159,7 @@ async fn test_version_polling_handles_api_errors() {
     let poll_interval_secs = 1;
 
     let poll_handle = tokio::spawn(async move {
-        ampsync::version_polling::version_poll_task(
+        crate::version_polling::version_poll_task(
             admin_api_addr.clone(),
             dataset_name.clone(),
             initial_version,
@@ -227,7 +227,7 @@ async fn test_fetch_latest_version_returns_first_version() {
         .create_async()
         .await;
 
-    let result = ampsync::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
 
     assert!(result.is_ok());
     let version = result.unwrap();
@@ -254,7 +254,7 @@ async fn test_fetch_latest_version_handles_empty_list() {
         .create_async()
         .await;
 
-    let result = ampsync::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
 
     // Should return error for empty versions list
     assert!(result.is_err());

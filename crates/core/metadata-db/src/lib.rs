@@ -1035,6 +1035,9 @@ pub struct GcManifestRow {
     pub expiration: NaiveDateTime,
 }
 
+#[cfg(test)]
+mod tests;
+
 // Garbage Collection API
 impl MetadataDb {
     pub async fn delete_file_id(&self, file_id: FileId) -> Result<(), Error> {

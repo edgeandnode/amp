@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use ampsync::conn::DbConnPool;
 use pgtemp::PgTempDB;
+
+use crate::conn::DbConnPool;
 
 /// Test that the connection pool circuit breaker stops retrying after max duration
 #[tokio::test]
