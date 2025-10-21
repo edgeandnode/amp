@@ -16,7 +16,7 @@ futures.workspace = true
 monitoring = { path = "../../core/monitoring" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
-serde_json = {workspace = true, optional = true}
+serde_json = { workspace = true, optional = true }
 serde_with = "3.9.0"
 thiserror.workspace = true
 tokio.workspace = true

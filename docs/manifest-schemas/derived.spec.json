@@ -48,7 +48,7 @@
   ],
   "$defs": {
     "ArrowSchema": {
-      "description": "Arrow schema representation for serialization.",
+      "description": "Arrow schema representation for serialization.\n\nContains an ordered list of fields that define the structure of a table.",
       "type": "object",
       "properties": {
         "fields": {
@@ -68,7 +68,7 @@
       "type": "string"
     },
     "Field": {
-      "description": "Arrow field definition with name, type, and nullability.",
+      "description": "Arrow field definition with name, type, and nullability.\n\nRepresents a single column in a table schema.",
       "type": "object",
       "properties": {
         "name": {
@@ -186,7 +186,7 @@
       ]
     },
     "TableSchema": {
-      "description": "Schema definition for a table.",
+      "description": "Schema definition for a table.\n\nWraps an Arrow schema with field definitions including names, types, and nullability.",
       "type": "object",
       "properties": {
         "arrow": {

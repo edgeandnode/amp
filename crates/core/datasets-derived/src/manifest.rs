@@ -9,10 +9,8 @@ use std::{
     sync::Arc,
 };
 
-use datafusion::{
-    arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
-    common::DFSchemaRef,
-};
+// Re-export schema types from datasets-common
+pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use datasets_common::{manifest::DataType, name::Name, reference::Reference, version::Version};
 
 use crate::dataset_kind::DerivedDatasetKind;
@@ -102,63 +100,6 @@ pub enum TableInput {
 pub struct View {
     /// SQL query defining the view
     pub sql: String,
-}
-
-/// Schema definition for a table.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct TableSchema {
-    /// Arrow schema definition
-    pub arrow: ArrowSchema,
-}
-impl From<DFSchemaRef> for TableSchema {
-    fn from(arrow: DFSchemaRef) -> Self {
-        Self {
-            arrow: ArrowSchema {
-                fields: arrow
-                    .fields()
-                    .iter()
-                    .map(|f| Field {
-                        name: f.name().clone(),
-                        type_: f.data_type().clone().into(),
-                        nullable: f.is_nullable(),
-                    })
-                    .collect(),
-            },
-        }
-    }
-}
-
-impl From<ArrowSchema> for SchemaRef {
-    fn from(schema: ArrowSchema) -> Self {
-        let fields = schema
-            .fields
-            .into_iter()
-            .map(|f| ArrowField::new(f.name, f.type_.0, f.nullable));
-
-        Arc::new(Schema::new(Fields::from_iter(fields)))
-    }
-}
-
-/// Arrow schema representation for serialization.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct ArrowSchema {
-    /// Ordered list of fields in the schema
-    pub fields: Vec<Field>,
-}
-
-/// Arrow field definition with name, type, and nullability.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Field {
-    /// Field name
-    pub name: String,
-    /// Arrow data type of the field
-    #[serde(rename = "type")]
-    pub type_: DataType,
-    /// Whether the field can contain null values
-    pub nullable: bool,
 }
 
 /// Errors that occur during derived dataset dependency validation

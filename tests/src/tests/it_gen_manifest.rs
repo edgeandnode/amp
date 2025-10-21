@@ -6,6 +6,52 @@ use firehose_datasets::FirehoseDatasetKind;
 use monitoring::logging;
 
 #[tokio::test]
+async fn gen_manifest_produces_expected_eth_rpc_json() {
+    //* Given
+    logging::init();
+    let name = "eth_rpc"
+        .parse::<Name>()
+        .expect("should parse valid dataset name");
+    let kind = EvmRpcDatasetKind;
+    let network = "mainnet".to_string();
+    let start_block = Some(15000000u64);
+
+    //* When
+    let mut out = Vec::new();
+    let result = gen_manifest_cmd::run(
+        name.clone(),
+        kind,
+        network.clone(),
+        start_block,
+        false,
+        &mut out,
+    )
+    .await;
+
+    //* Then
+    assert!(result.is_ok(), "manifest generation should succeed");
+
+    // Read the expected manifest file
+    let expected_manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("tests/config/manifests/eth_rpc.json");
+    let expected_json = std::fs::read_to_string(&expected_manifest_path)
+        .expect("should read expected manifest file");
+
+    // Parse both as JSON values for comparison
+    let generated: serde_json::Value =
+        serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
+    let expected: serde_json::Value =
+        serde_json::from_str(&expected_json).expect("expected manifest should be valid JSON");
+
+    assert_eq!(
+        generated, expected,
+        "generated manifest should match expected manifest exactly"
+    );
+}
+
+#[tokio::test]
 async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
     //* Given
     logging::init();

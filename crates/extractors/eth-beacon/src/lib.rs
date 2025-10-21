@@ -1,17 +1,37 @@
-use std::num::NonZeroU32;
+use std::{collections::BTreeMap, num::NonZeroU32};
 
 use common::{BlockNum, Dataset};
-use datasets_common::{manifest::Schema, name::Name, version::Version};
+use datasets_common::{name::Name, version::Version};
 use reqwest::Url;
 
 mod block;
 mod client;
 mod dataset_kind;
 
+// Reuse types from datasets-common for consistency
+pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+
 pub use self::{
     client::BeaconClient,
     dataset_kind::{EthBeaconDatasetKind, EthBeaconDatasetKindError},
 };
+
+/// Table definition for raw datasets
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Table {
+    /// Arrow schema for this table
+    pub schema: TableSchema,
+    /// Network for this table
+    pub network: String,
+}
+
+impl Table {
+    /// Create a new table with the given schema and network
+    pub fn new(schema: TableSchema, network: String) -> Self {
+        Self { schema, network }
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -32,10 +52,8 @@ pub struct Manifest {
     #[serde(default)]
     pub finalized_blocks_only: bool,
 
-    /// Dataset schema. Lists the tables defined by this dataset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schemars", schemars(with = "Schema"))]
-    pub schema: Option<Schema>,
+    /// Dataset tables. Maps table names to their definitions.
+    pub tables: BTreeMap<String, Table>,
 }
 
 #[serde_with::serde_as]

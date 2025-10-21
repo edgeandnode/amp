@@ -1,9 +1,10 @@
 {
-  "name": "base_firehose",
-  "version": "0.0.0",
-  "kind": "firehose",
-  "network": "base",
-  "start_block": 33411770,
+  "$comment": "Generated with: cargo run --release -p ampd -- generate-manifest --kind evm-rpc --name anvil --network anvil --start-block 0",
+  "name": "anvil",
+  "version": "0.1.0",
+  "kind": "evm-rpc",
+  "network": "anvil",
+  "start_block": 0,
   "finalized_blocks_only": false,
   "tables": {
     "blocks": {
@@ -153,134 +154,7 @@
           ]
         }
       },
-      "network": "base"
-    },
-    "calls": {
-      "schema": {
-        "arrow": {
-          "fields": [
-            {
-              "name": "block_hash",
-              "type": {
-                "FixedSizeBinary": 32
-              },
-              "nullable": false
-            },
-            {
-              "name": "block_num",
-              "type": "UInt64",
-              "nullable": false
-            },
-            {
-              "name": "timestamp",
-              "type": {
-                "Timestamp": [
-                  "Nanosecond",
-                  "+00:00"
-                ]
-              },
-              "nullable": false
-            },
-            {
-              "name": "tx_index",
-              "type": "UInt32",
-              "nullable": false
-            },
-            {
-              "name": "tx_hash",
-              "type": {
-                "FixedSizeBinary": 32
-              },
-              "nullable": false
-            },
-            {
-              "name": "index",
-              "type": "UInt32",
-              "nullable": false
-            },
-            {
-              "name": "parent_index",
-              "type": "UInt32",
-              "nullable": false
-            },
-            {
-              "name": "depth",
-              "type": "UInt32",
-              "nullable": false
-            },
-            {
-              "name": "call_type",
-              "type": "Int32",
-              "nullable": false
-            },
-            {
-              "name": "caller",
-              "type": {
-                "FixedSizeBinary": 20
-              },
-              "nullable": false
-            },
-            {
-              "name": "address",
-              "type": {
-                "FixedSizeBinary": 20
-              },
-              "nullable": false
-            },
-            {
-              "name": "value",
-              "type": {
-                "Decimal128": [
-                  38,
-                  0
-                ]
-              },
-              "nullable": true
-            },
-            {
-              "name": "gas_limit",
-              "type": "UInt64",
-              "nullable": false
-            },
-            {
-              "name": "gas_consumed",
-              "type": "UInt64",
-              "nullable": false
-            },
-            {
-              "name": "return_data",
-              "type": "Binary",
-              "nullable": false
-            },
-            {
-              "name": "input",
-              "type": "Binary",
-              "nullable": false
-            },
-            {
-              "name": "selfdestruct",
-              "type": "Boolean",
-              "nullable": false
-            },
-            {
-              "name": "executed_code",
-              "type": "Boolean",
-              "nullable": false
-            },
-            {
-              "name": "begin_ordinal",
-              "type": "UInt64",
-              "nullable": false
-            },
-            {
-              "name": "end_ordinal",
-              "type": "UInt64",
-              "nullable": false
-            }
-          ]
-        }
-      },
-      "network": "base"
+      "network": "anvil"
     },
     "logs": {
       "schema": {
@@ -368,7 +242,7 @@
           ]
         }
       },
-      "network": "base"
+      "network": "anvil"
     },
     "transactions": {
       "schema": {
@@ -443,7 +317,7 @@
                   0
                 ]
               },
-              "nullable": true
+              "nullable": false
             },
             {
               "name": "input",
@@ -496,6 +370,16 @@
               "nullable": true
             },
             {
+              "name": "max_fee_per_blob_gas",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
               "name": "from",
               "type": {
                 "FixedSizeBinary": 20
@@ -504,33 +388,13 @@
             },
             {
               "name": "status",
-              "type": "Int32",
-              "nullable": false
-            },
-            {
-              "name": "return_data",
-              "type": "Binary",
-              "nullable": false
-            },
-            {
-              "name": "public_key",
-              "type": "Binary",
-              "nullable": false
-            },
-            {
-              "name": "begin_ordinal",
-              "type": "UInt64",
-              "nullable": false
-            },
-            {
-              "name": "end_ordinal",
-              "type": "UInt64",
+              "type": "Boolean",
               "nullable": false
             }
           ]
         }
       },
-      "network": "base"
+      "network": "anvil"
     }
   }
 }

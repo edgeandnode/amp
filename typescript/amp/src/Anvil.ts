@@ -5,6 +5,28 @@ import * as Schema from "effect/Schema"
 import * as EvmRpc from "./evm/EvmRpc.ts"
 import * as Model from "./Model.ts"
 
+/**
+ * The anvil dataset manifest.
+ *
+ * This is loaded from the generated manifest file to ensure consistency with the CLI output.
+ *
+ * To regenerate the manifest, run:
+ * ```bash
+ * cargo run --release -p ampd -- generate-manifest --kind evm-rpc --name anvil --network anvil --start-block 0 > typescript/amp/test/fixtures/anvil_rpc.json
+ * ```
+ *
+ * Then adjust version to 0.1.0
+ */
+import anvilManifest from "../test/fixtures/anvil_rpc.json" with { type: "json" }
+
+/**
+ * The anvil dataset.
+ *
+ * Note: We use decodeSync to validate the JSON structure matches the DatasetRpc schema.
+ * The type assertion is needed because JSON imports don't preserve literal types.
+ */
+export const dataset = Schema.decodeSync(Model.DatasetRpc)(anvilManifest as any)
+
 // NODE: This is not a secret prviate key, it's one of the test keys from anvil's default mnemonic.
 const DEFAULT_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
@@ -68,75 +90,3 @@ export const script = (script: string, options: ScriptOptions = {}) =>
       Effect.asVoid,
     )
   }).pipe(Effect.scoped)
-
-/**
- * The anvil dataset.
- */
-export const dataset = new Model.DatasetRpc({
-  "kind": "evm-rpc",
-  "name": "anvil",
-  "version": "0.1.0",
-  "network": "anvil",
-  "schema": {
-    "blocks": {
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-      "mix_hash": { "FixedSizeBinary": 32 },
-      "base_fee_per_gas": { "Decimal128": [38, 0] },
-      "blob_gas_used": "UInt64",
-      "miner": { "FixedSizeBinary": 20 },
-      "block_num": "UInt64",
-      "parent_hash": { "FixedSizeBinary": 32 },
-      "excess_blob_gas": "UInt64",
-      "state_root": { "FixedSizeBinary": 32 },
-      "receipt_root": { "FixedSizeBinary": 32 },
-      "withdrawals_root": { "FixedSizeBinary": 32 },
-      "hash": { "FixedSizeBinary": 32 },
-      "difficulty": { "Decimal128": [38, 0] },
-      "ommers_hash": { "FixedSizeBinary": 32 },
-      "transactions_root": { "FixedSizeBinary": 32 },
-      "nonce": "UInt64",
-      "parent_beacon_root": { "FixedSizeBinary": 32 },
-      "extra_data": "Binary",
-      "gas_used": "UInt64",
-      "logs_bloom": "Binary",
-      "gas_limit": "UInt64",
-    },
-    "logs": {
-      "topic3": { "FixedSizeBinary": 32 },
-      "topic2": { "FixedSizeBinary": 32 },
-      "tx_index": "UInt32",
-      "tx_hash": { "FixedSizeBinary": 32 },
-      "data": "Binary",
-      "address": { "FixedSizeBinary": 20 },
-      "block_hash": { "FixedSizeBinary": 32 },
-      "block_num": "UInt64",
-      "log_index": "UInt32",
-      "topic0": { "FixedSizeBinary": 32 },
-      "topic1": { "FixedSizeBinary": 32 },
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-    },
-    "transactions": {
-      "gas_used": "UInt64",
-      "from": { "FixedSizeBinary": 20 },
-      "block_hash": { "FixedSizeBinary": 32 },
-      "type": "Int32",
-      "gas_limit": "UInt64",
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-      "status": "Boolean",
-      "s": "Binary",
-      "tx_index": "UInt32",
-      "gas_price": { "Decimal128": [38, 0] },
-      "input": "Binary",
-      "max_fee_per_gas": { "Decimal128": [38, 0] },
-      "r": "Binary",
-      "v": "Binary",
-      "max_priority_fee_per_gas": { "Decimal128": [38, 0] },
-      "max_fee_per_blob_gas": { "Decimal128": [38, 0] },
-      "tx_hash": { "FixedSizeBinary": 32 },
-      "to": { "FixedSizeBinary": 20 },
-      "block_num": "UInt64",
-      "nonce": "UInt64",
-      "value": { "Decimal128": [38, 0] },
-    },
-  },
-})

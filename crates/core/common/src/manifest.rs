@@ -4,7 +4,6 @@
 //!
 //! ## Modules
 //!
-//! - [`common`] - Common types and utilities shared across manifest formats
 //! - [`derived`] - Derived dataset definitions with versioning and dependencies
 //!
 //! ## Dataset Categories
@@ -16,5 +15,4 @@
 //! - Type-safe schema definitions
 //! - User-defined function support
 
-pub mod common;
 pub mod derived;

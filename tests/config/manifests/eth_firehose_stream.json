@@ -1,93 +1,536 @@
 {
-  "kind": "firehose",
   "name": "eth_firehose_stream",
+  "version": "0.0.0",
+  "kind": "firehose",
   "network": "mainnet",
-  "schema": {
+  "start_block": 0,
+  "finalized_blocks_only": false,
+  "tables": {
     "blocks": {
-      "mix_hash": { "FixedSizeBinary": 32 },
-      "gas_limit": "UInt64",
-      "block_num": "UInt64",
-      "hash": { "FixedSizeBinary": 32 },
-      "transactions_root": { "FixedSizeBinary": 32 },
-      "withdrawals_root": { "FixedSizeBinary": 32 },
-      "excess_blob_gas": "UInt64",
-      "logs_bloom": "Binary",
-      "gas_used": "UInt64",
-      "base_fee_per_gas": { "Decimal128": [38, 0] },
-      "parent_hash": { "FixedSizeBinary": 32 },
-      "ommers_hash": { "FixedSizeBinary": 32 },
-      "nonce": "UInt64",
-      "receipt_root": { "FixedSizeBinary": 32 },
-      "miner": { "FixedSizeBinary": 20 },
-      "difficulty": { "Decimal128": [38, 0] },
-      "blob_gas_used": "UInt64",
-      "parent_beacon_root": { "FixedSizeBinary": 32 },
-      "extra_data": "Binary",
-      "state_root": { "FixedSizeBinary": 32 },
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] }
-    },
-    "transactions": {
-      "end_ordinal": "UInt64",
-      "block_hash": { "FixedSizeBinary": 32 },
-      "tx_index": "UInt32",
-      "gas_limit": "UInt64",
-      "block_num": "UInt64",
-      "r": "Binary",
-      "gas_used": "UInt64",
-      "return_data": "Binary",
-      "begin_ordinal": "UInt64",
-      "v": "Binary",
-      "from": { "FixedSizeBinary": 20 },
-      "input": "Binary",
-      "value": { "Decimal128": [38, 0] },
-      "gas_price": { "Decimal128": [38, 0] },
-      "nonce": "UInt64",
-      "to": { "FixedSizeBinary": 20 },
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-      "max_fee_per_gas": { "Decimal128": [38, 0] },
-      "max_priority_fee_per_gas": { "Decimal128": [38, 0] },
-      "type": "Int32",
-      "s": "Binary",
-      "tx_hash": { "FixedSizeBinary": 32 },
-      "status": "Int32",
-      "public_key": "Binary"
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "timestamp",
+              "type": {
+                "Timestamp": [
+                  "Nanosecond",
+                  "+00:00"
+                ]
+              },
+              "nullable": false
+            },
+            {
+              "name": "hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "parent_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "ommers_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "miner",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": false
+            },
+            {
+              "name": "state_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "transactions_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "receipt_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "logs_bloom",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "difficulty",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": false
+            },
+            {
+              "name": "gas_limit",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "gas_used",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "extra_data",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "mix_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "nonce",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "base_fee_per_gas",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "withdrawals_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
+              "name": "blob_gas_used",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "excess_blob_gas",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "parent_beacon_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
     },
     "calls": {
-      "end_ordinal": "UInt64",
-      "selfdestruct": "Boolean",
-      "parent_index": "UInt32",
-      "call_type": "Int32",
-      "depth": "UInt32",
-      "executed_code": "Boolean",
-      "block_hash": { "FixedSizeBinary": 32 },
-      "begin_ordinal": "UInt64",
-      "address": { "FixedSizeBinary": 20 },
-      "return_data": "Binary",
-      "index": "UInt32",
-      "gas_consumed": "UInt64",
-      "block_num": "UInt64",
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-      "caller": { "FixedSizeBinary": 20 },
-      "tx_index": "UInt32",
-      "tx_hash": { "FixedSizeBinary": 32 },
-      "gas_limit": "UInt64",
-      "value": { "Decimal128": [38, 0] },
-      "input": "Binary"
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "timestamp",
+              "type": {
+                "Timestamp": [
+                  "Nanosecond",
+                  "+00:00"
+                ]
+              },
+              "nullable": false
+            },
+            {
+              "name": "tx_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "tx_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "parent_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "depth",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "call_type",
+              "type": "Int32",
+              "nullable": false
+            },
+            {
+              "name": "caller",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": false
+            },
+            {
+              "name": "address",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": false
+            },
+            {
+              "name": "value",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "gas_limit",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "gas_consumed",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "return_data",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "input",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "selfdestruct",
+              "type": "Boolean",
+              "nullable": false
+            },
+            {
+              "name": "executed_code",
+              "type": "Boolean",
+              "nullable": false
+            },
+            {
+              "name": "begin_ordinal",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "end_ordinal",
+              "type": "UInt64",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
     },
     "logs": {
-      "topic1": { "FixedSizeBinary": 32 },
-      "topic2": { "FixedSizeBinary": 32 },
-      "address": { "FixedSizeBinary": 20 },
-      "data": "Binary",
-      "topic3": { "FixedSizeBinary": 32 },
-      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
-      "block_hash": { "FixedSizeBinary": 32 },
-      "topic0": { "FixedSizeBinary": 32 },
-      "block_num": "UInt64",
-      "log_index": "UInt32",
-      "tx_hash": { "FixedSizeBinary": 32 },
-      "tx_index": "UInt32"
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "timestamp",
+              "type": {
+                "Timestamp": [
+                  "Nanosecond",
+                  "+00:00"
+                ]
+              },
+              "nullable": false
+            },
+            {
+              "name": "tx_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "tx_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "log_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "address",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": false
+            },
+            {
+              "name": "topic0",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
+              "name": "topic1",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
+              "name": "topic2",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
+              "name": "topic3",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
+              "name": "data",
+              "type": "Binary",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
+    },
+    "transactions": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "timestamp",
+              "type": {
+                "Timestamp": [
+                  "Nanosecond",
+                  "+00:00"
+                ]
+              },
+              "nullable": false
+            },
+            {
+              "name": "tx_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "tx_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "to",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": true
+            },
+            {
+              "name": "nonce",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "gas_price",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "gas_limit",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "value",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "input",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "r",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "s",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "gas_used",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "type",
+              "type": "Int32",
+              "nullable": false
+            },
+            {
+              "name": "max_fee_per_gas",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "max_priority_fee_per_gas",
+              "type": {
+                "Decimal128": [
+                  38,
+                  0
+                ]
+              },
+              "nullable": true
+            },
+            {
+              "name": "from",
+              "type": {
+                "FixedSizeBinary": 20
+              },
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "Int32",
+              "nullable": false
+            },
+            {
+              "name": "return_data",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "public_key",
+              "type": "Binary",
+              "nullable": false
+            },
+            {
+              "name": "begin_ordinal",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "end_ordinal",
+              "type": "UInt64",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
     }
   }
 }
-
