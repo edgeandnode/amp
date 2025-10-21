@@ -47,7 +47,7 @@ mod sql_visitors;
 
 use self::{
     block_stream_client::BlockStreamClient,
-    manifests::{DatasetManifestsStore, GetLatestVersionError},
+    manifests::DatasetManifestsStore,
     providers::{ProviderConfig, ProviderConfigsStore},
 };
 pub use self::{
@@ -56,7 +56,7 @@ pub use self::{
         CatalogForSqlError, EthCallForDatasetError, ExtractDatasetFromFunctionNamesError,
         ExtractDatasetFromTableRefsError, GetAllDatasetsError, GetClientError, GetDatasetError,
         GetDerivedManifestError, GetLogicalCatalogError, GetPhysicalCatalogError,
-        IsRegisteredError, PlanningCtxForSqlError, RegisterManifestError,
+        PlanningCtxForSqlError, RegisterManifestError, SetVersionTagError,
     },
     manifests::StoreError,
 };
@@ -94,61 +94,15 @@ impl DatasetStore {
         &self.provider_configs_store
     }
 
-    /// Register a dataset manifest with a specific version in both the dataset store and metadata database.
+    /// Register a dataset manifest in both the dataset store and metadata database.
+    ///
+    /// This operation stores the manifest file and registers it in the metadata database.
+    /// The operation is idempotent - if the manifest already exists, no error is raised.
+    ///
+    /// After registration, the "dev" tag is automatically updated to point to this manifest,
+    /// making it the most recently registered manifest for the dataset.
     ///
     /// The manifest must be provided as a JSON string (canonical serialized form).
-    ///
-    /// The operation is atomic - either both the store and metadata database are updated
-    /// or neither is updated.
-    pub async fn register_manifest_with_version(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        version: &Version,
-        manifest_hash: &Hash,
-        manifest_str: String,
-    ) -> Result<(), RegisterManifestError> {
-        // Check for existing datasets with the same name and version
-        if self.is_registered(namespace, name, version).await? {
-            tracing::error!(
-                dataset_name = %name,
-                dataset_version = %version,
-                "Trying to register an already registered manifest with a version"
-            );
-            return Err(RegisterManifestError::DatasetExists {
-                name: name.clone(),
-                version: version.clone(),
-            });
-        }
-
-        // Store manifest in the underlying store first
-        let manifest_path = self
-            .dataset_manifests_store
-            .store(name, version, manifest_str)
-            .await?;
-
-        self.metadata_db
-            .register_dataset(
-                namespace,
-                name,
-                version,
-                manifest_hash,
-                manifest_path.as_ref(),
-            )
-            .await
-            .map_err(RegisterManifestError::MetadataRegistration)?;
-
-        Ok(())
-    }
-
-    /// Register a dataset manifest using the default version (0.0.0) in both the dataset store and metadata database.
-    ///
-    /// The manifest must be provided as a JSON string (canonical serialized form).
-    ///
-    /// This is a convenience method that calls `register_manifest_with_version` with `Version::default()`.
-    ///
-    /// The operation is atomic - either both the store and metadata database are updated
-    /// or neither is updated.
     pub async fn register_manifest(
         &self,
         namespace: &Namespace,
@@ -156,45 +110,102 @@ impl DatasetStore {
         manifest_hash: &Hash,
         manifest_str: String,
     ) -> Result<(), RegisterManifestError> {
-        self.register_manifest_with_version(
-            namespace,
-            name,
-            &Version::default(),
-            manifest_hash,
-            manifest_str,
-        )
-        .await
+        // Store manifest file and register in metadata database (idempotent)
+        self.dataset_manifests_store
+            .store(manifest_hash, manifest_str)
+            .await?;
+
+        // Link manifest to dataset (idempotent)
+        self.metadata_db
+            .link_manifest_to_dataset(namespace, name, manifest_hash)
+            .await
+            .map_err(RegisterManifestError::MetadataRegistration)?;
+
+        // Automatically update dev tag to point to the newly registered manifest
+        self.metadata_db
+            .set_dataset_dev_tag(namespace, name, manifest_hash)
+            .await
+            .map_err(RegisterManifestError::MetadataRegistration)?;
+
+        Ok(())
     }
 
-    /// Check if a dataset with the given name and version is registered
+    /// Set a semantic version tag for a dataset manifest.
     ///
-    /// Returns true if the dataset is registered, false otherwise.
-    /// This operation queries the metadata database directly.
-    pub async fn is_registered(
+    /// Creates or updates a semantic version tag (e.g., "1.0.0", "2.3.1") that points to a manifest.
+    /// The manifest must already be registered, otherwise an error will occur.
+    ///
+    /// After setting the version tag, this method automatically updates the "latest" tag if the new
+    /// version is higher than the current "latest" version.
+    ///
+    /// ## Idempotency
+    ///
+    /// This operation is idempotent:
+    /// - If the tag doesn't exist, it is created
+    /// - If the tag exists with the same hash, no changes are made
+    /// - If the tag exists with a different hash, it is updated
+    ///
+    /// ## Race Condition
+    ///
+    /// **Note**: There is a potential race condition when multiple processes concurrently tag
+    /// different versions of the same dataset. In rare cases, the "latest" tag may temporarily
+    /// point to a version that is not the highest. This is **non-critical** because:
+    /// - The inconsistency is temporary and self-correcting
+    /// - The next version tag operation will fix the "latest" pointer
+    /// - All individual version tags remain correct and accessible
+    /// - No data is lost or corrupted
+    ///
+    /// This is a temporary trade-off was chosen to optimize and code simplicity
+    /// over perfect consistency in rare edge cases.
+    // TODO: Perform this operation in a single transaction (SELECT FOR UPDATE)
+    pub async fn set_dataset_version_tag(
         &self,
         namespace: &Namespace,
         name: &Name,
         version: &Version,
-    ) -> Result<bool, IsRegisteredError> {
+        manifest_hash: &Hash,
+    ) -> Result<(), SetVersionTagError> {
         self.metadata_db
-            .dataset_exists(namespace, name, version)
+            .register_dataset_version_tag(namespace, name, version, manifest_hash)
             .await
-            .map_err(IsRegisteredError)
+            .map_err(SetVersionTagError::MetadataDb)?;
+
+        let current_latest = self
+            .metadata_db
+            .get_dataset_latest_tag(namespace, name)
+            .await
+            .map_err(SetVersionTagError::UpdateLatestTag)?
+            .map(|tag| -> Version { tag.version.into() });
+
+        // Update "latest" tag if new version is higher (or no latest exists)
+        if let Some(ref current_latest) = current_latest
+            && version <= current_latest
+        {
+            return Ok(());
+        }
+
+        self.metadata_db
+            .set_dataset_latest_tag(namespace, name, manifest_hash)
+            .await
+            .map_err(SetVersionTagError::UpdateLatestTag)?;
+
+        Ok(())
     }
 
     /// Retrieves a dataset by name and optional version, with in-memory caching.
     ///
-    /// This method resolves the dataset information from the `<namespace>/<name>@<version>` tuple,
-    /// checks an in-memory cache keyed by `<namespace>/<name>@<version>`, and loads the dataset
+    /// This method resolves the dataset's manifest hash from the namespace+name+version tuple,
+    /// checks an in-memory cache keyed by the namespace+name+version, and loads the dataset
     /// from storage on cache miss:
     ///
     /// 1. Validate the dataset name and resolves the version (uses latest if not provided)
-    /// 2. Check the in-memory cache using `<namespace>/<name>@<version>` as the key
-    /// 3. On cache miss, load the dataset from storage and cache it
+    /// 2. Check the in-memory cache using the namespace+name+version as the key
+    /// 3. On cache miss, resolve the manifest hash for the namespace+name+version tuple
+    /// 4. Load the dataset from storage and caches it
     ///
     /// Returns `None` if the dataset cannot be found in the metadata database or manifest store.
     pub async fn get_dataset(
-        self: &Arc<Self>,
+        &self,
         name: &str,
         version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, GetDatasetError> {
@@ -210,21 +221,20 @@ impl DatasetStore {
                     source: err,
                 })?;
 
-            // If no version is provided, try to get the latest version from the manifests store
+            // If no version is provided, try to get the latest version from the metadata database
             // or use a placeholder version (default version, i.e., v0.0.0) if not found.
             let version = match version.into() {
                 Some(v) => v.clone(),
                 None => self
-                    .dataset_manifests_store
-                    .get_latest_version(&name)
+                    .metadata_db
+                    .get_dataset_latest_tag(&namespace, &name)
                     .await
-                    .map_err(
-                        |GetLatestVersionError(source)| GetDatasetError::GetLatestVersion {
-                            namespace: namespace.to_string(),
-                            name: name.to_string(),
-                            source,
-                        },
-                    )?
+                    .map_err(|source| GetDatasetError::GetLatestVersion {
+                        namespace: namespace.to_string(),
+                        name: name.to_string(),
+                        source,
+                    })?
+                    .map(|details| details.version.into())
                     .unwrap_or_default(),
             };
 
@@ -271,13 +281,15 @@ impl DatasetStore {
 
     /// Loads a dataset by retrieving and parsing its manifest content.
     ///
-    /// This function fetches the manifest from the object store using the provided `<namespace>/<name>@<version>`,
-    /// parses it to determine the dataset kind, and creates the appropriate dataset instance:
+    /// This function fetches the manifest hash from the metadata DB, then retrieves the manifest
+    /// content from the object store, parses it to determine the dataset kind, and creates the
+    /// appropriate dataset instance:
     ///
-    /// 1. Retrieve the manifest content from the manifest store
-    /// 2. Parse the common manifest structure to identify the dataset kind
-    /// 3. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
-    /// 4. Create and return the typed dataset instance
+    /// 1. Resolve the manifest hash for the namespace/name/version from metadata DB
+    /// 2. Retrieve the manifest content from the manifest store using the hash
+    /// 3. Parse the common manifest structure to identify the dataset kind
+    /// 4. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
+    /// 5. Create and return the typed dataset instance
     ///
     /// Returns `None` if the manifest cannot be found in the store, or an error if parsing or
     /// [`Dataset`] instance creation fails.
@@ -287,10 +299,26 @@ impl DatasetStore {
         name: &Name,
         version: &Version,
     ) -> Result<Option<Dataset>, GetDatasetError> {
-        // Try to load the dataset manifest using ManifestsStore
+        // Get the manifest hash from the metadata database
+        let Some(dataset_details) = self
+            .metadata_db
+            .get_dataset_version_tag(namespace, name, version)
+            .await
+            .map_err(|source| GetDatasetError::ManifestRetrievalError {
+                namespace: namespace.to_string(),
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(source),
+            })?
+        else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the hash
+        let manifest_hash: Hash = dataset_details.hash.into();
         let Some(manifest_content) = self
             .dataset_manifests_store
-            .get(name, version)
+            .get(&manifest_hash)
             .await
             .map_err(|err| GetDatasetError::ManifestRetrievalError {
                 namespace: namespace.to_string(),
@@ -383,18 +411,34 @@ impl DatasetStore {
         Ok(Some(dataset))
     }
 
-    pub async fn get_all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, GetAllDatasetsError> {
-        let list = self.dataset_manifests_store.list().await;
+    pub async fn get_all_datasets(&self) -> Result<Vec<Dataset>, GetAllDatasetsError> {
+        let list = self
+            .metadata_db
+            .list_all_datasets()
+            .await
+            .map_err(GetAllDatasetsError::ListDatasetsFromDb)?;
 
         let mut datasets = Vec::new();
-        for (name, version) in list {
-            match self.get_dataset(&name, &version).await? {
+        for dataset_info in list {
+            let namespace: Namespace = dataset_info.namespace.into();
+            let name: Name = dataset_info.name.into();
+            let version: Version = dataset_info.version.into();
+
+            match self.get_dataset(&name, &version).await.map_err(|err| {
+                GetAllDatasetsError::LoadDataset {
+                    namespace: namespace.to_string(),
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    source: err,
+                }
+            })? {
                 Some(dataset) => datasets.push(dataset),
                 None => {
                     tracing::warn!(
+                        dataset_namespace = %namespace,
                         dataset_name = %name,
                         dataset_version = %version,
-                        "Dataset manifest listed but not found when loading"
+                        "Dataset listed in metadata DB but not found when loading"
                     );
                 }
             }
@@ -409,6 +453,10 @@ impl DatasetStore {
         name: &str,
         version: impl Into<Option<&Version>> + std::fmt::Debug,
     ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
+        let namespace = &"_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
+
         // Validate dataset name
         let name =
             &name
@@ -421,10 +469,25 @@ impl DatasetStore {
         // If no version is provided use a placeholder version (default version, i.e., v0.0.0).
         let version = &version.into().cloned().unwrap_or_default();
 
-        // Try to load the dataset manifest using ManifestsStore
+        // Get manifest hash from metadata database
+        let Some(dataset_details) = self
+            .metadata_db
+            .get_dataset_version_tag(namespace, name, version)
+            .await
+            .map_err(|source| GetDerivedManifestError::ManifestRetrievalError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(source),
+            })?
+        else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the hash
+        let manifest_hash: Hash = dataset_details.hash.into();
         let Some(dataset_src) = self
             .dataset_manifests_store
-            .get(name, version)
+            .get(&manifest_hash)
             .await
             .map_err(|err| GetDerivedManifestError::ManifestRetrievalError {
                 name: name.to_string(),
@@ -444,6 +507,7 @@ impl DatasetStore {
             })?;
 
         tracing::debug!(
+            dataset_namespace = %namespace,
             dataset_name = %name,
             dataset_version = %version,
             "Loaded manifest: {manifest:?}"
@@ -492,10 +556,41 @@ impl DatasetStore {
                 })?;
         let dataset_version = dataset_version.into();
 
-        // Get the dataset manifest for the given name and version
+        // Get manifest hash from metadata database
+        let namespace = "_"
+            .parse::<Namespace>()
+            .expect("'_' should be a valid namespace");
+
+        let dataset_details = match dataset_version {
+            Some(version) => self
+                .metadata_db
+                .get_dataset_version_tag(&namespace, dataset_name, version)
+                .await
+                .map_err(|source| GetClientError::ManifestRetrievalError {
+                    name: dataset_name.to_string(),
+                    version: Some(version.to_string()),
+                    source: Box::new(source),
+                })?,
+            None => self
+                .metadata_db
+                .get_dataset_latest_tag(&namespace, dataset_name)
+                .await
+                .map_err(|source| GetClientError::ManifestRetrievalError {
+                    name: dataset_name.to_string(),
+                    version: None,
+                    source: Box::new(source),
+                })?,
+        };
+
+        let Some(dataset_details) = dataset_details else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the hash
+        let manifest_hash: Hash = dataset_details.hash.into();
         let Some(manifest_content) = self
             .dataset_manifests_store
-            .get(dataset_name, dataset_version)
+            .get(&manifest_hash)
             .await
             .map_err(|err| GetClientError::ManifestRetrievalError {
                 name: dataset_name.to_string(),

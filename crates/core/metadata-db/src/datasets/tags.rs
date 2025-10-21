@@ -24,7 +24,6 @@
 //! All tag types share the same underlying structure and are stored in the same `tags` table,
 //! providing a unified interface for referencing dataset versions.
 
-use futures::stream::Stream;
 use sqlx::{
     Executor, Postgres,
     types::chrono::{DateTime, Utc},
@@ -37,26 +36,29 @@ use super::{
     version::{Version, VersionOwned},
 };
 
-/// Insert a new tag
+/// Upsert a version tag
 ///
-/// Creates a version tag that points to a specific dataset-manifest combination.
-/// The combination of (namespace, name, version) must be unique.
-///
-/// Note: This function assumes the dataset-manifest link already exists in the
-/// dataset_manifests table. Violating this constraint will result in a foreign key error.
-pub async fn insert<'c, E>(
+/// Creates or updates a version tag that points to a specific manifest hash.
+/// If the tag exists with a different hash, it is updated and `updated_at` is modified.
+/// If the tag exists with the same hash, no changes are made.
+pub async fn upsert_version<'c, E>(
     exe: E,
-    namespace: &Namespace<'_>,
-    name: &Name<'_>,
-    version: &Version<'_>,
-    hash: &Hash<'_>,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+    version: Version<'_>,
+    hash: Hash<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO tags (namespace, name, version, hash)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO tags (namespace, name, version, hash, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW() AT TIME ZONE 'utc', NOW() AT TIME ZONE 'utc')
+        ON CONFLICT (namespace, name, version)
+        DO UPDATE SET
+            hash = EXCLUDED.hash,
+            updated_at = NOW() AT TIME ZONE 'utc'
+        WHERE tags.hash != EXCLUDED.hash
    "#};
 
     sqlx::query(query)
@@ -70,8 +72,72 @@ where
     Ok(())
 }
 
-/// Get tag with manifest details by namespace, name and version
-pub async fn get_by_namespace_name_and_version_with_details<'c, E>(
+/// Upsert the "latest" tag
+///
+/// Creates or updates the "latest" tag to point to a specific manifest hash.
+pub async fn upsert_latest<'c, E>(
+    exe: E,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+    hash: Hash<'_>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        INSERT INTO tags (namespace, name, version, hash, created_at, updated_at)
+        VALUES ($1, $2, 'latest', $3, NOW() AT TIME ZONE 'utc', NOW() AT TIME ZONE 'utc')
+        ON CONFLICT (namespace, name, version)
+        DO UPDATE SET
+            hash = EXCLUDED.hash,
+            updated_at = NOW() AT TIME ZONE 'utc'
+        WHERE tags.hash != EXCLUDED.hash
+   "#};
+
+    sqlx::query(query)
+        .bind(namespace)
+        .bind(name)
+        .bind(hash)
+        .execute(exe)
+        .await?;
+
+    Ok(())
+}
+
+/// Upsert the "dev" tag
+///
+/// Creates or updates the "dev" tag to point to a specific manifest hash.
+pub async fn upsert_dev<'c, E>(
+    exe: E,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+    hash: Hash<'_>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        INSERT INTO tags (namespace, name, version, hash, created_at, updated_at)
+        VALUES ($1, $2, 'dev', $3, NOW() AT TIME ZONE 'utc', NOW() AT TIME ZONE 'utc')
+        ON CONFLICT (namespace, name, version)
+        DO UPDATE SET
+            hash = EXCLUDED.hash,
+            updated_at = NOW() AT TIME ZONE 'utc'
+        WHERE tags.hash != EXCLUDED.hash
+   "#};
+
+    sqlx::query(query)
+        .bind(namespace)
+        .bind(name)
+        .bind(hash)
+        .execute(exe)
+        .await?;
+
+    Ok(())
+}
+
+/// Get a tag by namespace, name, and version
+pub async fn get_version<'c, E>(
     exe: E,
     namespace: Namespace<'_>,
     name: Name<'_>,
@@ -82,17 +148,14 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            t.namespace,
-            t.name,
-            t.version,
-            t.hash,
-            m.path,
-            t.created_at,
-            t.updated_at
-        FROM tags t
-        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
-        JOIN manifest_files m ON dm.hash = m.hash
-        WHERE t.namespace = $1 AND t.name = $2 AND t.version = $3
+            namespace,
+            name,
+            version,
+            hash,
+            created_at,
+            updated_at
+        FROM tags
+        WHERE namespace = $1 AND name = $2 AND version = $3
     "#};
 
     let result = sqlx::query_as(query)
@@ -105,54 +168,12 @@ where
     Ok(result)
 }
 
-/// Check if a tag exists for the given namespace, name and version
-pub async fn exists_by_namespace_name_and_version<'c, E>(
-    exe: E,
-    namespace: Namespace<'_>,
-    name: Name<'_>,
-    version: Version<'_>,
-) -> Result<bool, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = "SELECT COUNT(*) FROM tags WHERE namespace = $1 AND name = $2 AND version = $3";
-
-    let result: i64 = sqlx::query_scalar(query)
-        .bind(namespace)
-        .bind(name)
-        .bind(version)
-        .fetch_one(exe)
-        .await?;
-
-    Ok(result > 0)
-}
-
-/// Get manifest hash by namespace, name and version
+/// Resolve the "latest" tag to its corresponding semver tag
 ///
-/// Resolves the manifest hash for a specific dataset version without fetching
-/// additional manifest details. This is more efficient than full tag queries
-/// when only the hash is needed.
-pub async fn get_hash_by_namespace_name_version<'c, E>(
-    exe: E,
-    namespace: &Namespace<'_>,
-    name: &Name<'_>,
-    version: &Version<'_>,
-) -> Result<Option<HashOwned>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = "SELECT hash FROM tags WHERE namespace = $1 AND name = $2 AND version = $3";
-
-    sqlx::query_scalar(query)
-        .bind(namespace)
-        .bind(name)
-        .bind(version)
-        .fetch_optional(exe)
-        .await
-}
-
-/// Get the latest version tag for a dataset by namespace and name
-pub async fn get_latest_by_namespace_and_name<'c, E>(
+/// Returns the semver tag (excluding "dev" and "latest") that points to the same hash
+/// as the "latest" tag. If multiple semver tags point to the same hash, returns the
+/// most recently updated one.
+pub async fn get_latest<'c, E>(
     exe: E,
     namespace: Namespace<'_>,
     name: Name<'_>,
@@ -161,19 +182,23 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
+        WITH latest_hash AS (
+            SELECT hash
+            FROM tags
+            WHERE namespace = $1 AND name = $2 AND version = 'latest'
+        )
         SELECT
             t.namespace,
             t.name,
             t.version,
             t.hash,
-            m.path,
             t.created_at,
             t.updated_at
         FROM tags t
-        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
-        JOIN manifest_files m ON dm.hash = m.hash
+        INNER JOIN latest_hash lh ON t.hash = lh.hash
         WHERE t.namespace = $1 AND t.name = $2
-        ORDER BY t.version DESC
+          AND t.version NOT IN ('dev', 'latest')
+        ORDER BY t.updated_at DESC
         LIMIT 1
     "#};
 
@@ -186,35 +211,78 @@ where
     Ok(result)
 }
 
-/// List all tags from the registry
-///
-/// Returns all tag records ordered by version DESC.
-pub async fn list_all<'c, E>(exe: E) -> Result<Vec<Tag>, sqlx::Error>
+/// Get a tag's hash by namespace, name, and version
+pub async fn get_version_hash<'c, E>(
+    exe: E,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+    version: Version<'_>,
+) -> Result<Option<HashOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT
-            t.namespace,
-            t.name,
-            t.version,
-            t.hash,
-            m.path,
-            t.created_at,
-            t.updated_at
-        FROM tags t
-        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
-        JOIN manifest_files m ON dm.hash = m.hash
-        ORDER BY t.version DESC
+        SELECT hash
+        FROM tags
+        WHERE namespace = $1 AND name = $2 AND version = $3
     "#};
 
-    sqlx::query_as(query).fetch_all(exe).await
+    sqlx::query_scalar(query)
+        .bind(namespace)
+        .bind(name)
+        .bind(version)
+        .fetch_optional(exe)
+        .await
 }
 
-/// List all versions for a dataset by namespace and name
+/// Get the "latest" tag's hash
+pub async fn get_latest_hash<'c, E>(
+    exe: E,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+) -> Result<Option<HashOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT hash
+        FROM tags
+        WHERE namespace = $1 AND name = $2 AND version = 'latest'
+    "#};
+
+    sqlx::query_scalar(query)
+        .bind(namespace)
+        .bind(name)
+        .fetch_optional(exe)
+        .await
+}
+
+/// Get the "dev" tag's hash
+pub async fn get_dev_hash<'c, E>(
+    exe: E,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+) -> Result<Option<HashOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT hash
+        FROM tags
+        WHERE namespace = $1 AND name = $2 AND version = 'dev'
+    "#};
+
+    sqlx::query_scalar(query)
+        .bind(namespace)
+        .bind(name)
+        .fetch_optional(exe)
+        .await
+}
+
+/// List all versions for a dataset
 ///
-/// Returns all versions for the specified dataset ordered by version DESC.
-pub async fn list_by_namespace_and_name<'c, E>(
+/// Returns semver versions only (excludes "dev" and "latest"), ordered by version descending.
+pub async fn list_versions<'c, E>(
     exe: E,
     namespace: Namespace<'_>,
     name: Name<'_>,
@@ -226,6 +294,7 @@ where
         SELECT version
         FROM tags
         WHERE namespace = $1 AND name = $2
+          AND version NOT IN ('dev', 'latest')
         ORDER BY version DESC
     "#};
 
@@ -236,29 +305,27 @@ where
         .await
 }
 
-/// Stream all tags from the registry
+/// List all tags
 ///
-/// Returns a stream of all tag records ordered by version DESC.
-pub fn stream<'e, E>(executor: E) -> impl Stream<Item = Result<Tag, sqlx::Error>> + 'e
+/// Returns all semver tags (excludes "dev" and "latest"), ordered by version descending.
+pub async fn list_all<'c, E>(exe: E) -> Result<Vec<Tag>, sqlx::Error>
 where
-    E: Executor<'e, Database = Postgres> + 'e,
+    E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT
-            t.namespace,
-            t.name,
-            t.version,
-            t.hash,
-            m.path,
-            t.created_at,
-            t.updated_at
-        FROM tags t
-        JOIN dataset_manifests dm ON t.namespace = dm.namespace AND t.name = dm.name AND t.hash = dm.hash
-        JOIN manifest_files m ON dm.hash = m.hash
-        ORDER BY t.version DESC
+            namespace,
+            name,
+            version,
+            hash,
+            created_at,
+            updated_at
+        FROM tags
+        WHERE version NOT IN ('dev', 'latest')
+        ORDER BY version DESC
     "#};
 
-    sqlx::query_as(query).fetch(executor)
+    sqlx::query_as(query).fetch_all(exe).await
 }
 
 /// Tag record from the `tags` table
@@ -272,9 +339,6 @@ pub struct Tag {
     pub version: VersionOwned,
     /// Manifest hash this tag references
     pub hash: HashOwned,
-    /// File path where the manifest is stored
-    #[sqlx(rename = "path")]
-    pub manifest_path: String,
     /// Timestamp when the tag was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the tag was last updated

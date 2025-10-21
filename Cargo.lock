@@ -3585,6 +3585,7 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "backon",
  "common",
  "datafusion",
  "datasets-common",

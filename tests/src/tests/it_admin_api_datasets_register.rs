@@ -148,9 +148,9 @@ async fn register_with_missing_dependency_fails() {
 }
 
 #[tokio::test]
-async fn register_existing_dataset_with_manifest_fails() {
+async fn register_existing_dataset_is_idempotent() {
     //* Given
-    let ctx = TestCtx::setup("test_register_dataset_already_exists").await;
+    let ctx = TestCtx::setup("test_register_dataset_idempotent").await;
     let manifest = create_test_manifest("register_test_existing_dataset", "1.0.0");
 
     // Register dataset first to create existing state
@@ -161,7 +161,7 @@ async fn register_existing_dataset_with_manifest_fails() {
         "initial registration should succeed"
     );
 
-    // Prepare duplicate registration request
+    // Prepare duplicate registration request with same hash
     let manifest_json =
         serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
     let register_request = RegisterRequest {
@@ -173,32 +173,21 @@ async fn register_existing_dataset_with_manifest_fails() {
         manifest: manifest_json.parse().expect("Valid JSON"),
     };
 
-    //* When
+    //* When - Register same dataset again
     let resp = ctx.register(register_request).await;
 
-    //* Then
+    //* Then - Should succeed (idempotent)
     assert_eq!(
         resp.status(),
-        StatusCode::CONFLICT,
-        "registration should fail when dataset already exists"
+        StatusCode::CREATED,
+        "registration should be idempotent when same dataset is registered again"
     );
-    let error_response: serde_json::Value = resp
-        .json()
-        .await
-        .expect("failed to parse error response JSON");
-    let error_code = error_response["error_code"]
-        .as_str()
-        .expect("error_code should be a string");
-    let error_message = error_response["error_message"]
-        .as_str()
-        .expect("error_message should be a string");
-    assert_eq!(
-        error_code, "DATASET_ALREADY_EXISTS",
-        "should return dataset exists error"
-    );
+
+    // Verify dataset still exists and is accessible
     assert!(
-        error_message.contains("already exists"),
-        "error message should indicate dataset already exists"
+        ctx.verify_dataset_exists("register_test_existing_dataset", "1.0.0")
+            .await,
+        "dataset should still exist after duplicate registration"
     );
 }
 
@@ -346,9 +335,10 @@ impl TestCtx {
             .expect("'_' should be a valid namespace");
         self.ctx
             .metadata_db()
-            .dataset_exists(namespace, name, version)
+            .get_dataset_version_tag(namespace, name, version)
             .await
             .expect("failed to check if dataset exists")
+            .is_some()
     }
 }
 
