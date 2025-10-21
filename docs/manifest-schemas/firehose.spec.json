@@ -20,16 +20,19 @@
       "description": "Network name, e.g., `mainnet`.",
       "type": "string"
     },
-    "schema": {
-      "description": "Dataset schema.\n\nLists the tables defined by this dataset.",
-      "$ref": "#/$defs/Schema"
-    },
     "start_block": {
       "description": "Dataset start block.",
       "type": "integer",
       "format": "uint64",
       "default": 0,
       "minimum": 0
+    },
+    "tables": {
+      "description": "Dataset tables. Maps table names to their definitions.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Table"
+      }
     },
     "version": {
       "description": "Dataset version, e.g., `1.0.0`",
@@ -40,12 +43,52 @@
   "required": [
     "name",
     "kind",
-    "network"
+    "network",
+    "tables"
   ],
   "$defs": {
+    "ArrowSchema": {
+      "description": "Arrow schema representation for serialization.\n\nContains an ordered list of fields that define the structure of a table.",
+      "type": "object",
+      "properties": {
+        "fields": {
+          "description": "Ordered list of fields in the schema",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Field"
+          }
+        }
+      },
+      "required": [
+        "fields"
+      ]
+    },
     "DataType": {
       "description": "Arrow data type, e.g. `Int32`, `Utf8`, etc.",
       "type": "string"
+    },
+    "Field": {
+      "description": "Arrow field definition with name, type, and nullability.\n\nRepresents a single column in a table schema.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Field name",
+          "type": "string"
+        },
+        "nullable": {
+          "description": "Whether the field can contain null values",
+          "type": "boolean"
+        },
+        "type": {
+          "description": "Arrow data type of the field",
+          "$ref": "#/$defs/DataType"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "nullable"
+      ]
     },
     "Name": {
       "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
@@ -53,15 +96,36 @@
       "minLength": 1,
       "pattern": "^[a-z_][a-z0-9_]*$"
     },
-    "Schema": {
-      "description": "A serializable representation of a collection of Arrow schemas without metadata.\n\nThis structure maps table names to their field definitions, providing a way to serialize\nand deserialize Arrow schemas while filtering out the special `SPECIAL_BLOCK_NUM` field.\n\nStructure: table name -> field name -> data type",
+    "Table": {
+      "description": "Table definition for raw datasets",
       "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/$defs/DataType"
+      "properties": {
+        "network": {
+          "description": "Network for this table",
+          "type": "string"
+        },
+        "schema": {
+          "description": "Arrow schema for this table",
+          "$ref": "#/$defs/TableSchema"
         }
-      }
+      },
+      "required": [
+        "schema",
+        "network"
+      ]
+    },
+    "TableSchema": {
+      "description": "Schema definition for a table.\n\nWraps an Arrow schema with field definitions including names, types, and nullability.",
+      "type": "object",
+      "properties": {
+        "arrow": {
+          "description": "Arrow schema definition",
+          "$ref": "#/$defs/ArrowSchema"
+        }
+      },
+      "required": [
+        "arrow"
+      ]
     },
     "Version": {
       "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
