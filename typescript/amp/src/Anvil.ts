@@ -23,8 +23,9 @@ import anvilManifest from "../test/fixtures/anvil_rpc.json" with { type: "json" 
  * The anvil dataset.
  *
  * Note: We use decodeSync to validate the JSON structure matches the DatasetRpc schema.
+ * The type assertion is needed because JSON imports don't preserve literal types.
  */
-export const dataset = Schema.decodeSync(Model.DatasetRpc)(anvilManifest)
+export const dataset = Schema.decodeSync(Model.DatasetRpc)(anvilManifest as any)
 
 // NODE: This is not a secret prviate key, it's one of the test keys from anvil's default mnemonic.
 const DEFAULT_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
