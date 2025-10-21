@@ -10,6 +10,8 @@ pub mod dataset;
 mod dataset_kind;
 pub mod evm;
 pub mod metrics;
+#[allow(clippy::doc_overindented_list_items)]
+#[allow(clippy::enum_variant_names)]
 mod proto;
 
 pub use client::Client;

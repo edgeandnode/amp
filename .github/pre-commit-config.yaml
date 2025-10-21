@@ -28,6 +28,14 @@ repos:
     stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true
+  - id: clippy
+    name: Lint Rust code with clippy
+    language: system
+    entry: just clippy
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
+    pass_filenames: false
+    require_serial: true
 
   ## TypeScript hooks
   - id: fmt-ts
@@ -42,7 +50,7 @@ repos:
     name: Check TypeScript code formatting
     language: system
     entry: just fmt-ts-check
-    types_or: [ts, tsx, javascript, json]
+    types_or: [ts, tsx, javascript]
     stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true

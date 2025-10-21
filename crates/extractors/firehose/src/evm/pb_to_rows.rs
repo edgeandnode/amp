@@ -103,7 +103,7 @@ pub fn protobufs_to_rows(
             block_num: header.block_num,
             timestamp: header.timestamp,
             tx_index,
-            tx_hash: tx_hash.clone(),
+            tx_hash,
 
             to: if tx.to.is_empty() {
                 None
@@ -164,7 +164,7 @@ pub fn protobufs_to_rows(
                 block_num: header.block_num,
                 timestamp: header.timestamp,
                 tx_index,
-                tx_hash: tx_hash.clone(),
+                tx_hash,
                 index: call_index,
                 parent_index: call.parent_index,
                 depth: call.depth,
@@ -183,8 +183,8 @@ pub fn protobufs_to_rows(
                     .transpose()?,
                 gas_limit: call.gas_limit,
                 gas_consumed: call.gas_consumed,
-                return_data: call.return_data.into(),
-                input: call.input.into(),
+                return_data: call.return_data,
+                input: call.input,
                 executed_code: call.executed_code,
                 selfdestruct: call.suicide,
                 begin_ordinal: call.begin_ordinal,
@@ -217,7 +217,7 @@ pub fn protobufs_to_rows(
                     block_num: header.block_num,
                     timestamp: header.timestamp,
                     tx_index,
-                    tx_hash: tx_hash.clone(),
+                    tx_hash,
                     address: log
                         .address
                         .try_into()
@@ -226,7 +226,7 @@ pub fn protobufs_to_rows(
                     topic1,
                     topic2,
                     topic3,
-                    data: log.data.into(),
+                    data: log.data,
                     log_index: log.block_index,
                 };
                 logs.append(&log);
@@ -245,17 +245,15 @@ pub fn protobufs_to_rows(
         builder.append(&header);
         builder
             .build(block.clone())
-            .map_err(|e| ArrowError(dbg!(e).into()))?
+            .map_err(|e| ArrowError(dbg!(e)))?
     };
     let transactions_rows = transactions
         .build(block.clone())
-        .map_err(|e| ArrowError(dbg!(e).into()))?;
+        .map_err(|e| ArrowError(dbg!(e)))?;
     let calls_rows = calls
         .build(block.clone())
-        .map_err(|e| ArrowError(dbg!(e).into()))?;
-    let logs_rows = logs
-        .build(block.clone())
-        .map_err(|e| ArrowError(dbg!(e).into()))?;
+        .map_err(|e| ArrowError(dbg!(e)))?;
+    let logs_rows = logs.build(block.clone()).map_err(|e| ArrowError(dbg!(e)))?;
 
     Ok(RawDatasetRows::new(vec![
         header_row,
@@ -305,14 +303,14 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .receipt_root
             .try_into()
             .map_err(|b| Malformed("receipt_root", b))?,
-        logs_bloom: header.logs_bloom.into(),
+        logs_bloom: header.logs_bloom,
         difficulty: header
             .difficulty
             .ok_or(Missing("difficulty"))
             .and_then(|b| non_negative_pb_bigint_to_evm_currency("difficulty", b))?,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
-        extra_data: header.extra_data.into(),
+        extra_data: header.extra_data,
         mix_hash: header
             .mix_hash
             .try_into()

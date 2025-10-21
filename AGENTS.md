@@ -305,9 +305,8 @@ Development Progress:
 4. **Lint with clippy**:
     - **Check Skill**: `.claude/skills/code-check/SKILL.md`
     - **Command**: `just clippy-crate <crate-name>`
-    - **Fix ALL warnings**: Zero tolerance for clippy warnings (see Continuous Improvement section)
-    - **Opportunistic fixes**: Fix nearby warnings in related files
-    - **Validation**: Re-run until zero warnings
+   - **Must pass**: Fix all clippy warnings
+    - **Validation**: Re-run until zero warnings before proceeding
 
 5. **Run tests**:
     - **Check Skill**: `.claude/skills/code-test/SKILL.md`
@@ -369,52 +368,6 @@ Edit File → [Check Skills: format] → just fmt-file
 - **Always run tests**: See `.claude/skills/code-test/SKILL.md` for commands
 - **Always format code**: See `.claude/skills/code-format/SKILL.md` for commands
 - **Fix all warnings**: See `.claude/skills/code-check/SKILL.md` for clippy usage
-
-### 🔄 Continuous Improvement: Clippy Integration
-
-**AI agents MUST actively work towards enabling Clippy in CI by incrementally improving code quality.**
-
-#### The Goal
-Enable `clippy` checks in CI to enforce Rust best practices and catch common mistakes automatically. Currently, the codebase may have clippy warnings that prevent this integration.
-
-#### Required Actions for ALL AI Agents
-
-**When working on ANY crate:**
-
-1. **After making your changes**, ALWAYS run:
-   ```bash
-   just clippy-crate <crate-name>
-   ```
-
-2. **Fix ALL clippy warnings** in the files you modified:
-   - Never ignore clippy warnings with `#[allow(...)]` unless absolutely necessary and documented
-   - Treat clippy suggestions as mandatory improvements
-   - If a clippy warning seems incorrect, investigate thoroughly before suppressing
-
-3. **Opportunistically fix nearby warnings**:
-   - If you see clippy warnings in related files you didn't directly modify, fix them too
-   - Each PR should leave the codebase in a better state than it was found
-   - Document any warnings you cannot fix and why
-
-4. **Track progress** towards clippy-clean codebase:
-   - Report how many warnings you fixed in your changes
-   - Note if the crate you worked on is now clippy-clean
-   - Celebrate when entire crates become warning-free
-
-#### Why This Matters
-
-- **Code Quality**: Clippy catches common bugs and anti-patterns
-- **Maintainability**: Consistent code style and best practices
-- **CI Integration**: Once all crates are clean, we can add `clippy` to CI to prevent regressions
-- **Learning**: Clippy warnings teach Rust best practices
-
-#### Success Metrics
-
-- **Per-PR**: Number of clippy warnings fixed vs introduced (should always be net positive)
-- **Per-Crate**: Crates that are completely clippy-clean
-- **Project-wide**: When all crates are clean, enable `just clippy` in CI
-
-**Remember: Every change is an opportunity to improve. Fix clippy warnings incrementally, and we'll reach CI integration together.**
 
 ### 📦 Summary: Key Takeaways for AI Agents
 

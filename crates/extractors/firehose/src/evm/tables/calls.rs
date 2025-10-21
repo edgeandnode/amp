@@ -25,7 +25,7 @@ pub fn table(network: String) -> Table {
     )
 }
 
-pub const TABLE_NAME: &'static str = "calls";
+pub const TABLE_NAME: &str = "calls";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {

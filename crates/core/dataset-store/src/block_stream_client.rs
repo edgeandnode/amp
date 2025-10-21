@@ -6,7 +6,7 @@ use futures::Stream;
 pub(crate) enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
     EthBeacon(eth_beacon_datasets::BeaconClient),
-    Firehose(firehose_datasets::Client),
+    Firehose(Box<firehose_datasets::Client>),
 }
 
 impl BlockStreamer for BlockStreamClient {
