@@ -41,7 +41,9 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
         (telemetry_layer, tracer_provider)
     };
 
-    let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal());
 
     tracing_subscriber::Registry::default()
         .with(env_filter)
