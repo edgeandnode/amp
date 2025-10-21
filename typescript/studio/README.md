@@ -84,10 +84,10 @@ anvil
 forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-10. Use `ampd` to generate a manifest. Run in repo root
+10. Use `ampctl` to generate a manifest. Run in repo root
 
 ```bash
-AMP_CONFIG=config.toml cargo run --bin ampd -- generate-manifest --network anvil --kind evm-rpc --name anvil -o manifest-schemas/anvil.json
+AMP_CONFIG=config.toml cargo run --bin ampctl -- gen-manifest --network anvil --kind evm-rpc --name anvil -o manifest-schemas/anvil.json
 ```
 
 11. Use `ampd` to dump the dataset

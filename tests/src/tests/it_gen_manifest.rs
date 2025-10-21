@@ -1,4 +1,4 @@
-use ampd::gen_manifest_cmd;
+use ampctl::cmd::gen_manifest;
 use datasets_common::name::Name;
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
@@ -18,7 +18,7 @@ async fn gen_manifest_produces_expected_eth_rpc_json() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
+    let result = gen_manifest::generate_manifest(
         name.clone(),
         kind,
         network.clone(),
@@ -64,7 +64,8 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, false, &mut out).await;
+        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
+            .await;
 
     //* Then
     assert!(
@@ -93,7 +94,8 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, false, &mut out).await;
+        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
+            .await;
 
     //* Then
     assert!(
@@ -121,7 +123,7 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(name, kind, network, None, false, &mut out).await;
+    let result = gen_manifest::generate_manifest(name, kind, network, None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -150,7 +152,7 @@ async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest_cmd::run(
+    let result = gen_manifest::generate_manifest(
         name.clone(),
         kind,
         network.clone(),
@@ -189,7 +191,8 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest_cmd::run(name.clone(), kind, network.clone(), None, false, &mut out).await;
+        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
+            .await;
 
     //* Then
     assert!(

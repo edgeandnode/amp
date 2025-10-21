@@ -12,7 +12,7 @@ import * as Model from "./Model.ts"
  *
  * To regenerate the manifest, run:
  * ```bash
- * cargo run --release -p ampd -- generate-manifest --kind evm-rpc --name anvil --network anvil --start-block 0 > typescript/amp/test/fixtures/anvil_rpc.json
+ * cargo run --release -p ampctl -- gen-manifest --kind evm-rpc --name anvil --network anvil --start-block 0 > typescript/amp/test/fixtures/anvil_rpc.json
  * ```
  *
  * Then adjust version to 0.1.0

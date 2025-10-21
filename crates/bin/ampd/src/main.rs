@@ -1,8 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-use ampd::{dev_cmd, dump_cmd, gen_manifest_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
+use ampd::{dev_cmd, dump_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
-use dataset_store::DatasetKind;
 use datasets_common::reference::Reference;
 use dump::EndBlock;
 
@@ -15,8 +14,6 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 struct Args {
     /// The configuration file to use. This file defines where to look for dataset definitions and
     /// providers, along with many other configuration options.
-    ///
-    /// This argument is optional for the `generate-manifest` command.
     #[arg(long, env = "AMP_CONFIG")]
     config: Option<String>,
 
@@ -99,34 +96,6 @@ enum Command {
         node_id: String,
     },
     Controller,
-    GenerateManifest {
-        /// The name of the network.
-        #[arg(long, required = true, env = "GM_NETWORK")]
-        network: String,
-
-        /// Kind of the dataset.
-        #[arg(long, required = true, env = "GM_KIND")]
-        kind: String,
-
-        /// The name of the dataset.
-        #[arg(long, required = true, env = "GM_NAME")]
-        name: String,
-
-        /// Output file or directory. If it's a directory, the generated file name will
-        /// match the `kind` parameter.
-        ///
-        /// If not specified, the manifest will be printed to stdout.
-        #[arg(short, long, env = "GM_OUT")]
-        out: Option<PathBuf>,
-
-        /// The starting block number for the dataset. Defaults to 0.
-        #[arg(long, env = "GM_START_BLOCK")]
-        start_block: Option<u64>,
-
-        /// Only include finalized block data.
-        #[arg(long, env = "GM_FINALIZED_BLOCKS_ONLY")]
-        finalized_blocks_only: bool,
-    },
     /// Run migrations on the metadata database
     Migrate,
     /// Restore dataset snapshots from storage
@@ -288,52 +257,6 @@ async fn main_inner() -> Result<(), BoxError> {
 
             tracing::info!("Controller Admin API running at {}", addr);
             let result = server.await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
-        }
-        Command::GenerateManifest {
-            network,
-            kind,
-            name,
-            out,
-            start_block,
-            finalized_blocks_only,
-        } => {
-            let name = name.parse()?;
-            let kind = kind.parse::<DatasetKind>()?;
-
-            let (tracing_provider, metrics_provider, _) = monitoring::init(None)?;
-
-            let result = if let Some(mut out) = out {
-                if out.is_dir() {
-                    out.push(format!("{}.json", &kind));
-                }
-
-                let mut out = std::fs::File::create(out)?;
-                gen_manifest_cmd::run(
-                    name,
-                    kind,
-                    network,
-                    start_block,
-                    finalized_blocks_only,
-                    &mut out,
-                )
-                .await
-            } else {
-                let mut out = std::io::stdout();
-                gen_manifest_cmd::run(
-                    name,
-                    kind,
-                    network,
-                    start_block,
-                    finalized_blocks_only,
-                    &mut out,
-                )
-                .await
-            };
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 

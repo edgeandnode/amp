@@ -28,7 +28,6 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
   - `dev`: Start development server
   - `server`: Start query servers
   - `worker`: Run distributed worker node
-  - `generate-manifest`: Create dataset manifests
 
 ### 2. Data Extraction (`dump`)
 - Parallel extraction with configurable workers
@@ -37,7 +36,6 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ### 3. Query Serving (`server`)
 - **Arrow Flight Server** (port 1602): High-performance binary protocol
 - **JSON Lines Server** (port 1603): Simple HTTP interface
-- **Admin API** (port 1610): Management interface
 - Features:
   - SQL query execution via DataFusion
   - Streaming query support

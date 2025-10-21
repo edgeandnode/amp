@@ -13,7 +13,6 @@ Amp provides several commands that can be combined into different deployment pat
 3. **`worker`** - Standalone worker process for executing scheduled extraction jobs
 4. **`controller`** - Controller service providing the Admin API for job management
 5. **`migrate`** - Run database migrations on the metadata database
-6. **`generate-manifest`** - Generate raw dataset manifest JSON files
 
 ### Operational Modes
 
