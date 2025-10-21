@@ -110,6 +110,7 @@ pub struct JsonRpcClient {
 }
 
 impl JsonRpcClient {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         url: Url,
         network: String,
@@ -135,6 +136,7 @@ impl JsonRpcClient {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_ipc(
         path: std::path::PathBuf,
         network: String,
@@ -160,6 +162,7 @@ impl JsonRpcClient {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_ws(
         url: Url,
         network: String,
@@ -271,7 +274,7 @@ impl JsonRpcClient {
                         match receipt {
                             Some(receipt) => received_receipts.push(receipt),
                             None => {
-                                yield Err(format!("missing receipt for transaction: {}", hex::encode(&hash)).into());
+                                yield Err(format!("missing receipt for transaction: {}", hex::encode(hash)).into());
                                 continue 'outer;
                             }
                         }
@@ -484,7 +487,7 @@ impl RootProviderWithMetrics {
         provider: String,
         network: String,
     ) -> Self {
-        let metrics = meter.map(|meter| crate::metrics::MetricsRegistry::new(meter));
+        let metrics = meter.map(crate::metrics::MetricsRegistry::new);
         Self {
             inner,
             metrics,
@@ -686,20 +689,12 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
         logs_bloom: <[u8; 256]>::from(header.logs_bloom).into(),
         difficulty: EvmCurrency::try_from(header.difficulty)
             .map_err(|e| ToRowError::Overflow("difficulty", e.into()))?,
-        gas_limit: u64::try_from(header.gas_limit)
-            .map_err(|e| ToRowError::Overflow("gas_limit", e.into()))?,
-        gas_used: u64::try_from(header.gas_used)
-            .map_err(|e| ToRowError::Overflow("gas_used", e.into()))?,
+        gas_limit: header.gas_limit,
+        gas_used: header.gas_used,
         extra_data: header.extra_data.0.to_vec(),
         mix_hash: *header.mix_hash.unwrap_or_default(),
         nonce: u64::from(header.nonce.unwrap_or_default()),
-        base_fee_per_gas: header
-            .base_fee_per_gas
-            .map(|b| {
-                EvmCurrency::try_from(b)
-                    .map_err(|e| ToRowError::Overflow("base_fee_per_gas", e.into()))
-            })
-            .transpose()?,
+        base_fee_per_gas: header.base_fee_per_gas.map(EvmCurrency::from),
         withdrawals_root: header.withdrawals_root.map(Into::into),
         blob_gas_used: header.blob_gas_used,
         excess_blob_gas: header.excess_blob_gas,
@@ -729,7 +724,7 @@ fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<logs::Log, ToRowE
         log_index: u32::try_from(log.log_index.ok_or(ToRowError::Missing("log_index"))?)
             .map_err(|e| ToRowError::Overflow("log_index", e.into()))?,
         address: log.address().into(),
-        topic0: log.topics().get(0).cloned().map(Into::into),
+        topic0: log.topics().first().cloned().map(Into::into),
         topic1: log.topics().get(1).cloned().map(Into::into),
         topic2: log.topics().get(2).cloned().map(Into::into),
         topic3: log.topics().get(3).cloned().map(Into::into),
@@ -774,8 +769,7 @@ fn rpc_transaction_to_row(
         v: if sig.v() { vec![1] } else { vec![] },
         r: sig.r().to_be_bytes_vec(),
         s: sig.s().to_be_bytes_vec(),
-        receipt_cumulative_gas_used: u64::try_from(receipt.inner.inner.cumulative_gas_used())
-            .map_err(|e| ToRowError::Overflow("cumulative_gas_used", e.into()))?,
+        receipt_cumulative_gas_used: receipt.inner.inner.cumulative_gas_used(),
         r#type: tx.ty().into(),
         max_fee_per_gas: i128::try_from(tx.inner().inner.max_fee_per_gas())
             .map_err(|e| ToRowError::Overflow("max_fee_per_gas", e.into()))?,
@@ -790,6 +784,6 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.as_recovered().signer().into(),
-        status: receipt.inner.inner.status().into(),
+        status: receipt.inner.inner.status(),
     })
 }

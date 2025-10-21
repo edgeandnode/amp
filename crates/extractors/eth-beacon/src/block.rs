@@ -113,7 +113,7 @@ pub mod api {
         },
         SlotFilled {
             version: String,
-            data: Data,
+            data: Box<Data>,
         },
     }
     #[serde_as]

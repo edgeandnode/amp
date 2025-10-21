@@ -596,7 +596,7 @@ impl DatasetStore {
                     })?;
                 firehose_datasets::Client::new(config, meter)
                     .await
-                    .map(BlockStreamClient::Firehose)
+                    .map(|c| BlockStreamClient::Firehose(Box::new(c)))
                     .map_err(|err| GetClientError::FirehoseClientError {
                         name: dataset_name.to_string(),
                         source: err,
@@ -1190,7 +1190,7 @@ mod tests {
         };
         for (input, expected) in cases {
             let deps = input
-                .into_iter()
+                .iter()
                 .map(|(k, v)| (name_to_ref(k), v.iter().map(|n| name_to_ref(n)).collect()))
                 .collect();
             let expected: Option<Vec<datasets_common::reference::Reference>> =

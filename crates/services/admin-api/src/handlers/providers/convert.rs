@@ -92,13 +92,12 @@ mod tests {
                     .expect("should be integer"),
                 30
             );
-            assert_eq!(
+            assert!(
                 table
                     .get("enabled")
                     .expect("should have enabled")
                     .as_bool()
-                    .expect("should be bool"),
-                true
+                    .expect("should be bool")
             );
         }
 
@@ -232,12 +231,11 @@ mod tests {
                     .expect("should be integer"),
                 30
             );
-            assert_eq!(
+            assert!(
                 map.get("enabled")
                     .expect("should have enabled")
                     .as_bool()
-                    .expect("should be bool"),
-                true
+                    .expect("should be bool")
             );
         }
 

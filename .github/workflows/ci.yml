@@ -173,6 +173,9 @@ jobs:
       - name: Cargo check (release)
         run: just check-rs --release
 
+      - name: Run clippy (release)
+        run: just clippy --release
+
   typescript:
     name: TypeScript code style & types
     runs-on: ubuntu-latest

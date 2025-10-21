@@ -136,7 +136,7 @@ impl AmpCollectorInnerTask {
     /// and/or neither respective interval has elapsed this is
     /// a no-op
     pub async fn try_run(self) -> TaskResult<Self> {
-        Ok(self.try_compact().await?.try_collect().await?)
+        self.try_compact().await?.try_collect().await
     }
 
     async fn collect(mut self) -> CollectionResult<Self> {

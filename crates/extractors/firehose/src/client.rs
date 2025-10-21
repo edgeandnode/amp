@@ -90,7 +90,7 @@ impl Client {
         final_blocks_only: bool,
     ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>> + use<>, Error> {
         let request = tonic::Request::new(pbfirehose::Request {
-            start_block_num: start as i64,
+            start_block_num: start,
             stop_block_num: stop,
             final_blocks_only,
             cursor: String::new(),
@@ -127,6 +127,7 @@ pub struct AuthInterceptor {
 }
 
 impl AuthInterceptor {
+    #[allow(clippy::result_large_err)]
     pub fn new(token: Option<String>) -> Result<Self, Error> {
         Ok(AuthInterceptor {
             token: token.map_or(Ok(None), |token| {

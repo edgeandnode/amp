@@ -446,7 +446,7 @@ mod tests {
 
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 2);
-        matches!(results[1], Err(_)); // Error due to bad ordering
+        assert!(results[1].is_err()); // Error due to bad ordering
     }
 
     #[tokio::test]
@@ -475,7 +475,7 @@ mod tests {
 
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 1);
-        matches!(results[0], Err(_)); // Should be an error
+        assert!(results[0].is_err()); // Should be an error
     }
 
     #[tokio::test]

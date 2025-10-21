@@ -767,7 +767,7 @@ fn flight_data_stream(
                     }
                     QueryMessage::BlockComplete(_) => (),
                     QueryMessage::MicrobatchEnd(_) => {
-                        assert!(ranges.len() > 0);
+                        assert!(!ranges.is_empty());
                         let empty_batch = RecordBatch::new_empty(schema.clone());
                         let app_metadata = json!({
                             "ranges": &ranges,
@@ -795,6 +795,7 @@ fn flight_data_stream(
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn encode_record_batch(
     batch: RecordBatch,
     app_metadata: Option<&serde_json::Value>,

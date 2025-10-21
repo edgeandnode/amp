@@ -95,7 +95,7 @@ impl Compactor {
 
     #[tracing::instrument(skip_all, fields(table = %self.table.table_ref()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
-        if self.opts.compactor.active.load(Ordering::SeqCst) == false {
+        if !self.opts.compactor.active.load(Ordering::SeqCst) {
             return Ok(self);
         }
 
@@ -236,7 +236,7 @@ impl CompactionGroup {
         let output = self.write_and_finish().await?;
 
         // Calculate output metrics
-        let output_bytes = output.object_meta.size as u64;
+        let output_bytes = output.object_meta.size;
         let duration_millis = start_time.elapsed().as_millis() as f64;
 
         // Record metrics if available

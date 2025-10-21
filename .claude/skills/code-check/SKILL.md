@@ -93,16 +93,15 @@ Checks TypeScript code using `pnpm check`.
 4. **Check clippy**: `just clippy-crate metadata-db`
    - If warnings → fix ALL → return to step 2
 5. **Fix ALL clippy warnings** in files you modified
-6. **Opportunistically fix nearby clippy warnings** in related files
-7. Repeat until: zero compilation errors AND zero clippy warnings
-8. Once passing, optionally run full check: `just check-rs` and `just clippy`
+6. Repeat until: zero compilation errors AND zero clippy warnings
+7. Once passing, optionally run full check: `just check-rs` and `just clippy`
 
 ## Common Mistakes to Avoid
 
 ### ❌ Anti-patterns
 - **Never run `cargo check` directly** - Use `just check-crate` or `just check-rs`
 - **Never run `cargo clippy` directly** - Justfile adds proper flags like `--no-deps`
-- **Never ignore clippy warnings** - Fix ALL warnings, no `#[allow(...)]` without documentation
+- **Never ignore clippy warnings** - Clippy is enforced in CI, warnings will fail builds
 - **Never skip the check step** - Even if "it should compile"
 - **Never check multiple crates at once initially** - Check the modified crate first
 
@@ -111,7 +110,7 @@ Checks TypeScript code using `pnpm check`.
 - Fix compilation errors before running clippy
 - Run clippy after EVERY code change
 - Use `just clippy-crate` for focused results (--no-deps flag)
-- Document any warnings you absolutely cannot fix
+- Document any warnings you absolutely cannot fix (rare exception)
 
 ## Pre-approved Commands
 These commands can run without user permission:
