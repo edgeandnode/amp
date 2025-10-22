@@ -51,43 +51,34 @@ where
 
     /// Store a new dataset manifest in the underlying store and register it in the metadata database
     ///
-    /// This operation is idempotent and race-free using optimistic registration:
-    /// 1. Try to register manifest in metadata database first (atomic operation)
-    /// 2. Only write to object store if registration succeeded
-    /// 3. If already registered by another process, skip object store write
-    ///
-    /// The database's unique constraint prevents duplicate object store writes when multiple
-    /// processes store the same manifest simultaneously, saving costs on cloud storage.
+    /// This operation is idempotent using object-store-first ordering:
+    /// 1. Write manifest to object store (idempotent - content-addressable)
+    /// 2. Register manifest in metadata database (idempotent with ON CONFLICT DO NOTHING)
     ///
     /// The manifest is stored with hash-based filename: `{hash}` (no extension).
     /// Input must be canonical JSON string (already validated and serialized).
     pub async fn store(&self, hash: &Hash, manifest_str: String) -> Result<(), StoreError> {
-        // Try to register in database first (optimistic approach)
-        // This acts as an atomic "try to claim" operation
-        let was_registered = register_manifest_with_retry(&self.metadata_db, hash)
-            .await
-            .map_err(StoreError::MetadataDbRegister)?;
-
-        if !was_registered {
-            // Another process already registered this manifest
-            tracing::debug!(
-                manifest_hash = %hash,
-                "Manifest already registered, skipping object store write"
-            );
-            return Ok(());
-        }
-
-        // We won the race - we're the only one who will write to object store
-        tracing::debug!(
-            manifest_hash = %hash,
-            "Successfully registered manifest, writing to object store"
-        );
-
+        // Write to object store first (idempotent operation)
         let manifest_path = ObjectStorePath::from(hash.to_string());
         self.store
             .put(&manifest_path, manifest_str.into())
             .await
             .map_err(StoreError::ObjectStorePut)?;
+
+        tracing::debug!(
+            manifest_hash = %hash,
+            "Manifest written to object store, registering in database"
+        );
+
+        // Register in database (idempotent with ON CONFLICT DO NOTHING)
+        register_manifest_with_retry(&self.metadata_db, hash)
+            .await
+            .map_err(StoreError::MetadataDbRegister)?;
+
+        tracing::debug!(
+            manifest_hash = %hash,
+            "Manifest registered in database"
+        );
 
         Ok(())
     }
@@ -194,15 +185,11 @@ pub struct ManifestParseError(#[source] pub serde_json::Error);
 
 /// Register manifest file in metadata database with retry on connection errors
 ///
-/// Returns `true` if the manifest was successfully registered (didn't exist before),
-/// or `false` if it already existed (was previously registered).
-///
-/// This function wraps `register_manifest` with retry logic for transient database
-/// connection errors, using exponential backoff with jitter.
+/// This operation is idempotent (`ON CONFLICT DO NOTHING`).
 async fn register_manifest_with_retry(
     metadata_db: &MetadataDb,
     hash: &Hash,
-) -> Result<bool, metadata_db::Error> {
+) -> Result<(), metadata_db::Error> {
     let path = hash.to_string();
     (|| metadata_db.register_manifest(hash, path.as_str()))
         .retry(retry_policy())

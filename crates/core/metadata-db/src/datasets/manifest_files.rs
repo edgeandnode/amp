@@ -11,10 +11,9 @@ use super::hash::Hash;
 
 /// Insert a new manifest record
 ///
-/// Returns `true` if inserted (didn't exist), or `false` if already existed (ON CONFLICT).
-/// Enables optimistic registration: only the process returning `true` should proceed
-/// with expensive operations like object store writes.
-pub async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Cow<'_, str>) -> Result<bool, sqlx::Error>
+/// This operation is idempotent - uses ON CONFLICT DO NOTHING to silently ignore
+/// duplicate registrations. Both new insertions and existing records succeed.
+pub async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Cow<'_, str>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -22,19 +21,15 @@ where
         INSERT INTO manifest_files (hash, path)
         VALUES ($1, $2)
         ON CONFLICT (hash) DO NOTHING
-        RETURNING 1
     "#};
 
-    // Return constant 1 instead of hash for efficiency (4 bytes vs 64+ bytes)
-    let result: Option<i32> = sqlx::query_scalar(query)
+    sqlx::query(query)
         .bind(hash)
         .bind(path)
-        .fetch_optional(exe)
+        .execute(exe)
         .await?;
 
-    // If RETURNING gave us a result, the INSERT succeeded (we inserted it)
-    // If None, the ON CONFLICT triggered (already existed)
-    Ok(result.is_some())
+    Ok(())
 }
 
 /// Get manifest file path by hash

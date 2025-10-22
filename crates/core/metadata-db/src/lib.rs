@@ -804,13 +804,14 @@ impl MetadataDb {
 impl MetadataDb {
     /// Register manifest file in content-addressable storage
     ///
-    /// Inserts manifest hash and path into `manifest_files` table with ON CONFLICT DO NOTHING. Returns `true` if newly inserted (enabling optimistic registration pattern), `false` if already existed.
+    /// Inserts manifest hash and path into `manifest_files` table with ON CONFLICT DO NOTHING.
+    /// This operation is idempotent - duplicate registrations are silently ignored.
     #[instrument(skip(self), err)]
     pub async fn register_manifest(
         &self,
         manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
         manifest_path: impl Into<Cow<'_, str>> + std::fmt::Debug,
-    ) -> Result<bool, Error> {
+    ) -> Result<(), Error> {
         datasets::manifest_files::insert(&*self.pool, manifest_hash.into(), manifest_path.into())
             .await
             .map_err(Into::into)
