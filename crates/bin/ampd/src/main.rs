@@ -116,6 +116,13 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
+    // Initialize tokio-console subscriber if feature is enabled
+    #[cfg(feature = "console-subscriber")]
+    {
+        console_subscriber::init();
+        tracing::info!("tokio-console subscriber initialized");
+    }
+
     let Args {
         config: config_path,
         command,
