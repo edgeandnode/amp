@@ -6,7 +6,8 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{hash::Hash, name::Name, namespace::Namespace};
+use super::{name::Name, namespace::Namespace};
+use crate::manifests::ManifestHash;
 
 /// Internal SQL operations for dataset-manifest junction table
 ///
@@ -26,7 +27,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: Hash<'_>,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,

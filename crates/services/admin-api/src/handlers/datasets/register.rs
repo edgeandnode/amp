@@ -9,7 +9,7 @@ use datasets_common::{
     hash::hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
     version::Version,
 };
-use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
+use datasets_derived::manifest::DependencyValidationError;
 use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
@@ -17,7 +17,11 @@ use firehose_datasets::dataset::Manifest as FirehoseManifest;
 use crate::{
     ctx::Ctx,
     handlers::{
-        common::NonEmptyString,
+        common::{
+            NonEmptyString, ParseDerivedManifestError, ParseRawManifestError,
+            parse_and_canonicalize_raw_dataset_manifest,
+            parse_validate_and_canonicalize_derived_dataset_manifest,
+        },
         error::{ErrorResponse, IntoErrorResponse},
     },
 };
@@ -153,7 +157,7 @@ pub async fn handler(
 
     // Register the manifest
     ctx.dataset_store
-        .register_manifest(
+        .register_manifest_and_link(
             &payload.namespace,
             &payload.name,
             &manifest_hash,
@@ -340,104 +344,4 @@ impl From<ParseRawManifestError> for Error {
             ParseRawManifestError::Serialization(e) => Error::InvalidManifest(e),
         }
     }
-}
-
-/// Parse, validate, and re-serialize a derived dataset manifest to canonical JSON format
-///
-/// This function handles derived datasets which require dependency validation:
-/// 1. Deserialize from JSON string
-/// 2. Validate dependencies using `manifest.validate_dependencies()`
-/// 3. Re-serialize to canonical JSON
-///
-/// Returns canonical JSON string on success
-fn parse_validate_and_canonicalize_derived_dataset_manifest(
-    manifest_str: impl AsRef<str>,
-) -> Result<String, ParseDerivedManifestError> {
-    let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
-        .map_err(ParseDerivedManifestError::Deserialization)?;
-
-    manifest
-        .validate_dependencies()
-        .map_err(ParseDerivedManifestError::DependencyValidation)?;
-
-    serde_json::to_string(&manifest).map_err(ParseDerivedManifestError::Serialization)
-}
-
-/// Error type for derived dataset manifest parsing and validation
-///
-/// Represents the different failure points when processing a derived dataset manifest
-/// through the parse → validate → canonicalize pipeline.
-#[derive(Debug, thiserror::Error)]
-enum ParseDerivedManifestError {
-    /// Failed to deserialize the JSON string into a `DerivedDatasetManifest` struct
-    ///
-    /// This occurs when:
-    /// - JSON syntax is invalid
-    /// - JSON structure doesn't match the manifest schema
-    /// - Required fields are missing or have wrong types
-    #[error("failed to deserialize manifest: {0}")]
-    Deserialization(#[source] serde_json::Error),
-
-    /// Failed dependency validation after successful deserialization
-    ///
-    /// This occurs when:
-    /// - SQL queries reference datasets not declared in the dependencies list
-    /// - Circular dependencies are detected
-    /// - Other domain-specific validation rules are violated
-    #[error("dependency validation failed: {0}")]
-    DependencyValidation(#[source] DependencyValidationError),
-
-    /// Failed to serialize the validated manifest back to canonical JSON
-    ///
-    /// This occurs when:
-    /// - The manifest structure cannot be serialized (rare, indicates a bug)
-    /// - Memory allocation fails during serialization
-    ///
-    /// Note: This should rarely happen since we already deserialized successfully
-    #[error("failed to serialize manifest: {0}")]
-    Serialization(#[source] serde_json::Error),
-}
-
-/// Parse and re-serialize a raw dataset manifest to canonical JSON format
-///
-/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, EthBeacon):
-/// 1. Deserialize from JSON string
-/// 2. Re-serialize to canonical JSON
-///
-/// Returns canonical JSON string on success
-fn parse_and_canonicalize_raw_dataset_manifest<T>(
-    manifest_str: impl AsRef<str>,
-) -> Result<String, ParseRawManifestError>
-where
-    T: serde::de::DeserializeOwned + serde::Serialize,
-{
-    let manifest: T = serde_json::from_str(manifest_str.as_ref())
-        .map_err(ParseRawManifestError::Deserialization)?;
-    serde_json::to_string(&manifest).map_err(ParseRawManifestError::Serialization)
-}
-
-/// Error type for raw dataset manifest parsing and canonicalization
-///
-/// Represents the different failure points when processing raw dataset manifests
-/// (EvmRpc, Firehose, EthBeacon) through the parse → canonicalize pipeline.
-#[derive(Debug, thiserror::Error)]
-enum ParseRawManifestError {
-    /// Failed to deserialize the JSON string into the manifest struct
-    ///
-    /// This occurs when:
-    /// - JSON syntax is invalid
-    /// - JSON structure doesn't match the manifest schema
-    /// - Required fields are missing or have wrong types
-    #[error("failed to deserialize manifest: {0}")]
-    Deserialization(#[source] serde_json::Error),
-
-    /// Failed to serialize the manifest back to canonical JSON
-    ///
-    /// This occurs when:
-    /// - The manifest structure cannot be serialized (rare, indicates a bug)
-    /// - Memory allocation fails during serialization
-    ///
-    /// Note: This should rarely happen since we already deserialized successfully
-    #[error("failed to serialize manifest: {0}")]
-    Serialization(#[source] serde_json::Error),
 }

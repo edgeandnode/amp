@@ -112,9 +112,9 @@ pub async fn handler(
             }
         };
 
-    // Get the raw manifest JSON from the dataset manifests store using the hash
+    // Get the raw manifest JSON from the dataset store using the hash
     let manifest_hash: datasets_common::hash::Hash = dataset_details.hash.into();
-    let manifest_content = match ctx.dataset_manifests_store.get(&manifest_hash).await {
+    let manifest_content = match ctx.dataset_store.get_manifest(&manifest_hash).await {
         Ok(Some(content)) => content,
         Ok(None) => {
             tracing::debug!(
@@ -180,15 +180,15 @@ pub enum Error {
     #[error("manifest '{name}' version '{version}' not found")]
     NotFound { name: Name, version: Version },
 
-    /// Manifest retrieval error from the dataset manifests store
+    /// Manifest retrieval error from the dataset store
     ///
     /// This occurs when:
-    /// - The dataset manifests store is not accessible
-    /// - There's a configuration error in the store
+    /// - Failed to query manifest path from metadata database
+    /// - Failed to retrieve manifest from object store
     /// - I/O errors while reading manifest files
     /// - Unsupported manifest file format
     #[error("manifest retrieval error: {0}")]
-    ManifestRetrievalError(#[source] dataset_store::manifests::GetError),
+    ManifestRetrievalError(#[source] dataset_store::GetManifestError),
 
     /// Metadata database error
     ///

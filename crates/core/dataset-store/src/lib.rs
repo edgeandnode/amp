@@ -47,18 +47,20 @@ mod sql_visitors;
 
 use self::{
     block_stream_client::BlockStreamClient,
-    manifests::DatasetManifestsStore,
+    manifests::{DatasetManifestsStore, ManifestContent, ManifestPath},
     providers::{ProviderConfig, ProviderConfigsStore},
 };
 pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
     error::{
-        CatalogForSqlError, EthCallForDatasetError, ExtractDatasetFromFunctionNamesError,
-        ExtractDatasetFromTableRefsError, GetAllDatasetsError, GetClientError, GetDatasetError,
-        GetDerivedManifestError, GetLogicalCatalogError, GetPhysicalCatalogError,
-        PlanningCtxForSqlError, RegisterManifestError, SetVersionTagError,
+        CatalogForSqlError, DeleteManifestError, EthCallForDatasetError,
+        ExtractDatasetFromFunctionNamesError, ExtractDatasetFromTableRefsError,
+        GetAllDatasetsError, GetClientError, GetDatasetError, GetDerivedManifestError,
+        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError,
+        ListDatasetsUsingManifestError, PlanningCtxForSqlError, RegisterManifestError,
+        SetVersionTagError,
     },
-    manifests::StoreError,
+    manifests::{ManifestParseError, StoreError},
 };
 
 #[derive(Clone)]
@@ -93,37 +95,176 @@ impl DatasetStore {
     pub fn providers(&self) -> &ProviderConfigsStore {
         &self.provider_configs_store
     }
+}
 
-    /// Register a dataset manifest in both the dataset store and metadata database.
+// Manifest management APIs
+impl DatasetStore {
+    /// Store a manifest in both object store and metadata database without linking to datasets
     ///
-    /// This operation stores the manifest file and registers it in the metadata database.
-    /// The operation is idempotent - if the manifest already exists, no error is raised.
-    ///
-    /// After registration, the "dev" tag is automatically updated to point to this manifest,
-    /// making it the most recently registered manifest for the dataset.
-    ///
-    /// The manifest must be provided as a JSON string (canonical serialized form).
-    ///
-    /// ## Transaction Guarantees
-    ///
-    /// This method performs operations in two phases:
-    /// 1. **Object Storage** (outside transaction): Store manifest file - idempotent if file already exists
-    /// 2. **Database Transaction**: Link manifest to dataset AND update dev tag - both succeed atomically or both fail
-    ///
-    /// If the database transaction fails, the manifest file will exist in object storage but won't be
-    /// linked to any dataset, which is safe due to idempotency and eventual consistency. The operation
-    /// can be safely retried from the beginning.
+    /// Does NOT create version tags or link to datasets. Idempotent (content-addressable storage
+    /// + `ON CONFLICT DO NOTHING`). If DB registration fails after object store write, retry is safe.
     pub async fn register_manifest(
+        &self,
+        hash: &Hash,
+        content: String,
+    ) -> Result<(), RegisterManifestError> {
+        let path = self
+            .dataset_manifests_store
+            .store(hash, content)
+            .await
+            .map_err(RegisterManifestError::ManifestStorage)?;
+
+        metadata_db::manifests::register(&self.metadata_db, hash, path)
+            .await
+            .map_err(RegisterManifestError::MetadataRegistration)?;
+
+        Ok(())
+    }
+
+    /// Retrieve a manifest by its content hash
+    ///
+    /// Resolves hash to file path via metadata database, then fetches content from object store.
+    /// Returns `None` if manifest not found in DB or object store.
+    pub async fn get_manifest(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<ManifestContent>, GetManifestError> {
+        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, hash)
+            .await
+            .map_err(GetManifestError::MetadataDbQueryPath)?
+            .map(ManifestPath::from)
+        else {
+            return Ok(None);
+        };
+
+        let content = self
+            .dataset_manifests_store
+            .get(path)
+            .await
+            .map_err(GetManifestError::ObjectStoreError)?;
+
+        Ok(content)
+    }
+
+    /// Delete a manifest from both metadata database and object store
+    ///
+    /// Uses transaction with `SELECT FOR UPDATE` to check links before deletion, preventing
+    /// concurrent link creation. Returns `ManifestLinked` error if linked to any datasets.
+    /// Idempotent (returns `Ok(())` if not found). Deletes from object store before commit.
+    pub async fn delete_manifest(&self, hash: &Hash) -> Result<(), DeleteManifestError> {
+        // Begin transaction for atomic check-and-delete
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(DeleteManifestError::TransactionBegin)?;
+
+        // Check if manifest has remaining links (with row-level locking)
+        // This prevents concurrent processes from linking the manifest until we commit
+        let links = metadata_db::manifests::count_dataset_links_and_lock(&mut tx, hash)
+            .await
+            .map_err(DeleteManifestError::MetadataDbCheckLinks)?;
+
+        if links > 0 {
+            // No need to rollback explicitly - transaction drops on return
+            return Err(DeleteManifestError::ManifestLinked);
+        }
+
+        // Delete from metadata database (CASCADE deletes links/tags)
+        // Lock is still held, so no concurrent links can be created
+        let Some(path) = metadata_db::manifests::delete(&mut tx, hash)
+            .await
+            .map_err(DeleteManifestError::MetadataDbDelete)?
+            .map(Into::into)
+        else {
+            // Treat not found as success (idempotency)
+            tracing::debug!(
+                manifest_hash = %hash,
+                "Manifest not found in metadata database (already deleted or never existed)"
+            );
+            return Ok(());
+        };
+
+        // Delete manifest file from object store BEFORE committing transaction
+        // If this fails, transaction will roll back and manifest remains in DB
+        self.dataset_manifests_store
+            .delete(path)
+            .await
+            .map_err(DeleteManifestError::ObjectStoreError)?;
+
+        tracing::debug!(
+            manifest_hash = %hash,
+            "Manifest deleted from object store"
+        );
+
+        // Commit transaction - releases locks
+        // If this fails, object store file is gone but DB still has manifest
+        // Retry is safe: DB delete will find nothing (idempotent), object store delete tolerates NotFound
+        tx.commit()
+            .await
+            .map_err(DeleteManifestError::TransactionCommit)?;
+
+        tracing::debug!(manifest_hash = %hash, "Manifest deletion completed successfully");
+        Ok(())
+    }
+
+    /// List all datasets that use a specific manifest
+    ///
+    /// Returns all dataset tags (namespace, name, version) that reference the given
+    /// manifest hash. This is useful for discovering which datasets and versions
+    /// are using a particular manifest.
+    ///
+    /// System-managed tags ("latest" and "dev") are excluded from the results.
+    ///
+    /// Returns `None` if the manifest doesn't exist.
+    /// Returns `Some(vec![])` (empty vector) if the manifest exists but no datasets use it.
+    pub async fn list_manifest_linked_datasets(
+        &self,
+        manifest_hash: &Hash,
+    ) -> Result<Option<Vec<DatasetTag>>, ListDatasetsUsingManifestError> {
+        // Check if manifest exists
+        let manifest_path = metadata_db::manifests::get_path(&self.metadata_db, manifest_hash)
+            .await
+            .map_err(ListDatasetsUsingManifestError::MetadataDbQueryPath)?;
+
+        if manifest_path.is_none() {
+            return Ok(None);
+        }
+
+        // Query all tags using this manifest
+        let tags = metadata_db::datasets::list_tags_by_hash(&self.metadata_db, manifest_hash)
+            .await
+            .map_err(ListDatasetsUsingManifestError::MetadataDbListTags)?
+            .into_iter()
+            .map(DatasetTag::from)
+            .collect();
+
+        Ok(Some(tags))
+    }
+}
+
+impl DatasetStore {
+    /// Register a dataset manifest and link it to a dataset
+    ///
+    /// Stores manifest in object store, registers in DB, then links to dataset and updates "dev" tag
+    /// in a transaction. Idempotent - safe to retry if transaction fails after storage/registration.
+    pub async fn register_manifest_and_link(
         &self,
         namespace: &Namespace,
         name: &Name,
         manifest_hash: &Hash,
         manifest_str: String,
     ) -> Result<(), RegisterManifestError> {
-        // Store manifest file and register in metadata database (idempotent)
-        self.dataset_manifests_store
+        // Store manifest file in object store (idempotent) and get the path
+        let path = self
+            .dataset_manifests_store
             .store(manifest_hash, manifest_str)
             .await?;
+
+        // Register manifest in metadata database (idempotent)
+        metadata_db::manifests::register(&self.metadata_db, manifest_hash, &path)
+            .await
+            .map_err(RegisterManifestError::MetadataRegistration)?;
 
         // Use transaction to ensure both operations succeed atomically
         let mut tx = self
@@ -150,38 +291,11 @@ impl DatasetStore {
         Ok(())
     }
 
-    /// Set a semantic version tag for a dataset manifest.
+    /// Set a semantic version tag for a dataset manifest
     ///
-    /// Creates or updates a semantic version tag (e.g., "1.0.0", "2.3.1") that points to a manifest.
-    /// The manifest must already be registered, otherwise an error will occur.
-    ///
-    /// After setting the version tag, this method automatically updates the "latest" tag if the new
-    /// version is higher than the current "latest" version.
-    ///
-    /// ## Idempotency
-    ///
-    /// This operation is idempotent:
-    /// - If the tag doesn't exist, it is created
-    /// - If the tag exists with the same hash, no changes are made
-    /// - If the tag exists with a different hash, it is updated
-    ///
-    /// ## Transaction Guarantees
-    ///
-    /// This method uses a database transaction with row-level locking to ensure atomicity
-    /// and prevent race conditions when updating the "latest" tag:
-    ///
-    /// - **Atomicity**: Version tag registration and "latest" tag update succeed together or fail together
-    /// - **Isolation**: Uses `SELECT FOR UPDATE` to lock the "latest" tag row, preventing concurrent
-    ///   processes from reading stale values or creating race conditions
-    /// - **Consistency**: The "latest" tag is guaranteed to point to the highest version number,
-    ///   even under concurrent version tag registrations
-    ///
-    /// ### Race Condition Prevention
-    ///
-    /// Without row locking, two concurrent processes could both read the same "latest" version,
-    /// both determine they should update it, and the last writer would win regardless of which
-    /// version is higher. The `get_latest_tag_for_update` call prevents this by ensuring only
-    /// one transaction can read and modify the "latest" tag at a time.
+    /// Creates or updates version tag, then automatically updates "latest" tag if this version is higher.
+    /// Uses transaction with `SELECT FOR UPDATE` on "latest" row to prevent concurrent tag updates
+    /// from causing stale writes. Idempotent.
     pub async fn set_dataset_version_tag(
         &self,
         namespace: &Namespace,
@@ -208,7 +322,7 @@ impl DatasetStore {
 
         // Lock the "latest" row to prevent concurrent modifications (SELECT FOR UPDATE)
         let current_latest =
-            metadata_db::datasets::get_latest_tag_for_update(&mut tx, namespace, name)
+            metadata_db::datasets::get_latest_tag_and_lock(&mut tx, namespace, name)
                 .await
                 .map_err(SetVersionTagError::UpdateLatestTag)?
                 .map(|tag| -> Version { tag.version.into() });
@@ -356,18 +470,32 @@ impl DatasetStore {
             return Ok(None);
         };
 
-        // Load the manifest content using the hash
+        // Get the manifest path from metadata database
         let manifest_hash: Hash = dataset_details.hash.into();
-        let Some(manifest_content) = self
-            .dataset_manifests_store
-            .get(&manifest_hash)
+        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, &manifest_hash)
             .await
-            .map_err(|err| GetDatasetError::ManifestRetrievalError {
+            .map_err(|source| GetDatasetError::ManifestRetrievalError {
                 namespace: namespace.to_string(),
                 name: name.to_string(),
                 version: Some(version.to_string()),
-                source: Box::new(err),
+                source: Box::new(source),
             })?
+            .map(ManifestPath::from)
+        else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the path
+        let Some(manifest_content) =
+            self.dataset_manifests_store
+                .get(path)
+                .await
+                .map_err(|err| GetDatasetError::ManifestRetrievalError {
+                    namespace: namespace.to_string(),
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: Box::new(err),
+                })?
         else {
             return Ok(None);
         };
@@ -522,11 +650,24 @@ impl DatasetStore {
             return Ok(None);
         };
 
-        // Load the manifest content using the hash
+        // Get the manifest path from metadata database
         let manifest_hash: Hash = dataset_details.hash.into();
+        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, &manifest_hash)
+            .await
+            .map_err(|source| GetDerivedManifestError::ManifestRetrievalError {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(source),
+            })?
+            .map(ManifestPath::from)
+        else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the path
         let Some(dataset_src) = self
             .dataset_manifests_store
-            .get(&manifest_hash)
+            .get(path)
             .await
             .map_err(|err| GetDerivedManifestError::ManifestRetrievalError {
                 name: name.to_string(),
@@ -628,17 +769,30 @@ impl DatasetStore {
             return Ok(None);
         };
 
-        // Load the manifest content using the hash
+        // Get the manifest path from metadata database
         let manifest_hash: Hash = dataset_details.hash.into();
-        let Some(manifest_content) = self
-            .dataset_manifests_store
-            .get(&manifest_hash)
+        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, &manifest_hash)
             .await
-            .map_err(|err| GetClientError::ManifestRetrievalError {
+            .map_err(|source| GetClientError::ManifestRetrievalError {
                 name: dataset_name.to_string(),
                 version: dataset_version.map(|v| v.to_string()),
-                source: Box::new(err),
+                source: Box::new(source),
             })?
+            .map(ManifestPath::from)
+        else {
+            return Ok(None);
+        };
+
+        // Load the manifest content using the path
+        let Some(manifest_content) =
+            self.dataset_manifests_store
+                .get(path)
+                .await
+                .map_err(|err| GetClientError::ManifestRetrievalError {
+                    name: dataset_name.to_string(),
+                    version: dataset_version.map(|v| v.to_string()),
+                    source: Box::new(err),
+                })?
         else {
             return Ok(None);
         };
@@ -1294,6 +1448,34 @@ fn dependency_sort(deps: BTreeMap<Reference, Vec<Reference>>) -> Result<Vec<Refe
         }
     }
     Ok(ordered)
+}
+
+/// Dataset tag information
+///
+/// Represents a dataset version tag that points to a specific manifest.
+/// This is the dataset-store's public representation of dataset tags,
+/// mapped from the internal metadata-db representation.
+#[derive(Debug, Clone)]
+pub struct DatasetTag {
+    /// Dataset namespace identifier
+    pub namespace: Namespace,
+    /// Dataset name
+    pub name: Name,
+    /// Version tag
+    pub version: Version,
+    /// Manifest hash this tag references
+    pub hash: Hash,
+}
+
+impl From<metadata_db::DatasetTag> for DatasetTag {
+    fn from(tag: metadata_db::DatasetTag) -> Self {
+        Self {
+            namespace: tag.namespace.into(),
+            name: tag.name.into(),
+            version: tag.version.into(),
+            hash: tag.hash.into(),
+        }
+    }
 }
 
 #[cfg(test)]
