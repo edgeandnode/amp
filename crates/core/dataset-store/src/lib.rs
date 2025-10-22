@@ -449,7 +449,7 @@ impl DatasetStore {
 
     #[tracing::instrument(skip(self), err)]
     pub async fn get_derived_manifest(
-        self: &Arc<Self>,
+        &self,
         name: &str,
         version: impl Into<Option<&Version>> + std::fmt::Debug,
     ) -> Result<Option<DerivedManifest>, GetDerivedManifestError> {
@@ -759,7 +759,7 @@ impl DatasetStore {
     /// 3. Look up the dataset names in the configured dataset store.
     /// 4. Collect the datasets into a catalog.
     pub async fn catalog_for_sql(
-        self: &Arc<Self>,
+        &self,
         query: &parser::Statement,
         env: QueryEnv,
     ) -> Result<Catalog, CatalogForSqlError> {
@@ -775,7 +775,7 @@ impl DatasetStore {
 
     /// Looks up the datasets for the given table references and gets them into a catalog.
     pub async fn get_physical_catalog(
-        self: &Arc<Self>,
+        &self,
         table_refs: impl IntoIterator<Item = TableReference>,
         function_names: impl IntoIterator<Item = String>,
         env: &QueryEnv,
@@ -804,7 +804,7 @@ impl DatasetStore {
     /// Similar to `catalog_for_sql`, but only for planning and not execution. This does not require a
     /// physical location to exist for the dataset views.
     pub async fn planning_ctx_for_sql(
-        self: Arc<Self>,
+        &self,
         query: &parser::Statement,
     ) -> Result<PlanningContext, PlanningCtxForSqlError> {
         let (tables, _) = resolve_table_references(query, true).map_err(|err| {
@@ -821,7 +821,7 @@ impl DatasetStore {
     /// Looks up the datasets for the given table references and creates resolved tables. Create
     /// UDFs specific to the referenced datasets.
     async fn get_logical_catalog(
-        self: &Arc<Self>,
+        &self,
         table_refs: impl IntoIterator<Item = TableReference>,
         function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
