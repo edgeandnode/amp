@@ -689,6 +689,11 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
         logs_bloom: <[u8; 256]>::from(header.logs_bloom).into(),
         difficulty: EvmCurrency::try_from(header.difficulty)
             .map_err(|e| ToRowError::Overflow("difficulty", e.into()))?,
+        total_difficulty: header
+            .total_difficulty
+            .map(EvmCurrency::try_from)
+            .transpose()
+            .map_err(|e| ToRowError::Overflow("total_difficulty", e.into()))?,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         extra_data: header.extra_data.0.to_vec(),
