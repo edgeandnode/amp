@@ -58,6 +58,17 @@ enum Commands {
     /// available for use by datasets.
     #[command(after_help = include_str!("cmd/reg_provider__after_help.md"))]
     RegProvider(cmd::reg_provider::Args),
+
+    /// Deploy a dataset to start syncing blockchain data
+    ///
+    /// Deploys a dataset version by scheduling a data extraction job via the
+    /// engine admin interface. Once deployed, the dataset begins syncing blockchain
+    /// data from the configured provider and storing it as Parquet files.
+    ///
+    /// The end block can be configured to control when syncing stops:
+    /// continuous (default), latest block, specific block number, or relative to chain tip.
+    #[command(after_help = include_str!("cmd/dep_dataset__after_help.md"))]
+    DepDataset(cmd::dep_dataset::Args),
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -67,6 +78,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::GenManifest(args) => cmd::gen_manifest::run(args).await?,
         Commands::RegManifest(args) => cmd::reg_manifest::run(args).await?,
         Commands::RegProvider(args) => cmd::reg_provider::run(args).await?,
+        Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
     }
 
     Ok(())

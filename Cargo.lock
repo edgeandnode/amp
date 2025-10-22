@@ -893,6 +893,7 @@ dependencies = [
  "console 0.16.1",
  "dataset-store",
  "datasets-common",
+ "dump",
  "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
@@ -907,6 +908,7 @@ dependencies = [
  "tracing",
  "url",
  "vergen-gitcl",
+ "worker",
 ]
 
 [[package]]
