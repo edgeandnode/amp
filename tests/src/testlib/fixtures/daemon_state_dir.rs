@@ -186,79 +186,6 @@ impl DaemonStateDir {
         Ok(())
     }
 
-    /// Copy required provider configurations to the daemon state directory.
-    ///
-    /// The `providers` parameter should contain filename stems (without extension) that
-    /// correspond to `.toml` files located in the fixture directories. For example,
-    /// passing `"alchemy"` will copy `alchemy.toml` from the source fixture
-    /// directory to the daemon state's providers directory.
-    pub async fn preload_provider_configs(
-        &self,
-        providers: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<(), BoxError> {
-        let target_dir = &self.providers_dir_path;
-
-        // Create directory lazily if it doesn't exist
-        if !target_dir.exists() {
-            tracing::debug!("Providers directory doesn't exist, creating it lazily");
-            self.create_providers_dir()?;
-        }
-
-        // Only copy specifically requested providers
-        for provider in providers {
-            let provider_name = provider.as_ref();
-            let mut path = PathBuf::from(provider_name);
-
-            // Set the extension to .toml for provider configs
-            path.set_extension("toml");
-
-            // Resolve source directory by searching known fixture locations
-            let source_file_path =
-                config::resolve_provider_config_source_file(&path).ok_or_else(|| {
-                    format!("Could not find provider '{provider_name}' source directory")
-                })?;
-            let target_file_path = target_dir.join(path);
-
-            tracing::debug!(
-                "Copying provider config: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-
-            copy_file(&source_file_path, &target_file_path)?;
-
-            tracing::trace!(
-                "Copied provider config: {} -> {}",
-                source_file_path.display(),
-                target_file_path.display()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Create a provider config dynamically.
-    ///
-    /// Writes a provider configuration file directly to the daemon state's providers directory.
-    /// This is useful for tests that need to generate provider configurations at runtime with
-    /// dynamic values like IPC paths or port numbers.
-    pub fn create_provider_config(&self, name: &str, config: &str) -> Result<(), BoxError> {
-        let target_dir = &self.providers_dir_path;
-
-        // Create directory lazily if it doesn't exist
-        if !target_dir.exists() {
-            tracing::debug!("Providers directory doesn't exist, creating it lazily");
-            self.create_providers_dir()?;
-        }
-
-        let provider_file = target_dir.join(format!("{name}.toml"));
-        fs::write(provider_file, config)?;
-
-        tracing::debug!("Created provider config for '{name}'");
-
-        Ok(())
-    }
-
     /// Copy dataset snapshots to the daemon state data directory.
     ///
     /// This copies pre-validated reference datasets from the `tests/config/snapshots` directory
@@ -380,22 +307,6 @@ impl DaemonStateDirBuilder {
             root: self.root,
         }
     }
-}
-
-/// Copy a file, ensuring the parent directory exists.
-///
-/// Creates the parent directory if it doesn't exist or is not a directory,
-/// then copies the source file to the destination.
-fn copy_file(src: &Path, dst: &Path) -> Result<(), BoxError> {
-    // Ensure parent directory exists for the target file
-    if let Some(parent) = dst.parent()
-        && !parent.is_dir()
-    {
-        fs::create_dir_all(parent)?;
-    }
-
-    fs::copy(src, dst)?;
-    Ok(())
 }
 
 /// Recursively copy a directory and all its contents.
