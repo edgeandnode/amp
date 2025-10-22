@@ -8,12 +8,15 @@ build = "build.rs"
 [features]
 # Default features (enabled by default)
 default = ["snmalloc"]
+# Enable tokio-console support for async runtime introspection and debugging
+console-subscriber = ["dep:console-subscriber"]
 # Enable snmalloc memory allocator for improved performance
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 clap.workspace = true
 common = { path = "../../core/common" }
+console-subscriber = { version = "0.4.1", default-features = false, optional = true }
 controller = { path = "../../services/controller" }
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
