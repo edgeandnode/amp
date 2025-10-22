@@ -79,7 +79,7 @@ pub async fn run(
 /// The file path is extracted from the URL and passed to the object store.
 ///
 /// Returns [`Error`] for invalid paths, missing files, or read failures.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(%provider_path))]
 async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error> {
     // Create object store from the URL
     let (store, _) =
@@ -94,12 +94,12 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
     // Read the file from the object store
     store.get_string(file_path).await.map_err(|err| {
         if err.is_not_found() {
-            tracing::error!(path = %provider_path, "Provider file not found");
+            tracing::error!("Provider file not found");
             Error::ProviderNotFound {
                 path: provider_path.to_string(),
             }
         } else {
-            tracing::error!(path = %provider_path, error = %err, "Failed to read provider file");
+            tracing::error!(error = %err, "Failed to read provider file");
             Error::ProviderReadError {
                 path: provider_path.to_string(),
                 source: err,
