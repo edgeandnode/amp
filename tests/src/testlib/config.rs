@@ -147,3 +147,39 @@ pub(super) async fn read_manifest_fixture(manifest_name: &str) -> Result<String,
 
     Ok(content)
 }
+
+/// Read a provider configuration fixture from the predefined fixture directories.
+///
+/// This function searches for provider configuration files (`.toml`) in the predefined
+/// fixture directories and returns the content as a String.
+///
+/// Returns the provider configuration content as a String.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The provider file cannot be found in any of the predefined fixture directories
+/// - The file cannot be read
+pub(super) async fn read_provider_fixture(provider_name: &str) -> Result<String, BoxError> {
+    let mut path = PathBuf::from(provider_name);
+    path.set_extension("toml");
+
+    // Resolve source directory by searching known fixture locations
+    let source_file_path = resolve_provider_config_source_file(&path)
+        .ok_or_else(|| format!("Could not find provider config fixture '{}'", provider_name))?;
+
+    tracing::debug!("Reading provider fixture: {}", source_file_path.display());
+
+    // Read and return the provider content
+    let content = tokio::fs::read_to_string(&source_file_path)
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to read provider fixture '{}': {}",
+                source_file_path.display(),
+                err
+            )
+        })?;
+
+    Ok(content)
+}

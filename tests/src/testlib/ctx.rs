@@ -12,11 +12,8 @@
 //! test__<test-name>__<rand-id>/
 //! └── .amp/                         # Daemon state directory
 //!     ├── config.toml               # Main config (dynamically generated)
-//!     ├── manifests/                # Dataset manifests directory (initially empty, manifests registered via Admin API)
-//!     ├── providers/                # Provider configs (only copied if explicitly requested)
-//!     │   ├── rpc_eth_mainnet.toml
-//!     │   ├── firehose_eth_mainnet.toml
-//!     │   └── rpc_anvil.toml        # Note: Static provider configs are rarely used; Anvil uses dynamic IPC configs
+//!     ├── manifests/                # Dataset manifests directory (initially empty, registered via Admin API)
+//!     ├── providers/                # Provider configs directory (initially empty, registered via Admin API)
 //!     └── data/                     # Output directory (dataset snapshots copied if requested)
 //!         └── eth_mainnet/          # Dataset snapshot reference data with complete structure
 //!             └── revisions/
@@ -25,8 +22,9 @@
 //! # Key Features
 //!
 //! - **Complete isolation**: Each test gets its own temporary directory
-//! - **Selective resource loading**: Only copy explicitly requested datasets and providers
-//! - **Dynamic configuration**: Generate test-specific config.toml files
+//! - **Admin API registration**: Manifests and providers registered via Admin API after controller starts
+//! - **Dynamic configuration**: Generate test-specific config.toml files (including dynamic Anvil providers)
+//! - **Selective resource loading**: Only copy explicitly requested dataset snapshots
 //! - **Builder pattern**: Fluent API for environment customization
 //! - **Automatic cleanup**: Temporary directories cleaned up on drop (unless `TESTS_KEEP_TEMP_DIRS=1` is set)
 
@@ -41,7 +39,10 @@ use super::fixtures::{
     DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, TempMetadataDb as MetadataDbFixture,
     builder as daemon_state_dir_builder,
 };
-use crate::testlib::{config::read_manifest_fixture, env_dir::TestEnvDir};
+use crate::testlib::{
+    config::{read_manifest_fixture, read_provider_fixture},
+    env_dir::TestEnvDir,
+};
 
 enum AnvilMode {
     Ipc,
@@ -53,7 +54,7 @@ pub struct TestCtxBuilder {
     daemon_config: DaemonConfig,
     anvil_fixture: Option<AnvilMode>,
     manifests_to_register: Vec<ManifestRegistration>,
-    provider_configs_to_preload: BTreeSet<String>,
+    providers_to_register: Vec<ProviderRegistration>,
     dataset_snapshots_to_preload: BTreeSet<String>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
 }
@@ -66,7 +67,7 @@ impl TestCtxBuilder {
             daemon_config: Default::default(),
             anvil_fixture: None,
             manifests_to_register: Default::default(),
-            provider_configs_to_preload: Default::default(),
+            providers_to_register: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
             meter: None,
         }
@@ -149,58 +150,58 @@ impl TestCtxBuilder {
 
     /// Add a single provider config that this test environment needs.
     ///
-    /// Only the specified provider config will be copied from the source directory to the test environment.
+    /// The provider will be registered with the Admin API after the controller starts.
     /// This is a convenience method for adding one provider at a time.
+    ///
+    /// Accepts either a simple string for auto-inferred name, or a tuple
+    /// for explicit name specification:
+    /// - `"rpc_eth_mainnet"` → registers with name `rpc_eth_mainnet`
+    /// - `("rpc_eth_mainnet", "custom_name")` → registers with name `custom_name`
     ///
     /// # Panics
     ///
     /// Panics if the provider name is an absolute path or contains '..' segments.
-    pub fn with_provider_config(mut self, provider: impl Into<String>) -> Self {
-        let provider = provider.into();
+    pub fn with_provider_config(mut self, provider: impl Into<ProviderRegistration>) -> Self {
+        let registration = provider.into();
 
-        if provider.starts_with("/") {
-            panic!("The provider name cannot be an absolute path: {}", provider);
-        }
-
-        if provider.contains("..") {
+        // Validate file name
+        if registration.provider_file.starts_with("/") {
             panic!(
-                "The provider name cannot contain '..' path segments: {}",
-                provider
+                "The provider name cannot be an absolute path: {}",
+                registration.provider_file
             );
         }
 
-        self.provider_configs_to_preload.insert(provider);
+        if registration.provider_file.contains("..") {
+            panic!(
+                "The provider name cannot contain '..' path segments: {}",
+                registration.provider_file
+            );
+        }
+
+        self.providers_to_register.push(registration);
         self
     }
 
     /// Add provider configs that this test environment needs.
     ///
-    /// Only the specified provider configs will be copied from the source directory to the test environment.
-    /// If no provider configs are specified, the providers directory will remain empty.
+    /// The providers will be registered with the Admin API after the controller starts.
+    ///
+    /// Each item can be either a simple string for auto-inferred name, or a tuple
+    /// for explicit name specification:
+    /// - `"rpc_eth_mainnet"` → registers with name `rpc_eth_mainnet`
+    /// - `("rpc_eth_mainnet", "custom_name")` → registers with name `custom_name`
     ///
     /// # Panics
     ///
     /// Panics if any provider name is an absolute path or contains '..' segments.
     pub fn with_provider_configs(
         mut self,
-        providers: impl IntoIterator<Item = impl Into<String>>,
+        providers: impl IntoIterator<Item = impl Into<ProviderRegistration>>,
     ) -> Self {
-        let providers = providers.into_iter().map(Into::into).collect::<Vec<_>>();
-
-        for provider in &providers {
-            if provider.starts_with("/") {
-                panic!("The provider name cannot be an absolute path: {}", provider);
-            }
-
-            if provider.contains("..") {
-                panic!(
-                    "The provider name cannot contain '..' path segments: {}",
-                    provider
-                );
-            }
+        for provider in providers {
+            self = self.with_provider_config(provider);
         }
-
-        self.provider_configs_to_preload.extend(providers);
         self
     }
 
@@ -327,15 +328,6 @@ impl TestCtxBuilder {
         daemon_state_dir.create_data_dir()?;
 
         // Preload test resources in the daemon state dir as requested
-        if !self.provider_configs_to_preload.is_empty() {
-            tracing::info!(
-                "Preloading provider configs: {:?}",
-                self.provider_configs_to_preload
-            );
-            daemon_state_dir
-                .preload_provider_configs(&self.provider_configs_to_preload)
-                .await?;
-        }
         if !self.dataset_snapshots_to_preload.is_empty() {
             tracing::info!(
                 "Preloading dataset snapshots: {:?}",
@@ -350,8 +342,8 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true).await?);
 
-        // Create Anvil fixture (if enabled)
-        let anvil = match self.anvil_fixture {
+        // Create Anvil fixture (if enabled) and capture provider config for later registration
+        let (anvil, anvil_provider_config) = match self.anvil_fixture {
             Some(AnvilMode::Ipc) => {
                 let fixture = Anvil::new_ipc().await?;
 
@@ -359,10 +351,9 @@ impl TestCtxBuilder {
                     .wait_for_ready(std::time::Duration::from_secs(30))
                     .await?;
 
-                // Preload Anvil provider config into the daemon state dir
+                // Capture Anvil provider config for registration via Admin API
                 let anvil_provider = fixture.new_provider_config();
-                daemon_state_dir.create_provider_config("anvil_rpc", &anvil_provider)?;
-                Some(fixture)
+                (Some(fixture), Some(anvil_provider))
             }
             Some(AnvilMode::Http) => {
                 let fixture = Anvil::new_http(0).await?;
@@ -371,12 +362,11 @@ impl TestCtxBuilder {
                     .wait_for_ready(std::time::Duration::from_secs(30))
                     .await?;
 
-                // Preload Anvil provider config into the daemon state dir
+                // Capture Anvil provider config for registration via Admin API
                 let anvil_provider = fixture.new_provider_config();
-                daemon_state_dir.create_provider_config("anvil_rpc", &anvil_provider)?;
-                Some(fixture)
+                (Some(fixture), Some(anvil_provider))
             }
-            None => None,
+            None => (None, None),
         };
 
         // Clone meter for worker and controller before server consumes it
@@ -431,6 +421,59 @@ impl TestCtxBuilder {
                     reference = %registration.dataset_ref,
                     "Successfully registered manifest"
                 );
+            }
+        }
+
+        // Register providers with Admin API (if any)
+        if !self.providers_to_register.is_empty() || anvil_provider_config.is_some() {
+            let ampctl = Ampctl::new(controller.admin_api_url());
+
+            // Register static providers from fixtures
+            if !self.providers_to_register.is_empty() {
+                tracing::info!(
+                    "Registering {} provider configurations with Admin API",
+                    self.providers_to_register.len()
+                );
+
+                for registration in &self.providers_to_register {
+                    tracing::debug!(
+                        file_name = %registration.provider_file,
+                        name = %registration.provider_name,
+                        "Registering provider"
+                    );
+
+                    // Read provider content from fixtures
+                    let provider_toml = read_provider_fixture(&registration.provider_file).await?;
+
+                    // Register with Admin API
+                    ampctl
+                        .register_provider(&registration.provider_name, &provider_toml)
+                        .await
+                        .map_err(|err| {
+                            format!(
+                                "Failed to register provider '{}' as '{}': {}",
+                                registration.provider_file, registration.provider_name, err
+                            )
+                        })?;
+
+                    tracing::info!(
+                        file_name = %registration.provider_file,
+                        name = %registration.provider_name,
+                        "Successfully registered provider"
+                    );
+                }
+            }
+
+            // Register dynamic Anvil provider (if present)
+            if let Some(anvil_config) = anvil_provider_config {
+                tracing::info!("Registering dynamic Anvil provider with Admin API");
+
+                ampctl
+                    .register_provider("anvil_rpc", &anvil_config)
+                    .await
+                    .map_err(|err| format!("Failed to register dynamic Anvil provider: {}", err))?;
+
+                tracing::info!("Successfully registered dynamic Anvil provider");
             }
         }
 
@@ -620,6 +663,56 @@ where
         Self {
             manifest_file: file_name.as_ref().to_string(),
             dataset_ref,
+        }
+    }
+}
+
+/// Helper type for specifying provider configuration registrations.
+///
+/// This type encapsulates the information needed to register a provider configuration:
+/// - The filename (without extension) of the provider config in the fixtures directory
+/// - The provider name to use for registration (typically matches the filename)
+///
+/// It provides convenient `From` implementations to support both simple strings
+/// and tuples for explicit name specification.
+#[derive(Debug, Clone)]
+pub struct ProviderRegistration {
+    provider_file: String,
+    provider_name: String,
+}
+
+impl From<&str> for ProviderRegistration {
+    /// Create a provider registration where the provider name matches the file name.
+    ///
+    /// If the file name ends with `.toml`, the extension is stripped before using as the provider name.
+    fn from(file_name: &str) -> Self {
+        let name_without_ext = file_name.strip_suffix(".toml").unwrap_or(file_name);
+
+        Self {
+            provider_file: file_name.to_string(),
+            provider_name: name_without_ext.to_string(),
+        }
+    }
+}
+
+impl From<String> for ProviderRegistration {
+    fn from(file_name: String) -> Self {
+        Self::from(file_name.as_str())
+    }
+}
+
+impl<F, N> From<(F, N)> for ProviderRegistration
+where
+    F: AsRef<str>,
+    N: AsRef<str>,
+{
+    /// Create a provider registration with an explicit provider name.
+    ///
+    /// This allows the provider name used for registration to differ from the file name.
+    fn from((file_name, provider_name): (F, N)) -> Self {
+        Self {
+            provider_file: file_name.as_ref().to_string(),
+            provider_name: provider_name.as_ref().to_string(),
         }
     }
 }
