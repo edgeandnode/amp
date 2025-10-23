@@ -47,7 +47,7 @@ async fn load_sql_dataset_returns_sql_dataset_with_correct_kind() {
         .parse::<Namespace>()
         .expect("'_' should be a valid namespace");
     let db_dataset = metadata_db
-        .get_dataset_latest_version_with_details(&namespace, &result.name)
+        .get_dataset_latest_tag(&namespace, &result.name)
         .await
         .expect("should query metadata DB");
     assert!(
@@ -95,7 +95,7 @@ async fn load_manifest_dataset_returns_manifest_with_correct_kind() {
 
     // Assert that the dataset is registered in the metadata DB
     let db_dataset = metadata_db
-        .get_dataset_with_details(&namespace, &name, &version)
+        .get_dataset_version_tag(&namespace, &name, &version)
         .await
         .expect("should query metadata DB");
     assert!(
@@ -160,7 +160,7 @@ async fn all_datasets_returns_available_datasets_without_error() {
         .expect("'_' should be a valid namespace");
     for dataset in result {
         let db_dataset = metadata_db
-            .get_dataset_latest_version_with_details(&namespace, &dataset.name)
+            .get_dataset_latest_tag(&namespace, &dataset.name)
             .await
             .expect("should query metadata DB");
         assert!(

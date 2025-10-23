@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use common::BoxError;
-use dataset_store::{DatasetKind, RegisterManifestError};
+use dataset_store::{DatasetKind, RegisterManifestError, SetVersionTagError};
 use datasets_common::{
     hash::hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
     version::Version,
@@ -38,16 +38,15 @@ use crate::{
 /// - `manifest`: JSON string representation of the dataset manifest
 ///
 /// ## Response
-/// - **201 Created**: Dataset successfully registered
+/// - **201 Created**: Dataset successfully registered (or updated if version tag already exists)
 /// - **400 Bad Request**: Invalid dataset name, version, or manifest format
-/// - **409 Conflict**: Dataset already exists with provided manifest, or manifest required but not provided
 /// - **500 Internal Server Error**: Database or object store error
 ///
 /// ## Error Codes
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
-/// - `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists
+/// - `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version
 /// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
 /// - `STORE_ERROR`: Failed to load or access dataset store
 ///
@@ -59,13 +58,25 @@ use crate::{
 /// - **Eth Beacon dataset** (kind="eth-beacon"): Registers a raw dataset that extracts Ethereum Beacon Chain data
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
-/// All dataset types are registered using the same underlying `register_manifest_with_version` method to ensure consistency.
+/// ## Registration Process
+/// The registration process involves two steps:
+/// 1. **Register manifest**: Stores the manifest file in hash-based storage and creates a metadata database entry
+/// 2. **Tag version**: Associates the version identifier with the manifest hash (upsert operation)
+///
+/// This two-step approach enables:
+/// - Content-addressable storage by manifest hash
+/// - Deduplication of identical manifests
+/// - Separation of manifest storage from version management
+///
+/// The tag operation is idempotent:
+/// - If the version tag doesn't exist, it is created
+/// - If the version tag exists with the same manifest hash, the operation succeeds (no changes)
+/// - If the version tag exists with a different manifest hash, it is updated to point to the new hash
 ///
 /// The handler:
 /// - Validates dataset name and version format
 /// - Checks that dataset kind is supported
-/// - Attempts to load existing dataset from store
-/// - Handles manifest registration in the server's local registry
+/// - Stores the manifest and upserts the version tag in the server's local registry
 /// - Returns appropriate status codes and error messages
 ///
 /// ## Typical Workflow
@@ -82,9 +93,8 @@ use crate::{
         operation_id = "datasets_register",
         request_body = RegisterRequest,
         responses(
-            (status = 201, description = "Dataset successfully registered"),
+            (status = 201, description = "Dataset successfully registered or updated"),
             (status = 400, description = "Invalid request format or manifest", body = crate::handlers::error::ErrorResponse),
-            (status = 409, description = "Dataset already exists", body = crate::handlers::error::ErrorResponse),
             (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
@@ -100,37 +110,6 @@ pub async fn handler(
             return Err(Error::InvalidPayloadFormat.into());
         }
     };
-
-    // Early check if dataset already exists in the store to avoid unnecessary processing
-    let dataset_exists = ctx
-        .dataset_store
-        .is_registered(&payload.namespace, &payload.name, &payload.version)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                namespace = %payload.namespace,
-                name = %payload.name,
-                version = %payload.version,
-                error = ?err,
-                "Failed to check dataset existence in store"
-            );
-            Error::StoreError(err.into())
-        })?;
-
-    // Check if dataset already exists with this name and version
-    if dataset_exists {
-        tracing::error!(
-            "Dataset '{}/{}' version '{}' already exists",
-            payload.namespace,
-            payload.name,
-            payload.version
-        );
-        return Err(Error::DatasetAlreadyExists(
-            payload.name.to_string(),
-            payload.version.to_string(),
-        )
-        .into());
-    }
 
     let manifest =
         serde_json::from_str::<CommonManifest>(payload.manifest.as_str()).map_err(|err| {
@@ -172,14 +151,34 @@ pub async fn handler(
     // Compute manifest hash from canonical serialization
     let manifest_hash = hash(&manifest_str);
 
-    // Register the manifest with version
+    // Register the manifest
     ctx.dataset_store
-        .register_manifest_with_version(
+        .register_manifest(
+            &payload.namespace,
+            &payload.name,
+            &manifest_hash,
+            manifest_str,
+        )
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                namespace = %payload.namespace,
+                name = %payload.name,
+                manifest_hash = %manifest_hash,
+                kind = %dataset_kind,
+                error = ?err,
+                "Failed to register manifest"
+            );
+            Error::ManifestRegistrationError(err)
+        })?;
+
+    // Tag the manifest with the version
+    ctx.dataset_store
+        .set_dataset_version_tag(
             &payload.namespace,
             &payload.name,
             &payload.version,
             &manifest_hash,
-            manifest_str,
         )
         .await
         .map_err(|err| {
@@ -190,9 +189,9 @@ pub async fn handler(
                 manifest_hash = %manifest_hash,
                 kind = %dataset_kind,
                 error = ?err,
-                "Failed to register manifest"
+                "Failed to set version tag"
             );
-            Error::ManifestRegistrationError(err)
+            Error::VersionTaggingError(err)
         })?;
 
     tracing::info!(
@@ -268,6 +267,15 @@ pub enum Error {
     #[error("Failed to register manifest: {0}")]
     ManifestRegistrationError(#[from] RegisterManifestError),
 
+    /// Failed to tag version for the dataset
+    ///
+    /// This occurs when:
+    /// - Error during version tagging in metadata database
+    /// - Invalid semantic version format
+    /// - Error updating latest tag
+    #[error("Failed to set version tag: {0}")]
+    VersionTaggingError(#[from] SetVersionTagError),
+
     /// Unsupported dataset kind
     ///
     /// This occurs when:
@@ -276,15 +284,6 @@ pub enum Error {
         "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'eth-beacon'"
     )]
     UnsupportedDatasetKind(String),
-
-    /// Dataset already exists with the given configuration
-    ///
-    /// This occurs when:
-    /// - Dataset with same name/version already exists
-    /// - Attempt to register existing dataset with new manifest
-    /// - Conflicting registration attempts
-    #[error("Dataset '{0}' version '{1}' already exists")]
-    DatasetAlreadyExists(String, String),
 
     /// Dataset store error
     ///
@@ -303,7 +302,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
             Error::DependencyValidationError(_) => "DEPENDENCY_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
-            Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
+            Error::VersionTaggingError(_) => "VERSION_TAGGING_ERROR",
             Error::StoreError(_) => "STORE_ERROR",
             Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
         }
@@ -315,7 +314,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
             Error::DependencyValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,
+            Error::VersionTaggingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
         }

@@ -43,7 +43,7 @@ use crate::{
 )]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, ErrorResponse> {
     // Fetch all datasets from metadata DB
-    let datasets = ctx.metadata_db.list_datasets().await.map_err(|err| {
+    let datasets = ctx.metadata_db.list_all_datasets().await.map_err(|err| {
         tracing::debug!(error=?err, "failed to list datasets");
         Error::MetadataDbError(err)
     })?;

@@ -3,16 +3,17 @@
 //! This module provides database operations for the `manifest_files` table,
 //! which stores dataset manifest information indexed by content hash.
 
+use std::borrow::Cow;
+
 use sqlx::{Executor, Postgres};
 
 use super::hash::Hash;
 
 /// Insert a new manifest record
 ///
-/// Inserts a manifest identified by its hash with the corresponding file path.
-/// Uses ON CONFLICT DO NOTHING to make the operation idempotent - if a manifest
-/// with the same hash already exists, no error is raised.
-pub async fn insert<'c, E>(exe: E, hash: &Hash<'_>, path: &str) -> Result<(), sqlx::Error>
+/// This operation is idempotent - uses ON CONFLICT DO NOTHING to silently ignore
+/// duplicate registrations. Both new insertions and existing records succeed.
+pub async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Cow<'_, str>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -31,19 +32,15 @@ where
     Ok(())
 }
 
-/// Get manifest path by hash
+/// Get manifest file path by hash
 ///
 /// Retrieves the file path for a manifest identified by its content hash.
-/// Returns None if no manifest with the given hash exists.
-pub async fn get_by_hash<'c, E>(exe: E, hash: &Hash<'_>) -> Result<Option<String>, sqlx::Error>
+/// Returns `None` if no manifest with the given hash exists.
+pub async fn get_path_by_hash<'c, E>(exe: E, hash: &Hash<'_>) -> Result<Option<String>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {r#"
-        SELECT path
-        FROM manifest_files
-        WHERE hash = $1
-    "#};
+    let query = "SELECT path FROM manifest_files WHERE hash = $1";
 
     sqlx::query_scalar(query)
         .bind(hash)
