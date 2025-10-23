@@ -612,10 +612,10 @@ let query = construct_streaming_query("battleship", "game_created");
 
 // With incremental resumption (WHERE clause injection)
 let query_with_where = format!(
-    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num_end > {} SETTINGS stream = true",
+    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num > {} SETTINGS stream = true",
     dataset_name, table_name, max_block_num
 );
-// Note: Uses _block_num_end (system metadata column injected by ampsync)
+// Note: Uses _block_num (Nozzle system metadata column from materialized table)
 ```
 
 **Why This Approach:**
@@ -626,7 +626,43 @@ let query_with_where = format!(
 - ✅ **Fast**: No validation overhead on startup
 - ✅ **Maintainable**: Easy to understand and debug
 
-### 8. 🔒 Schema Evolution Pattern
+### 8. 🚨 Error Handling for Non-Existent Tables
+
+**Scenario: Table Not Yet Materialized**
+
+If ampsync attempts to stream from a table that doesn't exist in Nozzle (e.g., ampd hasn't finished materialization), the following occurs:
+
+**Retry Logic** (`stream_task.rs:81-116`):
+- **Exponential backoff**: 1s → 2s → 4s → 8s → 16s (each delay capped at 5 minutes)
+- **Maximum retry attempts**: 5
+- **Total retry window**: ~31 seconds (1+2+4+8+16) with current exponential progression
+- **Maximum delay cap**: 5 minutes (300 seconds) for any individual retry
+
+**Error Messages**:
+```
+ERROR stream_creation_failed table="my_table" attempt=1 error="TABLE_NOT_FOUND_ERROR"
+WARN  retrying_stream_creation table="my_table" retry_delay_secs=1 attempt=1
+ERROR max_retries_reached table="my_table" max_retries=5
+```
+
+**After Max Retries**:
+- Stream task exits permanently
+- User must restart ampsync after ampd completes materialization
+- Other tables continue streaming independently (per-table isolation)
+
+**Design Rationale:**
+- **Fail fast**: User discovers configuration errors quickly (~31 seconds)
+- **Clear feedback**: Structured logs show exact failure reason
+- **Explicit recovery**: Restart required prevents silent degraded state
+- **Independent tables**: One failing table doesn't affect others
+
+**Operational Guidance:**
+- Ensure ampd has materialized datasets before starting ampsync
+- If racing ampd startup, expect ampsync restart after materialization completes
+- Monitor logs for `max_retries_reached` to detect table configuration issues
+- Check Nozzle server availability if stream creation fails repeatedly
+
+### 9. 🔒 Schema Evolution Pattern
 
 🚨 **MANDATORY**: Support adding columns, reject dropping columns:
 

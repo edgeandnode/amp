@@ -2,7 +2,7 @@
 //!
 //! Tests verify that:
 //! - Queries are correctly constructed as `SELECT * FROM "{dataset}"."{table}" SETTINGS stream = true`
-//! - WHERE clause is correctly injected for incremental resumption using _block_num_end
+//! - WHERE clause is correctly injected for incremental resumption using _block_num
 //! - Watermark resumption doesn't modify the query
 //! - Special characters in dataset/table names are properly quoted
 
@@ -34,7 +34,7 @@ async fn test_query_construction_simple_pattern() {
 /// Test that WHERE clause is correctly injected for incremental resumption.
 ///
 /// This verifies:
-/// - WHERE clause uses _block_num_end (system metadata column)
+/// - WHERE clause uses _block_num (Nozzle system metadata column)
 /// - WHERE clause is inserted before SETTINGS
 /// - Format is correct for ClickHouse SQL
 #[tokio::test]
@@ -45,13 +45,13 @@ async fn test_query_construction_with_incremental_where_clause() {
 
     // Expected query with WHERE clause
     let expected_query = format!(
-        "SELECT * FROM \"{}\".\"{}\" WHERE _block_num_end > {} SETTINGS stream = true",
+        "SELECT * FROM \"{}\".\"{}\" WHERE _block_num > {} SETTINGS stream = true",
         dataset_name, table_name, max_block_num
     );
 
     assert_eq!(
         expected_query,
-        "SELECT * FROM \"battleship\".\"game_created\" WHERE _block_num_end > 1000000 SETTINGS stream = true"
+        "SELECT * FROM \"battleship\".\"game_created\" WHERE _block_num > 1000000 SETTINGS stream = true"
     );
 }
 
@@ -83,7 +83,7 @@ async fn test_query_construction_with_quoted_identifiers() {
 /// - Don't execute the raw SQL from manifest.tables[name].input.sql
 /// - Stream from materialized tables instead
 #[tokio::test]
-async fn test_ignores_custom_manifest_sql() {
+async fn test_uses_simple_select_pattern_not_manifest_sql() {
     // Even if the manifest has custom SQL, we ignore it and use simple SELECT *
     let manifest_sql = "SELECT event_name, block_num FROM ethereum.logs WHERE contract = '0x123'";
 

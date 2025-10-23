@@ -80,10 +80,10 @@ pub async fn spawn_stream_tasks(
                     max_block_num = max_block_num,
                     "resuming_from_incremental_checkpoint"
                 );
-                // Inject WHERE clause using _block_num_end (system metadata column)
+                // Inject WHERE clause using _block_num (Nozzle system metadata column)
                 // This filters out data we've already processed
                 let query_with_where = format!(
-                    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num_end > {} SETTINGS stream = true",
+                    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num > {} SETTINGS stream = true",
                     config.manifest.name, table_name, max_block_num
                 );
                 (None, query_with_where)
