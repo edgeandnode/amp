@@ -30,7 +30,7 @@ mod tasks;
 pub async fn dump_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
-    n_jobs: u16,
+    max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -45,9 +45,17 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, n_jobs, end, metrics, meter).await
+        dump_raw_tables(ctx, tables, max_writers, end, metrics, meter).await
     } else {
-        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
+        dump_user_tables(
+            ctx,
+            tables,
+            microbatch_max_interval,
+            max_writers,
+            end,
+            metrics,
+        )
+        .await
     }
 }
 
@@ -55,7 +63,7 @@ pub async fn dump_tables(
 pub async fn dump_raw_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
-    n_jobs: u16,
+    max_writers: u16,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
@@ -90,7 +98,7 @@ pub async fn dump_raw_tables(
         DatasetKind::EvmRpc | DatasetKind::EthBeacon | DatasetKind::Firehose => {
             raw_dataset::dump(
                 ctx,
-                n_jobs,
+                max_writers,
                 catalog,
                 tables,
                 parquet_opts,
@@ -120,12 +128,12 @@ pub async fn dump_user_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
     microbatch_max_interval: u64,
-    n_jobs: u16,
+    max_writers: u16,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
-    if n_jobs > 1 {
-        tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
+    if max_writers > 1 {
+        tracing::warn!("max_writers > 1 has no effect for SQL datasets");
     }
 
     let opts = crate::parquet_opts(&ctx.config.parquet);

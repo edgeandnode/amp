@@ -173,7 +173,7 @@ async fn handler_inner(
 
     let job_id = ctx
         .scheduler
-        .schedule_dataset_dump(dataset, options.end_block.into(), options.n_jobs)
+        .schedule_dataset_dump(dataset, options.end_block.into(), options.max_writers)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -237,21 +237,21 @@ pub struct DumpOptions {
     #[serde(default)]
     end_block: EndBlock,
 
-    /// Number of parallel extractor jobs to run
+    /// Number of parallel writers to run
     ///
-    /// Each job will be responsible for an equal number of blocks.
-    /// For example, if extracting blocks 0-10,000,000 with n_jobs=10,
-    /// each job will handle a contiguous section of 1 million blocks.
+    /// Each writer will be responsible for an equal number of blocks.
+    /// For example, if extracting blocks 0-10,000,000 with max_writers=10,
+    /// each writer will handle a contiguous section of 1 million blocks.
     ///
     /// Only applicable to raw datasets (EVM RPC, Firehose, etc.).
     /// SQL datasets ignore this parameter.
     ///
     /// Defaults to 1 if not specified.
-    #[serde(default = "default_n_jobs")]
-    n_jobs: u16,
+    #[serde(default = "default_max_writers")]
+    max_writers: u16,
 }
 
-fn default_n_jobs() -> u16 {
+fn default_max_writers() -> u16 {
     1
 }
 

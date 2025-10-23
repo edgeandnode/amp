@@ -34,7 +34,7 @@ pub async fn dump_dataset(
     metadata_db: &MetadataDb,
     dataset: Reference,
     end: u64,
-    n_jobs: u16,
+    max_writers: u16,
     microbatch_max_interval: impl Into<Option<u64>>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     dump(
@@ -43,7 +43,7 @@ pub async fn dump_dataset(
         dataset,
         true,
         EndBlock::Absolute(end),
-        n_jobs,
+        max_writers,
         None,
         microbatch_max_interval.into(),
         None,

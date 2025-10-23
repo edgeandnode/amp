@@ -56,7 +56,7 @@ async fn evm_rpc_single_dump() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -134,7 +134,7 @@ async fn eth_beacon_single_dump() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -212,7 +212,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -290,7 +290,7 @@ async fn evm_rpc_base_single_dump() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -368,7 +368,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -446,7 +446,7 @@ async fn eth_firehose_single_dump() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location
@@ -524,7 +524,7 @@ async fn base_firehose_single_dump() {
             dataset_ref,
             true,                      // ignore_deps
             EndBlock::Absolute(block), // end_block
-            1,                         // n_jobs
+            1,                         // max_writers
             None,                      // run_every_mins
             None,                      // microbatch_max_interval_override
             None,                      // new_location

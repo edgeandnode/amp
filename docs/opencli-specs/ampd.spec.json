@@ -243,17 +243,17 @@
           "x-environment": "DUMP_END_BLOCK"
         },
         {
-          "name": "n-jobs",
+          "name": "max-writers",
           "in": "option",
           "alias": ["j"],
-          "description": "How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an equal number of blocks. Example: If start = 0, end = 10,000,000 and n_jobs = 10, then each job will be responsible for a contiguous section of 1 million blocks.",
+          "description": "How many parallel writers to run. Defaults to 1. Each writer will be responsible for an equal number of blocks. Example: If start = 0, end = 10,000,000 and max_writers = 10, then each writer will be responsible for a contiguous section of 1 million blocks.",
           "required": false,
           "schema": {
             "type": "integer",
             "default": 1,
             "minimum": 1
           },
-          "x-environment": "DUMP_N_JOBS"
+          "x-environment": "DUMP_MAX_WRITERS"
         },
         {
           "name": "partition-size-mb",
@@ -321,7 +321,7 @@
       "x-examples": [
         {
           "command": "ampd --config config.toml dump --dataset eth_firehose -e 4000000 -j 2",
-          "description": "Dump eth_firehose dataset up to block 4,000,000 using 2 parallel jobs"
+          "description": "Dump eth_firehose dataset up to block 4,000,000 using 2 parallel writers"
         },
         {
           "command": "ampd --config config.toml dump --dataset eth_rpc,polygon_firehose",
