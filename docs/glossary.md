@@ -2,6 +2,7 @@
 
 A glossary defining key concepts and terminology used throughout the Amp project. Organized by logical and physical architecture layers.
 
+
 ## Logical
 
 ### Field
@@ -51,6 +52,7 @@ A high-level classification grouping [datasets](#dataset) by their data processi
 - **Raw** (a.k.a. **Extractor Datasets**): Extracts data directly from external blockchain sources (includes _evm-rpc_ and _firehose_ [kinds](#dataset-kind))
 - **Derived**: Transforms and combines data from existing datasets (_derived_ [kind](#dataset-kind))
 
+
 ## Physical
 
 Amp currently adopts the FDAP stack for its physical layer, see https://www.influxdata.com/glossary/fdap-stack/.
@@ -66,4 +68,31 @@ The file format in which record batches are persisted, for example to materializ
 
 ### Arrow Flight
 The RPC protocol Amp uses for queries, with results returned as Arrow record batches over gRPC, see https://arrow.apache.org/docs/format/Flight.html.
+
+
+## Architecture Components
+
+### Amp Engine
+The complete distributed system comprising all software components that run in a cluster: the [controller](#controller), [workers](#worker), [query server](#amp-server), and [metadata database](#metadata-database). The Amp engine provides the full data extraction, transformation, and query serving capabilities.
+
+### Amp Cluster
+Synonym for [Amp engine](#amp-engine), typically used when referring to deployments on cloud infrastructure. Emphasizes the distributed, multi-node nature of the system.
+
+### Amp Server
+The query server component of the Amp data plane that serves queries over the [Arrow Flight](#arrow-flight) protocol. Also referred to as the "Arrow Flight server" or "query server". Started via the `ampd server` command.
+
+### Amp Daemon
+A continuously running background process, following the Unix daemon concept. Refers to any of the `ampd` service processes: controller daemon, worker daemons, or query server daemon. The term emphasizes the long-running, background nature of these services.
+
+### Controller
+The component responsible for job scheduling, worker coordination, and exposing the [engine administration interface](#engine-administration-interface). Started via the `ampd controller` command.
+
+### Worker
+A process that executes data extraction jobs scheduled by the [controller](#controller). Multiple workers can run in parallel to scale extraction throughput. Started via the `ampd worker` command.
+
+### Engine Administration Interface
+The administrative API exposed by the [controller](#controller) for managing datasets, jobs, workers, providers, and storage. Accessed by the `ampctl` and `amp` CLIs. Also referred to as the "Admin API" in some contexts.
+
+### Metadata Database
+A PostgreSQL database that stores metadata about datasets, jobs, workers, files, and extraction progress. Used by the [controller](#controller) for state management and coordination across distributed components.
 
