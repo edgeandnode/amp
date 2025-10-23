@@ -19,7 +19,7 @@ use crate::{
 const MAX_STREAM_RETRIES: u32 = 5;
 
 /// Maximum delay between reconnection attempts (in seconds)
-const MAX_RETRY_DELAY_SECS: u64 = 60;
+const MAX_RETRY_DELAY_SECS: u64 = 300;
 
 /// Represents a single table's streaming task configuration and state.
 pub struct StreamTask {

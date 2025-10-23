@@ -3,7 +3,7 @@ mod it_circuit_breaker_test;
 mod it_decimal_insert_test;
 mod it_injected_block_num_test;
 mod it_nanosecond_timestamp_test;
+mod it_query_construction_test;
 mod it_reserved_words_test;
 mod it_schema_evolution_test;
-mod it_sql_construction_test;
 mod it_version_polling_test;
