@@ -99,12 +99,11 @@ ampsync/src/
 ├── lib.rs                   # Public library interface
 ├── config.rs                # Configuration management, env var parsing
 ├── version_polling.rs       # Version change detection, auto-update coordination
-├── stream_manager.rs        # Stream task spawning, graceful shutdown
+├── stream_manager.rs        # Stream task spawning, query construction, graceful shutdown
 ├── stream_task.rs           # Per-table streaming logic, retry loops
 ├── sync_engine.rs           # Database operations, schema management, checkpoints
 ├── conn.rs                  # PostgreSQL connection pooling, retry logic
-├── manifest.rs              # Schema fetching, Admin API client, SQL generation
-├── sql_validator.rs         # SQL query validation/sanitization
+├── manifest.rs              # Schema fetching, Admin API client
 ├── batch_utils.rs           # RecordBatch utilities, system metadata injection
 └── lib.rs                   # Public API exports
 ```
@@ -112,6 +111,7 @@ ampsync/src/
 **Module Ownership:**
 
 - **Orchestration**: `main.rs` coordinates subsystems but contains minimal logic
+- **Query Construction**: `stream_manager.rs` builds streaming queries from manifest
 - **Data Flow**: `stream_task.rs` → `sync_engine.rs` → PostgreSQL
 - **Schema Management**: `manifest.rs` → `sync_engine.rs` (DDL generation)
 - **Checkpointing**: `sync_engine.rs` owns all checkpoint logic (hybrid strategy)
@@ -125,7 +125,8 @@ ampsync/src/
 - **`main.rs`**: Entry point ONLY - orchestrates subsystems, handles signals
 - **`stream_task.rs`**: Per-table streaming loop - handles batches, reorgs, watermarks
 - **`sync_engine.rs`**: Database operations ONLY - inserts, checkpoints, schema DDL
-- **`manifest.rs`**: Schema fetching and SQL generation ONLY
+- **`manifest.rs`**: Schema fetching from Admin API ONLY
+- **`stream_manager.rs`**: Query construction and stream task spawning ONLY
 - **`config.rs`**: Configuration parsing and validation ONLY
 
 **Anti-Pattern Example (❌ DON'T DO THIS):**
@@ -572,78 +573,58 @@ pub async fn insert_with_retry(
 }
 ```
 
-### 7. 📋 SQL Generation and Validation
+### 7. 📋 SQL Query Construction
 
-🚨 **MANDATORY**: Automatically generate SQL from Arrow schemas:
-
-```rust
-/// Automatic SQL generation from Arrow schema
-///
-/// - Fetches manifest from Admin API (includes schemas)
-/// - Generates SELECT queries with SETTINGS stream = true
-/// - Automatically quotes SQL reserved keywords
-/// - Validates queries for streaming compatibility
-pub fn generate_query_from_schema(
-    network: &str,
-    table: &str,
-    schema: &Schema,
-) -> Result<String> {
-    let columns: Vec<String> = schema
-        .fields()
-        .iter()
-        .map(|field| {
-            let name = field.name();
-            // ✅ Quote reserved keywords
-            if is_sql_reserved_keyword(name) {
-                format!("\"{}\"", name)
-            } else {
-                name.to_string()
-            }
-        })
-        .collect();
-
-    let columns_str = columns.join(", ");
-
-    // ✅ Generate streaming query
-    Ok(format!(
-        "SELECT {} FROM {}.{} SETTINGS stream = true",
-        columns_str, network, table
-    ))
-}
-
-/// SQL reserved keyword handling
-/// Uses compile-time perfect hash set (phf) for O(1) lookups
-static SQL_RESERVED_KEYWORDS: phf::Set<&'static str> = phf_set! {
-    "to", "from", "select", "where", "order", "group", "having",
-    "insert", "update", "delete", "create", "drop", "alter", "table",
-    "array", "blob", "sum", "count", "avg", "max", "min", // ... etc
-};
-```
-
-**SQL Validation:**
+🚨 **MANDATORY**: Stream from materialized dataset tables using simple SELECT * pattern:
 
 ```rust
-/// Validate SQL for streaming compatibility
+/// Simple query construction for materialized datasets
 ///
-/// - Rejects ORDER BY, GROUP BY, DISTINCT, aggregates
-/// - Ensures incremental processing is possible
-pub fn validate_incremental_query(sql: &str) -> Result<()> {
-    let ast = parse_sql(sql)?;
-
-    // ✅ Check for non-streaming patterns
-    if contains_order_by(&ast) {
-        return Err(anyhow!("ORDER BY not supported in streaming queries"));
-    }
-    if contains_group_by(&ast) {
-        return Err(anyhow!("GROUP BY not supported in streaming queries"));
-    }
-    if contains_distinct(&ast) {
-        return Err(anyhow!("DISTINCT not supported in streaming queries"));
-    }
-
-    Ok(())
+/// - Dataset has already been materialized by ampd
+/// - Stream from the materialized table (not raw data sources)
+/// - Always use SELECT * (no custom SQL from manifest)
+/// - Automatically quote identifiers to prevent SQL syntax errors
+pub fn construct_streaming_query(
+    dataset_name: &str,
+    table_name: &str,
+) -> String {
+    // Simple pattern: SELECT * FROM "{dataset}"."{table}" SETTINGS stream = true
+    format!(
+        "SELECT * FROM \"{}\".\"{}\" SETTINGS stream = true",
+        dataset_name, table_name
+    )
 }
 ```
+
+**Key Design Decisions:**
+
+1. **No SQL Validation Needed**: We use simple SELECT * queries (no complex SQL to validate)
+2. **No Column Extraction**: SELECT * always includes all columns from manifest schema
+3. **Identifier Quoting**: Always quote dataset/table names for safety
+4. **Materialized Data**: Stream from already-processed data (ampd materializes, ampsync streams)
+
+**Query Construction Examples:**
+
+```rust
+// Basic query
+let query = construct_streaming_query("battleship", "game_created");
+// Result: SELECT * FROM "battleship"."game_created" SETTINGS stream = true
+
+// With incremental resumption (WHERE clause injection)
+let query_with_where = format!(
+    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num_end > {} SETTINGS stream = true",
+    dataset_name, table_name, max_block_num
+);
+// Note: Uses _block_num_end (system metadata column injected by ampsync)
+```
+
+**Why This Approach:**
+
+- ✅ **Efficient**: Stream from materialized tables (no redundant computation)
+- ✅ **Simple**: Single code path for all tables
+- ✅ **Reliable**: No complex SQL parsing that can fail
+- ✅ **Fast**: No validation overhead on startup
+- ✅ **Maintainable**: Easy to understand and debug
 
 ### 8. 🔒 Schema Evolution Pattern
 

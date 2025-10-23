@@ -7,15 +7,9 @@ use std::{sync::Arc, time::Duration};
 
 use amp_client::SqlClient;
 use common::BoxError;
-use datasets_derived::manifest::TableInput;
 use tracing::{debug, info, warn};
 
-use crate::{
-    config::AmpsyncConfig,
-    sql_validator::{SelectColumns, extract_select_columns, validate_incremental_query},
-    stream_task::StreamTask,
-    sync_engine::AmpsyncDbEngine,
-};
+use crate::{config::AmpsyncConfig, stream_task::StreamTask, sync_engine::AmpsyncDbEngine};
 
 /// Graceful shutdown timeout - maximum time to wait for in-flight operations (in seconds)
 const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
@@ -42,99 +36,22 @@ pub async fn spawn_stream_tasks(
     for (table_name, table) in &config.manifest.tables {
         debug!(table = %table_name, "processing_table");
 
-        // Get the SQL query from the table definition
-        let sql_query_raw = match &table.input {
-            TableInput::View(view) => &view.sql,
-        };
+        // Construct simple query to stream from materialized dataset table
+        // The dataset has already been materialized by ampd, so we just stream from it
+        let base_query = format!(
+            "SELECT * FROM \"{}\".\"{}\" SETTINGS stream = true",
+            config.manifest.name, table_name
+        );
 
-        // Ensure the query has "SETTINGS stream = true" for streaming behavior
-        let sql_query = if sql_query_raw.contains("SETTINGS stream = true") {
-            sql_query_raw.to_string()
-        } else {
-            format!("{} SETTINGS stream = true", sql_query_raw.trim())
-        };
+        info!(
+            table = %table_name,
+            column_count = table.schema.arrow.fields.len(),
+            query = %base_query,
+            "creating_table_with_schema"
+        );
 
-        // Validate that the query only uses incremental operations
-        validate_incremental_query(&sql_query)
-            .map_err(|e| format!("Table '{}' has invalid query:\n{}", table_name, e))?;
-
-        // Extract which columns are selected in the SQL query
-        let selected_columns = extract_select_columns(&sql_query)
-            .map_err(|e| format!("Failed to parse SQL for table '{}': {}", table_name, e))?;
-
-        // Filter the manifest schema based on what columns are actually selected
-        let arrow_schema = match selected_columns {
-            SelectColumns::All => {
-                info!(
-                    table = %table_name,
-                    column_count = table.schema.arrow.fields.len(),
-                    select_mode = "all",
-                    "creating_table_with_schema"
-                );
-                table.schema.arrow.clone()
-            }
-            SelectColumns::Specific(column_names) => {
-                info!(
-                    table = %table_name,
-                    column_count = column_names.len(),
-                    columns = %column_names.join(", "),
-                    select_mode = "specific",
-                    "creating_table_with_schema"
-                );
-
-                // Build a HashMap for O(1) lookups of manifest fields
-                let mut field_map: std::collections::HashMap<
-                    &str,
-                    &datasets_derived::manifest::Field,
-                > = std::collections::HashMap::new();
-
-                for field in &table.schema.arrow.fields {
-                    let unqualified_name = field.name.rsplit('.').next().unwrap_or(&field.name);
-                    field_map.insert(unqualified_name, field);
-                    field_map.insert(&field.name, field);
-                }
-
-                // Create a filtered schema with only the selected columns
-                let mut filtered_fields = Vec::new();
-                for col_name in &column_names {
-                    let unqualified_col = col_name.rsplit('.').next().unwrap_or(col_name);
-
-                    if let Some(field) = field_map
-                        .get(col_name.as_str())
-                        .or_else(|| field_map.get(unqualified_col))
-                    {
-                        filtered_fields.push((*field).clone());
-                    } else {
-                        warn!(
-                            table = %table_name,
-                            column = %col_name,
-                            "column_not_found_in_schema"
-                        );
-                    }
-                }
-
-                if filtered_fields.is_empty() {
-                    return Err(format!(
-                        "No matching columns found in manifest schema for table '{}'. \
-                         Selected columns: {:?}, Available fields: {:?}",
-                        table_name,
-                        column_names,
-                        table
-                            .schema
-                            .arrow
-                            .fields
-                            .iter()
-                            .map(|f| &f.name)
-                            .collect::<Vec<_>>()
-                    )
-                    .into());
-                }
-
-                datasets_derived::manifest::ArrowSchema {
-                    fields: filtered_fields,
-                }
-            }
-        };
+        // Use full manifest schema (SELECT * includes all columns)
+        let arrow_schema = table.schema.arrow.clone();
 
         // Create the table based on the filtered schema
         ampsync_db_engine
@@ -151,7 +68,7 @@ pub async fn spawn_stream_tasks(
                     watermark = ?watermark,
                     "resuming_from_watermark"
                 );
-                (Some(watermark.clone()), sql_query.clone())
+                (Some(watermark.clone()), base_query.clone())
             }
             crate::sync_engine::ResumePoint::Incremental {
                 network,
@@ -163,23 +80,20 @@ pub async fn spawn_stream_tasks(
                     max_block_num = max_block_num,
                     "resuming_from_incremental_checkpoint"
                 );
-                // sql_query already has "SETTINGS stream = true" (ensured above)
-                // Remove it, add WHERE clause, then add SETTINGS back
-                let base_query = sql_query.trim_end_matches(" SETTINGS stream = true");
-                (
-                    None,
-                    format!(
-                        "{} WHERE block_num > {} SETTINGS stream = true",
-                        base_query, max_block_num
-                    ),
-                )
+                // Inject WHERE clause using _block_num_end (system metadata column)
+                // This filters out data we've already processed
+                let query_with_where = format!(
+                    "SELECT * FROM \"{}\".\"{}\" WHERE _block_num_end > {} SETTINGS stream = true",
+                    config.manifest.name, table_name, max_block_num
+                );
+                (None, query_with_where)
             }
             crate::sync_engine::ResumePoint::None => {
                 info!(
                     table = %table_name,
                     "starting_from_beginning"
                 );
-                (None, sql_query)
+                (None, base_query)
             }
         };
 
