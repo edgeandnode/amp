@@ -28,10 +28,17 @@ use crate::{
 /// - `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)
 /// - `MANIFEST_NOT_FOUND`: No manifest exists with the given name/version
 /// - `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store
+/// - `METADATA_DB_ERROR`: Failed to query dataset details from metadata database
+///
+/// ## Retrieval Process
+/// The retrieval process involves two steps:
+/// 1. **Query metadata database**: Resolves the manifest hash for the namespace/name/version combination
+/// 2. **Fetch manifest**: Retrieves the manifest content from hash-based storage
 ///
 /// This handler:
 /// - Validates and extracts the dataset name and version from the URL path
-/// - Retrieves the raw manifest JSON directly from the dataset manifests store
+/// - Queries the metadata database to get the manifest hash for the version
+/// - Retrieves the raw manifest JSON from the dataset manifests store using the hash
 /// - Returns the manifest as a JSON response with proper Content-Type header
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
@@ -71,14 +78,51 @@ pub async fn handler(
         "retrieving manifest from store"
     );
 
-    // Get the raw manifest JSON from the dataset manifests store
-    let manifest_content = match ctx.dataset_manifests_store.get(&name, &version).await {
+    // TODO: Get namespace from request instead of using a placeholder
+    let namespace = "_"
+        .parse::<datasets_common::namespace::Namespace>()
+        .expect("'_' should be a valid namespace");
+
+    // Get the manifest hash from the metadata database
+    let dataset_details = match ctx
+        .metadata_db
+        .get_dataset_version_tag(&namespace, &name, &version)
+        .await
+    {
+        Ok(Some(details)) => details,
+        Ok(None) => {
+            tracing::debug!(
+                dataset_name=%name,
+                dataset_version=%version,
+                "dataset not found in metadata database"
+            );
+            return Err(Error::NotFound {
+                name: name.clone(),
+                version: version.clone(),
+            }
+            .into());
+        }
+        Err(err) => {
+            tracing::error!(
+                dataset_name=%name,
+                dataset_version=%version,
+                error=?err,
+                "failed to retrieve dataset details from metadata database"
+            );
+            return Err(Error::MetadataDbError(err).into());
+        }
+    };
+
+    // Get the raw manifest JSON from the dataset manifests store using the hash
+    let manifest_hash: datasets_common::hash::Hash = dataset_details.hash.into();
+    let manifest_content = match ctx.dataset_manifests_store.get(&manifest_hash).await {
         Ok(Some(content)) => content,
         Ok(None) => {
             tracing::debug!(
                 dataset_name=%name,
                 dataset_version=%version,
-                "manifest not found"
+                manifest_hash=%manifest_hash,
+                "manifest not found in store"
             );
             return Err(Error::NotFound {
                 name: name.clone(),
@@ -90,6 +134,7 @@ pub async fn handler(
             tracing::debug!(
                 dataset_name=%name,
                 dataset_version=%version,
+                manifest_hash=%manifest_hash,
                 error=?err,
                 "failed to retrieve manifest"
             );
@@ -145,6 +190,14 @@ pub enum Error {
     /// - Unsupported manifest file format
     #[error("manifest retrieval error: {0}")]
     ManifestRetrievalError(#[source] dataset_store::manifests::GetError),
+
+    /// Metadata database error
+    ///
+    /// This occurs when:
+    /// - Failed to query dataset details from metadata database
+    /// - Database connection or query errors
+    #[error("metadata database error: {0}")]
+    MetadataDbError(#[source] metadata_db::Error),
 }
 
 impl IntoErrorResponse for Error {
@@ -153,6 +206,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidSelector(_) => "INVALID_SELECTOR",
             Error::NotFound { .. } => "MANIFEST_NOT_FOUND",
             Error::ManifestRetrievalError(_) => "MANIFEST_RETRIEVAL_ERROR",
+            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
         }
     }
 
@@ -161,6 +215,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidSelector(_) => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::ManifestRetrievalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

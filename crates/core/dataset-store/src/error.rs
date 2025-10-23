@@ -10,41 +10,67 @@ use crate::{
     providers::ParseConfigError,
 };
 
-/// Error for dataset registration check operations
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to check dataset registration in metadata database: {0}")]
-pub struct IsRegisteredError(#[source] pub metadata_db::Error);
-
 /// Errors specific to manifest registration operations
 #[derive(Debug, thiserror::Error)]
 pub enum RegisterManifestError {
-    /// Dataset already exists in the registry
-    #[error("Dataset '{name}' version '{version}' already registered")]
-    DatasetExists { name: Name, version: Version },
-
     /// Failed to store manifest in dataset definitions store
-    #[error("Failed to store manifest in dataset definitions store: {0}")]
-    ManifestStorage(#[source] object_store::Error),
+    #[error("Failed to store manifest in dataset definitions store")]
+    ManifestStorage(#[from] StoreError),
 
     /// Failed to register dataset in metadata database
-    #[error("Failed to register dataset in metadata database: {0}")]
+    #[error("Failed to register dataset in metadata database")]
     MetadataRegistration(#[source] metadata_db::Error),
-
-    /// Failed to check if dataset is registered in metadata database
-    #[error("Failed to check dataset registration in metadata database: {0}")]
-    ExistenceCheck(#[source] metadata_db::Error),
 }
 
-impl From<IsRegisteredError> for RegisterManifestError {
-    fn from(IsRegisteredError(err): IsRegisteredError) -> Self {
-        RegisterManifestError::ExistenceCheck(err)
-    }
-}
+/// Errors specific to setting semantic version tags for dataset manifests
+///
+/// These errors occur during the `set_dataset_version_tag` operation, which creates
+/// or updates a semantic version tag and automatically updates the "latest" tag if needed.
+#[derive(Debug, thiserror::Error)]
+pub enum SetVersionTagError {
+    /// Failed to set the semantic version tag in the metadata database
+    ///
+    /// This error occurs when:
+    /// - The database connection is unavailable or times out
+    /// - The manifest hash does not exist (foreign key constraint violation)
+    /// - The dataset namespace/name combination doesn't exist
+    /// - Database permissions prevent the upsert operation
+    /// - A transaction conflict occurs during concurrent tag updates
+    ///
+    /// The operation may be retried as it's idempotent. If the manifest hash
+    /// is invalid, ensure the manifest is registered first via `register_manifest`.
+    #[error("Failed to set version tag in metadata database")]
+    MetadataDb(#[source] metadata_db::Error),
 
-impl From<StoreError> for RegisterManifestError {
-    fn from(StoreError(err): StoreError) -> Self {
-        RegisterManifestError::ManifestStorage(err)
-    }
+    /// Failed to stream existing version tags to find the highest version
+    ///
+    /// This error occurs when:
+    /// - The database connection fails while streaming tag records
+    /// - A serialization error occurs when reading tag data from the database
+    /// - The stream is interrupted due to network issues
+    /// - Database query execution fails due to resource constraints
+    ///
+    /// This happens during the automatic "latest" tag update process. The version
+    /// tag itself may have been successfully created, but the latest tag update
+    /// failed. The system remains in a consistent state (version tag exists), but
+    /// the latest tag may be stale until the next successful version tag operation.
+    #[error("Failed to stream all tags from metadata database")]
+    ListTags(#[source] metadata_db::Error),
+
+    /// Failed to update the "latest" tag to point to the highest version
+    ///
+    /// This error occurs when:
+    /// - The database connection fails during the latest tag update
+    /// - A transaction conflict occurs if another process updates latest simultaneously
+    /// - Database permissions prevent updating the latest tag
+    /// - The manifest hash resolved as highest no longer exists (rare edge case)
+    ///
+    /// This happens after successfully setting the version tag and finding the highest
+    /// version. The version tag operation succeeded, but the automatic latest tag
+    /// update failed. The system is consistent (version tag exists and is correct),
+    /// but the latest tag may not point to the actual highest version until corrected.
+    #[error("Failed to set latest tag in metadata database")]
+    UpdateLatestTag(#[source] metadata_db::Error),
 }
 
 /// Errors specific to getting dataset operations
@@ -124,13 +150,29 @@ pub enum GetDatasetError {
     },
 }
 
-/// Error that occurs when getting all datasets from the manifest store.
-///
-/// This error wraps a `GetDatasetError` that occurred while getting one of the
-/// datasets during the iteration through all registered datasets.
+/// Errors that occur when getting all datasets from the dataset store
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to get dataset: {0}")]
-pub struct GetAllDatasetsError(#[from] pub GetDatasetError);
+pub enum GetAllDatasetsError {
+    /// Failed to list datasets from the metadata database
+    ///
+    /// This occurs when the database query to retrieve all dataset tags fails,
+    /// typically due to connection issues, query timeouts, or database errors.
+    #[error("Failed to list datasets from metadata database: {0}")]
+    ListDatasetsFromDb(#[source] metadata_db::Error),
+
+    /// Failed to load a specific dataset
+    ///
+    /// This occurs when loading an individual dataset from the list fails.
+    /// The dataset exists in the metadata database but cannot be loaded,
+    /// typically due to manifest retrieval/parse errors or missing manifest files.
+    #[error("Failed to load dataset '{namespace}/{name}@{version}': {source}")]
+    LoadDataset {
+        namespace: String,
+        name: String,
+        version: String,
+        source: GetDatasetError,
+    },
+}
 
 /// Errors specific to getting derived dataset manifest operations
 #[derive(Debug, thiserror::Error)]

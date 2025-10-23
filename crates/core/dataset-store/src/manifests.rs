@@ -1,12 +1,20 @@
 use std::sync::Arc;
 
-use common::store::ObjectStoreExt as _;
-use datasets_common::{name::Name, namespace::Namespace, version::Version};
-use futures::TryStreamExt as _;
+use backon::Retryable as _;
+use datasets_common::hash::Hash;
 use metadata_db::MetadataDb;
 use object_store::{ObjectStore, path::Path as ObjectStorePath};
 
-/// Manages dataset manifest configurations combining ObjectStore and MetadataDb operations
+/// Manages dataset manifest configurations with object store operations
+///
+/// ## Manifest Storage Format
+///
+/// This store uses hash-based storage:
+/// - **Storage**: Manifests are stored as `{hash}` (no file extension)
+/// - **Content Addressing**: Filename is the SHA-256 hash of the manifest JSON content
+/// - **Deduplication**: Identical manifests share the same file
+/// - **Retrieval**: Use [`get`](Self::get) with the manifest hash
+/// - **Creation**: Use [`store`](Self::store) to write new manifests
 ///
 /// ## Object Store Agnostic Design
 ///
@@ -24,7 +32,6 @@ use object_store::{ObjectStore, path::Path as ObjectStorePath};
 /// - **Direct Access**: All operations directly access the underlying store
 /// - **Fresh Data**: Each call returns the most up-to-date information
 /// - **Simplicity**: No cache invalidation or consistency concerns
-/// - **MetadataDb Integration**: Operations coordinate between ObjectStore and MetadataDb
 ///
 /// **Note**: External changes to the underlying store are immediately visible.
 #[derive(Debug, Clone)]
@@ -37,232 +44,115 @@ impl<S> DatasetManifestsStore<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`DatasetManifestsStore`] instance with the given metadata database and underlying store.
+    /// Create a new [`DatasetManifestsStore`] instance with the given underlying store.
     pub fn new(metadata_db: MetadataDb, store: S) -> Self {
         Self { metadata_db, store }
     }
 
-    /// Get the latest version for a given dataset name
+    /// Store a new dataset manifest in the underlying store and register it in the metadata database
     ///
-    /// Returns the latest version if found, or None if no dataset with the given name exists.
-    pub async fn get_latest_version(
-        &self,
-        name: &Name,
-    ) -> Result<Option<Version>, GetLatestVersionError> {
-        // TODO: Pass the actual namespace instead of using a placeholder
-        let namespace = "_"
-            .parse::<Namespace>()
-            .expect("'_' should be a valid namespace");
-        let dataset = self
-            .metadata_db
-            .get_dataset_latest_version_with_details(&namespace, name)
-            .await
-            .map_err(GetLatestVersionError)?;
-
-        Ok(dataset.map(|details| details.version.into()))
-    }
-
-    /// Get all dataset manifests from the underlying store
+    /// This operation is idempotent using object-store-first ordering:
+    /// 1. Write manifest to object store (idempotent - content-addressable)
+    /// 2. Register manifest in metadata database (idempotent with ON CONFLICT DO NOTHING)
     ///
-    /// Returns a set of all available manifests with their name, version, and path information.
-    /// This operation directly queries the underlying store without caching.
-    pub async fn list(&self) -> Vec<(Name, Version)> {
-        // Get all datasets from metadata database
-        let datasets = match self
-            .metadata_db
-            .stream_all_datasets()
-            .try_collect::<Vec<_>>()
-            .await
-        {
-            Ok(datasets) => datasets,
-            Err(err) => {
-                tracing::error!(error = ?err, "Failed to get datasets from metadata database");
-                return Vec::new();
-            }
-        };
-
-        // Convert to Vec of (Name, Version), filtering out invalid entries
-        datasets
-            .into_iter()
-            .map(|dataset| {
-                let name = dataset.name.parse::<Name>().unwrap_or_else(|_| {
-                    unreachable!(
-                        "Datasets from the metadata DB MUST have valid names, got: {}",
-                        dataset.name
-                    )
-                });
-                let version = dataset.version.into();
-                (name, version)
-            })
-            .collect()
-    }
-
-    /// Get a specific dataset manifest by name and version
-    ///
-    /// Returns the manifest path and content if found, or None if not found.
-    /// This operation directly queries the underlying store without caching.
-    pub async fn get(
-        &self,
-        name: &Name,
-        version: impl Into<Option<&Version>>,
-    ) -> Result<Option<ManifestContent>, GetError> {
-        // TODO: Pass the actual namespace instead of using a placeholder
-        let namespace = "_"
-            .parse::<Namespace>()
-            .expect("'_' should be a valid namespace");
-        let res = match version.into() {
-            None => self
-                .metadata_db
-                .get_dataset_latest_version_with_details(&namespace, name)
-                .await
-                .map_err(GetError::MetadataDbError)?,
-            Some(version) => self
-                .metadata_db
-                .get_dataset_with_details(&namespace, name, version)
-                .await
-                .map_err(GetError::MetadataDbError)?,
-        };
-
-        let Some(dataset) = res else {
-            return Ok(None);
-        };
-
-        let manifest_file_path = ManifestPath::try_from(dataset.manifest_path)
-            .map_err(GetError::UnsupportedManifestFormat)?;
-        fetch_manifest_content(&self.store, manifest_file_path)
-            .await
-            .map_err(GetError::ObjectStoreFetch)
-    }
-
-    /// Store a new dataset manifest in the underlying store
-    ///
-    /// Returns the path where the manifest was stored.
-    /// Note: This function only stores the manifest file, it does not register
-    /// the dataset in the metadata database. The caller is responsible for that.
-    pub async fn store(
-        &self,
-        name: &Name,
-        version: &Version,
-        manifest_str: String,
-    ) -> Result<ObjectStorePath, StoreError> {
-        // Store manifest in underlying store
-        let manifest_path = ObjectStorePath::from(format!(
-            "{}__{}.json",
-            name,
-            version.to_underscore_version()
-        ));
-
+    /// The manifest is stored with hash-based filename: `{hash}` (no extension).
+    /// Input must be canonical JSON string (already validated and serialized).
+    pub async fn store(&self, hash: &Hash, manifest_str: String) -> Result<(), StoreError> {
+        // Write to object store first (idempotent operation)
+        let manifest_path = ObjectStorePath::from(hash.to_string());
         self.store
             .put(&manifest_path, manifest_str.into())
             .await
-            .map_err(StoreError)?;
+            .map_err(StoreError::ObjectStorePut)?;
 
-        Ok(manifest_path)
+        tracing::debug!(
+            manifest_hash = %hash,
+            "Manifest written to object store, registering in database"
+        );
+
+        // Register in database (idempotent with ON CONFLICT DO NOTHING)
+        register_manifest_with_retry(&self.metadata_db, hash)
+            .await
+            .map_err(StoreError::MetadataDbRegister)?;
+
+        tracing::debug!(
+            manifest_hash = %hash,
+            "Manifest registered in database"
+        );
+
+        Ok(())
+    }
+
+    /// Get a dataset manifest by hash from the object store
+    ///
+    /// Returns the manifest content if found, or None if not registered in the metadata database.
+    /// This method first checks the metadata database for the manifest path, and only fetches
+    /// from the object store if the manifest is registered.
+    ///
+    /// ## Steps performed:
+    /// 1. Query metadata database for manifest path by hash (with retry on connection issues)
+    /// 2. If not registered (None): return Ok(None)
+    /// 3. If registered (Some(path)): fetch manifest content from object store using the path
+    pub async fn get(&self, hash: &Hash) -> Result<Option<ManifestContent>, GetError> {
+        // Get manifest path from metadata database (with retry)
+        let Some(path) = get_manifest_path_with_retry(&self.metadata_db, hash)
+            .await
+            .map_err(GetError::MetadataDbQueryPath)?
+        else {
+            return Ok(None);
+        };
+
+        // Fetch manifest content from object store using the path from metadata DB
+        let manifest_path = ObjectStorePath::from(path);
+        let get_result = match self.store.get(&manifest_path).await {
+            Ok(res) => res,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(err) => return Err(GetError::ObjectStoreGet(err)),
+        };
+
+        // Read all bytes from the object
+        let bytes = get_result
+            .bytes()
+            .await
+            .map_err(GetError::ObjectStoreReadBytes)?;
+
+        // Convert bytes to UTF-8 string
+        let content = String::from_utf8(bytes.to_vec()).map_err(GetError::Utf8Error)?;
+
+        Ok(Some(ManifestContent(content)))
     }
 }
 
-/// Error when storing manifest in object store
+/// Error when storing manifest in object store and metadata database
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to store manifest in object store: {0}")]
-pub struct StoreError(#[source] pub object_store::Error);
+pub enum StoreError {
+    /// Failed to put manifest in object store
+    #[error("Failed to put manifest in object store")]
+    ObjectStorePut(#[source] object_store::Error),
+
+    /// Failed to register manifest in metadata database
+    #[error("Failed to register manifest in metadata database")]
+    MetadataDbRegister(#[source] metadata_db::Error),
+}
 
 /// Errors specific to manifest retrieval operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetError {
-    /// Failed to query metadata database
-    #[error("Failed to query metadata database: {0}")]
-    MetadataDbError(metadata_db::Error),
+    /// Failed to query manifest path from metadata database
+    #[error("Failed to query manifest path from metadata database")]
+    MetadataDbQueryPath(#[source] metadata_db::Error),
 
-    /// Unsupported manifest file format
-    #[error("Unsupported manifest file format: {}", .0.format)]
-    UnsupportedManifestFormat(#[source] UnsupportedManifestFormat),
+    /// Failed to get manifest object from object store
+    #[error("Failed to get manifest object from object store")]
+    ObjectStoreGet(#[source] object_store::Error),
 
-    /// Failed to fetch manifest from object store
-    #[error("Failed to fetch manifest from object store: {0}")]
-    ObjectStoreFetch(common::store::StoreError),
-}
+    /// Failed to read manifest bytes from object store
+    #[error("Failed to read manifest bytes from object store")]
+    ObjectStoreReadBytes(#[source] object_store::Error),
 
-/// Failed to query metadata database for latest version
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to query metadata database for latest version: {0}")]
-pub struct GetLatestVersionError(#[source] pub metadata_db::Error);
-
-/// Fetches manifest content from the object store
-///
-/// Retrieves the content of a manifest file (JSON format) from the provided
-/// object store. The function gracefully handles missing files by returning `None`.
-async fn fetch_manifest_content<S>(
-    store: &S,
-    path: ManifestPath,
-) -> Result<Option<ManifestContent>, common::store::StoreError>
-where
-    S: ObjectStore,
-{
-    match store.get_string(path.into_inner()).await {
-        Ok(content) => Ok(Some(ManifestContent(content))),
-        Err(err) if err.is_not_found() => Ok(None),
-        Err(err) => Err(err),
-    }
-}
-
-/// Newtype wrapper for dataset manifest paths (must be .json files)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ManifestPath(ObjectStorePath);
-
-impl ManifestPath {
-    /// Get the inner ObjectStorePath
-    pub fn into_inner(self) -> ObjectStorePath {
-        self.0
-    }
-}
-
-impl AsRef<ObjectStorePath> for ManifestPath {
-    fn as_ref(&self) -> &ObjectStorePath {
-        &self.0
-    }
-}
-
-impl From<ManifestPath> for ObjectStorePath {
-    fn from(path: ManifestPath) -> Self {
-        path.0
-    }
-}
-
-impl TryFrom<String> for ManifestPath {
-    type Error = UnsupportedManifestFormat;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if !value.ends_with(".json") {
-            return Err(UnsupportedManifestFormat { format: value });
-        }
-        Ok(ManifestPath(ObjectStorePath::from(value)))
-    }
-}
-
-impl TryFrom<ObjectStorePath> for ManifestPath {
-    type Error = UnsupportedManifestFormat;
-
-    fn try_from(value: ObjectStorePath) -> Result<Self, Self::Error> {
-        if !value.as_ref().ends_with(".json") {
-            return Err(UnsupportedManifestFormat {
-                format: value.to_string(),
-            });
-        }
-        Ok(ManifestPath(value))
-    }
-}
-
-impl std::fmt::Display for ManifestPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Error for unsupported manifest file format
-#[derive(Debug, thiserror::Error)]
-#[error("unsupported manifest file format: {format}")]
-pub struct UnsupportedManifestFormat {
-    pub format: String,
+    /// Failed to decode manifest content as UTF-8
+    #[error("Failed to decode manifest content as UTF-8")]
+    Utf8Error(#[source] std::string::FromUtf8Error),
 }
 
 /// Newtype wrapper for dataset manifest content (JSON format only)
@@ -292,3 +182,76 @@ impl AsRef<[u8]> for ManifestContent {
 #[derive(Debug, thiserror::Error)]
 #[error("JSON parsing error: {0}")]
 pub struct ManifestParseError(#[source] pub serde_json::Error);
+
+/// Register manifest file in metadata database with retry on connection errors
+///
+/// This operation is idempotent (`ON CONFLICT DO NOTHING`).
+async fn register_manifest_with_retry(
+    metadata_db: &MetadataDb,
+    hash: &Hash,
+) -> Result<(), metadata_db::Error> {
+    let path = hash.to_string();
+    (|| metadata_db.register_manifest(hash, path.as_str()))
+        .retry(retry_policy())
+        .when(metadata_db::Error::is_connection_error)
+        .notify(|err, dur| {
+            tracing::warn!(
+                error = %err,
+                manifest_hash = %hash,
+                "Database connection issue during manifest registration. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
+}
+
+/// Get manifest file path by hash with retry on connection errors
+async fn get_manifest_path_with_retry(
+    metadata_db: &MetadataDb,
+    hash: &Hash,
+) -> Result<Option<String>, metadata_db::Error> {
+    (|| metadata_db.get_manifest_path(hash))
+        .retry(retry_policy())
+        .when(metadata_db::Error::is_connection_error)
+        .notify(|err, dur| {
+            tracing::warn!(
+                error = %err,
+                manifest_hash = %hash,
+                "Database connection issue during path lookup. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
+}
+
+/// A retry policy for metadata DB operations in the manifest store.
+///
+/// Uses exponential backoff with jitter to prevent thundering herd problems when
+/// multiple clients retry simultaneously after a transient failure (e.g., database
+/// connection timeout, temporary network issue).
+///
+/// ## Retry Configuration
+/// - **Jitter**: Enabled (randomizes delay to spread out retry attempts)
+/// - **Factor**: 2 (exponential backoff multiplier)
+/// - **Min Delay**: 100ms (initial retry delay)
+/// - **Max Delay**: 2s (maximum retry delay cap)
+/// - **Max Attempts**: 5 (total of 5 retry attempts before giving up)
+///
+/// ## Example Retry Sequence (with jitter)
+/// Without jitter, retries would occur at: 100ms, 200ms, 400ms, 800ms, 1600ms (capped at 2s)
+/// With jitter, each delay is randomized within a range around these values, preventing
+/// synchronized retry storms from multiple clients.
+///
+/// ## Thundering Herd Prevention
+/// Jitter is critical when multiple instances retry database operations after a shared
+/// failure (e.g., database restart). Without jitter, all instances would retry at the
+/// exact same moments, potentially overwhelming the recovering database. Jitter spreads
+/// these retries over time, allowing gradual recovery.
+#[inline]
+fn retry_policy() -> backon::ExponentialBuilder {
+    backon::ExponentialBuilder::default()
+        .with_jitter() // Add jitter to prevent thundering herd
+        .with_min_delay(std::time::Duration::from_millis(100))
+        .with_max_delay(std::time::Duration::from_secs(2))
+        .with_max_times(5)
+}

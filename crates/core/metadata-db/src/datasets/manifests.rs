@@ -17,9 +17,9 @@ use super::{hash::Hash, name::Name, namespace::Namespace};
 /// respective tables. Violating this constraint will result in a foreign key error.
 pub async fn insert<'c, E>(
     exe: E,
-    namespace: &Namespace<'_>,
-    name: &Name<'_>,
-    hash: &Hash<'_>,
+    namespace: Namespace<'_>,
+    name: Name<'_>,
+    hash: Hash<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
