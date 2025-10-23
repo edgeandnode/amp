@@ -1585,6 +1585,12 @@
           "end_block": {
             "$ref": "#/components/schemas/EndBlock",
             "description": "The end block configuration for the dump\n\nSupports multiple modes:\n- `null` or omitted: Continuous dumping (never stops)\n- `\"latest\"`: Stop at the latest available block\n- `<number>`: Stop at specific block number (e.g., `1000000`)\n- `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)\n\nIf not specified, defaults to continuous mode."
+          },
+          "max_writers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of parallel writers to run\n\nEach writer will be responsible for an equal number of blocks.\nFor example, if extracting blocks 0-10,000,000 with max_writers=10,\neach writer will handle a contiguous section of 1 million blocks.\n\nOnly applicable to raw datasets (EVM RPC, Firehose, etc.).\nSQL datasets ignore this parameter.\n\nDefaults to 1 if not specified.",
+            "minimum": 0
           }
         }
       },
