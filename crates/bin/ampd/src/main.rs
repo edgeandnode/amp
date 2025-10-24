@@ -47,11 +47,11 @@ enum Command {
         #[arg(long, short, env = "DUMP_END_BLOCK")]
         end_block: Option<EndBlock>,
 
-        /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
-        /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
-        /// job will be responsible for a contiguous section of 1 million blocks.
-        #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
-        n_jobs: u16,
+        /// How many parallel writers to run. Defaults to 1. Each writer will be responsible for an
+        /// equal number of blocks. Example: If start = 0, end = 10_000_000 and max_writers = 10, then each
+        /// writer will be responsible for a contiguous section of 1 million blocks.
+        #[arg(long, short = 'j', default_value = "1", env = "DUMP_MAX_WRITERS")]
+        max_writers: u16,
 
         /// The size of each partition in MB. Once the size is reached, a new part file is created. This
         /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
@@ -171,7 +171,7 @@ async fn main_inner() -> Result<(), BoxError> {
         }
         Command::Dump {
             end_block,
-            n_jobs,
+            max_writers,
             partition_size_mb,
             dataset,
             ignore_deps,
@@ -191,7 +191,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 dataset,
                 ignore_deps,
                 end_block,
-                n_jobs,
+                max_writers,
                 partition_size_mb,
                 run_every_mins,
                 location,

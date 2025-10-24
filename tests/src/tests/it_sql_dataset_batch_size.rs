@@ -133,7 +133,7 @@ impl TestCtx {
         &self,
         dataset: &str,
         end: u64,
-        n_jobs: u16,
+        max_writers: u16,
         microbatch_max_interval: impl Into<Option<u64>>,
     ) {
         let dataset_ref: Reference = dataset.parse().unwrap();
@@ -142,7 +142,7 @@ impl TestCtx {
             self.ctx.metadata_db(),
             dataset_ref,
             end,
-            n_jobs,
+            max_writers,
             microbatch_max_interval,
         )
         .await

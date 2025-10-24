@@ -110,7 +110,7 @@ use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
 #[allow(clippy::too_many_arguments)]
 pub async fn dump(
     ctx: Ctx,
-    n_jobs: u16,
+    max_writers: u16,
     catalog: Catalog,
     tables: &[Arc<PhysicalTable>],
     parquet_opts: Arc<WriterProperties>,
@@ -195,9 +195,9 @@ pub async fn dump(
                 .join(", ")
         );
 
-        // Split them across the target number of jobs as to balance the number of blocks per job.
+        // Split them across the target number of writers as to balance the number of blocks per writer.
         let missing_dataset_ranges =
-            split_and_partition(missing_dataset_ranges, n_jobs as u64, 2000);
+            split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
 
         let total_blocks_to_cover = missing_dataset_ranges
             .iter()
@@ -211,7 +211,7 @@ pub async fn dump(
             last_log_time: RwLock::new(Instant::now()),
         });
 
-        let jobs = missing_dataset_ranges
+        let writers = missing_dataset_ranges
             .into_iter()
             .enumerate()
             .map(|(i, ranges)| DumpPartition {
@@ -227,15 +227,15 @@ pub async fn dump(
                 progress_reporter: progress_reporter.clone(),
             });
 
-        // Spawn the jobs, starting them with a 1 second delay between each.
+        // Spawn the writers, starting them with a 1 second delay between each.
         // Note that tasks spawned in the join set start executing immediately in parallel
         let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
-        for job in jobs {
-            let span = tracing::info_span!("dump_partition", partition_id = job.id);
-            join_set.spawn(job.run().instrument(span));
+        for writer in writers {
+            let span = tracing::info_span!("dump_partition", partition_id = writer.id);
+            join_set.spawn(writer.run().instrument(span));
         }
 
-        // Wait for all the jobs to finish, returning an error if any job panics or fails.
+        // Wait for all the writers to finish, returning an error if any writer panics or fails.
         if let Err(err) = join_set.try_wait_all().await {
             tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
 

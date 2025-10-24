@@ -298,7 +298,7 @@ async fn bless(
         dataset.clone(),
         true,                    // force_reprocess
         EndBlock::Absolute(end), // end_block
-        BLESS_JOB_COUNT,         // n_jobs
+        BLESS_JOB_COUNT,         // max_writers
         None,                    // start_block
         None,                    // microbatch_max_interval
         None,                    // microbatch_max_rows

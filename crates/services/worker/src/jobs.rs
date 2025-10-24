@@ -21,7 +21,15 @@ pub use self::{
 /// metadata DB table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Descriptor {
-    Dump { end_block: EndBlock },
+    Dump {
+        end_block: EndBlock,
+        #[serde(default = "default_max_writers")]
+        max_writers: u16,
+    },
+}
+
+fn default_max_writers() -> u16 {
+    1
 }
 
 /// The kind of job is inferred from the location and associated dataset information.
@@ -39,6 +47,8 @@ pub enum Job {
         tables: Vec<Arc<PhysicalTable>>,
         /// The end block configuration for the dump.
         end_block: EndBlock,
+        /// Number of parallel writers to run.
+        max_writers: u16,
         /// Metrics registry.
         metrics: Option<Arc<metrics::MetricsRegistry>>,
         /// Meter for creating telemetry objects.
@@ -62,7 +72,10 @@ impl Job {
             .map_err(JobCreationError::OutputLocationsFetchFailed)?;
 
         match job_desc {
-            Descriptor::Dump { end_block } => {
+            Descriptor::Dump {
+                end_block,
+                max_writers,
+            } => {
                 let mut tables = vec![];
                 for location in output_locations {
                     let dataset_version = location.dataset_version.parse().ok();
@@ -100,6 +113,7 @@ impl Job {
                     ctx,
                     tables,
                     end_block,
+                    max_writers,
                     metrics,
                     meter,
                 })
@@ -113,13 +127,14 @@ impl Job {
                 ctx,
                 tables,
                 end_block,
+                max_writers,
                 metrics,
                 meter,
             } => {
                 dump::dump_tables(
                     ctx.clone(),
                     &tables,
-                    1,
+                    max_writers,
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,

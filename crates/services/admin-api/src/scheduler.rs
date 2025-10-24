@@ -25,6 +25,7 @@ impl Scheduler {
         &self,
         dataset: Dataset,
         end_block: EndBlock,
+        max_writers: u16,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
         let existing_jobs = self
@@ -70,7 +71,10 @@ impl Scheduler {
             locations.push(physical_table.location_id());
         }
 
-        let job_desc = serde_json::to_string(&JobDescriptor::Dump { end_block })?;
+        let job_desc = serde_json::to_string(&JobDescriptor::Dump {
+            end_block,
+            max_writers,
+        })?;
         let job_id = self
             .metadata_db
             .schedule_job(&node_id, &job_desc, &locations)
