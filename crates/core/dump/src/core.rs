@@ -133,7 +133,7 @@ pub async fn dump_user_tables(
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if max_writers > 1 {
-        tracing::warn!("max_writers > 1 has no effect for SQL datasets");
+        tracing::warn!("max_writers > 1 has no effect for derived datasets");
     }
 
     let opts = crate::parquet_opts(&ctx.config.parquet);

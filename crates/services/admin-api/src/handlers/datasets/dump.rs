@@ -244,7 +244,7 @@ pub struct DumpOptions {
     /// each writer will handle a contiguous section of 1 million blocks.
     ///
     /// Only applicable to raw datasets (EVM RPC, Firehose, etc.).
-    /// SQL datasets ignore this parameter.
+    /// Derived datasets ignore this parameter.
     ///
     /// Defaults to 1 if not specified.
     #[serde(default = "default_max_writers")]
