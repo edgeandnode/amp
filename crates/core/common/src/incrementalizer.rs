@@ -140,7 +140,7 @@ impl TreeNodeRewriter for Incrementalizer {
                 TableScan(table_scan) => {
                     let Ok(table_provider) = source_as_provider(&table_scan.source) else {
                         return Err(DataFusionError::External(
-                            format!("TableSource was not DefaultTableSource").into(),
+                            "TableSource was not DefaultTableSource".to_string().into(),
                         ));
                     };
 
@@ -245,7 +245,7 @@ pub fn incremental_op_kind(node: &LogicalPlan) -> Result<IncrementalOpKind, NonI
     match node {
         // Entirely unsupported operations.
         Dml(_) | Ddl(_) | Statement(_) | Copy(_) | Extension(_) => {
-            return Err(NonIncrementalError::Invalid(node.to_string()));
+            Err(NonIncrementalError::Invalid(node.to_string()))
         }
 
         // Stateless operators
@@ -275,24 +275,12 @@ pub fn incremental_op_kind(node: &LogicalPlan) -> Result<IncrementalOpKind, NonI
         },
 
         // Operations that are supported only in batch queries
-        Limit(_) => {
-            return Err(NonIncremental(NonIncrementalOp::Limit));
-        }
-        Aggregate(_) => {
-            return Err(NonIncremental(NonIncrementalOp::Aggregate));
-        }
-        Distinct(_) => {
-            return Err(NonIncremental(NonIncrementalOp::Distinct));
-        }
-        Sort(_) => {
-            return Err(NonIncremental(NonIncrementalOp::Sort));
-        }
-        Window(_) => {
-            return Err(NonIncremental(NonIncrementalOp::Window));
-        }
-        RecursiveQuery(_) => {
-            return Err(NonIncremental(NonIncrementalOp::RecursiveQuery));
-        }
+        Limit(_) => Err(NonIncremental(NonIncrementalOp::Limit)),
+        Aggregate(_) => Err(NonIncremental(NonIncrementalOp::Aggregate)),
+        Distinct(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+        Sort(_) => Err(NonIncremental(NonIncrementalOp::Sort)),
+        Window(_) => Err(NonIncremental(NonIncrementalOp::Window)),
+        RecursiveQuery(_) => Err(NonIncremental(NonIncrementalOp::RecursiveQuery)),
     }
 }
 

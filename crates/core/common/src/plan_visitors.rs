@@ -168,7 +168,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
                         // But they were not equal, probably due to qualifiers. If there is only one input table, we can ignore the qualifier difference.
                         let input_schema = projection.input.schema();
                         let input_qualifiers: BTreeSet<&TableReference> =
-                            input_schema.iter().map(|x| x.0).flatten().collect();
+                            input_schema.iter().filter_map(|x| x.0).collect();
 
                         if input_qualifiers.len() <= 1 {
                             return Ok(Transformed::no(LogicalPlan::Projection(projection)));
@@ -178,10 +178,11 @@ impl TreeNodeRewriter for BlockNumPropagator {
                     // But If we cannot be sure that the `_block_num` selection is correct, we reject the query.
                     //
                     // Many cases of this would currently be caught by `fn forbid_underscore_prefixed_aliases`.
-                    return Err(df_err(format!(
+                    return Err(df_err(
                         "Invalid select of `_block_num`. To fix this error, alias the column or \
                         if using `*`, consider explicitly selecting the columns you need."
-                    )));
+                            .to_string(),
+                    ));
                 }
 
                 projection.expr.insert(0, block_num_expr);
@@ -206,7 +207,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
             }
 
             Join(ref join) => {
-                self.next_block_num_expr = Some(block_num_for_join(&join)?);
+                self.next_block_num_expr = Some(block_num_for_join(join)?);
                 Ok(Transformed::no(node))
             }
 
@@ -308,7 +309,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), BoxError> {
     let mut err: Option<NonIncrementalError> = None;
 
     // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
-    plan.exists(|node| match incremental_op_kind(&node) {
+    plan.exists(|node| match incremental_op_kind(node) {
         Ok(_) => Ok(false),
         Err(e) => {
             err = Some(e);
