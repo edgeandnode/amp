@@ -84,34 +84,33 @@ pub async fn handler(
         .expect("'_' should be a valid namespace");
 
     // Get the manifest hash from the metadata database
-    let dataset_details = match ctx
-        .metadata_db
-        .get_dataset_version_tag(&namespace, &name, &version)
-        .await
-    {
-        Ok(Some(details)) => details,
-        Ok(None) => {
-            tracing::debug!(
-                dataset_name=%name,
-                dataset_version=%version,
-                "dataset not found in metadata database"
-            );
-            return Err(Error::NotFound {
-                name: name.clone(),
-                version: version.clone(),
+    let dataset_details =
+        match metadata_db::datasets::get_version_tag(&ctx.metadata_db, &namespace, &name, &version)
+            .await
+        {
+            Ok(Some(details)) => details,
+            Ok(None) => {
+                tracing::debug!(
+                    dataset_name=%name,
+                    dataset_version=%version,
+                    "dataset not found in metadata database"
+                );
+                return Err(Error::NotFound {
+                    name: name.clone(),
+                    version: version.clone(),
+                }
+                .into());
             }
-            .into());
-        }
-        Err(err) => {
-            tracing::error!(
-                dataset_name=%name,
-                dataset_version=%version,
-                error=?err,
-                "failed to retrieve dataset details from metadata database"
-            );
-            return Err(Error::MetadataDbError(err).into());
-        }
-    };
+            Err(err) => {
+                tracing::error!(
+                    dataset_name=%name,
+                    dataset_version=%version,
+                    error=?err,
+                    "failed to retrieve dataset details from metadata database"
+                );
+                return Err(Error::MetadataDbError(err).into());
+            }
+        };
 
     // Get the raw manifest JSON from the dataset manifests store using the hash
     let manifest_hash: datasets_common::hash::Hash = dataset_details.hash.into();

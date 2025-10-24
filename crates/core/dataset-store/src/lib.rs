@@ -103,6 +103,16 @@ impl DatasetStore {
     /// making it the most recently registered manifest for the dataset.
     ///
     /// The manifest must be provided as a JSON string (canonical serialized form).
+    ///
+    /// ## Transaction Guarantees
+    ///
+    /// This method performs operations in two phases:
+    /// 1. **Object Storage** (outside transaction): Store manifest file - idempotent if file already exists
+    /// 2. **Database Transaction**: Link manifest to dataset AND update dev tag - both succeed atomically or both fail
+    ///
+    /// If the database transaction fails, the manifest file will exist in object storage but won't be
+    /// linked to any dataset, which is safe due to idempotency and eventual consistency. The operation
+    /// can be safely retried from the beginning.
     pub async fn register_manifest(
         &self,
         namespace: &Namespace,
@@ -115,17 +125,27 @@ impl DatasetStore {
             .store(manifest_hash, manifest_str)
             .await?;
 
+        // Use transaction to ensure both operations succeed atomically
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(RegisterManifestError::MetadataRegistration)?;
+
         // Link manifest to dataset (idempotent)
-        self.metadata_db
-            .link_manifest_to_dataset(namespace, name, manifest_hash)
+        metadata_db::datasets::link_manifest_to_dataset(&mut tx, namespace, name, manifest_hash)
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 
         // Automatically update dev tag to point to the newly registered manifest
-        self.metadata_db
-            .set_dataset_dev_tag(namespace, name, manifest_hash)
+        metadata_db::datasets::set_dev_tag(&mut tx, namespace, name, manifest_hash)
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
+
+        // Commit transaction - both operations succeed or both are rolled back
+        tx.commit()
+            .await
+            .map_err(RegisterManifestError::TransactionCommit)?;
 
         Ok(())
     }
@@ -145,19 +165,23 @@ impl DatasetStore {
     /// - If the tag exists with the same hash, no changes are made
     /// - If the tag exists with a different hash, it is updated
     ///
-    /// ## Race Condition
+    /// ## Transaction Guarantees
     ///
-    /// **Note**: There is a potential race condition when multiple processes concurrently tag
-    /// different versions of the same dataset. In rare cases, the "latest" tag may temporarily
-    /// point to a version that is not the highest. This is **non-critical** because:
-    /// - The inconsistency is temporary and self-correcting
-    /// - The next version tag operation will fix the "latest" pointer
-    /// - All individual version tags remain correct and accessible
-    /// - No data is lost or corrupted
+    /// This method uses a database transaction with row-level locking to ensure atomicity
+    /// and prevent race conditions when updating the "latest" tag:
     ///
-    /// This is a temporary trade-off was chosen to optimize and code simplicity
-    /// over perfect consistency in rare edge cases.
-    // TODO: Perform this operation in a single transaction (SELECT FOR UPDATE)
+    /// - **Atomicity**: Version tag registration and "latest" tag update succeed together or fail together
+    /// - **Isolation**: Uses `SELECT FOR UPDATE` to lock the "latest" tag row, preventing concurrent
+    ///   processes from reading stale values or creating race conditions
+    /// - **Consistency**: The "latest" tag is guaranteed to point to the highest version number,
+    ///   even under concurrent version tag registrations
+    ///
+    /// ### Race Condition Prevention
+    ///
+    /// Without row locking, two concurrent processes could both read the same "latest" version,
+    /// both determine they should update it, and the last writer would win regardless of which
+    /// version is higher. The `get_latest_tag_for_update` call prevents this by ensuring only
+    /// one transaction can read and modify the "latest" tag at a time.
     pub async fn set_dataset_version_tag(
         &self,
         namespace: &Namespace,
@@ -165,29 +189,50 @@ impl DatasetStore {
         version: &Version,
         manifest_hash: &Hash,
     ) -> Result<(), SetVersionTagError> {
-        self.metadata_db
-            .register_dataset_version_tag(namespace, name, version, manifest_hash)
+        // Use transaction to ensure atomic version tag + latest tag update
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
             .await
             .map_err(SetVersionTagError::MetadataDb)?;
 
-        let current_latest = self
-            .metadata_db
-            .get_dataset_latest_tag(namespace, name)
-            .await
-            .map_err(SetVersionTagError::UpdateLatestTag)?
-            .map(|tag| -> Version { tag.version.into() });
+        metadata_db::datasets::register_version_tag(
+            &mut tx,
+            namespace,
+            name,
+            version,
+            manifest_hash,
+        )
+        .await
+        .map_err(SetVersionTagError::MetadataDb)?;
 
-        // Update "latest" tag if new version is higher (or no latest exists)
+        // Lock the "latest" row to prevent concurrent modifications (SELECT FOR UPDATE)
+        let current_latest =
+            metadata_db::datasets::get_latest_tag_for_update(&mut tx, namespace, name)
+                .await
+                .map_err(SetVersionTagError::UpdateLatestTag)?
+                .map(|tag| -> Version { tag.version.into() });
+
+        // Lock held until commit, so current_latest cannot change during this transaction.
+        // Update "latest" tag only if new version is higher (or no latest exists).
         if let Some(ref current_latest) = current_latest
             && version <= current_latest
         {
+            // Version is not higher than current latest, no need to update latest tag
+            tx.commit()
+                .await
+                .map_err(SetVersionTagError::TransactionCommit)?;
             return Ok(());
         }
 
-        self.metadata_db
-            .set_dataset_latest_tag(namespace, name, manifest_hash)
+        metadata_db::datasets::set_latest_tag(&mut tx, namespace, name, manifest_hash)
             .await
             .map_err(SetVersionTagError::UpdateLatestTag)?;
+
+        // Commit transaction - all operations succeed or all are rolled back
+        tx.commit()
+            .await
+            .map_err(SetVersionTagError::TransactionCommit)?;
 
         Ok(())
     }
@@ -225,9 +270,7 @@ impl DatasetStore {
             // or use a placeholder version (default version, i.e., v0.0.0) if not found.
             let version = match version.into() {
                 Some(v) => v.clone(),
-                None => self
-                    .metadata_db
-                    .get_dataset_latest_tag(&namespace, &name)
+                None => metadata_db::datasets::get_latest_tag(&self.metadata_db, &namespace, &name)
                     .await
                     .map_err(|source| GetDatasetError::GetLatestVersion {
                         namespace: namespace.to_string(),
@@ -300,16 +343,15 @@ impl DatasetStore {
         version: &Version,
     ) -> Result<Option<Dataset>, GetDatasetError> {
         // Get the manifest hash from the metadata database
-        let Some(dataset_details) = self
-            .metadata_db
-            .get_dataset_version_tag(namespace, name, version)
-            .await
-            .map_err(|source| GetDatasetError::ManifestRetrievalError {
-                namespace: namespace.to_string(),
-                name: name.to_string(),
-                version: Some(version.to_string()),
-                source: Box::new(source),
-            })?
+        let Some(dataset_details) =
+            metadata_db::datasets::get_version_tag(&self.metadata_db, namespace, name, version)
+                .await
+                .map_err(|source| GetDatasetError::ManifestRetrievalError {
+                    namespace: namespace.to_string(),
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: Box::new(source),
+                })?
         else {
             return Ok(None);
         };
@@ -412,9 +454,7 @@ impl DatasetStore {
     }
 
     pub async fn get_all_datasets(&self) -> Result<Vec<Dataset>, GetAllDatasetsError> {
-        let list = self
-            .metadata_db
-            .list_all_datasets()
+        let list = metadata_db::datasets::list_all(&self.metadata_db)
             .await
             .map_err(GetAllDatasetsError::ListDatasetsFromDb)?;
 
@@ -470,15 +510,14 @@ impl DatasetStore {
         let version = &version.into().cloned().unwrap_or_default();
 
         // Get manifest hash from metadata database
-        let Some(dataset_details) = self
-            .metadata_db
-            .get_dataset_version_tag(namespace, name, version)
-            .await
-            .map_err(|source| GetDerivedManifestError::ManifestRetrievalError {
-                name: name.to_string(),
-                version: Some(version.to_string()),
-                source: Box::new(source),
-            })?
+        let Some(dataset_details) =
+            metadata_db::datasets::get_version_tag(&self.metadata_db, namespace, name, version)
+                .await
+                .map_err(|source| GetDerivedManifestError::ManifestRetrievalError {
+                    name: name.to_string(),
+                    version: Some(version.to_string()),
+                    source: Box::new(source),
+                })?
         else {
             return Ok(None);
         };
@@ -562,24 +601,27 @@ impl DatasetStore {
             .expect("'_' should be a valid namespace");
 
         let dataset_details = match dataset_version {
-            Some(version) => self
-                .metadata_db
-                .get_dataset_version_tag(&namespace, dataset_name, version)
-                .await
-                .map_err(|source| GetClientError::ManifestRetrievalError {
-                    name: dataset_name.to_string(),
-                    version: Some(version.to_string()),
-                    source: Box::new(source),
-                })?,
-            None => self
-                .metadata_db
-                .get_dataset_latest_tag(&namespace, dataset_name)
-                .await
-                .map_err(|source| GetClientError::ManifestRetrievalError {
-                    name: dataset_name.to_string(),
-                    version: None,
-                    source: Box::new(source),
-                })?,
+            Some(version) => metadata_db::datasets::get_version_tag(
+                &self.metadata_db,
+                &namespace,
+                dataset_name,
+                version,
+            )
+            .await
+            .map_err(|source| GetClientError::ManifestRetrievalError {
+                name: dataset_name.to_string(),
+                version: Some(version.to_string()),
+                source: Box::new(source),
+            })?,
+            None => {
+                metadata_db::datasets::get_latest_tag(&self.metadata_db, &namespace, dataset_name)
+                    .await
+                    .map_err(|source| GetClientError::ManifestRetrievalError {
+                        name: dataset_name.to_string(),
+                        version: None,
+                        source: Box::new(source),
+                    })?
+            }
         };
 
         let Some(dataset_details) = dataset_details else {
