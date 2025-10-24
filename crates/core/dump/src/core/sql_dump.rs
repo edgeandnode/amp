@@ -100,7 +100,6 @@ use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::ResumeWatermark},
-    plan_visitors::IncrementalCheck,
     query_context::{QueryEnv, parse_sql},
 };
 use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
@@ -170,7 +169,11 @@ pub async fn dump_table(
         let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
-        let incremental_check = plan.is_incremental()?;
+        if let Err(e) = plan.is_incremental() {
+            return Err(
+                format!("syncing table {table_name}.{dataset_name} is not supported: {e}",).into(),
+            );
+        }
 
         let Some(start) = catalog.earliest_block().await? else {
             // If the dependencies have synced nothing, we have nothing to do.
@@ -196,14 +199,6 @@ pub async fn dump_table(
             }
             ResolvedEndBlock::Block(block) => Some(block),
         };
-
-        if let IncrementalCheck::NonIncremental(op) = incremental_check {
-            return Err(format!(
-                "syncing non-incremental table is not supported: {}.{} (contains non-incremental operation: {})",
-                table_name, dataset_name, op
-            )
-            .into());
-        }
 
         let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
         let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));

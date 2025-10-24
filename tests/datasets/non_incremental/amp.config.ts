@@ -8,15 +8,10 @@ export default defineDataset(() => ({
     eth_rpc: "_/eth_rpc@0.0.0",
   },
   tables: {
-    // This table uses JOIN which is a non-incremental operation
-    join_blocks_txs: {
+    // This table uses a MAX aggregation which is a non-incremental operation
+    max_gas_used: {
       sql: `
-        SELECT
-          b.block_num,
-          b.hash as block_hash,
-          b.miner
-        FROM eth_rpc.blocks b
-        JOIN eth_rpc.transactions t ON b.block_num = t.block_num
+        SELECT max(b.gas_used) FROM eth_rpc.blocks b
       `,
       network: "mainnet",
     },

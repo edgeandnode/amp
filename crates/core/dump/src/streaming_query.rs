@@ -8,8 +8,9 @@ use common::{
     SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
+    incrementalizer::incrementalize_plan,
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
-    plan_visitors::{constrain_by_block_num, unproject_special_block_num_column},
+    plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     query_context::{QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
@@ -195,13 +196,11 @@ impl StreamingQuery {
                 .iter()
                 .any(|f| f.name() == SPECIAL_BLOCK_NUM);
 
-        // Plan transformations for streaming:
+        // This plan is the starting point of each microbatch execution. Transformations applied to it:œ
         // - Propagate the `_block_num` column.
-        // - Enforce `order by _block_num`.
         // - Run logical optimizations ahead of execution.
         let plan = {
-            let mut plan = plan.propagate_block_num()?;
-            plan = plan.order_by_block_num();
+            let plan = plan.propagate_block_num()?;
 
             let ctx = PlanningContext::new(catalog.logical().clone());
             ctx.optimize_plan(&plan).await?
@@ -264,7 +263,10 @@ impl StreamingQuery {
             let plan = {
                 // Incrementalize the plan
                 let plan = self.plan.clone().attach_to(&ctx)?;
-                let mut plan = constrain_by_block_num(plan, range.start(), range.end())?;
+                let mut plan = incrementalize_plan(plan, range.start(), range.end())?;
+
+                // Enforce `order by _block_num`.
+                plan = order_by_block_num(plan);
 
                 // Remove `_block_num` if not needed in the output.
                 if !self.preserve_block_num {

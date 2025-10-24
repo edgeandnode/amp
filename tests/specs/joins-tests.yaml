@@ -1,0 +1,19 @@
+- name: restore_eth_rpc
+  restore: _/eth_rpc@0.0.0
+
+- name: deploy_joins
+  deploy: joins
+  end: 15000000
+
+- name: dump_joins
+  dataset: _/joins@0.1.0
+  end: 15000000
+
+- name: query_join_blocks_txs
+  query: |
+    SELECT COUNT(*) as count
+    FROM joins.join_blocks_txs
+  results: |
+    [
+      {"count": 348}
+    ]
