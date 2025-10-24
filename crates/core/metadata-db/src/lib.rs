@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use futures::{
     StreamExt, TryStreamExt,
@@ -6,13 +6,13 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
-use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
 use url::Url;
 
-mod conn;
-mod datasets;
+pub mod datasets;
+mod db;
+mod error;
 mod files;
 mod jobs;
 mod locations;
@@ -21,16 +21,16 @@ pub mod notification_multiplexer;
 pub mod temp;
 mod workers;
 
-use self::conn::{DbConn, DbConnPool};
+use self::db::{ConnPool, Connection};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
-        Hash as DatasetHash, HashOwned as DatasetHashOwned, Name as DatasetName,
-        NameOwned as DatasetNameOwned, Namespace as DatasetNamespace,
-        NamespaceOwned as DatasetNamespaceOwned, Version as DatasetVersion,
-        VersionOwned as DatasetVersionOwned, tags::Tag as DatasetTag,
+        DatasetHash, DatasetHashOwned, DatasetName, DatasetNameOwned, DatasetNamespace,
+        DatasetNamespaceOwned, DatasetTag, DatasetVersion, DatasetVersionOwned,
     },
+    db::{ConnError, Executor, Transaction},
+    error::Error,
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
         FileMetadataWithDetails, FooterBytes,
@@ -61,81 +61,10 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 /// Default pool size for the metadata DB.
 pub const DEFAULT_POOL_SIZE: u32 = 10;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Error connecting to metadata db: {0}")]
-    ConnectionError(sqlx::Error),
-
-    #[error("Error running migrations: {0}")]
-    MigrationError(#[from] sqlx::migrate::MigrateError),
-
-    #[error("Error executing database query: {0}")]
-    DbError(#[from] sqlx::Error),
-
-    #[error("Error sending job notification: {0}")]
-    JobNotificationSendError(#[from] workers::events::NotifSendError),
-
-    #[error("Error receiving job notification: {0}")]
-    JobNotificationRecvError(#[from] workers::events::NotifRecvError),
-
-    #[error("Error sending location notification: {0}")]
-    LocationNotificationSendError(#[from] locations::events::LocationNotifSendError),
-
-    #[error(
-        "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
-    )]
-    MultipleActiveLocations(String, String, String, Vec<String>),
-
-    #[error("Error parsing URL: {0}")]
-    UrlParseError(#[from] url::ParseError),
-
-    #[error("Job status update error: {0}")]
-    JobStatusUpdateError(#[from] jobs::JobStatusUpdateError),
-}
-
-impl Error {
-    /// Returns `true` if the error is likely to be a transient connection issue.
-    ///
-    /// This is used to determine if an operation should be retried.
-    ///
-    /// The following errors are considered retryable:
-    /// - `Error::ConnectionError`: This is a wrapper around `sqlx::Error` that is returned when
-    ///   the initial connection to the database fails.
-    /// - `sqlx::Error::Io`: An I/O error, often indicating a network issue or a closed socket.
-    /// - `sqlx::Error::Tls`: An error that occurred during the TLS handshake.
-    /// - `sqlx::Error::PoolTimedOut`: The connection pool timed out waiting for a free connection.
-    /// - `sqlx::Error::PoolClosed`: The connection pool was closed while an operation was pending.
-    ///
-    /// Other database errors, such as constraint violations or serialization issues, are not
-    /// considered transient and will not be retried.
-    pub fn is_connection_error(&self) -> bool {
-        match self {
-            Error::ConnectionError(_) => true,
-            Error::DbError(err) => matches!(
-                err,
-                sqlx::Error::Io(_)
-                    | sqlx::Error::Tls(_)
-                    | sqlx::Error::PoolTimedOut
-                    | sqlx::Error::PoolClosed
-            ),
-            _ => false,
-        }
-    }
-}
-
-impl From<conn::ConnError> for Error {
-    fn from(err: conn::ConnError) -> Self {
-        match err {
-            conn::ConnError::ConnectionError(err) => Error::ConnectionError(err),
-            conn::ConnError::MigrationFailed(err) => Error::MigrationError(err),
-        }
-    }
-}
-
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pool: DbConnPool,
+    pool: ConnPool,
     #[cfg(feature = "temp-db")]
     pub(crate) url: Arc<str>,
     #[cfg(not(feature = "temp-db"))]
@@ -170,7 +99,7 @@ impl MetadataDb {
         pool_size: u32,
         auto_migrate: bool,
     ) -> Result<Self, Error> {
-        let pool = DbConnPool::connect(url, pool_size).await?;
+        let pool = ConnPool::connect(url, pool_size).await?;
         if auto_migrate {
             pool.run_migrations().await?;
         }
@@ -192,15 +121,15 @@ impl MetadataDb {
             .with_max_delay(Duration::from_millis(100))
             .with_max_times(20);
 
-        fn is_db_starting_up(err: &conn::ConnError) -> bool {
+        fn is_db_starting_up(err: &ConnError) -> bool {
             matches!(
                 err,
-                conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
+                ConnError::ConnectionError(sqlx::Error::Database(db_err))
                 if db_err.code().is_some_and(|code| code == "57P03")
             )
         }
 
-        fn notify_retry(err: &conn::ConnError, dur: Duration) {
+        fn notify_retry(err: &ConnError, dur: Duration) {
             tracing::warn!(
                 error = %err,
                 "Database still starting up during connection. Retrying in {:.1}s",
@@ -208,7 +137,7 @@ impl MetadataDb {
             );
         }
 
-        let pool = (|| DbConnPool::connect(url, pool_size))
+        let pool = (|| ConnPool::connect(url, pool_size))
             .retry(retry_policy)
             .when(is_db_starting_up)
             .notify(notify_retry)
@@ -232,10 +161,81 @@ impl MetadataDb {
         }
     }
 
+    /// Begins a new database transaction
+    ///
+    /// Returns a `Transaction` that provides RAII semantics - it will automatically
+    /// roll back when dropped unless explicitly committed with `.commit()`.
+    #[instrument(skip(self), err)]
+    pub async fn begin_txn(&self) -> Result<Transaction, Error> {
+        let tx = self.pool.begin().await.map_err(Error::DbError)?;
+        Ok(Transaction::new(tx))
+    }
+
     pub fn default_pool_size() -> u32 {
         DEFAULT_POOL_SIZE
     }
 }
+
+// Implement sqlx::Executor for &MetadataDb by delegating to the pool
+impl<'c> sqlx::Executor<'c> for &'c MetadataDb {
+    type Database = sqlx::Postgres;
+
+    fn fetch_many<'e, 'q: 'e, E>(
+        self,
+        query: E,
+    ) -> BoxStream<
+        'e,
+        Result<
+            sqlx::Either<
+                <sqlx::Postgres as sqlx::Database>::QueryResult,
+                <sqlx::Postgres as sqlx::Database>::Row,
+            >,
+            sqlx::Error,
+        >,
+    >
+    where
+        'c: 'e,
+        E: 'q + sqlx::Execute<'q, Self::Database>,
+    {
+        (&self.pool).fetch_many(query)
+    }
+
+    fn fetch_optional<'e, 'q: 'e, E>(
+        self,
+        query: E,
+    ) -> BoxFuture<'e, Result<Option<<sqlx::Postgres as sqlx::Database>::Row>, sqlx::Error>>
+    where
+        'c: 'e,
+        E: 'q + sqlx::Execute<'q, Self::Database>,
+    {
+        (&self.pool).fetch_optional(query)
+    }
+
+    fn prepare_with<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+        parameters: &'e [<sqlx::Postgres as sqlx::Database>::TypeInfo],
+    ) -> BoxFuture<'e, Result<<sqlx::Postgres as sqlx::Database>::Statement<'q>, sqlx::Error>>
+    where
+        'c: 'e,
+    {
+        (&self.pool).prepare_with(sql, parameters)
+    }
+
+    fn describe<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+    ) -> BoxFuture<'e, Result<sqlx::Describe<Self::Database>, sqlx::Error>>
+    where
+        'c: 'e,
+    {
+        (&self.pool).describe(sql)
+    }
+}
+
+impl<'c> Executor<'c> for &'c MetadataDb {}
+
+impl _priv::Sealed for &MetadataDb {}
 
 /// Worker-related API
 impl MetadataDb {
@@ -255,7 +255,7 @@ impl MetadataDb {
         &self,
         node_id: impl Into<WorkerNodeIdOwned>,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
-        let mut conn = DbConn::connect(&self.url).await?;
+        let mut conn = Connection::connect(&self.url).await?;
 
         let node_id = node_id.into();
         let fut = async move {
@@ -800,211 +800,6 @@ impl MetadataDb {
     }
 }
 
-/// Dataset registry API
-impl MetadataDb {
-    /// Register manifest file in content-addressable storage
-    ///
-    /// Inserts manifest hash and path into `manifest_files` table with ON CONFLICT DO NOTHING.
-    /// This operation is idempotent - duplicate registrations are silently ignored.
-    #[instrument(skip(self), err)]
-    pub async fn register_manifest(
-        &self,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-        manifest_path: impl Into<Cow<'_, str>> + std::fmt::Debug,
-    ) -> Result<(), Error> {
-        datasets::manifest_files::insert(&*self.pool, manifest_hash.into(), manifest_path.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Retrieve manifest file path by content hash
-    ///
-    /// Queries `manifest_files` table for the object store path associated with the given manifest hash. Returns `None` if hash not found.
-    #[instrument(skip(self), err)]
-    pub async fn get_manifest_path(
-        &self,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    ) -> Result<Option<String>, Error> {
-        datasets::manifest_files::get_path_by_hash(&*self.pool, &manifest_hash.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Link manifest to dataset in junction table
-    ///
-    /// Inserts association into `dataset_manifests` table with ON CONFLICT DO NOTHING for idempotency. Both manifest and dataset must exist or foreign key constraint will fail.
-    #[instrument(skip(self), err)]
-    pub async fn link_manifest_to_dataset(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    ) -> Result<(), Error> {
-        datasets::manifests::insert(
-            &*self.pool,
-            namespace.into(),
-            name.into(),
-            manifest_hash.into(),
-        )
-        .await
-        .map_err(Into::into)
-    }
-
-    /// Register or update semantic version tag pointing to manifest
-    ///
-    /// Upserts version tag (e.g., "1.0.0", "2.3.1") in `tags` table. Only updates `updated_at` if hash changes (WHERE clause). Manifest must be registered and linked or foreign key constraint fails.
-    #[instrument(skip(self), err)]
-    pub async fn register_dataset_version_tag(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    ) -> Result<(), Error> {
-        datasets::tags::upsert_version(
-            &*self.pool,
-            namespace.into(),
-            name.into(),
-            version.into(),
-            manifest_hash.into(),
-        )
-        .await
-        .map_err(Into::into)
-    }
-
-    /// Update "latest" special tag to point to manifest
-    ///
-    /// Upserts "latest" tag in `tags` table, typically managed automatically to track highest semantic version. Only updates `updated_at` if hash changes.
-    #[instrument(skip(self), err)]
-    pub async fn set_dataset_latest_tag(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    ) -> Result<(), Error> {
-        datasets::tags::upsert_latest(
-            &*self.pool,
-            namespace.into(),
-            name.into(),
-            manifest_hash.into(),
-        )
-        .await
-        .map_err(Into::into)
-    }
-
-    /// Update "dev" special tag to point to manifest
-    ///
-    /// Upserts "dev" tag in `tags` table, typically managed automatically to track most recently registered manifest. Only updates `updated_at` if hash changes.
-    #[instrument(skip(self), err)]
-    pub async fn set_dataset_dev_tag(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    ) -> Result<(), Error> {
-        datasets::tags::upsert_dev(
-            &*self.pool,
-            namespace.into(),
-            name.into(),
-            manifest_hash.into(),
-        )
-        .await
-        .map_err(Into::into)
-    }
-
-    /// Retrieve version tag with complete details (namespace, name, version, hash, timestamps)
-    ///
-    /// Queries `tags` table for specified version tag. Returns full tag record including manifest hash and creation/update timestamps, or `None` if tag doesn't exist.
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset_version_tag(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetTag>, Error> {
-        datasets::tags::get_version(&*self.pool, namespace.into(), name.into(), version.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Resolve "latest" special tag to its corresponding semantic version tag
-    ///
-    /// Uses CTE query to find the semver tag pointing to same manifest hash as "latest". Returns most recently updated tag if multiple tags share the hash, or `None` if "latest" doesn't exist.
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset_latest_tag(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetTag>, Error> {
-        datasets::tags::get_latest(&*self.pool, namespace.into(), name.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Retrieve manifest hash for version tag
-    ///
-    /// Queries `tags` table for hash column only. Returns `None` if tag doesn't exist.
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset_version_tag_hash(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetHashOwned>, Error> {
-        datasets::tags::get_version_hash(&*self.pool, namespace.into(), name.into(), version.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Retrieve manifest hash for "latest" special tag
-    ///
-    /// Queries `tags` table for hash where version='latest'. Returns `None` if "latest" tag doesn't exist.
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset_latest_tag_hash(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetHashOwned>, Error> {
-        datasets::tags::get_latest_hash(&*self.pool, namespace.into(), name.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Retrieve manifest hash for "dev" special tag
-    ///
-    /// Queries `tags` table for hash where version='dev'. Returns `None` if "dev" tag doesn't exist.
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset_dev_tag_hash(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    ) -> Result<Option<DatasetHashOwned>, Error> {
-        datasets::tags::get_dev_hash(&*self.pool, namespace.into(), name.into())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// List all semantic versions for dataset
-    ///
-    /// Queries `tags` table excluding special tags (NOT IN ('dev', 'latest')), ordered by version DESC.
-    #[instrument(skip(self))]
-    pub async fn list_dataset_versions(
-        &self,
-        namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    ) -> Result<Vec<DatasetVersionOwned>, Error> {
-        Ok(datasets::tags::list_versions(&*self.pool, namespace.into(), name.into()).await?)
-    }
-
-    /// List all dataset tags from registry
-    ///
-    /// Queries all semantic version tags from `tags` table (excludes "dev" and "latest"), ordered by version DESC.
-    #[instrument(skip(self))]
-    pub async fn list_all_datasets(&self) -> Result<Vec<DatasetTag>, Error> {
-        Ok(datasets::tags::list_all(&*self.pool).await?)
-    }
-}
-
 #[derive(Debug, sqlx::FromRow)]
 pub struct GcManifestRow {
     /// gc_manifest.location_id
@@ -1016,9 +811,6 @@ pub struct GcManifestRow {
     /// gc_manifest.expiration
     pub expiration: NaiveDateTime,
 }
-
-#[cfg(test)]
-mod tests;
 
 // Garbage Collection API
 impl MetadataDb {
@@ -1105,3 +897,20 @@ impl MetadataDb {
             .boxed()
     }
 }
+
+/// Private module for sealed trait pattern
+///
+/// This module contains the `Sealed` trait used to prevent external
+/// implementations of our `Executor` trait. The trait implementations
+/// are co-located with the `Executor` trait in `db/exec.rs`.
+pub(crate) mod _priv {
+    /// Sealed trait to prevent external implementations
+    ///
+    /// This trait has no methods and serves only as a marker.
+    /// Types implement this trait in `db/exec.rs` alongside the
+    /// `Executor` trait implementation.
+    pub trait Sealed {}
+}
+
+#[cfg(test)]
+mod tests;

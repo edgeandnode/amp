@@ -191,7 +191,7 @@ async fn register_manifest_with_retry(
     hash: &Hash,
 ) -> Result<(), metadata_db::Error> {
     let path = hash.to_string();
-    (|| metadata_db.register_manifest(hash, path.as_str()))
+    (|| metadata_db::datasets::register_manifest(metadata_db, hash, path.as_str()))
         .retry(retry_policy())
         .when(metadata_db::Error::is_connection_error)
         .notify(|err, dur| {
@@ -210,7 +210,7 @@ async fn get_manifest_path_with_retry(
     metadata_db: &MetadataDb,
     hash: &Hash,
 ) -> Result<Option<String>, metadata_db::Error> {
-    (|| metadata_db.get_manifest_path(hash))
+    (|| metadata_db::datasets::get_manifest_path(metadata_db, hash))
         .retry(retry_policy())
         .when(metadata_db::Error::is_connection_error)
         .notify(|err, dur| {

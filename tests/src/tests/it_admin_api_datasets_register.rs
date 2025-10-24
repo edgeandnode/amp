@@ -333,9 +333,7 @@ impl TestCtx {
         let namespace = "_"
             .parse::<Namespace>()
             .expect("'_' should be a valid namespace");
-        self.ctx
-            .metadata_db()
-            .get_dataset_version_tag(namespace, name, version)
+        metadata_db::datasets::get_version_tag(self.ctx.metadata_db(), namespace, name, version)
             .await
             .expect("failed to check if dataset exists")
             .is_some()

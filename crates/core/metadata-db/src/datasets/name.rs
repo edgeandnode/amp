@@ -73,6 +73,15 @@ impl<'a> Name<'a> {
     }
 }
 
+impl<'a> From<&'a Name<'a>> for Name<'a> {
+    fn from(name: &'a Name<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input name.
+        // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
+        // SAFETY: The input name already upholds invariants, so the referenced data is valid.
+        Name::from_ref_unchecked(name.as_ref())
+    }
+}
+
 impl<'a> std::ops::Deref for Name<'a> {
     type Target = str;
 

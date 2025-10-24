@@ -18,7 +18,7 @@ pub use self::{
     pagination::{list_first_page, list_next_page},
 };
 use crate::{
-    datasets::{Name as DatasetName, Version as DatasetVersion},
+    datasets::{DatasetName, DatasetVersion},
     workers::{NodeId, NodeIdOwned},
 };
 

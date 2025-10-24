@@ -73,9 +73,7 @@ pub async fn handler(
     let namespace = "_"
         .parse::<Namespace>()
         .expect("'_' should be a valid namespace");
-    let versions = ctx
-        .metadata_db
-        .list_dataset_versions(&namespace, &name)
+    let versions = metadata_db::datasets::list_versions(&ctx.metadata_db, &namespace, &name)
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, dataset_name=%name, "failed to list dataset versions");

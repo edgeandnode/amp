@@ -1,0 +1,137 @@
+//! Integration tests for transaction support
+
+use pgtemp::PgTempDB;
+
+use crate::{DatasetHash, DatasetName, DatasetNamespace, MetadataDb, datasets};
+
+#[tokio::test]
+async fn commit_persists_changes() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset-commit");
+    let manifest_hash = DatasetHash::from_ref_unchecked("test-hash-commit");
+    let manifest_path = "path/to/manifest-commit.json";
+
+    // Begin transaction
+    let mut tx = metadata_db
+        .begin_txn()
+        .await
+        .expect("Failed to begin transaction");
+
+    // Make changes within transaction
+    datasets::register_manifest(&mut tx, &manifest_hash, manifest_path)
+        .await
+        .expect("Failed to register manifest in transaction");
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+        .await
+        .expect("Failed to link manifest in transaction");
+
+    //* When
+    let commit_result = tx.commit().await;
+
+    //* Then
+    assert!(commit_result.is_ok(), "transaction commit should succeed");
+
+    // Verify data persisted by querying outside the transaction
+    let path = datasets::get_manifest_path(&metadata_db, &manifest_hash)
+        .await
+        .expect("Failed to query manifest path after commit");
+    assert_eq!(
+        path,
+        Some(manifest_path.to_string()),
+        "Manifest should be persisted after commit"
+    );
+}
+
+#[tokio::test]
+async fn explicit_rollback_discards_changes() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset-rollback");
+    let manifest_hash = DatasetHash::from_ref_unchecked("test-hash-rollback");
+    let manifest_path = "path/to/manifest-rollback.json";
+
+    let mut tx = metadata_db
+        .begin_txn()
+        .await
+        .expect("Failed to begin transaction");
+
+    // Make changes within transaction
+    datasets::register_manifest(&mut tx, &manifest_hash, manifest_path)
+        .await
+        .expect("Failed to register manifest in transaction");
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+        .await
+        .expect("Failed to link manifest in transaction");
+
+    //* When
+    let rollback_result = tx.rollback().await;
+
+    //* Then
+    assert!(
+        rollback_result.is_ok(),
+        "transaction rollback should succeed"
+    );
+
+    // Verify data was NOT persisted
+    let path = datasets::get_manifest_path(&metadata_db, &manifest_hash)
+        .await
+        .expect("Failed to query manifest path after rollback");
+    assert_eq!(
+        path, None,
+        "Manifest should NOT be persisted after rollback"
+    );
+}
+
+#[tokio::test]
+async fn rollback_on_drop_discards_changes() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset-drop");
+    let manifest_hash = DatasetHash::from_ref_unchecked("test-hash-drop");
+    let manifest_path = "path/to/manifest-drop.json";
+
+    let mut tx = metadata_db
+        .begin_txn()
+        .await
+        .expect("Failed to begin transaction");
+
+    // Make changes within transaction
+    datasets::register_manifest(&mut tx, &manifest_hash, manifest_path)
+        .await
+        .expect("Failed to register manifest in transaction");
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+        .await
+        .expect("Failed to link manifest in transaction");
+
+    //* When
+    drop(tx);
+
+    //* Then
+    // Verify data was NOT persisted
+    let path = datasets::get_manifest_path(&metadata_db, &manifest_hash)
+        .await
+        .expect("Failed to query manifest path after drop");
+    assert_eq!(
+        path, None,
+        "Manifest should NOT be persisted after explicit drop"
+    );
+}

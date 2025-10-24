@@ -20,6 +20,22 @@ pub enum RegisterManifestError {
     /// Failed to register dataset in metadata database
     #[error("Failed to register dataset in metadata database")]
     MetadataRegistration(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// None of the operations in the transaction (linking manifest and updating dev tag)
+    /// were persisted to the database.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations (serialization failure)
+    /// - Database constraint violation detected at commit time
+    /// - Database running out of disk space or resources
+    ///
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
 }
 
 /// Errors specific to setting semantic version tags for dataset manifests
@@ -28,34 +44,20 @@ pub enum RegisterManifestError {
 /// or updates a semantic version tag and automatically updates the "latest" tag if needed.
 #[derive(Debug, thiserror::Error)]
 pub enum SetVersionTagError {
-    /// Failed to set the semantic version tag in the metadata database
+    /// Failed to begin transaction or execute database operations
     ///
     /// This error occurs when:
     /// - The database connection is unavailable or times out
     /// - The manifest hash does not exist (foreign key constraint violation)
     /// - The dataset namespace/name combination doesn't exist
     /// - Database permissions prevent the upsert operation
-    /// - A transaction conflict occurs during concurrent tag updates
+    /// - Failed to begin the transaction
+    /// - Failed to register version tag or query latest tag
     ///
     /// The operation may be retried as it's idempotent. If the manifest hash
     /// is invalid, ensure the manifest is registered first via `register_manifest`.
-    #[error("Failed to set version tag in metadata database")]
+    #[error("Failed to execute database operations")]
     MetadataDb(#[source] metadata_db::Error),
-
-    /// Failed to stream existing version tags to find the highest version
-    ///
-    /// This error occurs when:
-    /// - The database connection fails while streaming tag records
-    /// - A serialization error occurs when reading tag data from the database
-    /// - The stream is interrupted due to network issues
-    /// - Database query execution fails due to resource constraints
-    ///
-    /// This happens during the automatic "latest" tag update process. The version
-    /// tag itself may have been successfully created, but the latest tag update
-    /// failed. The system remains in a consistent state (version tag exists), but
-    /// the latest tag may be stale until the next successful version tag operation.
-    #[error("Failed to stream all tags from metadata database")]
-    ListTags(#[source] metadata_db::Error),
 
     /// Failed to update the "latest" tag to point to the highest version
     ///
@@ -65,12 +67,27 @@ pub enum SetVersionTagError {
     /// - Database permissions prevent updating the latest tag
     /// - The manifest hash resolved as highest no longer exists (rare edge case)
     ///
-    /// This happens after successfully setting the version tag and finding the highest
-    /// version. The version tag operation succeeded, but the automatic latest tag
-    /// update failed. The system is consistent (version tag exists and is correct),
-    /// but the latest tag may not point to the actual highest version until corrected.
-    #[error("Failed to set latest tag in metadata database")]
+    /// This happens after successfully registering the version tag and determining
+    /// that the "latest" tag needs to be updated. The error occurs before commit,
+    /// so no changes have been persisted yet.
+    #[error("Failed to update latest tag in metadata database")]
     UpdateLatestTag(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// None of the operations in the transaction (version tag registration and latest
+    /// tag update) were persisted to the database.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations (serialization failure)
+    /// - Database constraint violation detected at commit time
+    /// - Database running out of disk space or resources
+    ///
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
 }
 
 /// Errors specific to getting dataset operations
