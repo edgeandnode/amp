@@ -140,7 +140,7 @@ impl TreeNodeRewriter for Incrementalizer {
                 TableScan(table_scan) => {
                     let Ok(table_provider) = source_as_provider(&table_scan.source) else {
                         return Err(DataFusionError::External(
-                            "TableSource was not DefaultTableSource".to_string().into(),
+                            "TableSource was not DefaultTableSource".into(),
                         ));
                     };
 
