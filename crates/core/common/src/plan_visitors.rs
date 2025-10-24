@@ -2,20 +2,29 @@ use std::{collections::BTreeSet, fmt, sync::Arc};
 
 use datafusion::{
     common::{
-        Column, plan_err,
-        tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
+        Column, JoinType, plan_err,
+        tree_node::{Transformed, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter},
     },
-    datasource::TableType,
     error::DataFusionError,
-    logical_expr::{Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
-    optimizer::{OptimizerContext, OptimizerRule, push_down_filter::PushDownFilter},
+    functions::core::expr_fn::greatest,
+    logical_expr::{
+        Join as JoinStruct, LogicalPlan, LogicalPlanBuilder, Sort, Union as UnionStruct,
+        expr::physical_name,
+    },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
     sql::TableReference,
 };
-use tracing::instrument;
 
-use crate::{BoxError, SPECIAL_BLOCK_NUM};
+use crate::{
+    BoxError, SPECIAL_BLOCK_NUM,
+    incrementalizer::{NonIncrementalError, incremental_op_kind},
+};
+
+/// Helper function to create a column reference to `_block_num`
+fn block_num_col() -> Expr {
+    col(SPECIAL_BLOCK_NUM)
+}
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
 /// names are reserved for special columns.
@@ -75,35 +84,167 @@ pub fn forbid_duplicate_field_names(
     Ok(())
 }
 
-/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
-pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| {
+/// The expression `greatest(left._block_num, right._block_num)`
+fn block_num_for_join(join: &JoinStruct) -> Result<Expr, DataFusionError> {
+    // Get the schema field names from left and right inputs
+    let left_schema = join.left.schema();
+    let right_schema = join.right.schema();
+
+    // Find the qualified _block_num columns from each side
+    let left_block_num = left_schema
+        .iter()
+        .find(|(_, field)| field.name() == SPECIAL_BLOCK_NUM)
+        .map(|(qualifier, _)| col(Column::new(qualifier.cloned(), SPECIAL_BLOCK_NUM)))
+        .ok_or_else(|| df_err(format!("Left side of join missing {SPECIAL_BLOCK_NUM}")))?;
+
+    let right_block_num = right_schema
+        .iter()
+        .find(|(_, field)| field.name() == SPECIAL_BLOCK_NUM)
+        .map(|(qualifier, _)| col(Column::new(qualifier.cloned(), SPECIAL_BLOCK_NUM)))
+        .ok_or_else(|| df_err(format!("Right side of join missing {SPECIAL_BLOCK_NUM}")))?;
+
+    Ok(greatest(vec![left_block_num, right_block_num]))
+}
+
+/// Rewriter that propagates the `SPECIAL_BLOCK_NUM` column through the logical plan.
+struct BlockNumPropagator {
+    // State variable of the transformation.
+    // This is the block num value being bubbled up to be applied in the next projection as:
+    // `<block_num_expr> as _block_num`
+    next_block_num_expr: Option<Expr>,
+}
+
+impl BlockNumPropagator {
+    fn new() -> Self {
+        Self {
+            next_block_num_expr: None,
+        }
+    }
+}
+
+impl TreeNodeRewriter for BlockNumPropagator {
+    type Node = LogicalPlan;
+
+    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>, DataFusionError> {
+        use LogicalPlan::*;
+
+        // Check that the op is actually incremental
+        let op_kind =
+            incremental_op_kind(&node).map_err(|e| DataFusionError::External(e.into()))?;
+
         match node {
-            LogicalPlan::Projection(mut projection) => {
-                // If the projection already selects the `SPECIAL_BLOCK_NUM` column directly, we don't need to
-                // add that column, but we do have to ensure that the `SPECIAL_BLOCK_NUM` is not
-                // qualified with a table name (since it does not necessarily belong to a table).
-                for expr in projection.expr.iter_mut() {
-                    if let Expr::Column(c) = expr
-                        && c.name == SPECIAL_BLOCK_NUM
-                    {
-                        *expr = expr.clone().alias(SPECIAL_BLOCK_NUM);
-                        return Ok(Transformed::yes(LogicalPlan::Projection(projection)));
+            Projection(mut projection) => {
+                let block_num_expr = {
+                    // Set the `next_block_num_expr` and take the current one.
+                    //
+                    // Unwrap: `next_block_num_expr` is only `None` at initialization.
+                    // When visiting any leaf plan, we unconditionally set it.
+                    let mut expr = self.next_block_num_expr.replace(block_num_col()).unwrap();
+
+                    // Use an alias if it would not be redundant
+                    if expr != block_num_col() {
+                        expr = expr.alias(SPECIAL_BLOCK_NUM)
                     }
+                    expr
+                };
+
+                // Deal with any existing projection that resolves to `_block_num`
+                for existing_expr in projection.expr.iter() {
+                    // Unwrap: `physical_name` never errors
+                    if physical_name(existing_expr).unwrap() != SPECIAL_BLOCK_NUM {
+                        continue;
+                    }
+
+                    // If the user already correctly selected `SPECIAL_BLOCK_NUM`, we don't need to modify the projection.
+                    // We do a best effort to detect correct selections:
+                    // - If the expression is identical to the generated one, it is trivially correct.
+                    // - If the input is a single table and the expression is simply `_block_num`, qualified or not, it is also correct.
+                    if existing_expr == &block_num_expr {
+                        return Ok(Transformed::no(LogicalPlan::Projection(projection)));
+                    } else if matches!(existing_expr, Expr::Column(_))
+                        && block_num_expr == block_num_col()
+                    {
+                        // Both the user expression and the generated one are simple column references to `_block_num`.
+                        // But they were not equal, probably due to qualifiers. If there is only one input table, we can ignore the qualifier difference.
+                        let input_schema = projection.input.schema();
+                        let input_qualifiers: BTreeSet<&TableReference> =
+                            input_schema.iter().map(|x| x.0).flatten().collect();
+
+                        if input_qualifiers.len() <= 1 {
+                            return Ok(Transformed::no(LogicalPlan::Projection(projection)));
+                        }
+                    }
+
+                    // But If we cannot be sure that the `_block_num` selection is correct, we reject the query.
+                    //
+                    // Many cases of this would currently be caught by `fn forbid_underscore_prefixed_aliases`.
+                    return Err(df_err(format!(
+                        "Invalid select of `_block_num`. To fix this error, alias the column or \
+                        if using `*`, consider explicitly selecting the columns you need."
+                    )));
                 }
 
-                projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
+                projection.expr.insert(0, block_num_expr);
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
-            LogicalPlan::Union(mut union) => {
-                union.schema = prepend_special_block_num_field(&union.schema);
-                Ok(Transformed::yes(LogicalPlan::Union(union)))
+
+            // Rebuild union schemas to match their child projections
+            // TODO: Use `Union::try_new` once DF 51 released.
+            Union(union) => {
+                // Sanity check
+                if self.next_block_num_expr != Some(block_num_col()) {
+                    return Err(df_err(format!(
+                        "unexpected `next_block_num_expr`: {:?}",
+                        self.next_block_num_expr
+                    )));
+                }
+
+                Ok(Transformed::yes(Union(
+                    UnionStruct::try_new_with_loose_types(union.inputs)?,
+                )))
             }
-            _ => Ok(Transformed::no(node)),
+
+            Join(ref join) => {
+                self.next_block_num_expr = Some(block_num_for_join(&join)?);
+                Ok(Transformed::no(node))
+            }
+
+            TableScan(ref scan) => {
+                // We run this before optimizations, so we can assume the projection to be empty
+                if scan.projection.is_some() {
+                    return Err(df_err(format!("Scan should not have projection: {scan:?}")));
+                }
+                self.next_block_num_expr = Some(block_num_col());
+                Ok(Transformed::no(node))
+            }
+
+            // Constants are formally produced "before block 0" but hopefully it's correct enough to assign them 0.
+            EmptyRelation(_) | Values(_) => {
+                self.next_block_num_expr = Some(lit(0));
+                Ok(Transformed::no(node))
+            }
+
+            // These nodes do not change the schema and are not leaves, so we can leave them as-is
+            Filter(_) | Repartition(_) | Subquery(_) | SubqueryAlias(_) | Explain(_)
+            | Analyze(_) | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
+
+            // These variants would have already errored in `incremental_op_kind` above
+            Limit(_) | Aggregate(_) | Distinct(_) | Sort(_) | Window(_) | RecursiveQuery(_)
+            | Statement(_) | Dml(_) | Ddl(_) | Copy(_) | Extension(_) => {
+                unreachable!(
+                    "incremental_op_kind should have already rejected this node type: {:?}",
+                    op_kind
+                )
+            }
         }
-    })
-    .data()
+    }
+}
+
+/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
+pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+    let mut propagator = BlockNumPropagator::new();
+    plan.rewrite(&mut propagator).map(|t| t.data)
 }
 
 /// This will project the `SPECIAL_BLOCK_NUM` out of the plan by adding a projection on top of the
@@ -128,37 +269,8 @@ pub fn unproject_special_block_num_column(
     builder.project(expr)?.build()
 }
 
-/// Adds `where start <= _block_num and _block_num <= end` to the plan and runs filter pushdown.
-///
-/// This assumes that the `_block_num` column has already been propagated and is therefore
-/// present in the schema of `plan`.
-#[instrument(skip_all, err)]
-pub fn constrain_by_block_num(
-    plan: LogicalPlan,
-    start: u64,
-    end: u64,
-) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| match &node {
-        // Insert the clauses in non-view table scans
-        LogicalPlan::TableScan(TableScan { source, .. })
-            if source.table_type() == TableType::Base && source.get_logical_plan().is_none() =>
-        {
-            // `where start <= _block_num and _block_num <= end`
-            let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
-            predicate = predicate.and(lit(start).lt_eq(col(SPECIAL_BLOCK_NUM)));
-
-            let with_filter = LogicalPlan::Filter(Filter::try_new(predicate, Arc::new(node))?);
-            let with_pushdown =
-                PushDownFilter::new().rewrite(with_filter, &OptimizerContext::default())?;
-            Ok(Transformed::yes(with_pushdown.data))
-        }
-        _ => Ok(Transformed::no(node)),
-    })
-    .map(|t| t.data)
-}
-
 /// Reasons why a logical plan cannot be materialized incrementally
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NonIncrementalOp {
     /// Limit requires counting rows across batches
     Limit,
@@ -166,8 +278,8 @@ pub enum NonIncrementalOp {
     Aggregate,
     /// Distinct operations need global deduplication
     Distinct,
-    /// Joins need to maintain state between batches
-    Join,
+    /// Outer joins are not incremental
+    Join(JoinType),
     /// Sorts require seeing all data
     Sort,
     /// Window functions often require sorting and state
@@ -183,7 +295,7 @@ impl fmt::Display for NonIncrementalOp {
             Limit => write!(f, "Limit"),
             Aggregate => write!(f, "Aggregate"),
             Distinct => write!(f, "Distinct"),
-            Join => write!(f, "Join"),
+            Join(join_type) => write!(f, "Join({})", join_type),
             Sort => write!(f, "Sort"),
             Window => write!(f, "Window"),
             RecursiveQuery => write!(f, "RecursiveQuery"),
@@ -191,82 +303,24 @@ impl fmt::Display for NonIncrementalOp {
     }
 }
 
-/// Result of checking if a logical plan can be materialized incrementally
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IncrementalCheck {
-    /// The plan can be materialized incrementally
-    Incremental,
-    /// The plan cannot be materialized incrementally due to the given operation
-    NonIncremental(NonIncrementalOp),
-}
+/// Returns `Ok(())` if the given logical plan can be synced incrementally, `Err` otherwise.
+pub fn is_incremental(plan: &LogicalPlan) -> Result<(), BoxError> {
+    let mut err: Option<NonIncrementalError> = None;
 
-impl IncrementalCheck {
-    /// Returns `true` if the plan can be materialized incrementally
-    pub fn is_incremental(&self) -> bool {
-        matches!(self, IncrementalCheck::Incremental)
-    }
-}
-
-/// Can the given logical plan be sync'ed incrementally?
-pub fn is_incremental(plan: &LogicalPlan) -> Result<IncrementalCheck, BoxError> {
-    use LogicalPlan::*;
-
-    let mut non_incremental_op = None;
-    let mut err: Option<BoxError> = None;
-
-    plan.exists(|node| {
-        match node {
-            // Entirely unsupported operations.
-            Dml(_) | Ddl(_) | Statement(_) | Copy(_) | Extension(_) => {
-                err = Some(format!("unsupported operation in query: {}", node.display()).into());
-                Ok(true)
-            }
-
-            // Stateless operators
-            Projection(_) | Filter(_) | Union(_) | Unnest(_) | Repartition(_) | TableScan(_)
-            | EmptyRelation(_) | Values(_) | Subquery(_) | SubqueryAlias(_) | DescribeTable(_)
-            | Explain(_) | Analyze(_) => Ok(false),
-
-            // Non-incremental but supported operations
-            Limit(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Limit);
-                Ok(true)
-            }
-            Aggregate(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Aggregate);
-                Ok(true)
-            }
-            Distinct(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Distinct);
-                Ok(true)
-            }
-            Join(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Join);
-                Ok(true)
-            }
-            Sort(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Sort);
-                Ok(true)
-            }
-            Window(_) => {
-                non_incremental_op = Some(NonIncrementalOp::Window);
-                Ok(true)
-            }
-            RecursiveQuery(_) => {
-                non_incremental_op = Some(NonIncrementalOp::RecursiveQuery);
-                Ok(true)
-            }
+    // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
+    plan.exists(|node| match incremental_op_kind(&node) {
+        Ok(_) => Ok(false),
+        Err(e) => {
+            err = Some(e);
+            Ok(true)
         }
     })?;
 
     if let Some(err) = err {
-        return Err(err);
+        return Err(err.into());
     }
 
-    Ok(match non_incremental_op {
-        None => IncrementalCheck::Incremental,
-        Some(op) => IncrementalCheck::NonIncremental(op),
-    })
+    Ok(())
 }
 
 pub fn extract_table_references_from_plan(
@@ -287,7 +341,7 @@ pub fn extract_table_references_from_plan(
 
 pub fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
     let sort = Sort {
-        expr: vec![col(SPECIAL_BLOCK_NUM).sort(true, false)],
+        expr: vec![block_num_col().sort(true, false)],
         input: Arc::new(plan),
         fetch: None,
     };
@@ -317,6 +371,10 @@ pub fn prepend_special_block_num_field(
     .unwrap();
     new_schema.merge(schema);
     new_schema.into()
+}
+
+fn df_err(msg: String) -> DataFusionError {
+    DataFusionError::External(msg.into())
 }
 
 #[cfg(test)]
@@ -401,7 +459,7 @@ mod tests {
             .unwrap();
 
         // Project foo.* (which includes foo._block_num)
-        let projection_plan = LogicalPlanBuilder::from(join_plan)
+        let invalid_projection_plan = LogicalPlanBuilder::from(join_plan.clone())
             .project(vec![
                 col("foo.id"),
                 col(format!("foo.{}", SPECIAL_BLOCK_NUM)),
@@ -411,25 +469,32 @@ mod tests {
             .build()
             .unwrap();
 
-        // Apply propagate_block_num - this should handle the qualified column correctly
-        let result = propagate_block_num(projection_plan);
+        // Error on incorrect selection of `_block_num`, even if qualified.
+        let err = propagate_block_num(invalid_projection_plan).unwrap_err();
+        assert!(err.to_string().contains("Invalid select of `_block_num`. To fix this error, alias the column or if using `*`, consider explicitly selecting the columns you need."));
 
-        assert!(
-            result.is_ok(),
-            "propagate_block_num should succeed with qualified SPECIAL_BLOCK_NUM column"
-        );
+        // Project foo.* (now aliasing foo._block_num)
+        let projection_plan = LogicalPlanBuilder::from(join_plan)
+            .project(vec![
+                col("foo.id"),
+                col(format!("foo.{}", SPECIAL_BLOCK_NUM)).alias("block_num"),
+                col("foo.foo_value"),
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
 
-        let transformed_plan = result.unwrap();
+        let transformed_plan = propagate_block_num(projection_plan).unwrap();
 
         // Check that the plan was transformed (should be a Projection)
         match &transformed_plan {
             LogicalPlan::Projection(projection) => {
-                // The first expression should be the aliased SPECIAL_BLOCK_NUM
-                assert!(projection.expr.len() == 3, "Should have exactly 3 columns");
+                // The first expression should be the SPECIAL_BLOCK_NUM
+                assert_eq!(projection.expr.len(), 4);
 
                 // Check if the qualified column was properly aliased
-                if let Expr::Alias(alias) = &projection.expr[1] {
-                    assert_eq!(alias.name, SPECIAL_BLOCK_NUM, "Should alias to _block_num");
+                if let Expr::Alias(alias) = &projection.expr[2] {
+                    assert_eq!(alias.name, "block_num", "Should alias to block_num");
                     if let Expr::Column(c) = alias.expr.as_ref() {
                         assert_eq!(
                             c.name, SPECIAL_BLOCK_NUM,
