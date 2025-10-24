@@ -25,7 +25,7 @@ use tracing::instrument;
 use crate::{
     BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     metadata::segments::ResumeWatermark,
-    plan_visitors::{IncrementalCheck, is_incremental, order_by_block_num, propagate_block_num},
+    plan_visitors::{is_incremental, propagate_block_num},
     query_context::{Error, TableProviderCodec, default_catalog_name},
     stream_helpers::is_streaming,
 };
@@ -147,6 +147,7 @@ impl PlanningContext {
         &self.catalog.tables
     }
 
+    #[instrument(skip_all, err)]
     pub async fn optimize_plan(
         &self,
         plan: &DetachedLogicalPlan,
@@ -230,7 +231,7 @@ impl DetachedLogicalPlan {
             .data)
     }
 
-    pub fn is_incremental(&self) -> Result<IncrementalCheck, BoxError> {
+    pub fn is_incremental(&self) -> Result<(), BoxError> {
         is_incremental(&self.0)
     }
 
@@ -240,10 +241,6 @@ impl DetachedLogicalPlan {
 
     pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
         Ok(Self(propagate_block_num(self.0)?))
-    }
-
-    pub fn order_by_block_num(self) -> Self {
-        Self(order_by_block_num(self.0))
     }
 
     pub fn apply<F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>

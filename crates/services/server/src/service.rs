@@ -23,7 +23,6 @@ use common::{
     catalog::physical::Catalog,
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
-    plan_visitors::IncrementalCheck,
     query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
 use datafusion::{
@@ -302,17 +301,6 @@ impl Service {
     ) -> Result<QueryResultStream, Error> {
         let query_start_time = std::time::Instant::now();
 
-        // is_incremental returns an error if query contains DDL, DML, etc.
-        let incremental_check = plan
-            .is_incremental()
-            .map_err(|e| Error::InvalidQuery(e.to_string()))?;
-        if is_streaming && let IncrementalCheck::NonIncremental(op) = incremental_check {
-            return Err(Error::InvalidQuery(format!(
-                "non-incremental queries are not supported for streaming, query contains non-incremental operation: `{}`",
-                op
-            )));
-        }
-
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
@@ -328,6 +316,13 @@ impl Service {
                 Ok(stream)
             }
         } else {
+            // is_incremental returns an error if query contains DDL, DML, etc.
+            if let Err(e) = plan.is_incremental() {
+                return Err(Error::InvalidQuery(format!(
+                    "non-incremental queries are not supported for streaming, {e}",
+                )));
+            }
+
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
             let earliest_block = catalog

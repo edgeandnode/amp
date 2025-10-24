@@ -5,8 +5,8 @@
   deploy: non_incremental
   end: 15000000
 
-- name: dump_non_incremental_join_fails
+- name: dump_non_incremental_fails
   dataset: _/non_incremental@0.1.0
   end: 15000000
   failure: |
-    non-incremental operation: Join
+    non-incremental operation: Aggregate

@@ -1,0 +1,8 @@
+{
+  "name": "amp-test-joins",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@edgeandnode/amp": "workspace:*"
+  }
+}

@@ -4,12 +4,12 @@
 - name: invalid_streaming_query1
   query: SELECT count(*) FROM eth_rpc.blocks SETTINGS stream = true
   failure: |
-    invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: `Aggregate`
+    invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: Aggregate
 
 - name: invalid_streaming_query2
   query: SELECT max(block_num) as block_num FROM eth_rpc.blocks SETTINGS stream = true
   failure: |
-    invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: `Aggregate`
+    invalid query: non-incremental queries are not supported for streaming, query contains non-incremental operation: Aggregate
 
 - name: select_block_num
   query: SELECT block_num FROM eth_rpc.blocks WHERE block_num >= 15000000 SETTINGS stream = true

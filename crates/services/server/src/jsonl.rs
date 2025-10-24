@@ -41,7 +41,7 @@ pub async fn run_server(
     Ok((addr, fut))
 }
 
-#[tracing::instrument(skip(service))]
+#[tracing::instrument(skip_all)]
 async fn handle_jsonl_request(State(service): State<Service>, request: String) -> Response {
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
