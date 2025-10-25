@@ -163,8 +163,8 @@ importers:
         specifier: workspace:*
         version: link:../amp
       '@graphprotocol/gds-react':
-        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23
-        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23(@types/react@19.2.2)(bufferutil@4.0.9)(react-dom@19.2.0(react@19.2.0))(react-is@17.0.2)(react@19.2.0)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
+        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f
+        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f(@types/react@19.2.2)(bufferutil@4.0.9)(react-dom@19.2.0(react@19.2.0))(react-is@17.0.2)(react@19.2.0)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.54.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -901,18 +901,18 @@ packages:
   '@formatjs/intl-localematcher@0.6.1':
     resolution: {integrity: sha512-ePEgLgVCqi2BBFnTMWPfIghu6FkbZnnBVhO2sSxvLfrdFw7wCHAHiDoM2h4NRgjbaY7+B7HgOLZGkK187pZTZg==}
 
-  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@85dabe524613a6d41b5f5b85ae1f73ed3ff89294':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@85dabe524613a6d41b5f5b85ae1f73ed3ff89294}
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@57f617faad451d7fca0886127fd15f5ddfa8cc0e':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@57f617faad451d7fca0886127fd15f5ddfa8cc0e}
     version: 0.0.1
     peerDependencies:
       tailwindcss: ^4.1.14
 
-  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@85dabe524613a6d41b5f5b85ae1f73ed3ff89294':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@85dabe524613a6d41b5f5b85ae1f73ed3ff89294}
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@57f617faad451d7fca0886127fd15f5ddfa8cc0e':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@57f617faad451d7fca0886127fd15f5ddfa8cc0e}
     version: 0.0.1
 
-  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23}
+  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f}
     version: 0.0.1
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -920,12 +920,12 @@ packages:
       react-is: ^18.0.0 || ^19.0.0
       tailwindcss: ^4.1.14
 
-  '@graphprotocol/gds-utils@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@85dabe524613a6d41b5f5b85ae1f73ed3ff89294':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@85dabe524613a6d41b5f5b85ae1f73ed3ff89294}
+  '@graphprotocol/gds-utils@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@57f617faad451d7fca0886127fd15f5ddfa8cc0e':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@57f617faad451d7fca0886127fd15f5ddfa8cc0e}
     version: 0.0.1
 
-  '@graphprotocol/tailwindcss-animate@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@85dabe524613a6d41b5f5b85ae1f73ed3ff89294':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@85dabe524613a6d41b5f5b85ae1f73ed3ff89294}
+  '@graphprotocol/tailwindcss-animate@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@57f617faad451d7fca0886127fd15f5ddfa8cc0e':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@57f617faad451d7fca0886127fd15f5ddfa8cc0e}
     version: 0.0.1
     peerDependencies:
       tailwindcss: ^4.1.14
@@ -4772,10 +4772,10 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(bufferutil@4.0.9)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@57f617faad451d7fca0886127fd15f5ddfa8cc0e(bufferutil@4.0.9)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
     dependencies:
-      '@graphprotocol/gds-utils': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
-      '@graphprotocol/tailwindcss-animate': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(tailwindcss@4.1.16)
+      '@graphprotocol/gds-utils': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@57f617faad451d7fca0886127fd15f5ddfa8cc0e(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
+      '@graphprotocol/tailwindcss-animate': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@57f617faad451d7fca0886127fd15f5ddfa8cc0e(tailwindcss@4.1.16)
       cssesc: 3.0.0
       tailwindcss: 4.1.16
       ts-extras: 0.16.0
@@ -4785,15 +4785,15 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@85dabe524613a6d41b5f5b85ae1f73ed3ff89294': {}
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@57f617faad451d7fca0886127fd15f5ddfa8cc0e': {}
 
-  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23(@types/react@19.2.2)(bufferutil@4.0.9)(react-dom@19.2.0(react@19.2.0))(react-is@17.0.2)(react@19.2.0)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
+  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f(@types/react@19.2.2)(bufferutil@4.0.9)(react-dom@19.2.0(react@19.2.0))(react-is@17.0.2)(react@19.2.0)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
     dependencies:
       '@base-ui-components/react': 1.0.0-beta.4(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@base-ui-components/utils': 0.1.2(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      '@graphprotocol/gds-css': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(bufferutil@4.0.9)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
-      '@graphprotocol/gds-icons': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@85dabe524613a6d41b5f5b85ae1f73ed3ff89294
-      '@graphprotocol/gds-utils': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
+      '@graphprotocol/gds-css': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@57f617faad451d7fca0886127fd15f5ddfa8cc0e(bufferutil@4.0.9)(tailwindcss@4.1.16)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
+      '@graphprotocol/gds-icons': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@57f617faad451d7fca0886127fd15f5ddfa8cc0e
+      '@graphprotocol/gds-utils': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@57f617faad451d7fca0886127fd15f5ddfa8cc0e(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
       '@react-aria/utils': 3.31.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@react-hookz/web': 25.1.1(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@ver0/deep-equal': 1.0.0
@@ -4813,7 +4813,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@graphprotocol/gds-utils@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
+  '@graphprotocol/gds-utils@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-utils@57f617faad451d7fca0886127fd15f5ddfa8cc0e(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
     dependencies:
       md5: 2.3.0
       viem: 2.38.4(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
@@ -4823,7 +4823,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@graphprotocol/tailwindcss-animate@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@85dabe524613a6d41b5f5b85ae1f73ed3ff89294(tailwindcss@4.1.16)':
+  '@graphprotocol/tailwindcss-animate@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/tailwindcss-animate@57f617faad451d7fca0886127fd15f5ddfa8cc0e(tailwindcss@4.1.16)':
     dependencies:
       tailwindcss: 4.1.16
 

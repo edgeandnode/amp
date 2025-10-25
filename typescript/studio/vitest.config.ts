@@ -4,5 +4,7 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.{test,spec}.{ts,tsx}"],
     environment: "jsdom",
+    fileParallelism: false,
+    isolate: true,
   },
 })

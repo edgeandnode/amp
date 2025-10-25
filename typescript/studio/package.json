@@ -12,11 +12,12 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
-    "check": "prettier --write . && eslint --fix"
+    "check": "prettier --write . && eslint --fix && tsc --noEmit",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@base-ui-components/react": "^1.0.0-beta.4",
-    "@graphprotocol/gds-react": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@23",
+    "@graphprotocol/gds-react": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@57f617f",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.1.6",
     "@tanstack/match-sorter-utils": "^8.19.4",
