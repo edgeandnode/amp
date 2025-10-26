@@ -9,6 +9,7 @@ import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
 
 import { USER_DEFINED_FUNCTIONS } from "@/constants"
+import { useAmpConfigStreamQuery } from "@/hooks/useAmpConfigStream"
 import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
 
@@ -48,6 +49,14 @@ export function Editor({
 
   // Single SQL provider ref
   const sqlProviderRef = useRef<UnifiedSQLProvider | null>(null)
+
+  // Stream amp config manifest and update provider when it changes
+  const ampConfigQuery = useAmpConfigStreamQuery({
+    onSuccess: (newManifest) => {
+      // When manifest updates from SSE, update the SQL provider with new data
+      sqlProviderRef.current?.updateManifest(newManifest)
+    },
+  })
 
   // Single cleanup effect for unmount
   useEffect(() => {
@@ -105,15 +114,20 @@ export function Editor({
           // Add keyboard shortcuts
           editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onSubmit?.())
 
-          // Initialize unified SQL provider with static data
+          // Initialize unified SQL provider with static data and amp config manifest
           if (sourcesQuery.data) {
-            sqlProviderRef.current = new UnifiedSQLProvider(sourcesQuery.data, USER_DEFINED_FUNCTIONS, {
-              validationLevel,
-              enablePartialValidation,
-              enableDebugLogging: process.env.NODE_ENV === "development",
-              minPrefixLength: 0,
-              maxSuggestions: 50,
-            })
+            sqlProviderRef.current = new UnifiedSQLProvider(
+              sourcesQuery.data,
+              USER_DEFINED_FUNCTIONS,
+              {
+                validationLevel,
+                enablePartialValidation,
+                enableDebugLogging: process.env.NODE_ENV === "development",
+                minPrefixLength: 0,
+                maxSuggestions: 50,
+              },
+              ampConfigQuery.data, // Pass the manifest from amp config stream
+            )
 
             sqlProviderRef.current.setup(editor)
           }

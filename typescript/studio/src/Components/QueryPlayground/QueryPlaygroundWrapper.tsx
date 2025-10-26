@@ -175,7 +175,7 @@ export function QueryPlaygroundWrapper() {
                   <Tabs.Tab
                     key={`queries[${idx}].tab`}
                     value={idx}
-                    className="inline-flex items-center justify-center gap-x-1.5 px-4 h-full text-14 bg-transparent text-white/65 border-b-2 border-transparent data-[selected]:text-white data-[selected]:border-purple-500 hover:dark:text-white hover:border-purple-500 cursor-pointer -mb-px"
+                    className="inline-flex items-center justify-center gap-x-1.5 px-4 h-full text-14 bg-transparent text-white/65 border-b-2 border-transparent data-selected:text-white data-selected:border-purple-500 hover:dark:text-white hover:border-purple-500 cursor-pointer -mb-px"
                     nativeButton={false}
                     render={
                       <div>
@@ -230,7 +230,7 @@ export function QueryPlaygroundWrapper() {
                 )}
               >
                 <div className={classNames(navbarOpen ? "md:col-span-2 xl:col-span-3" : "col-span-1", "flex flex-col")}>
-                  <div className="w-full flex-shrink-0 flex flex-col rounded-lg">
+                  <div className="w-full shrink-0 flex flex-col rounded-lg">
                     {queryField.state.value.map((_, idx) => (
                       <Tabs.Panel
                         key={`queries[${idx}].editor_panel`}
@@ -367,9 +367,9 @@ export function QueryPlaygroundWrapper() {
                   }}
                 >
                   <AmpConfigBrowser
-                    onTableSelected={(table, def) => {
-                      const query = def.input.sql.trim()
-                      const tab = `SELECT ... ${table}`
+                    onTableSelected={(dataset, table) => {
+                      const query = `SELECT * FROM "${dataset}"."${table}"`
+                      const tab = `SELECT ... ${dataset}.${table}`
                       setQueryTabFromSelected(tab, query)
                     }}
                   />
@@ -409,12 +409,12 @@ LIMIT 10;`.trim()
         </form.AppField>
       </form>
       <Toast.Portal>
-        <Toast.Viewport className="fixed bottom-[1rem] right-[1rem] top-auto z-10 mx-auto flex w-[350px] sm:bottom-[2rem] sm:right-[2rem] sm:w-[300px]">
+        <Toast.Viewport className="fixed bottom-4 right-4 top-auto z-10 mx-auto flex w-[350px] sm:bottom-8 sm:right-8 sm:w-[300px]">
           {toastManager.toasts.map((toast) => (
             <Toast.Root
               key={toast.id}
               toast={toast}
-              className="rounded-6 border-space-1300 bg-space-1500 absolute bottom-0 left-auto right-0 z-[calc(1000-var(--toast-index))] mr-0 w-full select-none rounded-lg border bg-clip-padding p-4 shadow transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] [transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+calc(min(var(--toast-index),10)*-15px)))_scale(calc(max(0,1-(var(--toast-index)*0.1))))] [transition-property:opacity,transform] after:absolute after:bottom-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-[''] data-[ending-style]:opacity-0 data-[limited]:opacity-0 data-[ending-style]:data-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))] data-[expanded]:data-[ending-style]:data-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))] data-[ending-style]:data-[swipe-direction=left]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))] data-[expanded]:data-[ending-style]:data-[swipe-direction=left]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))] data-[expanded]:[transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y)))] data-[starting-style]:[transform:translateY(150%)] data-[ending-style]:data-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))] data-[expanded]:data-[ending-style]:data-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))] data-[ending-style]:data-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))] data-[expanded]:data-[ending-style]:data-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))] [&[data-ending-style]:not([data-limited]):not([data-swipe-direction])]:[transform:translateY(150%)]"
+              className="rounded-6 border-space-1300 bg-space-1500 absolute bottom-0 left-auto right-0 z-[calc(1000-var(--toast-index))] mr-0 w-full select-none rounded-lg border bg-clip-padding p-4 shadow transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+calc(min(var(--toast-index),10)*-15px)))_scale(calc(max(0,1-(var(--toast-index)*0.1))))] [transition-property:opacity,transform] after:absolute after:bottom-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-[''] data-ending-style:opacity-0 data-limited:opacity-0 data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))] data-expanded:data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))] data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))] data-expanded:data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))] data-expanded:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y)))] data-starting-style:transform-[translateY(150%)] data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+150%))] data-expanded:data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+150%))] data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-150%))] data-expanded:data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-150%))] [&[data-ending-style]:not([data-limited]):not([data-swipe-direction])]:transform-[translateY(150%)]"
               style={{
                 ["--gap" as string]: "1rem",
                 ["--offset-y" as string]:

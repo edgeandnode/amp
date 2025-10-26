@@ -2,7 +2,7 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
-import type { Table } from "@edgeandnode/amp/Model"
+import type { DatasetManifest } from "@edgeandnode/amp/Model"
 import { PlusIcon, TableIcon } from "@graphprotocol/gds-react/icons"
 import { String } from "effect"
 
@@ -11,7 +11,7 @@ import { useAmpConfigStreamQuery } from "@/hooks/useAmpConfigStream"
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
 export type AmpConfigBrowserProps = {
-  onTableSelected: (table: string, def: Table) => void
+  onTableSelected: (dataset: DatasetManifest["name"], table: string) => void
 }
 export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserProps>) {
   const { data: config } = useAmpConfigStreamQuery()
@@ -48,14 +48,14 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
                       <Tooltip.Trigger
                         type="button"
                         className="rounded-full p-2 bg-transparent hover:bg-space-1500 cursor-pointer inline-flex items-center justify-center shadow"
-                        onClick={() => onTableSelected(table, def)}
+                        onClick={() => onTableSelected(config.name, table)}
                       >
                         <PlusIcon alt={`Add ${table}`} size={4} className="text-space-500" aria-hidden="true" />
                       </Tooltip.Trigger>
                       <Tooltip.Portal>
                         <Tooltip.Positioner sideOffset={10} side="left">
-                          <Tooltip.Popup className="flex origin-[var(--transform-origin)] flex-col rounded-6 bg-[canvas] px-2 py-1 text-10 shadow shadow-space-1200 outline-1 outline-space-1500 transition-[transform,scale,opacity] data-[ending-style]:scale-90 data-[ending-style]:opacity-0 data-[instant]:duration-0 data-[starting-style]:scale-90 data-[starting-style]:opacity-0">
-                            <Tooltip.Arrow className="data-[side=bottom]:top-[-8px] data-[side=left]:right-[-13px] data-[side=left]:rotate-90 data-[side=right]:left-[-13px] data-[side=right]:-rotate-90 data-[side=top]:bottom-[-8px] data-[side=top]:rotate-180">
+                          <Tooltip.Popup className="flex origin-(--transform-origin) flex-col rounded-6 bg-[canvas] px-2 py-1 text-10 shadow shadow-space-1200 outline-1 outline-space-1500 transition-[transform,scale,opacity] data-ending-style:scale-90 data-ending-style:opacity-0 data-instant:duration-0 data-starting-style:scale-90 data-starting-style:opacity-0">
+                            <Tooltip.Arrow className="data-[side=bottom]:-top-2 data-[side=left]:right-[-13px] data-[side=left]:rotate-90 data-[side=right]:left-[-13px] data-[side=right]:-rotate-90 data-[side=top]:-bottom-2 data-[side=top]:rotate-180">
                               <ArrowIcon />
                             </Tooltip.Arrow>
                             Add to Query

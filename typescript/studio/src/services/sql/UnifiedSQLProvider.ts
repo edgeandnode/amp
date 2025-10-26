@@ -10,14 +10,18 @@
  * - Built-in validation with Monaco events
  * - Simplified API for Editor integration
  * - Strong TypeScript typing
+ * - Support for both raw DatasetSource and materialized DatasetManifest tables
  *
  * @file UnifiedSQLProvider.ts
  */
 import type { StudioModel } from "@edgeandnode/amp"
+import { DatasetManifest } from "@edgeandnode/amp/Model"
+import { Schema } from "effect"
 import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 
 import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
+import { convertManifestToMetadata, mergeMetadataSources } from "./manifestConverter.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import { SqlValidation } from "./SqlValidation.ts"
 import type { CompletionConfig, UserDefinedFunction } from "./types.ts"
@@ -68,6 +72,9 @@ export class UnifiedSQLProvider implements ISQLProvider {
 
   private isDisposed = false
 
+  // Equivalence checker for DatasetManifest deep equality comparison
+  private static readonly manifestEquivalence = Schema.equivalence(DatasetManifest)
+
   private static readonly FALLBACK_KEYWORDS = [
     "SELECT",
     "FROM",
@@ -87,6 +94,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
     private readonly sources: ReadonlyArray<StudioModel.DatasetSource>,
     private readonly udfs: ReadonlyArray<UserDefinedFunction>,
     private readonly config: SQLProviderConfig,
+    private manifest: DatasetManifest | null = null,
   ) {}
 
   /**
@@ -115,6 +123,49 @@ export class UnifiedSQLProvider implements ISQLProvider {
    */
   getValidator(): SqlValidation | null {
     return this.validator || null
+  }
+
+  /**
+   * Update Manifest
+   *
+   * Updates the manifest and reinitializes providers with the new data.
+   * This should be called when a new manifest is received from the SSE stream.
+   *
+   * Optimization: Skips reinitialization if the manifest hasn't actually changed,
+   * using Effect Schema's deep equality comparison to avoid expensive provider recreation.
+   *
+   * @param newManifest - Updated manifest from SSE stream
+   */
+  updateManifest(newManifest: DatasetManifest | null): void {
+    if (this.isDisposed) {
+      this.logError("Attempted to update manifest on disposed provider", new Error("Provider disposed"))
+      return
+    }
+
+    if (this.manifest == null && newManifest == null) {
+      return
+    }
+
+    if (this.manifest != null && newManifest != null) {
+      if (UnifiedSQLProvider.manifestEquivalence(this.manifest, newManifest)) {
+        return
+      }
+    }
+
+    try {
+      this.manifest = newManifest
+
+      // Reinitialize providers with new manifest data
+      // This will merge the new manifest with existing sources
+      this.initializeProviders()
+
+      this.logDebug("Manifest updated", {
+        manifestName: newManifest?.name,
+        tableCount: newManifest ? Object.keys(newManifest.tables).length : 0,
+      })
+    } catch (error) {
+      this.logError("Failed to update manifest", error)
+    }
   }
 
   /**
@@ -179,9 +230,22 @@ export class UnifiedSQLProvider implements ISQLProvider {
       contextCacheTTL: 300000,
     }
 
+    // Convert manifest to metadata and merge with raw sources
+    const manifestMetadata = this.manifest ? convertManifestToMetadata(this.manifest) : []
+    const mergedMetadata = mergeMetadataSources(this.sources, manifestMetadata)
+
+    // Convert merged metadata to DatasetSource format for existing providers
+    const unifiedSources = mergedMetadata.map((meta) => ({
+      source: meta.source,
+      metadata_columns: meta.columns.map((col) => ({
+        name: col.name,
+        datatype: col.datatype,
+      })),
+    })) as unknown as Array<StudioModel.DatasetSource>
+
     this.contextAnalyzer = new QueryContextAnalyzer(completionConfig)
     this.completionProvider = new AmpCompletionProvider(
-      [...this.sources],
+      unifiedSources,
       [...this.udfs],
       this.contextAnalyzer,
       completionConfig,
@@ -189,7 +253,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
     this.snippetGenerator = new UdfSnippetGenerator()
 
     if (this.config.validationLevel !== "off") {
-      this.validator = new SqlValidation([...this.sources], [...this.udfs], completionConfig)
+      this.validator = new SqlValidation(unifiedSources, [...this.udfs], completionConfig)
     }
   }
 

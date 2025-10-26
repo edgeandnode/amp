@@ -1,8 +1,8 @@
-import { StudioModel } from "@edgeandnode/amp"
+import { ArrowField, ArrowSchema, DatasetManifest, Table, TableInput, TableSchema } from "@edgeandnode/amp/Model"
 import { renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { QueryableEventsStreamManager, useQueryableEventsQuery } from "../../src/hooks/useQueryableEventsQuery.js"
+import { AmpConfigStreamManager, useAmpConfigStreamQuery } from "../../src/hooks/useAmpConfigStream.js"
 
 // Mock the API_ORIGIN constant
 vi.mock("../../src/constants.js", () => ({
@@ -74,10 +74,10 @@ class MockEventSource {
 // Stub global EventSource with our mock
 vi.stubGlobal("EventSource", MockEventSource)
 
-describe("useQueryableEventsQuery", () => {
+describe("useAmpConfigStreamQuery", () => {
   beforeEach(() => {
     // Reset singleton state between tests
-    QueryableEventsStreamManager.reset()
+    AmpConfigStreamManager.reset()
     MockEventSource.reset()
     vi.clearAllMocks()
   })
@@ -87,28 +87,30 @@ describe("useQueryableEventsQuery", () => {
 
   it("should connect to EventSource and decode server-sent events successfully", async () => {
     // Mock SSE data in the format the API would send
-    const mockEventData = StudioModel.QueryableEventStream.make({
-      events: [
-        StudioModel.QueryableEvent.make({
-          name: "Count",
-          params: [{ name: "count", datatype: "uint256", indexed: false }],
-          signature: "Count(uint256 count)",
-          source: ["./contracts/src/Counter.sol"],
+    const mockManifest = DatasetManifest.make({
+      kind: "manifest",
+      name: "test_dataset",
+      network: "mainnet",
+      version: "1.0.0",
+      dependencies: {},
+      tables: {
+        blocks: Table.make({
+          network: "mainnet",
+          input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
+          schema: TableSchema.make({
+            arrow: ArrowSchema.make({
+              fields: [
+                ArrowField.make({ name: "number", type: "UInt64", nullable: false }),
+                ArrowField.make({ name: "hash", type: "Utf8", nullable: false }),
+              ],
+            }),
+          }),
         }),
-        StudioModel.QueryableEvent.make({
-          name: "Transfer",
-          params: [
-            { name: "from", datatype: "address", indexed: true },
-            { name: "to", datatype: "address", indexed: true },
-            { name: "value", datatype: "uint256", indexed: false },
-          ],
-          signature: "Transfer(address indexed from, address indexed to, uint256 value)",
-          source: ["./contracts/src/Counter.sol"],
-        }),
-      ],
+      },
+      functions: {},
     })
 
-    const { result } = renderHook(() => useQueryableEventsQuery())
+    const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for the hook to initialize and start connecting
     await waitFor(() => {
@@ -116,45 +118,62 @@ describe("useQueryableEventsQuery", () => {
     })
 
     // Simulate receiving SSE data
-    getMockEventSource().simulateMessage(JSON.stringify(mockEventData))
+    getMockEventSource().simulateMessage(JSON.stringify(mockManifest))
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.data).toEqual(mockEventData.events)
+    expect(result.current.data).toEqual(mockManifest)
     expect(MockEventSource.instances.length).toBe(1)
-    expect(MockEventSource.instances[0].url).toBe("http://test-api.com/events/stream")
+    expect(MockEventSource.instances[0].url).toBe("http://test-api.com/config/stream")
   })
 
   it("should handle multiple SSE messages", async () => {
-    const mockEventData1 = StudioModel.QueryableEventStream.make({
-      events: [
-        StudioModel.QueryableEvent.make({
-          name: "Count",
-          params: [{ name: "count", datatype: "uint256", indexed: false }],
-          signature: "Count(uint256 count)",
-          source: ["./contracts/src/Counter.sol"],
+    const mockManifest1 = DatasetManifest.make({
+      kind: "manifest",
+      name: "test_dataset_v1",
+      network: "mainnet",
+      version: "1.0.0",
+      dependencies: {},
+      tables: {
+        blocks: Table.make({
+          network: "mainnet",
+          input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
+          schema: TableSchema.make({
+            arrow: ArrowSchema.make({
+              fields: [ArrowField.make({ name: "number", type: "UInt64", nullable: false })],
+            }),
+          }),
         }),
-      ],
+      },
+      functions: {},
     })
 
-    const mockEventData2 = StudioModel.QueryableEventStream.make({
-      events: [
-        StudioModel.QueryableEvent.make({
-          name: "Transfer",
-          params: [
-            { name: "from", datatype: "address", indexed: true },
-            { name: "to", datatype: "address", indexed: true },
-            { name: "value", datatype: "uint256", indexed: false },
-          ],
-          signature: "Transfer(address indexed from, address indexed to, uint256 value)",
-          source: ["./contracts/src/Counter.sol"],
+    const mockManifest2 = DatasetManifest.make({
+      kind: "manifest",
+      name: "test_dataset_v2",
+      network: "mainnet",
+      version: "2.0.0",
+      dependencies: {},
+      tables: {
+        blocks: Table.make({
+          network: "mainnet",
+          input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
+          schema: TableSchema.make({
+            arrow: ArrowSchema.make({
+              fields: [
+                ArrowField.make({ name: "number", type: "UInt64", nullable: false }),
+                ArrowField.make({ name: "hash", type: "Utf8", nullable: false }),
+              ],
+            }),
+          }),
         }),
-      ],
+      },
+      functions: {},
     })
 
-    const { result } = renderHook(() => useQueryableEventsQuery())
+    const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for loading state
     await waitFor(() => {
@@ -162,23 +181,23 @@ describe("useQueryableEventsQuery", () => {
     })
 
     // Simulate first message
-    getMockEventSource().simulateMessage(JSON.stringify(mockEventData1))
+    getMockEventSource().simulateMessage(JSON.stringify(mockManifest1))
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
-      expect(result.current.data).toEqual(mockEventData1.events)
+      expect(result.current.data).toEqual(mockManifest1)
     })
 
     // Simulate second message (should replace the first one)
-    getMockEventSource().simulateMessage(JSON.stringify(mockEventData2))
+    getMockEventSource().simulateMessage(JSON.stringify(mockManifest2))
 
     await waitFor(() => {
-      expect(result.current.data).toEqual(mockEventData2.events)
+      expect(result.current.data).toEqual(mockManifest2)
     })
   })
 
   it("should handle EventSource errors", async () => {
-    const { result } = renderHook(() => useQueryableEventsQuery())
+    const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for loading state
     await waitFor(() => {
@@ -196,10 +215,7 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should handle malformed SSE data gracefully", async () => {
-    // Mock console.warn to verify it's called
-    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-
-    const { result } = renderHook(() => useQueryableEventsQuery())
+    const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for loading state
     await waitFor(() => {
@@ -214,23 +230,21 @@ describe("useQueryableEventsQuery", () => {
     })
 
     expect(result.current.error?.message).toContain("parseJson")
-
-    consoleWarnSpy.mockRestore()
   })
 
   it("should handle disabled state", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
+    const { result } = renderHook(() => useAmpConfigStreamQuery({ enabled: false }))
 
     // Should not connect when disabled
     expect(result.current.isLoading).toBe(false)
     expect(result.current.isError).toBe(false)
     expect(result.current.isSuccess).toBe(false)
-    expect(result.current.data).toEqual([])
+    expect(result.current.data).toEqual(null)
     expect(MockEventSource.instances.length).toBe(0)
   })
 
   it("should handle refetch functionality", async () => {
-    const { result } = renderHook(() => useQueryableEventsQuery())
+    const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for initial connection
     await waitFor(() => {
@@ -256,28 +270,28 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should handle retry functionality", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ retry: true, retryDelay: 100 }))
+    const { result } = renderHook(() => useAmpConfigStreamQuery({ retry: true, retryDelay: 100 }))
 
     // Hook should start loading immediately when enabled
     expect(result.current.isLoading).toBe(true)
     expect(result.current.isError).toBe(false)
     expect(result.current.isSuccess).toBe(false)
-    expect(result.current.data).toEqual([])
+    expect(result.current.data).toEqual(null)
   })
 
   it("should handle callbacks configuration", () => {
     const onSuccess = vi.fn()
     const onError = vi.fn()
-    const { result } = renderHook(() => useQueryableEventsQuery({ onSuccess, onError }))
+    const { result } = renderHook(() => useAmpConfigStreamQuery({ onSuccess, onError }))
 
     // Should accept callback configurations and start loading
     expect(result.current.isLoading).toBe(true)
-    expect(result.current.data).toEqual([])
+    expect(result.current.data).toEqual(null)
     expect(typeof result.current.refetch).toBe("function")
   })
 
   it("should expose correct interface", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
+    const { result } = renderHook(() => useAmpConfigStreamQuery({ enabled: false }))
 
     // Should expose the correct interface
     expect(result.current).toHaveProperty("data")
@@ -291,8 +305,8 @@ describe("useQueryableEventsQuery", () => {
 
   it("should share single SSE connection across multiple hook instances", async () => {
     // Render the hook twice
-    const { result: result1 } = renderHook(() => useQueryableEventsQuery())
-    const { result: result2 } = renderHook(() => useQueryableEventsQuery())
+    const { result: result1 } = renderHook(() => useAmpConfigStreamQuery())
+    const { result: result2 } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for both to be loading
     await waitFor(() => {
@@ -302,21 +316,30 @@ describe("useQueryableEventsQuery", () => {
 
     // EventSource should only be created ONCE for both instances
     expect(MockEventSource.instances.length).toBe(1)
-    expect(MockEventSource.instances[0].url).toBe("http://test-api.com/events/stream")
+    expect(MockEventSource.instances[0].url).toBe("http://test-api.com/config/stream")
 
     // Simulate receiving data
-    const mockEventData = StudioModel.QueryableEventStream.make({
-      events: [
-        StudioModel.QueryableEvent.make({
-          name: "SharedEvent",
-          params: [{ name: "value", datatype: "uint256", indexed: false }],
-          signature: "SharedEvent(uint256 value)",
-          source: ["./contracts/src/Shared.sol"],
+    const mockManifest = DatasetManifest.make({
+      kind: "manifest",
+      name: "shared_dataset",
+      network: "mainnet",
+      version: "1.0.0",
+      dependencies: {},
+      tables: {
+        blocks: Table.make({
+          network: "mainnet",
+          input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
+          schema: TableSchema.make({
+            arrow: ArrowSchema.make({
+              fields: [ArrowField.make({ name: "number", type: "UInt64", nullable: false })],
+            }),
+          }),
         }),
-      ],
+      },
+      functions: {},
     })
 
-    getMockEventSource().simulateMessage(JSON.stringify(mockEventData))
+    getMockEventSource().simulateMessage(JSON.stringify(mockManifest))
 
     // Both hooks should receive the same data
     await waitFor(() => {
@@ -324,7 +347,7 @@ describe("useQueryableEventsQuery", () => {
       expect(result2.current.isSuccess).toBe(true)
     })
 
-    expect(result1.current.data).toEqual(mockEventData.events)
-    expect(result2.current.data).toEqual(mockEventData.events)
+    expect(result1.current.data).toEqual(mockManifest)
+    expect(result2.current.data).toEqual(mockManifest)
   })
 })

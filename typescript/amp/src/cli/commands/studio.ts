@@ -234,7 +234,7 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                         return tables.length > 0
                           ? Option.some({
                             title: `SELECT ... ${tables[0][0]}`,
-                            query: tables[0][1].input.sql.trim(),
+                            query: `SELECT * FROM "${manifest.name}"."${tables[0][0]}"`,
                           })
                           : Option.none()
                       }),

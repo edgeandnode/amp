@@ -550,3 +550,36 @@ export function getFullTableName(dataset: ExtendedDatasetSource): string | null 
   }
   return null
 }
+
+/**
+ * Manifest-based Table Metadata
+ *
+ * Represents column metadata extracted from DatasetManifest Arrow schemas.
+ * This is used for intellisense on materialized datasets defined in amp configs.
+ *
+ * @interface ManifestTableMetadata
+ */
+export interface ManifestTableMetadata {
+  /** Fully qualified table name (e.g., "example.blocks") */
+  source: string
+
+  /** Network the table belongs to */
+  network: string
+
+  /** Column definitions from Arrow schema */
+  columns: Array<{
+    /** Column name */
+    name: string
+
+    /** SQL-like type string for display (e.g., "BIGINT", "TIMESTAMP") */
+    datatype: string
+
+    /** Whether the column is nullable */
+    nullable: boolean
+  }>
+}
+
+/**
+ * Unified metadata that can come from either DatasetSource (raw) or DatasetManifest (materialized)
+ */
+export type UnifiedTableMetadata = ManifestTableMetadata
