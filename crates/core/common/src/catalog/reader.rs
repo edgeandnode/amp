@@ -10,7 +10,7 @@ use datafusion::{
             async_reader::{AsyncFileReader, ParquetObjectReader},
         },
         errors::{ParquetError, Result as ParquetResult},
-        file::metadata::{ParquetMetaData, ParquetMetaDataReader},
+        file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader},
     },
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
@@ -108,7 +108,7 @@ impl AsyncFileReader for AmpReader {
                         .map_err(|e| foyer::Error::Other(e.into()))?;
 
                     let metadata = ParquetMetaDataReader::new()
-                        .with_page_indexes(true)
+                        .with_page_index_policy(PageIndexPolicy::Required)
                         .parse_and_finish(&Bytes::from_owner(footer))
                         .map_err(|e| foyer::Error::Other(e.into()))?;
                     Ok(Arc::new(metadata))

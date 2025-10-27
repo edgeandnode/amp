@@ -23,8 +23,8 @@ snmalloc = ["dep:snmalloc-rs"]
 admin-api = { path = "../../services/admin-api" }
 amp-client = { path = "../../client/amp-client" }
 anyhow.workspace = true
-arrow-array = { version = "55.2.0", default-features = false }
-arrow-schema = { version = "55.2.0" }
+arrow-array = { version = "56", default-features = false }
+arrow-schema = { version = "56" }
 arrow-to-postgres = { path = "../../arrow-to-postgres" }
 backon.workspace = true
 bytes = "1.10.1"

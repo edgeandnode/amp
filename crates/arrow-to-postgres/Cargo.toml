@@ -6,8 +6,8 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-arrow-array = { version = "55.2.0", default-features = false }
-arrow-schema = { version = "55.2.0" }
+arrow-array = { version = "56", default-features = false }
+arrow-schema = { version = "56" }
 bytes = "1.10.1"
 enum_dispatch = "0.3.13"
 serde_json = "1.0"

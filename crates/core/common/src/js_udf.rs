@@ -2,8 +2,7 @@ use std::{any::Any, sync::Arc};
 
 use async_trait::async_trait;
 use datafusion::{
-    arrow::{array::ArrayRef, datatypes::DataType},
-    config::ConfigOptions,
+    arrow::datatypes::DataType,
     error::DataFusionError,
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
@@ -22,6 +21,30 @@ pub(crate) struct JsUdf {
     function_name: Arc<str>, // Name of the JS function to be called
     return_type: DataType,
     signature: Signature,
+}
+
+impl PartialEq for JsUdf {
+    fn eq(&self, other: &Self) -> bool {
+        self.udf_name == other.udf_name
+            && self.code == other.code
+            && self.script_name == other.script_name
+            && self.function_name == other.function_name
+            && self.return_type == other.return_type
+            && self.signature == other.signature
+    }
+}
+
+impl Eq for JsUdf {}
+
+impl std::hash::Hash for JsUdf {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.udf_name.hash(state);
+        self.code.hash(state);
+        self.script_name.hash(state);
+        self.function_name.hash(state);
+        self.return_type.hash(state);
+        self.signature.hash(state);
+    }
 }
 
 impl JsUdf {
@@ -81,8 +104,7 @@ impl AsyncScalarUDFImpl for JsUdf {
     async fn invoke_async_with_args(
         &self,
         args: ScalarFunctionArgs,
-        _option: &ConfigOptions,
-    ) -> Result<ArrayRef, DataFusionError> {
+    ) -> Result<ColumnarValue, DataFusionError> {
         // First, transpose the arguments row format
         let mut js_params_batch: Vec<Vec<Box<dyn ToV8>>> = vec![];
         let num_rows = args.number_rows;
@@ -110,7 +132,7 @@ impl AsyncScalarUDFImpl for JsUdf {
             .await
             .map_err(|e| DataFusionError::External(e.into()))?;
 
-        ScalarValue::iter_to_array(outputs)
+        ScalarValue::iter_to_array(outputs).map(ColumnarValue::Array)
     }
 }
 
@@ -167,13 +189,15 @@ async fn js_udf_smoke_test() {
         arg_fields,
         return_field,
         number_rows: 1,
+        config_options: Default::default(),
     };
-    let out = udf
-        .invoke_async_with_args(args, &ConfigOptions::default())
-        .await
-        .unwrap();
+    let out = udf.invoke_async_with_args(args).await.unwrap();
+    let array = match out {
+        ColumnarValue::Array(arr) => arr,
+        ColumnarValue::Scalar(_) => panic!("expected array"),
+    };
     assert_eq!(
-        ScalarValue::try_from_array(&out, 0).unwrap(),
+        ScalarValue::try_from_array(&array, 0).unwrap(),
         ScalarValue::Int32(Some(43))
     );
 }

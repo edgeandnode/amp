@@ -13,13 +13,12 @@ use async_trait::async_trait;
 use datafusion::{
     arrow::{
         array::{
-            Array, ArrayBuilder, ArrayRef, BinaryArray, BinaryBuilder, FixedSizeBinaryArray,
-            StringArray, StringBuilder, StructBuilder,
+            Array, ArrayBuilder, BinaryArray, BinaryBuilder, FixedSizeBinaryArray, StringArray,
+            StringBuilder, StructBuilder,
         },
         datatypes::{DataType, Field, Fields},
     },
     common::{internal_err, plan_err},
-    config::ConfigOptions,
     error::DataFusionError,
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
@@ -36,6 +35,22 @@ pub struct EthCall {
     client: alloy::providers::RootProvider<AnyNetwork>,
     signature: Signature,
     fields: Fields,
+}
+
+impl PartialEq for EthCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.signature == other.signature && self.fields == other.fields
+    }
+}
+
+impl Eq for EthCall {}
+
+impl std::hash::Hash for EthCall {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+        self.fields.hash(state);
+    }
 }
 
 impl EthCall {
@@ -95,8 +110,7 @@ impl AsyncScalarUDFImpl for EthCall {
     async fn invoke_async_with_args(
         &self,
         args: ScalarFunctionArgs,
-        _option: &ConfigOptions,
-    ) -> Result<ArrayRef, DataFusionError> {
+    ) -> Result<ColumnarValue, DataFusionError> {
         let name = self.name().to_string();
         let client = self.client.clone();
         let fields = self.fields.clone();
@@ -228,7 +242,9 @@ impl AsyncScalarUDFImpl for EthCall {
                 }
             }
         }
-        Ok(ArrayBuilder::finish(&mut result_builder))
+        Ok(ColumnarValue::Array(ArrayBuilder::finish(
+            &mut result_builder,
+        )))
     }
 }
 
