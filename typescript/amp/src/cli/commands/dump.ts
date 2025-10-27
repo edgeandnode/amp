@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema"
 import * as Admin from "../../api/Admin.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile, manifestFile } from "../common.ts"
+import { adminUrl, configFile, datasetReference, manifestFile, parseReferenceToMetadata } from "../common.ts"
 
 export const dump = Command.make("dump", {
   args: {
@@ -18,6 +18,7 @@ export const dump = Command.make("dump", {
       Args.withSchema(Schema.Union(Model.DatasetName, Model.DatasetNameAndVersion)),
       Args.optional,
     ),
+    reference: datasetReference.pipe(Options.optional),
     manifestFile: manifestFile.pipe(Options.optional),
     configFile: configFile.pipe(Options.optional),
     endBlock: Options.integer("end-block").pipe(
@@ -36,10 +37,7 @@ export const dump = Command.make("dump", {
       const dataset = yield* Option.match(args.dataset, {
         onSome: (dataset) => Effect.succeed(dataset),
         onNone: () =>
-          context.pipe(
-            Effect.map((ctx) => `${ctx.metadata.name}@${ctx.metadata.version}` as const),
-            Effect.orDie,
-          ),
+          context.pipe(Effect.map((ctx) => `${ctx.metadata.name}@${ctx.metadata.version}` as const), Effect.orDie),
       })
 
       const [name, version] = dataset.split("@") as [string, string | undefined]
@@ -57,17 +55,19 @@ export const dump = Command.make("dump", {
       yield* Console.log(`Dump scheduled for dataset ${dataset}`)
     }),
   ),
-  Command.provide(({ args }) =>
-    Option.match(args.dataset, {
+  Command.provide(({ args }) => {
+    const metadata = Option.map(args.reference, parseReferenceToMetadata)
+
+    return Option.match(args.dataset, {
       onSome: () => Layer.empty,
       onNone: () =>
         ManifestContext.layerFromFile({
-          metadata: Option.none(),
           manifest: args.manifestFile,
+          metadata,
           config: args.configFile,
         }).pipe(
           Layer.provide(Admin.layer(`${args.adminUrl}`)),
         ),
     }).pipe(Layer.merge(Admin.layer(`${args.adminUrl}`)))
-  ),
+  }),
 )

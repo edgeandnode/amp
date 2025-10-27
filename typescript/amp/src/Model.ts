@@ -25,8 +25,9 @@ export const DatasetName = Schema.String.pipe(
   Schema.minLength(1),
   Schema.annotations({
     title: "Name",
-    description: "the name of the dataset",
-    examples: ["uniswap", "eth_mainnet", "_test"],
+    description:
+      "the name of the dataset (must start with lowercase letter or underscore, followed by lowercase letters, digits, or underscores)",
+    examples: ["uniswap", "eth_mainnet", "_internal"],
   }),
 )
 export type DatasetName = Schema.Schema.Type<typeof DatasetName>
@@ -39,6 +40,7 @@ export const Reference = Schema.String.pipe(
     examples: ["edgeandnode/mainnet@0.0.0", "0xdeadbeef/eth_firehose@0.0.0"],
   }),
 )
+export type Reference = Schema.Schema.Type<typeof Reference>
 
 /**
  * Parses a Reference to extract the namespace, name, and version components.
@@ -72,11 +74,11 @@ export const Network = Schema.Lowercase.pipe(
   }),
 )
 
-export const DatasetKind = Schema.Literal("manifest", "sql", "firehose", "evm-rpc").pipe(
+export const DatasetKind = Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose").pipe(
   Schema.annotations({
     title: "Kind",
     description: "the kind of dataset",
-    examples: ["manifest", "sql", "firehose", "evm-rpc"],
+    examples: ["manifest", "evm-rpc", "eth-beacon", "firehose"],
   }),
 )
 
@@ -91,6 +93,31 @@ export const DatasetVersion = Schema.String.pipe(
   }),
 )
 export type DatasetVersion = Schema.Schema.Type<typeof DatasetVersion>
+
+export const DatasetHash = Schema.String.pipe(
+  Schema.pattern(/^[0-9a-fA-F]{64}$/),
+  Schema.length(64),
+  Schema.annotations({
+    title: "Hash",
+    description: "a 32-byte SHA-256 hash (64 hex characters)",
+    examples: ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
+  }),
+)
+export type DatasetHash = Schema.Schema.Type<typeof DatasetHash>
+
+export const Revision = Schema.Union(
+  DatasetVersion,
+  DatasetHash,
+  Schema.Literal("latest"),
+  Schema.Literal("dev"),
+).pipe(
+  Schema.annotations({
+    title: "Revision",
+    description: "a dataset revision reference (semver tag, 64-char hex hash, 'latest', or 'dev')",
+    examples: ["1.0.0", "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", "latest", "dev"],
+  }),
+)
+export type Revision = Schema.Schema.Type<typeof Revision>
 
 export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
   Schema.pattern(
@@ -183,51 +210,6 @@ export class DatasetVersionInfo extends Schema.Class<DatasetVersionInfo>("Datase
   manifestHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("manifest_hash")),
   kind: Schema.String,
 }) {}
-
-/**
- * Dataset cursor for pagination in "name:version" format (e.g., "eth_mainnet:1.0.0")
- */
-export const DatasetCursor = Schema.String.pipe(
-  Schema.pattern(/^[^:]+:[^:]+$/),
-  Schema.annotations({
-    description: "Dataset cursor in 'name:version' format for pagination",
-    examples: ["eth_mainnet:1.0.0", "uniswap:2.1.0"],
-  }),
-  Schema.brand("DatasetCursor"),
-)
-export type DatasetCursor = Schema.Schema.Type<typeof DatasetCursor>
-
-/**
- * Creates a DatasetCursor from a dataset name and version.
- *
- * @param name - The dataset name
- * @param version - The dataset version
- * @returns A properly formatted DatasetCursor
- *
- * @example
- * const cursor = makeDatasetCursor("eth_mainnet", "1.0.0") // "eth_mainnet:1.0.0"
- */
-export const makeDatasetCursor = (name: string, version: string): DatasetCursor => {
-  const cursorString = `${name}:${version}`
-  // This will validate the format and throw if invalid
-  return Schema.decodeSync(DatasetCursor)(cursorString)
-}
-
-/**
- * Parses a DatasetCursor to extract the name and version components.
- *
- * @param cursor - The DatasetCursor to parse
- * @returns An object with name and version properties
- *
- * @example
- * const { name, version } = parseDatasetCursor(cursor) // { name: "eth_mainnet", version: "1.0.0" }
- */
-export const parseDatasetCursor = (cursor: DatasetCursor): { name: string; version: string } => {
-  const parts = cursor.split(":")
-  // Since the cursor passed schema validation, we know it has exactly one colon
-  const [name, version] = parts
-  return { name: name!, version: version! }
-}
 
 export class DatasetSummary extends Schema.Class<DatasetSummary>("DatasetSummary")({
   namespace: Schema.String,

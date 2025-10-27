@@ -31,17 +31,31 @@ Testing.layer((it) => {
       const admin = yield* Admin.Admin
 
       // Register and dump the root dataset.
-      yield* admin.registerDataset("_", "anvil", "0.1.0", Anvil.dataset)
-      const job = yield* admin.deployDataset("_", "anvil", "0.1.0", {
-        endBlock: "5",
-      })
+      const namespace = "_"
+      const name = "anvil"
+      const version = "0.1.0"
+
+      yield* admin.registerDataset(
+        namespace,
+        name,
+        version,
+        Anvil.dataset,
+      )
+      const job = yield* admin.deployDataset(
+        namespace,
+        name,
+        version,
+        {
+          endBlock: "5",
+        },
+      )
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", "anvil", "dev")
+      const response = yield* admin.getDatasetVersion(namespace, name, "dev")
       assertInstanceOf(response, Model.DatasetVersionInfo)
-      deepStrictEqual(response.name, "anvil")
+      deepStrictEqual(response.name, name)
     }),
   )
 
@@ -85,17 +99,31 @@ Testing.layer((it) => {
       const fixtures = yield* Fixtures.Fixtures
 
       // Register and dump the example manifest.
-      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.registerDataset("_", "example", "0.1.0", dataset)
+      const dataset = yield* fixtures.load("manifest.json", Model.DatasetDerived)
+      yield* admin.registerDataset(
+        dataset.namespace ?? Model.DEFAULT_NAMESPACE,
+        dataset.name!,
+        dataset.version!,
+        dataset,
+      )
 
-      const job = yield* admin.deployDataset("_", "example", "0.1.0", {
-        endBlock: "5",
-      })
+      const job = yield* admin.deployDataset(
+        dataset.namespace ?? Model.DEFAULT_NAMESPACE,
+        dataset.name!,
+        dataset.version!,
+        {
+          endBlock: "5",
+        },
+      )
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", "example", "dev")
+      const response = yield* admin.getDatasetVersion(
+        dataset.namespace ?? Model.DEFAULT_NAMESPACE,
+        dataset.name!,
+        "dev",
+      )
       assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, "example")
     }),

@@ -563,8 +563,8 @@ export interface ManifestTableMetadata {
   /** Fully qualified table name (e.g., "example.blocks") */
   source: string
 
-  /** Network the table belongs to (optional for derived datasets) */
-  network: string | undefined
+  /** Network the table belongs to (optional, defaults to "unknown" for derived datasets) */
+  network?: string
 
   /** Column definitions from Arrow schema */
   columns: Array<{

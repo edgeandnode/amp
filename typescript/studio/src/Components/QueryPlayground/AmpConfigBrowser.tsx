@@ -20,6 +20,12 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
     return null
   }
 
+  // Only show tables for derived datasets (kind: "manifest") which have SQL definitions
+  // RPC datasets (kind: "evm-rpc") don't have SQL input to display
+  if (config.kind !== "manifest") {
+    return null
+  }
+
   const tables = Object.entries(config.tables)
 
   return (

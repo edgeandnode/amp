@@ -27,7 +27,7 @@ import anvilManifest from "../test/fixtures/anvil_rpc.json" with { type: "json" 
  */
 export const dataset = Schema.decodeSync(Model.DatasetEvmRpc)(anvilManifest as any)
 
-// NODE: This is not a secret prviate key, it's one of the test keys from anvil's default mnemonic.
+// NOTE: This is not a secret private key, it's one of the test keys from anvil's default mnemonic.
 const DEFAULT_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 /**
