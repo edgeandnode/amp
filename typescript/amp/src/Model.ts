@@ -274,7 +274,7 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>(
   "DatasetManifest",
 )({
   kind: Schema.Literal("manifest"),
-  network: Network,
+  network: Network.pipe(Schema.optional),
   name: DatasetName,
   version: DatasetVersion,
   dependencies: Schema.Record({ key: Schema.String, value: Reference }),

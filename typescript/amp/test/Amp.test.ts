@@ -63,7 +63,8 @@ Testing.layer((it) => {
     Effect.fn(function*() {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasetManifest("_", "anvil", "0.1.0")
-      assertInstanceOf(result, Model.DatasetRpc)
+      assertEquals(result.kind, "evm-rpc")
+      assertEquals(result.network, "anvil")
       deepStrictEqual(typeof result.tables, "object")
     }),
   )
@@ -105,7 +106,8 @@ Testing.layer((it) => {
     Effect.fn(function*() {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasetManifest("_", "example", "dev")
-      assertInstanceOf(result, Model.DatasetManifest)
+      assertEquals(result.kind, "manifest")
+      assertEquals(result.network, undefined)
       deepStrictEqual(typeof result.tables, "object")
     }),
   )
