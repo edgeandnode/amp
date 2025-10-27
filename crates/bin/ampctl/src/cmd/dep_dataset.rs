@@ -42,6 +42,19 @@ pub struct Args {
     /// - Negative number: Stop N blocks before latest (e.g., "-100")
     #[arg(long, value_parser = clap::value_parser!(EndBlock))]
     pub end_block: Option<EndBlock>,
+
+    /// Number of parallel workers to run
+    ///
+    /// Each worker will be responsible for an equal number of blocks.
+    /// For example, if extracting blocks 0-10,000,000 with parallelism=10,
+    /// each worker will handle a contiguous section of 1 million blocks.
+    ///
+    /// Only applicable to raw datasets (EVM RPC, Firehose, etc.).
+    /// Derived datasets ignore this parameter.
+    ///
+    /// Defaults to 1 if not specified.
+    #[arg(long, default_value = "1")]
+    pub parallelism: u16,
 }
 
 /// Deploy a dataset to start syncing blockchain data.
@@ -57,15 +70,17 @@ pub async fn run(
         admin_url,
         dataset_ref,
         end_block,
+        parallelism,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!(
-        dataset_ref = %dataset_ref,
-        end_block = ?end_block,
+        %dataset_ref,
+        ?end_block,
+        %parallelism,
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(&admin_url, &dataset_ref, end_block).await?;
+    let job_id = deploy_dataset(&admin_url, &dataset_ref, end_block, parallelism).await?;
 
     crate::success!("Dataset deployed successfully");
     crate::info!("Job ID: {}", job_id);
@@ -77,11 +92,12 @@ pub async fn run(
 ///
 /// POSTs to the versioned `/datasets/{name}/versions/{version}/dump` endpoint
 /// and returns the job ID.
-#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block))]
+#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
 async fn deploy_dataset(
     admin_url: &Url,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
+    parallelism: u16,
 ) -> Result<JobId, Error> {
     let name = dataset_ref.name();
     let version = dataset_ref.revision();
@@ -102,7 +118,10 @@ async fn deploy_dataset(
     let client = reqwest::Client::new();
     let response = client
         .post(url.as_str())
-        .json(&DumpRequest { end_block })
+        .json(&DumpRequest {
+            end_block,
+            parallelism,
+        })
         .send()
         .await
         .map_err(|err| {
@@ -174,6 +193,7 @@ async fn deploy_dataset(
 struct DumpRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     end_block: Option<EndBlock>,
+    parallelism: u16,
 }
 
 /// Response from the dump endpoint.
