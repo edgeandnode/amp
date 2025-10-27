@@ -63,7 +63,8 @@ Testing.layer((it) => {
     Effect.fn(function*() {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasetManifest("_", "anvil", "0.1.0")
-      deepStrictEqual(Array.isArray(result.tables), true)
+      assertInstanceOf(result, Model.DatasetManifest)
+      deepStrictEqual(typeof result.tables, "object")
     }),
   )
 
