@@ -1,10 +1,11 @@
 //! Datasets HTTP handlers
 
-pub mod dump;
+pub mod delete;
+pub mod delete_version;
+pub mod deploy;
+pub mod get;
 pub mod get_all;
-pub mod get_by_id;
-pub mod get_version_manifest;
-pub mod get_version_schema;
-pub mod get_versions;
+pub mod get_manifest;
+pub mod list_all;
+pub mod list_versions;
 pub mod register;
-mod tracing;

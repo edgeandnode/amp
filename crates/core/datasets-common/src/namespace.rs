@@ -154,6 +154,48 @@ impl<'a> From<&'a Namespace> for metadata_db::DatasetNamespace<'a> {
     }
 }
 
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::DatasetNamespace<'a>> for Namespace {
+    fn eq(&self, other: &metadata_db::DatasetNamespace<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Namespace> for metadata_db::DatasetNamespace<'a> {
+    fn eq(&self, other: &Namespace) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&metadata_db::DatasetNamespace<'a>> for Namespace {
+    fn eq(&self, other: &&metadata_db::DatasetNamespace<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Namespace> for &metadata_db::DatasetNamespace<'a> {
+    fn eq(&self, other: &Namespace) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::DatasetNamespace<'a>> for &Namespace {
+    fn eq(&self, other: &metadata_db::DatasetNamespace<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&Namespace> for metadata_db::DatasetNamespace<'a> {
+    fn eq(&self, other: &&Namespace) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 /// Validates that a namespace follows the required format:
 /// - Must be lowercase
 /// - Can only contain letters, underscores, and numbers

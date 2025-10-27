@@ -372,6 +372,39 @@ pub(crate) mod sql {
             .await
     }
 
+    /// List all version tags with full details for a dataset
+    ///
+    /// Returns semver version tags with hash and timestamps (excludes "dev" and "latest"),
+    /// ordered by version descending.
+    pub async fn list_version_tags<'c, E>(
+        exe: E,
+        namespace: Namespace<'_>,
+        name: Name<'_>,
+    ) -> Result<Vec<Tag>, sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query = indoc::indoc! {r#"
+            SELECT
+                namespace,
+                name,
+                version,
+                hash,
+                created_at,
+                updated_at
+            FROM tags
+            WHERE namespace = $1 AND name = $2
+              AND version NOT IN ('dev', 'latest')
+            ORDER BY version DESC
+        "#};
+
+        sqlx::query_as(query)
+            .bind(namespace)
+            .bind(name)
+            .fetch_all(exe)
+            .await
+    }
+
     /// List all tags
     ///
     /// Returns all semver tags (excludes "dev" and "latest"), ordered by version descending.
@@ -395,9 +428,10 @@ pub(crate) mod sql {
         sqlx::query_as(query).fetch_all(exe).await
     }
 
-    /// List all tags that reference a specific manifest hash
+    /// List all dataset tags using a specific manifest hash
     ///
-    /// Returns all semver tags (excludes "dev" and "latest") that point to the given manifest hash.
+    /// Returns all tags (namespace, name, version) that point to the given manifest hash.
+    /// Excludes system-managed tags ("latest" and "dev").
     pub async fn list_by_manifest_hash<'c, E>(
         exe: E,
         hash: ManifestHash<'_>,
@@ -419,6 +453,52 @@ pub(crate) mod sql {
         "#};
 
         sqlx::query_as(query).bind(hash).fetch_all(exe).await
+    }
+
+    /// Delete a specific version tag
+    ///
+    /// Removes a version tag from the `tags` table. This is idempotent - succeeds even if tag doesn't exist.
+    pub async fn delete_version<'c, E>(
+        exe: E,
+        namespace: Namespace<'_>,
+        name: Name<'_>,
+        version: Version<'_>,
+    ) -> Result<(), sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query = "DELETE FROM tags WHERE namespace = $1 AND name = $2 AND version = $3";
+
+        sqlx::query(query)
+            .bind(namespace)
+            .bind(name)
+            .bind(version)
+            .execute(exe)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Delete all tags for a dataset
+    ///
+    /// Removes all version tags (including "latest" and "dev") for a dataset. This is idempotent.
+    pub async fn delete_all_for_dataset<'c, E>(
+        exe: E,
+        namespace: Namespace<'_>,
+        name: Name<'_>,
+    ) -> Result<(), sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query = "DELETE FROM tags WHERE namespace = $1 AND name = $2";
+
+        sqlx::query(query)
+            .bind(namespace)
+            .bind(name)
+            .execute(exe)
+            .await?;
+
+        Ok(())
     }
 }
 

@@ -49,6 +49,7 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
+/// - `DEPENDENCY_VALIDATION_ERROR`: SQL queries are invalid or reference undeclared dependencies
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
 /// - `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version
 /// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
@@ -107,7 +108,12 @@ pub async fn handler(
     State(ctx): State<Ctx>,
     payload: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> Result<StatusCode, ErrorResponse> {
-    let payload = match payload {
+    let RegisterRequest {
+        namespace,
+        name,
+        version,
+        manifest: manifest_str,
+    } = match payload {
         Ok(Json(payload)) => payload,
         Err(err) => {
             tracing::error!("Failed to parse request JSON: {}", err);
@@ -116,11 +122,11 @@ pub async fn handler(
     };
 
     let manifest =
-        serde_json::from_str::<CommonManifest>(payload.manifest.as_str()).map_err(|err| {
+        serde_json::from_str::<CommonManifest>(manifest_str.as_str()).map_err(|err| {
             tracing::error!(
-                namespace = %payload.namespace,
-                name = %payload.name,
-                version = %payload.version,
+                namespace = %namespace,
+                name = %name,
+                version = %version,
                 error = ?err,
                 "Failed to parse common manifest JSON"
             );
@@ -133,41 +139,36 @@ pub async fn handler(
         .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
 
     // Validate and serialize manifest based on dataset kind
-    let manifest_str = match dataset_kind {
+    let manifest_canonical = match dataset_kind {
         DatasetKind::Derived => {
-            parse_validate_and_canonicalize_derived_dataset_manifest(&payload.manifest)
+            parse_validate_and_canonicalize_derived_dataset_manifest(&manifest_str)
                 .map_err(Error::from)?
         }
         DatasetKind::EvmRpc => {
-            parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&payload.manifest)
+            parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&manifest_str)
                 .map_err(Error::from)?
         }
         DatasetKind::Firehose => {
-            parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&payload.manifest)
+            parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
                 .map_err(Error::from)?
         }
         DatasetKind::EthBeacon => {
-            parse_and_canonicalize_raw_dataset_manifest::<EthBeaconManifest>(&payload.manifest)
+            parse_and_canonicalize_raw_dataset_manifest::<EthBeaconManifest>(&manifest_str)
                 .map_err(Error::from)?
         }
     };
 
     // Compute manifest hash from canonical serialization
-    let manifest_hash = hash(&manifest_str);
+    let manifest_hash = hash(&manifest_canonical);
 
     // Register the manifest
     ctx.dataset_store
-        .register_manifest_and_link(
-            &payload.namespace,
-            &payload.name,
-            &manifest_hash,
-            manifest_str,
-        )
+        .register_manifest_and_link(&namespace, &name, &manifest_hash, manifest_canonical)
         .await
         .map_err(|err| {
             tracing::error!(
-                namespace = %payload.namespace,
-                name = %payload.name,
+                namespace = %namespace,
+                name = %name,
                 manifest_hash = %manifest_hash,
                 kind = %dataset_kind,
                 error = ?err,
@@ -178,18 +179,13 @@ pub async fn handler(
 
     // Tag the manifest with the version
     ctx.dataset_store
-        .set_dataset_version_tag(
-            &payload.namespace,
-            &payload.name,
-            &payload.version,
-            &manifest_hash,
-        )
+        .set_dataset_version_tag(&namespace, &name, &version, &manifest_hash)
         .await
         .map_err(|err| {
             tracing::error!(
-                namespace = %payload.namespace,
-                name = %payload.name,
-                version = %payload.version,
+                namespace = %namespace,
+                name = %name,
+                version = %version,
                 manifest_hash = %manifest_hash,
                 kind = %dataset_kind,
                 error = ?err,
@@ -200,9 +196,9 @@ pub async fn handler(
 
     tracing::info!(
         "Registered manifest for dataset '{}/{}' version '{}' (hash: {})",
-        payload.namespace,
-        payload.name,
-        payload.version,
+        namespace,
+        name,
+        version,
         manifest_hash
     );
 

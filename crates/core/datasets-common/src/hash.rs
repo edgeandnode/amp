@@ -154,6 +154,48 @@ impl<'a> From<&'a Hash> for metadata_db::ManifestHash<'a> {
     }
 }
 
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::ManifestHash<'a>> for Hash {
+    fn eq(&self, other: &metadata_db::ManifestHash<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Hash> for metadata_db::ManifestHash<'a> {
+    fn eq(&self, other: &Hash) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&metadata_db::ManifestHash<'a>> for Hash {
+    fn eq(&self, other: &&metadata_db::ManifestHash<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Hash> for &metadata_db::ManifestHash<'a> {
+    fn eq(&self, other: &Hash) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::ManifestHash<'a>> for &Hash {
+    fn eq(&self, other: &metadata_db::ManifestHash<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&Hash> for metadata_db::ManifestHash<'a> {
+    fn eq(&self, other: &&Hash) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 /// Validates that a hash follows the required format:
 /// - Must be exactly 64 characters long
 /// - Must contain only valid hex digits

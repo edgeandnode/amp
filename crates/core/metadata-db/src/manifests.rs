@@ -73,7 +73,7 @@ where
 {
     sql::count_dataset_links_for_update(exe, hash.into())
         .await
-        .map_err(Error::from)
+        .map_err(Into::into)
 }
 
 /// Delete a manifest from the database
@@ -91,5 +91,5 @@ pub async fn delete<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::delete(exe, hash.into()).await.map_err(Error::from)
+    sql::delete(exe, hash.into()).await.map_err(Into::into)
 }

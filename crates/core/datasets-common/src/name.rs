@@ -155,6 +155,48 @@ impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
     }
 }
 
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::DatasetName<'a>> for Name {
+    fn eq(&self, other: &metadata_db::DatasetName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Name> for metadata_db::DatasetName<'a> {
+    fn eq(&self, other: &Name) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&metadata_db::DatasetName<'a>> for Name {
+    fn eq(&self, other: &&metadata_db::DatasetName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<Name> for &metadata_db::DatasetName<'a> {
+    fn eq(&self, other: &Name) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<metadata_db::DatasetName<'a>> for &Name {
+    fn eq(&self, other: &metadata_db::DatasetName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+#[cfg(feature = "metadata-db")]
+impl<'a> PartialEq<&Name> for metadata_db::DatasetName<'a> {
+    fn eq(&self, other: &&Name) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 /// Validates that a dataset name follows the required format:
 /// - Must start with a lowercase letter or underscore
 /// - Must be lowercase

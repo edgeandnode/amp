@@ -90,6 +90,21 @@ pub enum SetVersionTagError {
     TransactionCommit(#[source] metadata_db::Error),
 }
 
+/// Error when resolving revision references to manifest hashes
+///
+/// This error occurs during the `resolve_revision` operation, which converts
+/// revision references (version tags, hashes, or special tags) into concrete manifest hashes.
+///
+/// This occurs when:
+/// - The database connection is unavailable or times out
+/// - Database permissions prevent the query operation
+/// - Database query syntax or logic error (should be rare)
+///
+/// The operation may be retried as it's read-only.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to query metadata database")]
+pub struct ResolveRevisionError(#[source] pub metadata_db::Error);
+
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetDatasetError {
@@ -667,6 +682,46 @@ pub enum DeleteManifestError {
     #[error("Failed to commit transaction")]
     TransactionCommit(#[source] metadata_db::Error),
 }
+
+/// Error when unlinking dataset manifests
+///
+/// This error type is used by `DatasetStore::unlink_dataset_manifests()`.
+///
+/// This occurs when failing to delete dataset manifest links from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete dataset manifest links from metadata database")]
+pub struct UnlinkDatasetManifestsError(#[source] pub metadata_db::Error);
+
+/// Error when listing version tags for a dataset
+///
+/// This error type is used by `DatasetStore::list_version_tags()`.
+///
+/// This occurs when failing to query version tags from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list version tags from metadata database")]
+pub struct ListVersionTagsError(#[source] pub metadata_db::Error);
+
+/// Error when listing all datasets
+///
+/// This error type is used by `DatasetStore::list_all_datasets()`.
+///
+/// This occurs when failing to query all datasets from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list all datasets from metadata database")]
+pub struct ListAllDatasetsError(#[source] pub metadata_db::Error);
+
+/// Error when deleting a version tag
+///
+/// This error type is used by `DatasetStore::delete_version_tag()`.
+///
+/// This occurs when failing to delete a version tag from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete version tag from metadata database")]
+pub struct DeleteVersionTagError(#[source] pub metadata_db::Error);
 
 /// Errors that occur when listing datasets that use a specific manifest
 ///
