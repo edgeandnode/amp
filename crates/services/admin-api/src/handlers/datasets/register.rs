@@ -33,8 +33,8 @@ use crate::{
 ///
 /// **Note**: This endpoint only registers datasets and does NOT schedule data extraction.
 /// To extract data after registration, make a separate call to:
-/// - `POST /datasets/{name}/dump` - for latest version
-/// - `POST /datasets/{name}/versions/{version}/dump` - for specific version
+/// - `POST /datasets/{namespace}/{name}/versions/latest/deploy` - for latest version
+/// - `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - for specific version
 ///
 /// ## Request Body
 /// - `dataset_name`: Name of the dataset to be registered (must be valid dataset name)
@@ -87,7 +87,7 @@ use crate::{
 /// ## Typical Workflow
 /// For users wanting both registration and data extraction:
 /// 1. `POST /datasets` - Register the dataset (this endpoint)
-/// 2. `POST /datasets/{name}/dump` or `POST /datasets/{name}/versions/{version}/dump` - Schedule data extraction
+/// 2. `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - Schedule data extraction
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
