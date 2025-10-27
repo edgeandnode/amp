@@ -2,7 +2,7 @@
 //!
 //! Deploys a dataset to start syncing blockchain data by:
 //! 1. Parsing dataset reference (namespace/name@version)
-//! 2. POSTing to admin API `/datasets/{name}/versions/{version}/dump` endpoint
+//! 2. POSTing to admin API `/datasets/{namespace}/{name}/versions/{version}/deploy` endpoint
 //! 3. Returning the job ID of the scheduled deployment
 //!
 //! # Dataset Reference Format
@@ -90,7 +90,7 @@ pub async fn run(
 
 /// Deploy a dataset via the admin API.
 ///
-/// POSTs to the versioned `/datasets/{name}/versions/{version}/dump` endpoint
+/// POSTs to the versioned `/datasets/{namespace}/{name}/versions/{version}/deploy` endpoint
 /// and returns the job ID.
 #[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
 async fn deploy_dataset(
@@ -99,12 +99,16 @@ async fn deploy_dataset(
     end_block: Option<EndBlock>,
     parallelism: u16,
 ) -> Result<JobId, Error> {
+    let namespace = dataset_ref.namespace();
     let name = dataset_ref.name();
     let version = dataset_ref.revision();
 
-    // Build URL for versioned dump endpoint
+    // Build URL for versioned deploy endpoint
     let url = admin_url
-        .join(&format!("datasets/{}/versions/{}/dump", name, version))
+        .join(&format!(
+            "datasets/{}/{}/versions/{}/deploy",
+            namespace, name, version
+        ))
         .map_err(|err| {
             tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
             Error::InvalidAdminUrl {
@@ -118,7 +122,7 @@ async fn deploy_dataset(
     let client = reqwest::Client::new();
     let response = client
         .post(url.as_str())
-        .json(&DumpRequest {
+        .json(&DeployRequest {
             end_block,
             parallelism,
         })
@@ -136,8 +140,8 @@ async fn deploy_dataset(
     tracing::debug!(status = %status, "Received API response");
 
     match status.as_u16() {
-        200 => {
-            let dump_response = response.json::<DumpResponse>().await.map_err(|err| {
+        200 | 202 => {
+            let deploy_response = response.json::<DeployResponse>().await.map_err(|err| {
                 tracing::error!(
                     status = %status,
                     error = %err,
@@ -149,8 +153,8 @@ async fn deploy_dataset(
                 }
             })?;
 
-            tracing::info!(job_id = %dump_response.job_id, "Dataset deployment job scheduled");
-            Ok(dump_response.job_id)
+            tracing::info!(job_id = %deploy_response.job_id, "Dataset deployment job scheduled");
+            Ok(deploy_response.job_id)
         }
         400 | 404 | 500 => {
             let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
@@ -188,17 +192,17 @@ async fn deploy_dataset(
     }
 }
 
-/// Request body for the POST /datasets/{name}/versions/{version}/dump endpoint.
+/// Request body for the POST /datasets/{namespace}/{name}/versions/{version}/deploy endpoint.
 #[derive(Debug, serde::Serialize)]
-struct DumpRequest {
+struct DeployRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     end_block: Option<EndBlock>,
     parallelism: u16,
 }
 
-/// Response from the dump endpoint.
+/// Response from the deploy endpoint.
 #[derive(Debug, serde::Deserialize)]
-struct DumpResponse {
+struct DeployResponse {
     job_id: JobId,
 }
 
