@@ -59,7 +59,7 @@ export const make = Effect.gen(function*() {
         dependencies,
         (dependency) => {
           const { name, version } = Model.parseReference(dependency)
-          return admin.dumpDatasetVersion(name, version)
+          return admin.deployDataset("_", name, version)
         },
         {
           concurrency: "unbounded",
@@ -68,7 +68,7 @@ export const make = Effect.gen(function*() {
       )
 
       yield* admin.registerDataset(manifest.name, manifest.version, manifest)
-      yield* admin.dumpDatasetVersion(manifest.name, manifest.version)
+      yield* admin.deployDataset("_", manifest.name, manifest.version)
     }).pipe(
       Effect.tapError((cause) =>
         Effect.logError(`Failed to dump manifest ${manifest.name}@${manifest.version}`, cause)

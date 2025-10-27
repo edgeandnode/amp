@@ -13,30 +13,19 @@ import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
 /**
- * End block configuration for dump operations.
- *
- * Can be one of:
- * - null/undefined: Continuous dumping (never stops)
- * - "latest": Stop at the latest available block
- * - "123": Stop at specific block number (as string)
- * - "-100": Stop N blocks before latest (as string, e.g., "-100" means latest - 100)
+ * The dataset namespace parameter.
  */
-const EndBlock = Schema.NullOr(
-  Schema.Union(
-    Schema.Literal("latest"),
-    Schema.String, // Accepts numeric strings like "123" or "-100"
-  ),
-)
+const datasetNamespace = HttpApiSchema.param("namespace", Schema.String)
 
 /**
- * The dataset name parameter (GET /datasets/{name}).
+ * The dataset name parameter.
  */
 const datasetName = HttpApiSchema.param("name", Model.DatasetName)
 
 /**
- * The dataset version parameter (GET /datasets/{name}/versions/{version}).
+ * The dataset revision parameter (version, hash, "latest", or "dev").
  */
-const datasetVersion = HttpApiSchema.param("version", Model.DatasetVersion)
+const datasetRevision = HttpApiSchema.param("revision", Schema.String)
 
 /**
  * The job ID parameter (GET /jobs/{jobId}, DELETE /jobs/{jobId}, PUT /jobs/{jobId}/stop).
@@ -47,63 +36,6 @@ const jobId = HttpApiSchema.param("jobId", Model.JobIdParam)
  * The location ID parameter (GET /locations/{locationId}, DELETE /locations/{locationId}).
  */
 const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
-
-/**
- * The dump dataset endpoint (POST /datasets/{name}/dump).
- */
-const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}/dump`
-  .addError(Error.DatasetNotFound)
-  .addError(Error.InvalidRequest)
-  .addError(Error.DatasetStoreError)
-  .addError(Error.InvalidSelector)
-  .addError(Error.UnexpectedJobStatus)
-  .addError(Error.SchedulerError)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Model.DumpResponse)
-  .setPayload(
-    Schema.Struct({
-      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
-    }),
-  )
-
-/**
- * The dump dataset with version endpoint (POST /datasets/{name}/versions/{version}/dump).
- */
-const dumpDatasetVersion = HttpApiEndpoint.post(
-  "dumpDatasetVersion",
-)`/datasets/${datasetName}/versions/${datasetVersion}/dump`
-  .addError(Error.DatasetNotFound)
-  .addError(Error.InvalidRequest)
-  .addError(Error.DatasetStoreError)
-  .addError(Error.InvalidSelector)
-  .addError(Error.UnexpectedJobStatus)
-  .addError(Error.SchedulerError)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Model.DumpResponse)
-  .setPayload(
-    Schema.Struct({
-      endBlock: Schema.optional(EndBlock).pipe(Schema.fromKey("end_block")),
-    }),
-  )
-
-/**
- * Error type for the `dumpDataset` endpoint.
- *
- * - InvalidRequest: Invalid request parameters.
- * - DatasetStoreError: Failed to load dataset from store.
- * - InvalidSelector: The dataset selector is invalid.
- * - UnexpectedJobStatus: The job status is unexpected.
- * - SchedulerError: Failed to schedule the dump job.
- * - MetadataDbError: Database error while polling job status.
- */
-export type DumpDatasetError =
-  | Error.DatasetNotFound
-  | Error.InvalidRequest
-  | Error.DatasetStoreError
-  | Error.InvalidSelector
-  | Error.UnexpectedJobStatus
-  | Error.SchedulerError
-  | Error.MetadataDbError
 
 /**
  * The register dataset endpoint (POST /datasets).
@@ -160,78 +92,106 @@ const getDatasets = HttpApiEndpoint.get("getDatasets")`/datasets`
 export type GetDatasetsError = Error.DatasetStoreError | Error.MetadataDbError
 
 /**
- * The get dataset versions endpoint (GET /datasets/{name}/versions).
+ * The get dataset versions endpoint (GET /datasets/{namespace}/{name}/versions).
  */
-const getDatasetVersions = HttpApiEndpoint.get("getDatasetVersions")`/datasets/${datasetName}/versions`
-  .addError(Error.InvalidSelector)
+const getDatasetVersions = HttpApiEndpoint.get(
+  "getDatasetVersions",
+)`/datasets/${datasetNamespace}/${datasetName}/versions`
+  .addError(Error.InvalidRequest)
+  .addError(Error.DatasetStoreError)
   .addError(Error.MetadataDbError)
   .addSuccess(Model.DatasetVersionsResponse)
 
 /**
  * Error type for the `getDatasetVersions` endpoint.
  *
- * - InvalidSelector: The dataset selector is invalid.
+ * - InvalidRequest: Invalid namespace or name in path parameters.
+ * - DatasetStoreError: Failed to list version tags from dataset store.
  * - MetadataDbError: Database error while retrieving versions.
  */
-export type GetDatasetVersionsError = Error.InvalidSelector | Error.MetadataDbError
+export type GetDatasetVersionsError = Error.InvalidRequest | Error.DatasetStoreError | Error.MetadataDbError
 
 /**
- * The get dataset by name endpoint (GET /datasets/{name}).
- */
-const getDataset = HttpApiEndpoint.get("getDataset")`/datasets/${datasetName}`
-  .addError(Error.InvalidSelector)
-  .addError(Error.DatasetNotFound)
-  .addError(Error.DatasetStoreError)
-  .addSuccess(Model.DatasetInfo)
-
-/**
- * Error type for the `getDataset` endpoint.
- *
- * - InvalidSelector: The dataset selector is invalid.
- * - DatasetNotFound: The dataset was not found.
- * - DatasetStoreError: Failed to load dataset from store.
- */
-export type GetDatasetError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
-
-/**
- * The get dataset by name and version endpoint (GET /datasets/{name}/versions/{version}).
+ * The get dataset by revision endpoint (GET /datasets/{namespace}/{name}/versions/{revision}).
  */
 const getDatasetVersion = HttpApiEndpoint.get(
   "getDatasetVersion",
-)`/datasets/${datasetName}/versions/${datasetVersion}`
-  .addError(Error.InvalidSelector)
+)`/datasets/${datasetNamespace}/${datasetName}/versions/${datasetRevision}`
+  .addError(Error.InvalidRequest)
   .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
-  .addSuccess(Model.DatasetInfo)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.DatasetVersionInfo)
 
 /**
  * Error type for the `getDatasetVersion` endpoint.
  *
- * - InvalidSelector: The dataset selector is invalid.
- * - DatasetNotFound: The dataset was not found.
+ * - InvalidRequest: Invalid namespace, name, or revision in path parameters.
+ * - DatasetNotFound: The dataset or revision was not found.
  * - DatasetStoreError: Failed to load dataset from store.
+ * - MetadataDbError: Database error while retrieving dataset information.
  */
-export type GetDatasetVersionError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
+export type GetDatasetVersionError =
+  | Error.InvalidRequest
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.MetadataDbError
 
 /**
- * The get dataset schema by name and version endpoint (GET /datasets/{name}/versions/{version}/schema).
+ * The deploy dataset endpoint (POST /datasets/{namespace}/{name}/versions/{revision}/deploy).
  */
-const getDatasetVersionSchema = HttpApiEndpoint.get(
-  "getDatasetVersionSchema",
-)`/datasets/${datasetName}/versions/${datasetVersion}/schema`
-  .addError(Error.InvalidSelector)
+const deployDataset = HttpApiEndpoint.post(
+  "deployDataset",
+)`/datasets/${datasetNamespace}/${datasetName}/versions/${datasetRevision}/deploy`
+  .addError(Error.InvalidRequest)
   .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
-  .addSuccess(Model.DatasetSchemaResponse)
+  .addError(Error.SchedulerError)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.DeployResponse, { status: 202 })
+  .setPayload(Model.DeployRequest)
 
 /**
- * Error type for the `getDatasetVersionSchema` endpoint.
+ * Error type for the `deployDataset` endpoint.
  *
- * - InvalidSelector: The dataset selector is invalid.
- * - DatasetNotFound: The dataset was not found.
+ * - InvalidRequest: Invalid path parameters or request body.
+ * - DatasetNotFound: The dataset or revision was not found.
  * - DatasetStoreError: Failed to load dataset from store.
+ * - SchedulerError: Failed to schedule the deployment job.
+ * - MetadataDbError: Database error while scheduling job.
  */
-export type GetDatasetVersionSchemaError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
+export type DeployDatasetError =
+  | Error.InvalidRequest
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.SchedulerError
+  | Error.MetadataDbError
+
+/**
+ * The get dataset manifest endpoint (GET /datasets/{namespace}/{name}/versions/{revision}/manifest).
+ */
+const getDatasetManifest = HttpApiEndpoint.get(
+  "getDatasetManifest",
+)`/datasets/${datasetNamespace}/${datasetName}/versions/${datasetRevision}/manifest`
+  .addError(Error.InvalidRequest)
+  .addError(Error.DatasetNotFound)
+  .addError(Error.DatasetStoreError)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Schema.Union(Model.DatasetManifest, Model.DatasetRpc))
+
+/**
+ * Error type for the `getDatasetManifest` endpoint.
+ *
+ * - InvalidRequest: Invalid namespace, name, or revision in path parameters.
+ * - DatasetNotFound: The dataset, revision, or manifest was not found.
+ * - DatasetStoreError: Failed to read manifest from store.
+ * - MetadataDbError: Database error while retrieving manifest path.
+ */
+export type GetDatasetManifestError =
+  | Error.InvalidRequest
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.MetadataDbError
 
 /**
  * The get jobs endpoint (GET /jobs).
@@ -382,18 +342,31 @@ export type GetLocationByIdError = Error.InvalidLocationId | Error.LocationNotFo
  */
 const deleteLocationById = HttpApiEndpoint.del("deleteLocationById")`/locations/${locationId}`
   .addError(Error.InvalidLocationId)
+  .addError(Error.InvalidQueryParameters)
   .addError(Error.LocationNotFound)
   .addError(Error.MetadataDbError)
   .addSuccess(Schema.Void, { status: 204 })
+  .setUrlParams(
+    Schema.Struct({
+      force: Schema.optional(Schema.BooleanFromString),
+    }),
+  )
 
 /**
  * Error type for the `deleteLocationById` endpoint.
  *
  * - InvalidLocationId: The provided ID is not a valid location identifier.
+ * - InvalidQueryParameters: Invalid query parameters.
  * - LocationNotFound: No location exists with the given ID.
  * - MetadataDbError: Internal database error occurred.
+ *
+ * Note: LocationConflict error (409) exists in the API but is not yet defined in the TypeScript error types.
  */
-export type DeleteLocationByIdError = Error.InvalidLocationId | Error.LocationNotFound | Error.MetadataDbError
+export type DeleteLocationByIdError =
+  | Error.InvalidLocationId
+  | Error.InvalidQueryParameters
+  | Error.LocationNotFound
+  | Error.MetadataDbError
 
 /**
  * The output schema endpoint (POST /schema).
@@ -424,13 +397,11 @@ export type GetOutputSchemaError = Error.DatasetStoreError | Error.PlanningError
  */
 export class DatasetGroup extends HttpApiGroup.make("dataset")
   .add(registerDataset)
-  .add(dumpDataset)
-  .add(dumpDatasetVersion)
-  .add(getDataset)
-  .add(getDatasetVersion)
-  .add(getDatasetVersionSchema)
   .add(getDatasets)
   .add(getDatasetVersions)
+  .add(getDatasetVersion)
+  .add(deployDataset)
+  .add(getDatasetManifest)
 {}
 
 /**
@@ -515,70 +486,6 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
-   * Dump a dataset.
-   *
-   * @param name The name of the dataset to dump.
-   * @param options The options for dumping.
-   * @return Whether the dump or dump scheduling was successful.
-   */
-  readonly dumpDataset: (
-    name: string,
-    options?: {
-      endBlock?: string | null | undefined
-    } | undefined,
-  ) => Effect.Effect<Model.DumpResponse, HttpClientError.HttpClientError | DumpDatasetError>
-
-  /**
-   * Dump a dataset with a specific version.
-   *
-   * @param name The name of the dataset to dump.
-   * @param version The version of the dataset to dump.
-   * @param options The options for dumping.
-   * @return Whether the dump or dump scheduling was successful.
-   */
-  readonly dumpDatasetVersion: (
-    name: string,
-    version: string,
-    options?: {
-      endBlock?: string | null | undefined
-    } | undefined,
-  ) => Effect.Effect<Model.DumpResponse, HttpClientError.HttpClientError | DumpDatasetError>
-
-  /**
-   * Get a dataset by name.
-   *
-   * @param name The name of the dataset to get.
-   * @return The dataset information.
-   */
-  readonly getDataset: (
-    name: string,
-  ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetError>
-
-  /**
-   * Get a dataset by name and version.
-   *
-   * @param name The name of the dataset to get.
-   * @param version The version of the dataset to get.
-   * @return The dataset information.
-   */
-  readonly getDatasetVersion: (
-    name: string,
-    version: string,
-  ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
-
-  /**
-   * Get the schema for a dataset by name and version.
-   *
-   * @param name The name of the dataset.
-   * @param version The version of the dataset.
-   * @return The dataset schema information.
-   */
-  readonly getDatasetVersionSchema: (
-    name: string,
-    version: string,
-  ) => Effect.Effect<Model.DatasetSchemaResponse, HttpClientError.HttpClientError | GetDatasetVersionSchemaError>
-
-  /**
    * Get all datasets.
    *
    * @return The list of all datasets.
@@ -588,12 +495,61 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   /**
    * Get all versions of a specific dataset.
    *
+   * @param namespace The namespace of the dataset.
    * @param name The name of the dataset.
    * @return The list of all dataset versions.
    */
   readonly getDatasetVersions: (
+    namespace: string,
     name: string,
   ) => Effect.Effect<Model.DatasetVersionsResponse, HttpClientError.HttpClientError | GetDatasetVersionsError>
+
+  /**
+   * Get a specific dataset version.
+   *
+   * @param namespace The namespace of the dataset.
+   * @param name The name of the dataset.
+   * @param revision The version/revision of the dataset.
+   * @return The dataset version information.
+   */
+  readonly getDatasetVersion: (
+    namespace: string,
+    name: string,
+    revision: string,
+  ) => Effect.Effect<Model.DatasetVersionInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
+
+  /**
+   * Deploy a dataset version.
+   *
+   * @param namespace The namespace of the dataset.
+   * @param name The name of the dataset to deploy.
+   * @param revision The version/revision to deploy.
+   * @param options The deployment options.
+   * @return The deployment response with job ID.
+   */
+  readonly deployDataset: (
+    namespace: string,
+    name: string,
+    revision: string,
+    options?: {
+      endBlock?: string | null | undefined
+      parallelism?: number | undefined
+    } | undefined,
+  ) => Effect.Effect<Model.DeployResponse, HttpClientError.HttpClientError | DeployDatasetError>
+
+  /**
+   * Get the manifest for a dataset version.
+   *
+   * @param namespace The namespace of the dataset.
+   * @param name The name of the dataset.
+   * @param revision The version/revision of the dataset.
+   * @return The dataset manifest.
+   */
+  readonly getDatasetManifest: (
+    namespace: string,
+    name: string,
+    revision: string,
+  ) => Effect.Effect<any, HttpClientError.HttpClientError | GetDatasetManifestError>
 
   /**
    * Get all jobs with pagination.
@@ -666,9 +622,13 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * Delete a location by ID.
    *
    * @param locationId The ID of the location to delete.
+   * @param options Optional parameters including force flag.
    */
   readonly deleteLocationById: (
     locationId: number,
+    options?: {
+      force?: boolean | undefined
+    },
   ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteLocationByIdError>
 
   /**
@@ -718,22 +678,63 @@ export const make = Effect.fn(function*(url: string) {
     },
   )
 
-  const dumpDataset = Effect.fn("dumpDataset")(function*(
+  const getDatasetVersions = Effect.fn("getDatasetVersions")(function*(namespace: string, name: string) {
+    const result = yield* client.dataset.getDatasetVersions({
+      path: {
+        namespace,
+        name,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const getDatasetVersion = Effect.fn("getDatasetVersion")(function*(
+    namespace: string,
     name: string,
+    revision: string,
+  ) {
+    const result = yield* client.dataset.getDatasetVersion({
+      path: {
+        namespace,
+        name,
+        revision,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const deployDataset = Effect.fn("deployDataset")(function*(
+    namespace: string,
+    name: string,
+    revision: string,
     options?: {
       endBlock?: string | null | undefined
+      parallelism?: number | undefined
     },
   ) {
-    const request = client.dataset.dumpDataset({
+    const result = yield* client.dataset.deployDataset({
       path: {
+        namespace,
         name,
+        revision,
       },
       payload: {
         endBlock: options?.endBlock,
+        parallelism: options?.parallelism,
       },
-    })
-
-    const result = yield* request.pipe(
+    }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
@@ -743,77 +744,18 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const dumpDatasetVersion = Effect.fn("dumpDatasetVersion")(function*(
+  const getDatasetManifest = Effect.fn("getDatasetManifest")(function*(
+    namespace: string,
     name: string,
-    version: string,
-    options?: {
-      endBlock?: string | null | undefined
-    },
+    revision: string,
   ) {
-    const request = client.dataset.dumpDatasetVersion({
+    const result = yield* client.dataset.getDatasetManifest({
       path: {
+        namespace,
         name,
-        version,
+        revision,
       },
-      payload: {
-        endBlock: options?.endBlock,
-      },
-    })
-
-    const result = yield* request.pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const getDataset = Effect.fn("getDataset")(function*(name: string) {
-    const request = client.dataset.getDataset({
-      path: {
-        name,
-      },
-    })
-
-    const result = yield* request.pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const getDatasetVersion = Effect.fn("getDatasetVersion")(function*(name: string, version: string) {
-    const request = client.dataset.getDatasetVersion({
-      path: {
-        name,
-        version,
-      },
-    })
-
-    const result = yield* request.pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const getDatasetVersionSchema = Effect.fn("getDatasetVersionSchema")(function*(name: string, version: string) {
-    const request = client.dataset.getDatasetVersionSchema({
-      path: {
-        name,
-        version,
-      },
-    })
-
-    const result = yield* request.pipe(
+    }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
@@ -825,21 +767,6 @@ export const make = Effect.fn(function*(url: string) {
 
   const getDatasets = Effect.fn("getDatasets")(function*() {
     const result = yield* client.dataset.getDatasets({}).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const getDatasetVersions = Effect.fn("getDatasetVersions")(function*(name: string) {
-    const result = yield* client.dataset.getDatasetVersions({
-      path: {
-        name,
-      },
-    }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
@@ -958,10 +885,18 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const deleteLocationById = Effect.fn("deleteLocationById")(function*(locationId: number) {
+  const deleteLocationById = Effect.fn("deleteLocationById")(function*(
+    locationId: number,
+    options?: {
+      force?: boolean | undefined
+    },
+  ) {
     yield* client.location.deleteLocationById({
       path: {
         locationId,
+      },
+      urlParams: {
+        force: options?.force,
       },
     }).pipe(
       Effect.catchTags({
@@ -990,14 +925,12 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   return {
-    dumpDataset,
-    dumpDatasetVersion,
     registerDataset,
-    getDataset,
-    getDatasetVersion,
-    getDatasetVersionSchema,
     getDatasets,
     getDatasetVersions,
+    getDatasetVersion,
+    deployDataset,
+    getDatasetManifest,
     getJobs,
     getJobById,
     deleteAllJobs,

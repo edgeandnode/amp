@@ -32,15 +32,15 @@ Testing.layer((it) => {
 
       // Register and dump the root dataset.
       yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
-      const job = yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
+      const job = yield* admin.deployDataset("_", Anvil.dataset.name, Anvil.dataset.version, {
         endBlock: "5",
       })
 
       // Wait for the job to complete
-      yield* Testing.waitForJobCompletion(job.job_id)
+      yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDataset(Anvil.dataset.name)
-      assertInstanceOf(response, Model.DatasetInfo)
+      const response = yield* admin.getDatasetVersion("_", Anvil.dataset.name, "dev")
+      assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, Anvil.dataset.name)
     }),
   )
@@ -49,10 +49,12 @@ Testing.layer((it) => {
     "can fetch a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDataset("anvil")
-      assertInstanceOf(result, Model.DatasetInfo)
-      assertEquals(result.kind, "evm-rpc")
+      const result = yield* api.getDatasetVersion("_", "anvil", "dev")
+      assertInstanceOf(result, Model.DatasetVersionInfo)
+      assertEquals(result.namespace, "_")
       assertEquals(result.name, "anvil")
+      assertEquals(result.revision, "dev")
+      assertEquals(result.kind, "evm-rpc")
     }),
   )
 
@@ -60,10 +62,7 @@ Testing.layer((it) => {
     "can fetch the schema for a dataset version",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetVersionSchema("anvil", "0.1.0")
-      assertInstanceOf(result, Model.DatasetSchemaResponse)
-      assertEquals(result.name, "anvil")
-      assertEquals(result.version, "0.1.0")
+      const result = yield* api.getDatasetManifest("_", "anvil", "0.1.0")
       deepStrictEqual(Array.isArray(result.tables), true)
     }),
   )
@@ -87,15 +86,15 @@ Testing.layer((it) => {
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
       yield* admin.registerDataset(dataset.name, dataset.version, dataset)
 
-      const job = yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
+      const job = yield* admin.deployDataset("_", dataset.name, dataset.version, {
         endBlock: "5",
       })
 
       // Wait for the job to complete
-      yield* Testing.waitForJobCompletion(job.job_id)
+      yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDataset(dataset.name)
-      assertInstanceOf(response, Model.DatasetInfo)
+      const response = yield* admin.getDatasetVersion("_", dataset.name, "dev")
+      assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, dataset.name)
     }),
   )
@@ -106,9 +105,9 @@ Testing.layer((it) => {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasets()
       const example = result.datasets.find((dataset) => dataset.name === "example")
-      assertInstanceOf(example, Model.DatasetRegistryInfo)
+      assertInstanceOf(example, Model.DatasetSummary)
       const anvil = result.datasets.find((dataset) => dataset.name === "anvil")
-      assertInstanceOf(anvil, Model.DatasetRegistryInfo)
+      assertInstanceOf(anvil, Model.DatasetSummary)
     }),
   )
 
