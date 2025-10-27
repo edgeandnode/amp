@@ -1192,6 +1192,236 @@
         }
       }
     },
+    "/manifests": {
+      "post": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `POST /manifests` endpoint",
+        "description": "Registers a new manifest in content-addressable storage without linking to any dataset or creating version tags.\nThis endpoint is useful for pre-registering manifests before associating them with specific datasets.\n\n## Request Body\nThe request body should contain a complete manifest JSON object. The manifest kind determines\nthe validation rules:\n- `kind=\"manifest\"` (Derived): Validates SQL dependencies\n- `kind=\"evm-rpc\"`, `kind=\"firehose\"`, `kind=\"eth-beacon\"` (Raw): Validates structure only\n\n## Response\n- **201 Created**: Manifest successfully registered, returns the computed hash\n- **400 Bad Request**: Invalid JSON format, unsupported kind, or validation failure\n- **500 Internal Server Error**: Manifest store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `DEPENDENCY_VALIDATION_ERROR`: SQL dependency validation failed (derived datasets only)\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `MANIFEST_STORE_ERROR`: Failed to store manifest in object store or metadata database\n\n## Registration Process\nUnlike `POST /datasets`, this endpoint performs minimal registration:\n1. **Parse and validate**: Validates manifest structure and dependencies (for derived datasets)\n2. **Canonicalize**: Re-serializes manifest to canonical JSON format\n3. **Compute hash**: Generates content hash from canonical JSON\n4. **Store manifest**: Writes to object store and registers in metadata database\n\nThis handler:\n- Validates and extracts the manifest JSON from the request body\n- Parses and validates based on dataset kind\n- Stores the manifest in content-addressable storage\n- Returns the computed manifest hash",
+        "operationId": "manifests_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Manifest successfully registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterManifestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request format or manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/manifests/{hash}": {
+      "get": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `GET /manifests/{hash}` endpoint",
+        "description": "Retrieves the raw manifest JSON for a specific manifest hash.\n\n## Path Parameters\n- `hash`: Manifest content hash (validated hash format)\n\n## Response\n- **200 OK**: Returns the raw manifest JSON\n- **400 Bad Request**: Invalid manifest hash format\n- **404 Not Found**: Manifest with the given hash does not exist\n- **500 Internal Server Error**: Manifest retrieval error\n\n## Error Codes\n- `INVALID_HASH`: The provided hash is not valid (invalid hash format or parsing error)\n- `MANIFEST_NOT_FOUND`: No manifest exists with the given hash\n- `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store\n\n## Retrieval Process\nThis handler retrieves manifests from content-addressable storage:\n- The dataset manifests store queries the metadata database internally to resolve the hash to a file path\n- Then fetches the manifest content from the object store\n\nThis handler:\n- Validates and extracts the manifest hash from the URL path\n- Retrieves the raw manifest JSON from the dataset manifests store using the hash\n- Returns the manifest as a JSON response with proper Content-Type header",
+        "operationId": "manifests_get_by_hash",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Manifest content hash",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved manifest JSON (schema varies by manifest kind)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid manifest hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Manifest not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Manifest retrieval error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `DELETE /manifests/{hash}` endpoint",
+        "description": "Deletes a manifest from both object store and metadata database.\n**Manifests linked to datasets cannot be deleted** (returns 409 Conflict).\n\nThis endpoint is idempotent: deleting a non-existent manifest returns success (204 No Content).\n\n## Path Parameters\n- `hash`: Manifest content hash to delete\n\n## Response\n- **204 No Content**: Manifest successfully deleted (or already deleted)\n- **400 Bad Request**: Invalid manifest hash format\n- **409 Conflict**: Manifest is linked to datasets and cannot be deleted\n- **500 Internal Server Error**: Store or database error\n\n## Error Codes\n- `INVALID_HASH`: Invalid hash format\n- `MANIFEST_LINKED`: Manifest is linked to datasets and cannot be deleted\n- `MANIFEST_DELETE_ERROR`: Failed to delete manifest\n\n## Deletion Flow\nThis handler:\n1. Validates and extracts the manifest hash from the URL path\n2. Checks if the manifest is linked to any datasets\n3. If linked: Returns 409 Conflict error (deletion not allowed)\n4. If not linked:\n   - Deletes manifest record from metadata database\n   - Deletes manifest file from object store\n   - Treats \"not found\" as success (idempotent behavior)\n5. Returns 204 No Content on success\n\n## Safety Notes\n- Only unlinked manifests can be deleted (no dataset dependencies)\n- To delete a linked manifest, first remove all dataset associations\n- Deletion is permanent and cannot be undone",
+        "operationId": "manifests_delete",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Manifest content hash",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Manifest successfully deleted (or already deleted)"
+          },
+          "400": {
+            "description": "Invalid hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Manifest linked to datasets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/manifests/{hash}/datasets": {
+      "get": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `GET /manifests/{hash}/datasets` endpoint",
+        "description": "Lists all datasets that reference a specific manifest hash.\n\n## Path Parameters\n- `hash`: Manifest content hash (validated hash format)\n\n## Response\n- **200 OK**: Successfully retrieved datasets using manifest\n- **400 Bad Request**: Invalid manifest hash format\n- **404 Not Found**: Manifest with the given hash does not exist\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `INVALID_HASH`: The provided hash is not valid (invalid hash format or parsing error)\n- `MANIFEST_NOT_FOUND`: No manifest exists with the given hash\n- `QUERY_MANIFEST_PATH_ERROR`: Failed to query manifest path from metadata database\n- `LIST_DATASET_TAGS_ERROR`: Failed to list dataset tags from metadata database\n\n## Behavior\nThis handler queries the dataset store to find all datasets using a manifest:\n- Validates and extracts the manifest hash from the URL path\n- Queries dataset store for all dataset tags referencing this manifest\n- Returns 404 if the manifest doesn't exist\n- Returns list of datasets with their namespace, name, and version",
+        "operationId": "list_manifest_datasets",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Manifest hash (64-char hex)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved datasets using manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestDatasetsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid manifest hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Manifest not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/providers": {
       "get": {
         "tags": [
@@ -1471,6 +1701,29 @@
   },
   "components": {
     "schemas": {
+      "Dataset": {
+        "type": "object",
+        "description": "Dataset information\n\nRepresents a dataset tag with its namespace, name, and version.",
+        "required": [
+          "namespace",
+          "name",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
+          "version": {
+            "type": "string",
+            "description": "Version tag"
+          }
+        }
+      },
       "DatasetInfo": {
         "type": "object",
         "description": "Represents dataset information for API responses from the dataset store",
@@ -1913,6 +2166,31 @@
           }
         }
       },
+      "ManifestDatasetsResponse": {
+        "type": "object",
+        "description": "Response for listing datasets using a manifest",
+        "required": [
+          "hash",
+          "datasets"
+        ],
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dataset"
+            },
+            "description": "List of datasets using this manifest"
+          },
+          "hash": {
+            "type": "string",
+            "description": "Manifest hash"
+          }
+        }
+      },
+      "ManifestResponse": {
+        "type": "object",
+        "description": "Response wrapper for manifest content"
+      },
       "OutputSchemaRequest": {
         "type": "object",
         "description": "Request payload for output schema analysis\n\nContains the SQL query to analyze and optional configuration flags.",
@@ -1989,6 +2267,19 @@
               "$ref": "#/components/schemas/ProviderInfo"
             },
             "description": "List of all provider configurations with complete configuration details"
+          }
+        }
+      },
+      "RegisterManifestResponse": {
+        "type": "object",
+        "description": "Response payload for manifest registration\n\nContains the computed hash of the registered manifest.",
+        "required": [
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The computed content hash of the manifest (used as unique identifier)"
           }
         }
       },
@@ -2125,6 +2416,10 @@
     {
       "name": "locations",
       "description": "Location management endpoints"
+    },
+    {
+      "name": "manifests",
+      "description": "Manifest management endpoints"
     },
     {
       "name": "providers",

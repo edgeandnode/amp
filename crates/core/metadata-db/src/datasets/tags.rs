@@ -30,11 +30,11 @@ use sqlx::{
 };
 
 use super::{
-    hash::{Hash, HashOwned},
     name::{Name, NameOwned},
     namespace::{Namespace, NamespaceOwned},
     version::{Version, VersionOwned},
 };
+use crate::manifests::{ManifestHash, ManifestHashOwned};
 
 /// Internal SQL operations for tag management
 ///
@@ -53,7 +53,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-        hash: Hash<'_>,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -86,7 +86,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: Hash<'_>,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -118,7 +118,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: Hash<'_>,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -284,7 +284,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-    ) -> Result<Option<HashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -307,7 +307,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<HashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -329,7 +329,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<HashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -394,6 +394,32 @@ pub(crate) mod sql {
 
         sqlx::query_as(query).fetch_all(exe).await
     }
+
+    /// List all tags that reference a specific manifest hash
+    ///
+    /// Returns all semver tags (excludes "dev" and "latest") that point to the given manifest hash.
+    pub async fn list_by_manifest_hash<'c, E>(
+        exe: E,
+        hash: ManifestHash<'_>,
+    ) -> Result<Vec<Tag>, sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query = indoc::indoc! {r#"
+            SELECT
+                namespace,
+                name,
+                version,
+                hash,
+                created_at,
+                updated_at
+            FROM tags
+            WHERE hash = $1
+              AND version NOT IN ('latest', 'dev')
+        "#};
+
+        sqlx::query_as(query).bind(hash).fetch_all(exe).await
+    }
 }
 
 /// Tag record from the `tags` table
@@ -406,7 +432,7 @@ pub struct Tag {
     /// Version tag
     pub version: VersionOwned,
     /// Manifest hash this tag references
-    pub hash: HashOwned,
+    pub hash: ManifestHashOwned,
     /// Timestamp when the tag was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the tag was last updated

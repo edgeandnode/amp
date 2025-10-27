@@ -16,6 +16,7 @@ mod error;
 mod files;
 mod jobs;
 mod locations;
+pub mod manifests;
 pub mod notification_multiplexer;
 #[cfg(feature = "temp-db")]
 pub mod temp;
@@ -26,8 +27,8 @@ use self::db::{ConnPool, Connection};
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
-        DatasetHash, DatasetHashOwned, DatasetName, DatasetNameOwned, DatasetNamespace,
-        DatasetNamespaceOwned, DatasetTag, DatasetVersion, DatasetVersionOwned,
+        DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
+        DatasetVersion, DatasetVersionOwned,
     },
     db::{ConnError, Executor, Transaction},
     error::Error,
@@ -44,6 +45,7 @@ pub use self::{
             LocationNotification,
         },
     },
+    manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     workers::{
         NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker,

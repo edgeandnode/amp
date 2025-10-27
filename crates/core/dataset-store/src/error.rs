@@ -607,3 +607,87 @@ pub enum EthCallForDatasetError {
     #[error("Failed to establish IPC connection: {0}")]
     IpcConnection(#[source] BoxError),
 }
+
+/// Errors that can occur when retrieving a manifest by hash
+///
+/// This error type is used by `DatasetStore::get_manifest_by_hash()`.
+#[derive(Debug, thiserror::Error)]
+pub enum GetManifestError {
+    /// Failed to query manifest path from metadata database
+    #[error("Failed to query manifest path from metadata database")]
+    MetadataDbQueryPath(#[source] metadata_db::Error),
+
+    /// Failed to retrieve manifest from object store
+    #[error("Failed to retrieve manifest from object store")]
+    ObjectStoreError(#[source] crate::manifests::GetError),
+}
+
+/// Errors that can occur when deleting a manifest
+///
+/// This error type is used by `DatasetStore::delete_manifest()`.
+#[derive(Debug, thiserror::Error)]
+pub enum DeleteManifestError {
+    /// Manifest is linked to one or more datasets and cannot be deleted
+    ///
+    /// Manifests must be unlinked from all datasets before deletion.
+    #[error("Manifest is linked to datasets and cannot be deleted")]
+    ManifestLinked,
+
+    /// Failed to begin transaction
+    ///
+    /// This error occurs when the database connection fails to start a transaction,
+    /// typically due to connection issues, database unavailability, or permission problems.
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to check if manifest is linked to datasets
+    #[error("Failed to check if manifest is linked to datasets")]
+    MetadataDbCheckLinks(#[source] metadata_db::Error),
+
+    /// Failed to delete manifest from metadata database
+    #[error("Failed to delete manifest from metadata database")]
+    MetadataDbDelete(#[source] metadata_db::Error),
+
+    /// Failed to delete manifest from object store
+    #[error("Failed to delete manifest from object store")]
+    ObjectStoreError(#[source] crate::manifests::DeleteError),
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// The manifest deletion was not persisted to the database.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations (serialization failure)
+    /// - Database constraint violation detected at commit time
+    /// - Database running out of disk space or resources
+    ///
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+}
+
+/// Errors that occur when listing datasets that use a specific manifest
+///
+/// This error type is used by `DatasetStore::list_manifest_linked_datasets()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ListDatasetsUsingManifestError {
+    /// Failed to query manifest path from metadata database
+    ///
+    /// This occurs when:
+    /// - Database connection is lost
+    /// - SQL query to resolve manifest hash to file path fails
+    /// - Database schema inconsistencies prevent path lookup
+    #[error("Failed to query manifest path from metadata database")]
+    MetadataDbQueryPath(#[source] metadata_db::Error),
+
+    /// Failed to list dataset tags from metadata database
+    ///
+    /// This occurs when:
+    /// - Database connection is lost
+    /// - SQL query to retrieve dataset tags fails
+    /// - Database schema inconsistencies prevent tag retrieval
+    #[error("Failed to list dataset tags from metadata database")]
+    MetadataDbListTags(#[source] metadata_db::Error),
+}

@@ -15,8 +15,8 @@ pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
-use dataset_store::{manifests::DatasetManifestsStore, providers::ProviderConfigsStore};
-use handlers::{datasets, files, jobs, locations, providers, schema, workers};
+use dataset_store::providers::ProviderConfigsStore;
+use handlers::{datasets, files, jobs, locations, manifests, providers, schema, workers};
 use scheduler::Scheduler;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
@@ -29,13 +29,14 @@ pub async fn serve(
     let metadata_db = config.metadata_db().await?;
 
     let provider_configs_store = ProviderConfigsStore::new(config.providers_store.prefixed_store());
-    let dataset_manifests_store =
-        DatasetManifestsStore::new(metadata_db.clone(), config.manifests_store.prefixed_store());
+    let dataset_manifests_store = dataset_store::manifests::DatasetManifestsStore::new(
+        config.manifests_store.prefixed_store(),
+    );
 
     let dataset_store = DatasetStore::new(
         metadata_db.clone(),
         provider_configs_store,
-        dataset_manifests_store.clone(),
+        dataset_manifests_store,
     );
 
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
@@ -43,7 +44,6 @@ pub async fn serve(
     let ctx = Ctx {
         metadata_db,
         dataset_store,
-        dataset_manifests_store,
         scheduler,
     };
 
@@ -93,6 +93,15 @@ pub async fn serve(
         .route(
             "/locations/{location_id}/files",
             get(locations::get_files::handler),
+        )
+        .route("/manifests", post(manifests::register::handler))
+        .route(
+            "/manifests/{hash}",
+            get(manifests::get_by_id::handler).delete(manifests::delete_by_id::handler),
+        )
+        .route(
+            "/manifests/{hash}/datasets",
+            get(manifests::list_datasets::handler),
         )
         .route(
             "/providers",
@@ -148,6 +157,11 @@ pub async fn serve(
         handlers::datasets::register::handler,
         handlers::datasets::dump::handler,
         handlers::datasets::dump::handler_with_version,
+        // Manifest endpoints
+        handlers::manifests::register::handler,
+        handlers::manifests::get_by_id::handler,
+        handlers::manifests::delete_by_id::handler,
+        handlers::manifests::list_datasets::handler,
         // Job endpoints
         handlers::jobs::get_all::handler,
         handlers::jobs::get_by_id::handler,
@@ -174,6 +188,10 @@ pub async fn serve(
     components(schemas(
         // Common schemas
         handlers::error::ErrorResponse,
+        // Manifest schemas
+        handlers::manifests::register::RegisterManifestResponse,
+        handlers::manifests::list_datasets::ManifestDatasetsResponse,
+        handlers::manifests::list_datasets::Dataset,
         // Dataset schemas
         handlers::datasets::get_by_id::DatasetInfo,
         handlers::datasets::get_by_id::TableInfo,
@@ -211,6 +229,7 @@ pub async fn serve(
         (name = "datasets", description = "Dataset management endpoints"),
         (name = "jobs", description = "Job management endpoints"),
         (name = "locations", description = "Location management endpoints"),
+        (name = "manifests", description = "Manifest management endpoints"),
         (name = "providers", description = "Provider management endpoints"),
         (name = "files", description = "File access endpoints"),
         (name = "schema", description = "Schema generation endpoints"),

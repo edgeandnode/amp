@@ -165,10 +165,8 @@ async fn main() {
             let dataset_store = {
                 let provider_configs_store =
                     ProviderConfigsStore::new(config.providers_store.prefixed_store());
-                let dataset_manifests_store = DatasetManifestsStore::new(
-                    temp_db.metadata_db().clone(),
-                    config.manifests_store.prefixed_store(),
-                );
+                let dataset_manifests_store =
+                    DatasetManifestsStore::new(config.manifests_store.prefixed_store());
                 DatasetStore::new(
                     temp_db.metadata_db().clone(),
                     provider_configs_store,

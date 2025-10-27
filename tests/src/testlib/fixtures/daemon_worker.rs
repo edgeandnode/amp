@@ -41,7 +41,7 @@ impl DaemonWorker {
             let provider_configs_store =
                 ProviderConfigsStore::new(config.providers_store.prefixed_store());
             let dataset_manifests_store =
-                DatasetManifestsStore::new(metadb.clone(), config.manifests_store.prefixed_store());
+                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
             DatasetStore::new(
                 metadb.clone(),
                 provider_configs_store,

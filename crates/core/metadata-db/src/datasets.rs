@@ -1,72 +1,30 @@
-//! Dataset registry and manifest management
+//! Dataset registry and version tag management
 //!
-//! This module provides a unified interface for managing dataset
-//! registrations, manifests, and version tags. It encompasses all database
-//! operations related to dataset metadata, including:
+//! This module provides operations for managing datasets and their metadata:
 //!
-//! - **Type definitions**: Dataset identification (namespace, name, version,
-//!   hash)
-//! - **manifest_files**: Content-addressable manifest storage indexed by
-//!   SHA256 hash
+//! - **Type definitions**: Dataset identification (namespace, name, version)
 //! - **manifests**: Many-to-many junction table linking datasets to manifests
 //! - **tags**: Version tags (semver, "latest", "dev") pointing to
 //!   dataset-manifest combinations
 
-use std::borrow::Cow;
-
-mod hash;
 mod name;
 mod namespace;
 mod version;
 
-pub mod manifest_files;
 pub mod manifests;
 pub mod tags;
 
 pub use self::{
-    hash::{Hash as DatasetHash, HashOwned as DatasetHashOwned},
     name::{Name as DatasetName, NameOwned as DatasetNameOwned},
     namespace::{Namespace as DatasetNamespace, NamespaceOwned as DatasetNamespaceOwned},
     tags::Tag as DatasetTag,
     version::{Version as DatasetVersion, VersionOwned as DatasetVersionOwned},
 };
-use crate::{db::Executor, error::Error};
-
-/// Register manifest file in content-addressable storage
-///
-/// Inserts manifest hash and path into `manifest_files` table with ON
-/// CONFLICT DO NOTHING. This operation is idempotent - duplicate
-/// registrations are silently ignored.
-#[tracing::instrument(skip(exe), err)]
-pub async fn register_manifest<'c, E>(
-    exe: E,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-    manifest_path: impl Into<Cow<'_, str>> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    manifest_files::sql::insert(exe, manifest_hash.into(), manifest_path.into())
-        .await
-        .map_err(Into::into)
-}
-
-/// Retrieve manifest file path by content hash
-///
-/// Queries `manifest_files` table for the object store path associated
-/// with the given manifest hash. Returns `None` if hash not found.
-#[tracing::instrument(skip(exe), err)]
-pub async fn get_manifest_path<'c, E>(
-    exe: E,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
-) -> Result<Option<String>, Error>
-where
-    E: Executor<'c>,
-{
-    manifest_files::sql::get_path_by_hash(exe, &manifest_hash.into())
-        .await
-        .map_err(Into::into)
-}
+use crate::{
+    db::Executor,
+    error::Error,
+    manifests::{ManifestHash, ManifestHashOwned},
+};
 
 /// Link manifest to dataset in junction table
 ///
@@ -78,7 +36,7 @@ pub async fn link_manifest_to_dataset<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -99,7 +57,7 @@ pub async fn register_version_tag<'c, E>(
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -125,7 +83,7 @@ pub async fn set_latest_tag<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -145,7 +103,7 @@ pub async fn set_dev_tag<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<DatasetHash<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -198,13 +156,13 @@ where
         .map_err(Into::into)
 }
 
-/// Resolve "latest" tag with row-level locking for safe concurrent updates
+/// Get "latest" tag and lock the row to prevent concurrent modifications
 ///
-/// This function is identical to `get_latest_tag` but acquires a row-level lock
-/// using `SELECT FOR UPDATE` on the "latest" tag row. This enables safe
-/// read-modify-write operations on the "latest" tag within a transaction.
+/// This function retrieves the "latest" tag while acquiring a row-level lock using
+/// `SELECT FOR UPDATE`. This enables safe read-modify-write operations on the
+/// "latest" tag within a transaction, preventing concurrent modifications.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_latest_tag_for_update<'c, E>(
+pub async fn get_latest_tag_and_lock<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
@@ -227,7 +185,7 @@ pub async fn get_version_tag_hash<'c, E>(
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-) -> Result<Option<DatasetHashOwned>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -245,7 +203,7 @@ pub async fn get_latest_tag_hash<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-) -> Result<Option<DatasetHashOwned>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -263,7 +221,7 @@ pub async fn get_dev_tag_hash<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-) -> Result<Option<DatasetHashOwned>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -300,4 +258,21 @@ where
     E: Executor<'c>,
 {
     tags::sql::list_all(exe).await.map_err(Into::into)
+}
+
+/// List all dataset tags that reference a specific manifest hash
+///
+/// Queries all semantic version tags from `tags` table that point to the
+/// given manifest hash (excludes "dev" and "latest" special tags).
+#[tracing::instrument(skip(exe))]
+pub async fn list_tags_by_hash<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+) -> Result<Vec<DatasetTag>, Error>
+where
+    E: Executor<'c>,
+{
+    tags::sql::list_by_manifest_hash(exe, manifest_hash.into())
+        .await
+        .map_err(Into::into)
 }
