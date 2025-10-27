@@ -60,16 +60,9 @@ impl Dataset {
     }
 
     pub fn to_identifier(&self) -> String {
-        match self.kind.as_str() {
-            "manifest" => format!(
-                "{}__{}",
-                self.name,
-                self.version
-                    .as_ref()
-                    .map(|v| v.to_underscore_version())
-                    .unwrap_or_default()
-            ),
-            _ => self.name.to_string(),
+        match &self.version {
+            Some(v) => format!("{}__{}", self.name, v.to_underscore_version()),
+            None => self.name.to_string(),
         }
     }
 }
