@@ -59,11 +59,11 @@ Testing.layer((it) => {
   )
 
   it.effect(
-    "can fetch the schema for a dataset version",
+    "can fetch the manifest for an evm-rpc dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasetManifest("_", "anvil", "0.1.0")
-      assertInstanceOf(result, Model.DatasetManifest)
+      assertInstanceOf(result, Model.DatasetRpc)
       deepStrictEqual(typeof result.tables, "object")
     }),
   )
@@ -97,6 +97,16 @@ Testing.layer((it) => {
       const response = yield* admin.getDatasetVersion("_", dataset.name, "dev")
       assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, dataset.name)
+    }),
+  )
+
+  it.effect(
+    "can fetch the schema for a dataset version",
+    Effect.fn(function*() {
+      const api = yield* Admin.Admin
+      const result = yield* api.getDatasetManifest("_", "example", "dev")
+      assertInstanceOf(result, Model.DatasetManifest)
+      deepStrictEqual(typeof result.tables, "object")
     }),
   )
 
