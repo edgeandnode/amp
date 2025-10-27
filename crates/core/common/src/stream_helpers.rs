@@ -1,4 +1,7 @@
-use datafusion::{logical_expr::sqlparser::ast::Value, sql::parser::Statement};
+use datafusion::{
+    logical_expr::sqlparser::ast::Expr,
+    sql::{parser::Statement, sqlparser::ast},
+};
 
 // Returns true if the query is a streaming query, ending with "SETTINGS stream = true"
 // E.g. "SELECT * FROM eth_firehose.blocks SETTINGS stream = true"
@@ -11,7 +14,11 @@ pub fn is_streaming(stmt: &Statement) -> bool {
                         settings: Some(settings),
                         ..
                     } => settings.iter().any(|s| {
-                        s.key.value.to_lowercase() == "stream" && s.value == Value::Boolean(true)
+                        s.key.value.to_lowercase() == "stream"
+                            && matches!(
+                                &s.value,
+                                Expr::Value(v) if matches!(v.value, ast::Value::Boolean(true))
+                            )
                     }),
                     _ => false,
                 }

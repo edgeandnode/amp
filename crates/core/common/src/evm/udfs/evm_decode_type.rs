@@ -25,7 +25,7 @@ use crate::{
     plan,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeType {
     signature: Signature,
 }

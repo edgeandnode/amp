@@ -37,7 +37,7 @@ pub async fn serve(
         Server::builder()
             .add_service(FlightServiceServer::new(service.clone()))
             .serve_with_incoming_shutdown(
-                TcpIncoming::from_listener(listener, true, None)?,
+                TcpIncoming::from(listener).with_nodelay(Some(true)),
                 shutdown_signal(),
             )
             .map_err(|err| {

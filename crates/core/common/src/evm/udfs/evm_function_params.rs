@@ -83,7 +83,7 @@ impl TryFrom<&ScalarValue> for FunctionCall {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeParams {
     signature: Signature,
 }
@@ -280,7 +280,7 @@ impl EvmDecodeParams {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmEncodeParams {
     signature: Signature,
 }

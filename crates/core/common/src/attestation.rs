@@ -14,7 +14,7 @@ use datafusion::{
 };
 use stable_hash::{FieldAddress, StableHash as _, StableHasher};
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct AttestationHasherUDF(Signature);
 
 impl Default for AttestationHasherUDF {
@@ -169,6 +169,8 @@ fn hash_column(
         DataType::UInt16 => hash!(array::UInt16Array, |v| v.to_le_bytes()),
         DataType::UInt32 => hash!(array::UInt32Array, |v| v.to_le_bytes()),
         DataType::UInt64 => hash!(array::UInt64Array, |v| v.to_le_bytes()),
+        DataType::Decimal32(_, _) => hash!(array::Decimal32Array, |v| v.to_le_bytes()),
+        DataType::Decimal64(_, _) => hash!(array::Decimal64Array, |v| v.to_le_bytes()),
         DataType::Decimal128(_, _) => hash!(array::Decimal128Array, |v| v.to_le_bytes()),
         DataType::Decimal256(_, _) => hash!(array::Decimal256Array, |v| v.to_le_bytes()),
         DataType::Timestamp(unit, _) => match unit {

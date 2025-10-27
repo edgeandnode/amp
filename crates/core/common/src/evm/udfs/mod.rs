@@ -382,7 +382,7 @@ pub fn decode(
     Ok(Arc::new(structs))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeLog {
     name: &'static str,
     signature: Signature,
@@ -511,7 +511,7 @@ impl ScalarUDFImpl for EvmDecodeLog {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmTopic {
     signature: Signature,
 }
@@ -1559,6 +1559,7 @@ mod tests {
             arg_fields,
             number_rows: 1,
             return_field,
+            config_options: Default::default(),
         };
         let result = evm_topic.invoke_with_args(args).unwrap();
         let ColumnarValue::Scalar(result) = result else {
@@ -1632,6 +1633,7 @@ mod tests {
                 false,
             )
             .into(),
+            config_options: Default::default(),
         };
         let result = evm_decode_log.invoke_with_args(args).unwrap();
         let ColumnarValue::Array(result) = result else {

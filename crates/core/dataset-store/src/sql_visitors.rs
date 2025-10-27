@@ -35,8 +35,9 @@ pub fn all_function_names(stmt: &Statement) -> Result<Vec<String>, BoxError> {
             f.name
                 .0
                 .into_iter()
-                .map(|s| match s {
-                    ObjectNamePart::Identifier(ident) => ident.value,
+                .filter_map(|s| match s {
+                    ObjectNamePart::Identifier(ident) => Some(ident.value),
+                    ObjectNamePart::Function(_) => None,
                 })
                 .join(".")
         })

@@ -14,7 +14,7 @@ use datafusion::{
 use super::{array_to_sol_value, num_rows, scalar_to_sol_value};
 use crate::plan;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmEncodeType {
     signature: Signature,
 }

@@ -116,17 +116,21 @@ url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates
-arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
-datafusion = { version = "49", features = ["serde"] }
-datafusion-tracing = { version = "49" }
-datafusion-proto = { version = "49" }
+arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
+datafusion = { version = "50", features = ["serde"] }
+datafusion-tracing = { version = "50" }
+datafusion-proto = { version = "50" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
 prost = "=0.13.3"
 prost-build = "0.13.3"
-tonic = { version = "0.12.3", features = ["transport", "gzip", "tls-roots"] }
-tonic-build = "0.12.3"
+tonic = { version = "0.13", features = [
+    "transport",
+    "gzip",
+    "tls-native-roots",
+] }
+tonic-build = "0.13"
 
 # Prost fork
 #
