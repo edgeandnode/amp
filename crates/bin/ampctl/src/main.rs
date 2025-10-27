@@ -70,6 +70,11 @@ enum Commands {
     #[command(after_help = include_str!("cmd/dep_dataset__after_help.md"))]
     DepDataset(cmd::dep_dataset::Args),
 
+    /// Manage manifests in content-addressable storage
+    #[command(subcommand)]
+    #[command(long_about = include_str!("cmd/manifest__long_about.md"))]
+    Manifest(cmd::manifest::Commands),
+
     /// Manage provider configurations
     #[command(subcommand)]
     #[command(long_about = include_str!("cmd/provider__long_about.md"))]
@@ -84,6 +89,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::RegManifest(args) => cmd::reg_manifest::run(args).await?,
         Commands::RegProvider(args) => cmd::reg_provider::run(args).await?,
         Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
+        Commands::Manifest(command) => cmd::manifest::run(command).await?,
         Commands::Provider(command) => cmd::provider::run(command).await?,
     }
 
