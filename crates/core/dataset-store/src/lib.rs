@@ -19,7 +19,7 @@ use datafusion::{
 };
 use datasets_common::{
     hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
-    reference::Reference, version::Version,
+    reference::Reference, revision::Revision, version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -53,12 +53,13 @@ use self::{
 pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
     error::{
-        CatalogForSqlError, DeleteManifestError, EthCallForDatasetError,
+        CatalogForSqlError, DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError,
         ExtractDatasetFromFunctionNamesError, ExtractDatasetFromTableRefsError,
         GetAllDatasetsError, GetClientError, GetDatasetError, GetDerivedManifestError,
-        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError,
-        ListDatasetsUsingManifestError, PlanningCtxForSqlError, RegisterManifestError,
-        SetVersionTagError,
+        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError, ListAllDatasetsError,
+        ListDatasetsUsingManifestError, ListVersionTagsError, PlanningCtxForSqlError,
+        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
+        UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
 };
@@ -243,6 +244,7 @@ impl DatasetStore {
     }
 }
 
+// Dataset versioning API
 impl DatasetStore {
     /// Register a dataset manifest and link it to a dataset
     ///
@@ -283,7 +285,6 @@ impl DatasetStore {
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
 
-        // Commit transaction - both operations succeed or both are rolled back
         tx.commit()
             .await
             .map_err(RegisterManifestError::TransactionCommit)?;
@@ -351,6 +352,175 @@ impl DatasetStore {
         Ok(())
     }
 
+    /// Resolves the "latest" tag to its manifest hash
+    ///
+    /// Returns the manifest hash that the "latest" tag currently points to, or None if no
+    /// "latest" tag exists for this dataset.
+    pub async fn resolve_latest_version_hash(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+    ) -> Result<Option<Hash>, ResolveRevisionError> {
+        let hash = metadata_db::datasets::get_latest_tag_hash(&self.metadata_db, namespace, name)
+            .await
+            .map_err(ResolveRevisionError)?
+            .map(Into::into);
+        Ok(hash)
+    }
+
+    /// Resolves the "dev" tag to its manifest hash
+    ///
+    /// Returns the manifest hash that the "dev" tag currently points to, or None if no
+    /// "dev" tag exists for this dataset.
+    pub async fn resolve_dev_version_hash(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+    ) -> Result<Option<Hash>, ResolveRevisionError> {
+        let hash = metadata_db::datasets::get_dev_tag_hash(&self.metadata_db, namespace, name)
+            .await
+            .map_err(ResolveRevisionError)?
+            .map(Into::into);
+        Ok(hash)
+    }
+
+    /// Resolves a semantic version tag to its manifest hash
+    ///
+    /// Returns the manifest hash that the specified version tag points to, or None if the
+    /// version tag doesn't exist for this dataset.
+    pub async fn resolve_version_hash(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        version: &Version,
+    ) -> Result<Option<Hash>, ResolveRevisionError> {
+        let hash = metadata_db::datasets::get_version_tag_hash(
+            &self.metadata_db,
+            namespace,
+            name,
+            version,
+        )
+        .await
+        .map_err(ResolveRevisionError)?
+        .map(Into::into);
+        Ok(hash)
+    }
+
+    /// Resolves a revision to a manifest hash for a given dataset.
+    ///
+    /// This is the primary resolution method used by Admin API handlers to convert
+    /// revision references (version tags, hashes, or special tags) into concrete manifest hashes.
+    ///
+    /// For more specific use cases, consider using the dedicated methods:
+    /// - `resolve_version_hash` for semantic versions
+    /// - `resolve_latest_version_hash` for the "latest" tag
+    /// - `resolve_dev_version_hash` for the "dev" tag
+    pub async fn resolve_dataset_revision(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        revision: &Revision,
+    ) -> Result<Option<Hash>, ResolveRevisionError> {
+        match revision {
+            Revision::Hash(hash) => {
+                // Hash is already concrete, just verify it exists in manifest storage
+                let path = metadata_db::manifests::get_path(&self.metadata_db, hash)
+                    .await
+                    .map_err(ResolveRevisionError)?;
+                Ok(path.map(|_| hash.clone()))
+            }
+            Revision::Version(version) => self.resolve_version_hash(namespace, name, version).await,
+            Revision::Latest => self.resolve_latest_version_hash(namespace, name).await,
+            Revision::Dev => self.resolve_dev_version_hash(namespace, name).await,
+        }
+    }
+
+    /// List all version tags for a dataset
+    ///
+    /// Returns all semantic version tags for the dataset with their metadata,
+    /// sorted in descending order (newest version first).
+    ///
+    /// Returns an empty list if the dataset has no version tags.
+    pub async fn list_dataset_version_tags(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+    ) -> Result<Vec<metadata_db::DatasetTag>, ListVersionTagsError> {
+        metadata_db::datasets::list_version_tags(&self.metadata_db, namespace, name)
+            .await
+            .map_err(ListVersionTagsError)
+    }
+
+    /// List all datasets across all namespaces
+    ///
+    /// Returns all dataset tags from the metadata database.
+    /// Each tag represents a dataset-version combination.
+    ///
+    /// Returns an empty list if no datasets are registered.
+    pub async fn list_all_datasets(
+        &self,
+    ) -> Result<Vec<metadata_db::DatasetTag>, ListAllDatasetsError> {
+        metadata_db::datasets::list_all(&self.metadata_db)
+            .await
+            .map_err(ListAllDatasetsError)
+    }
+
+    /// Unlink all manifests from a dataset
+    ///
+    /// Removes all dataset-manifest associations for the dataset and returns the set of
+    /// unlinked manifest hashes. This will also cascade delete all version tags due to
+    /// foreign key constraints.
+    ///
+    /// The caller is responsible for checking if any of the returned manifests became
+    /// orphaned (no remaining references) and deleting them if needed.
+    ///
+    /// This operation is idempotent - returns an empty set if dataset doesn't exist.
+    pub async fn unlink_dataset_manifests(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+    ) -> Result<BTreeSet<Hash>, UnlinkDatasetManifestsError> {
+        // Delete all dataset_manifests links
+        // This will cascade delete all tags due to foreign key constraint
+        let unlinked_hashes =
+            metadata_db::datasets::unlink_manifests(&self.metadata_db, namespace, name)
+                .await
+                .map_err(UnlinkDatasetManifestsError)?
+                .into_iter()
+                .map(Into::into)
+                .collect::<BTreeSet<Hash>>();
+
+        tracing::debug!(
+            namespace=%namespace,
+            name=%name,
+            unlinked_count=%unlinked_hashes.len(),
+            "Unlinked dataset manifests"
+        );
+
+        Ok(unlinked_hashes)
+    }
+
+    /// Delete a version tag for a dataset
+    ///
+    /// Removes the specified semantic version tag from the dataset.
+    /// This operation is idempotent - returns `Ok(())` if the version doesn't exist.
+    ///
+    /// Note: This only deletes the version tag, not the manifest itself.
+    /// Manifests are content-addressable and may be referenced by other versions.
+    pub async fn delete_dataset_version_tag(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        version: &Version,
+    ) -> Result<(), DeleteVersionTagError> {
+        metadata_db::datasets::delete_version_tag(&self.metadata_db, namespace, name, version)
+            .await
+            .map_err(DeleteVersionTagError)
+    }
+}
+
+// Dataset loading API
+impl DatasetStore {
     /// Retrieves a dataset by name and optional version, with in-memory caching.
     ///
     /// This method resolves the dataset's manifest hash from the namespace+name+version tuple,

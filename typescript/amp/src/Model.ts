@@ -144,15 +144,12 @@ export class DatasetInfo extends Schema.Class<DatasetInfo>("DatasetInfo")({
   tables: Schema.Array(TableInfo),
 }) {}
 
-export class DatasetSchemaResponse extends Schema.Class<DatasetSchemaResponse>("DatasetSchemaResponse")({
+export class DatasetVersionInfo extends Schema.Class<DatasetVersionInfo>("DatasetVersionInfo")({
+  namespace: Schema.String,
   name: DatasetName,
-  version: DatasetVersion,
-  tables: Schema.Array(TableSchemaInfo),
-}) {}
-
-export class DatasetRegistryInfo extends Schema.Class<DatasetRegistryInfo>("DatasetRegistryInfo")({
-  name: DatasetName,
-  version: DatasetVersion,
+  revision: Schema.String,
+  manifestHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("manifest_hash")),
+  kind: Schema.String,
 }) {}
 
 /**
@@ -200,8 +197,15 @@ export const parseDatasetCursor = (cursor: DatasetCursor): { name: string; versi
   return { name: name!, version: version! }
 }
 
+export class DatasetSummary extends Schema.Class<DatasetSummary>("DatasetSummary")({
+  namespace: Schema.String,
+  name: Schema.String,
+  latestVersion: Schema.optional(Schema.String).pipe(Schema.fromKey("latest_version")),
+  versions: Schema.Array(Schema.String),
+}) {}
+
 export class DatasetsResponse extends Schema.Class<DatasetsResponse>("DatasetsResponse")({
-  datasets: Schema.Array(DatasetRegistryInfo),
+  datasets: Schema.Array(DatasetSummary),
 }) {}
 
 /**
@@ -270,7 +274,7 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>(
   "DatasetManifest",
 )({
   kind: Schema.Literal("manifest"),
-  network: Network,
+  network: Network.pipe(Schema.optional),
   name: DatasetName,
   version: DatasetVersion,
   dependencies: Schema.Record({ key: Schema.String, value: Reference }),
@@ -388,4 +392,13 @@ export class RecordBatchMetadata extends Schema.Class<RecordBatchMetadata>("Reco
 
 export class DumpResponse extends Schema.Class<DumpResponse>("DumpResponse")({
   job_id: JobId,
+}) {}
+
+export class DeployRequest extends Schema.Class<DeployRequest>("DeployRequest")({
+  endBlock: Schema.optional(Schema.NullOr(Schema.String)).pipe(Schema.fromKey("end_block")),
+  parallelism: Schema.optional(Schema.Number),
+}) {}
+
+export class DeployResponse extends Schema.Class<DeployResponse>("DeployResponse")({
+  jobId: JobId.pipe(Schema.propertySignature, Schema.fromKey("job_id")),
 }) {}

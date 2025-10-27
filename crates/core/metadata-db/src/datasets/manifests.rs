@@ -7,7 +7,7 @@
 use sqlx::{Executor, Postgres};
 
 use super::{name::Name, namespace::Namespace};
-use crate::manifests::ManifestHash;
+use crate::manifests::{ManifestHash, ManifestHashOwned};
 
 /// Internal SQL operations for dataset-manifest junction table
 ///
@@ -46,5 +46,32 @@ pub(crate) mod sql {
             .await?;
 
         Ok(())
+    }
+
+    /// Delete all manifest links for a dataset
+    ///
+    /// Removes all dataset-manifest associations for a given dataset. This operation is idempotent
+    /// and will cascade delete all associated tags due to the foreign key constraint.
+    ///
+    /// Returns the list of manifest hashes that were unlinked from the dataset. This can be used
+    /// to check for and clean up orphaned manifests.
+    ///
+    /// This effectively removes all versions of a dataset from the system.
+    pub async fn delete_all_for_dataset<'c, E>(
+        exe: E,
+        namespace: Namespace<'_>,
+        name: Name<'_>,
+    ) -> Result<Vec<ManifestHashOwned>, sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query =
+            "DELETE FROM dataset_manifests WHERE namespace = $1 AND name = $2 RETURNING hash";
+
+        sqlx::query_scalar(query)
+            .bind(namespace)
+            .bind(name)
+            .fetch_all(exe)
+            .await
     }
 }

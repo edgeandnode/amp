@@ -23,8 +23,10 @@ const list = Command.make("list", {
       }
 
       yield* Console.table(response.datasets.map((dataset) => ({
+        Namespace: dataset.namespace,
         Name: dataset.name,
-        Version: dataset.version,
+        Latest: dataset.latestVersion ?? "N/A",
+        Versions: dataset.versions.join(", "),
       })))
     }),
   ),
@@ -49,8 +51,8 @@ const show = Command.make("show", {
     Effect.fn(function*({ args }) {
       const admin = yield* Admin.Admin
       const dataset = yield* (args.version.pipe(Option.isSome)
-        ? admin.getDatasetVersion(args.name, args.version.pipe(Option.getOrThrow))
-        : admin.getDataset(args.name)).pipe(
+        ? admin.getDatasetVersion("_", args.name, args.version.pipe(Option.getOrThrow))
+        : admin.getDatasetVersion("_", args.name, "dev")).pipe(
           Effect.catchTags({
             DatasetNotFound: () =>
               Effect.dieMessage(
@@ -58,23 +60,15 @@ const show = Command.make("show", {
                   args.version.pipe(Option.isSome) ? `@${args.version.pipe(Option.getOrThrow)}` : ""
                 }`,
               ),
-            InvalidSelector: () => Effect.dieMessage(`Invalid dataset name: ${args.name}`),
+            InvalidRequest: () => Effect.dieMessage(`Invalid dataset name: ${args.name}`),
           }),
         )
 
-      yield* Console.log(`Dataset: ${dataset.name}`)
+      yield* Console.log(`Namespace: ${dataset.namespace}`)
+      yield* Console.log(`Name: ${dataset.name}`)
+      yield* Console.log(`Revision: ${dataset.revision}`)
       yield* Console.log(`Kind: ${dataset.kind}`)
-      yield* Console.log(`\nTables:`)
-
-      if (dataset.tables.length === 0) {
-        yield* Console.log("  No tables found")
-      } else {
-        yield* Console.table(dataset.tables.map((table) => ({
-          Name: table.name,
-          Network: table.network,
-          Location: table.activeLocation ?? "N/A",
-        })))
-      }
+      yield* Console.log(`Manifest Hash: ${dataset.manifestHash}`)
     }),
   ),
   Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
@@ -92,9 +86,9 @@ const versions = Command.make("versions", {
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const admin = yield* Admin.Admin
-      const response = yield* admin.getDatasetVersions(args.name).pipe(
+      const response = yield* admin.getDatasetVersions("_", args.name).pipe(
         Effect.catchTags({
-          InvalidSelector: () => Effect.dieMessage(`Invalid dataset name: ${args.name}`),
+          InvalidRequest: () => Effect.dieMessage(`Invalid dataset name: ${args.name}`),
         }),
       )
 

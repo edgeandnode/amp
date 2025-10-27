@@ -1,6 +1,6 @@
 //! Integration tests for the Admin API dataset manifest endpoint.
 
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
 
@@ -12,7 +12,7 @@ async fn get_dataset_version_manifest_with_valid_dataset_succeeds() {
     let ctx = TestCtx::setup("get_dataset_version_manifest_with_valid_dataset").await;
 
     //* When
-    let resp = ctx.get_manifest("eth_rpc", "0.0.0").await;
+    let resp = ctx.get_manifest("edgeandnode", "eth_rpc", "0.0.0").await;
 
     //* Then
     assert_eq!(
@@ -80,7 +80,9 @@ async fn get_dataset_version_manifest_with_non_existent_dataset_returns_not_foun
     let ctx = TestCtx::setup("get_dataset_version_manifest_with_non_existent_dataset").await;
 
     //* When
-    let resp = ctx.get_manifest("non_existent_dataset", "1.0.0").await;
+    let resp = ctx
+        .get_manifest("edgeandnode", "non_existent_dataset", "1.0.0")
+        .await;
 
     //* Then
     assert_eq!(
@@ -95,8 +97,8 @@ async fn get_dataset_version_manifest_with_non_existent_dataset_returns_not_foun
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        error_response.error_code, "MANIFEST_NOT_FOUND",
-        "should return MANIFEST_NOT_FOUND error code"
+        error_response.error_code, "DATASET_NOT_FOUND",
+        "should return DATASET_NOT_FOUND error code"
     );
     assert!(
         error_response
@@ -116,29 +118,16 @@ async fn get_dataset_version_manifest_with_invalid_name_returns_bad_request() {
     let ctx = TestCtx::setup("get_dataset_version_manifest_with_invalid_name").await;
 
     //* When
-    let resp = ctx.get_manifest_raw("invalid dataset name", "1.0.0").await;
+    let resp = ctx
+        .get_manifest_raw("edgeandnode", "invalid dataset name", "1.0.0")
+        .await;
 
     //* Then
+    // Axum's path extraction rejects invalid names with 400 BAD_REQUEST
     assert_eq!(
         resp.status(),
         StatusCode::BAD_REQUEST,
         "manifest retrieval should fail with 400 for invalid dataset name"
-    );
-
-    let error_response: ErrorResponse = resp
-        .json()
-        .await
-        .expect("failed to parse error response JSON");
-
-    assert_eq!(
-        error_response.error_code, "INVALID_SELECTOR",
-        "should return INVALID_SELECTOR error code"
-    );
-    assert!(
-        error_response
-            .error_message
-            .contains("invalid dataset selector"),
-        "error message should indicate invalid selector"
     );
 }
 
@@ -148,29 +137,16 @@ async fn get_dataset_version_manifest_with_invalid_version_returns_bad_request()
     let ctx = TestCtx::setup("get_dataset_version_manifest_with_invalid_version").await;
 
     //* When
-    let resp = ctx.get_manifest_raw("eth_rpc", "not_a_version").await;
+    let resp = ctx
+        .get_manifest_raw("edgeandnode", "eth_rpc", "not_a_version")
+        .await;
 
     //* Then
+    // Axum's path extraction rejects invalid revisions with 400 BAD_REQUEST
     assert_eq!(
         resp.status(),
         StatusCode::BAD_REQUEST,
         "manifest retrieval should fail with 400 for invalid version"
-    );
-
-    let error_response: ErrorResponse = resp
-        .json()
-        .await
-        .expect("failed to parse error response JSON");
-
-    assert_eq!(
-        error_response.error_code, "INVALID_SELECTOR",
-        "should return INVALID_SELECTOR error code"
-    );
-    assert!(
-        error_response
-            .error_message
-            .contains("invalid dataset selector"),
-        "error message should indicate invalid selector"
     );
 }
 
@@ -181,30 +157,15 @@ async fn get_dataset_version_manifest_with_invalid_name_and_version_returns_bad_
 
     //* When
     let resp = ctx
-        .get_manifest_raw("invalid dataset name", "not_a_version")
+        .get_manifest_raw("edgeandnode", "invalid dataset name", "not_a_version")
         .await;
 
     //* Then
+    // Axum's path extraction rejects invalid names/versions with 400 BAD_REQUEST
     assert_eq!(
         resp.status(),
         StatusCode::BAD_REQUEST,
         "manifest retrieval should fail with 400 for invalid name and version"
-    );
-
-    let error_response: ErrorResponse = resp
-        .json()
-        .await
-        .expect("failed to parse error response JSON");
-
-    assert_eq!(
-        error_response.error_code, "INVALID_SELECTOR",
-        "should return INVALID_SELECTOR error code"
-    );
-    assert!(
-        error_response
-            .error_message
-            .contains("invalid dataset selector"),
-        "error message should indicate invalid selector"
     );
 }
 
@@ -218,7 +179,7 @@ impl TestCtx {
     async fn setup(test_name: &str) -> Self {
         let ctx = TestCtxBuilder::new(test_name)
             .with_provider_config("rpc_eth_mainnet")
-            .with_dataset_manifest("eth_rpc")
+            .with_dataset_manifest(("eth_rpc", "edgeandnode/eth_rpc@0.0.0"))
             .with_dataset_snapshot("eth_rpc")
             .build()
             .await
@@ -234,25 +195,31 @@ impl TestCtx {
         }
     }
 
-    async fn get_manifest(&self, name: &str, version: &str) -> reqwest::Response {
+    async fn get_manifest(&self, namespace: &str, name: &str, version: &str) -> reqwest::Response {
+        let namespace = namespace.parse::<Namespace>().expect("valid namespace");
         let name = name.parse::<Name>().expect("valid dataset name");
         let version = version.parse::<Version>().expect("valid version");
 
         self.client
             .get(format!(
-                "{}/datasets/{}/versions/{}/manifest",
-                &self.admin_api_url, name, version
+                "{}/datasets/{}/{}/versions/{}/manifest",
+                &self.admin_api_url, namespace, name, version
             ))
             .send()
             .await
             .expect("failed to send manifest request")
     }
 
-    async fn get_manifest_raw(&self, name: &str, version: &str) -> reqwest::Response {
+    async fn get_manifest_raw(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: &str,
+    ) -> reqwest::Response {
         self.client
             .get(format!(
-                "{}/datasets/{}/versions/{}/manifest",
-                &self.admin_api_url, name, version
+                "{}/datasets/{}/{}/versions/{}/manifest",
+                &self.admin_api_url, namespace, name, version
             ))
             .send()
             .await

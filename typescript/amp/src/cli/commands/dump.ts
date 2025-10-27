@@ -42,11 +42,11 @@ export const dump = Command.make("dump", {
       const [name, version] = dataset.split("@") as [string, string | undefined]
 
       if (version) {
-        yield* admin.dumpDatasetVersion(name, version, {
+        yield* admin.deployDataset("_", name, version, {
           endBlock: args.endBlock.pipe(Option.map(String), Option.getOrUndefined),
         })
       } else {
-        yield* admin.dumpDataset(name, {
+        yield* admin.deployDataset("_", name, "dev", {
           endBlock: args.endBlock.pipe(Option.map(String), Option.getOrUndefined),
         })
       }

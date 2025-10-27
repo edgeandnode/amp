@@ -15,11 +15,11 @@
           "datasets"
         ],
         "summary": "Handler for the `GET /datasets` endpoint",
-        "description": "Retrieves and returns a complete list of all datasets from the metadata database registry.\n\n## Response\n- **200 OK**: Returns all datasets\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides comprehensive dataset information from the registry including:\n- Dataset names, versions, and owners from the metadata database\n- Lexicographical ordering by dataset name ASC, then version string DESC within each dataset\n\nThe handler:\n- Calls the metadata DB to list all datasets\n- Returns a structured response with all datasets",
-        "operationId": "datasets_list",
+        "description": "Returns all registered datasets across all namespaces with their version information.\n\n## Response\n- **200 OK**: Successfully retrieved all datasets\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `LIST_ALL_DATASETS_ERROR`: Failed to list all datasets from dataset store\n\n## Behavior\nThis endpoint returns a comprehensive list of all datasets registered in the system,\ngrouped by namespace and name. For each dataset, it includes:\n- The latest semantic version (if any versions are tagged)\n- All available semantic versions in descending order\n\nThe response does not include special tags (\"latest\", \"dev\") as these are system-managed\nand can be queried via the versions endpoint for specific datasets.\n\nResults are ordered by namespace then by name (lexicographical).",
+        "operationId": "list_all_datasets",
         "responses": {
           "200": {
-            "description": "Returns all datasets",
+            "description": "Successfully retrieved all datasets",
             "content": {
               "application/json": {
                 "schema": {
@@ -45,7 +45,7 @@
           "datasets"
         ],
         "summary": "Handler for the `POST /datasets` endpoint",
-        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{name}/dump` - for latest version\n- `POST /datasets/{name}/versions/{version}/dump` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Version of the dataset to register (must be valid version string)\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `STORE_ERROR`: Failed to load or access dataset store\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Eth Beacon dataset** (kind=\"eth-beacon\"): Registers a raw dataset that extracts Ethereum Beacon Chain data\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves two steps:\n1. **Register manifest**: Stores the manifest file in hash-based storage and creates a metadata database entry\n2. **Tag version**: Associates the version identifier with the manifest hash (upsert operation)\n\nThis two-step approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage from version management\n\nThe tag operation is idempotent:\n- If the version tag doesn't exist, it is created\n- If the version tag exists with the same manifest hash, the operation succeeds (no changes)\n- If the version tag exists with a different manifest hash, it is updated to point to the new hash\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Stores the manifest and upserts the version tag in the server's local registry\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{name}/dump` or `POST /datasets/{name}/versions/{version}/dump` - Schedule data extraction",
+        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{name}/dump` - for latest version\n- `POST /datasets/{name}/versions/{version}/dump` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Version of the dataset to register (must be valid version string)\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `DEPENDENCY_VALIDATION_ERROR`: SQL queries are invalid or reference undeclared dependencies\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `STORE_ERROR`: Failed to load or access dataset store\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Eth Beacon dataset** (kind=\"eth-beacon\"): Registers a raw dataset that extracts Ethereum Beacon Chain data\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves two steps:\n1. **Register manifest**: Stores the manifest file in hash-based storage and creates a metadata database entry\n2. **Tag version**: Associates the version identifier with the manifest hash (upsert operation)\n\nThis two-step approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage from version management\n\nThe tag operation is idempotent:\n- If the version tag doesn't exist, it is created\n- If the version tag exists with the same manifest hash, the operation succeeds (no changes)\n- If the version tag exists with a different manifest hash, it is updated to point to the new hash\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Stores the manifest and upserts the version tag in the server's local registry\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{name}/dump` or `POST /datasets/{name}/versions/{version}/dump` - Schedule data extraction",
         "operationId": "datasets_register",
         "requestBody": {
           "content": {
@@ -84,17 +84,26 @@
         }
       }
     },
-    "/datasets/{id}": {
-      "get": {
+    "/datasets/{namespace}/{name}": {
+      "delete": {
         "tags": [
           "datasets"
         ],
-        "summary": "Handler for dataset retrieval endpoint without version",
-        "description": "Retrieves detailed information about the latest version of a specific dataset,\nincluding its tables and active locations.\nURL pattern: `GET /datasets/{name}`\n\n## Path Parameters\n- `name`: Dataset name\n\n## Response\n- **200 OK**: Returns the dataset information as JSON\n- **400 Bad Request**: Invalid dataset name or invalid request parameters\n- **404 Not Found**: Dataset with the given name does not exist\n- **500 Internal Server Error**: Dataset store or database connection error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name is not valid (invalid name format or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n- `METADATA_DB_ERROR`: Database error while retrieving active locations for tables",
-        "operationId": "datasets_get",
+        "summary": "Handler for the `DELETE /datasets/{namespace}/{name}` endpoint",
+        "description": "Removes all manifest links and version tags for a dataset.\n\n## Response\n- **204 No Content**: Dataset successfully deleted (or didn't exist)\n- **400 Bad Request**: Invalid path parameters\n- **500 Internal Server Error**: Database operation error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace or name in path parameters\n- `UNLINK_DATASET_MANIFESTS_ERROR`: Failed to unlink dataset manifests from dataset store\n\n## Behavior\nThis endpoint deletes all metadata for a dataset including:\n- All manifest links in the dataset_manifests table\n- All version tags (cascaded automatically via foreign key constraint)\n- Orphaned manifest files (manifests not referenced by any other dataset)\n\nThis operation is fully idempotent - it returns 204 even if the dataset\ndoesn't exist. Manifests that are still referenced by other datasets are\npreserved.",
+        "operationId": "delete_dataset",
         "parameters": [
           {
-            "name": "id",
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
             "in": "path",
             "description": "Dataset name",
             "required": true,
@@ -104,28 +113,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successfully retrieved dataset information",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetInfo"
-                }
-              }
-            }
+          "204": {
+            "description": "Dataset successfully deleted"
           },
           "400": {
-            "description": "Invalid dataset name",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Dataset not found",
+            "description": "Invalid path parameters",
             "content": {
               "application/json": {
                 "schema": {
@@ -147,19 +139,180 @@
         }
       }
     },
-    "/datasets/{id}/dump": {
+    "/datasets/{namespace}/{name}/versions": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions` endpoint",
+        "description": "Returns all versions for a dataset with their metadata.\n\n## Response\n- **200 OK**: Successfully retrieved version list\n- **400 Bad Request**: Invalid path parameters\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace or name in path parameters\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dev tag revision\n\n## Behavior\nThis endpoint returns comprehensive version information for a dataset:\n- All semantic versions sorted in descending order (newest first)\n- For each version: manifest hash, creation time, and last update time\n- Special tags: \"latest\" (if any semantic versions exist) and \"dev\" (if set)\n\nThe \"latest\" tag is automatically managed and always points to the highest\nsemantic version. The \"dev\" tag is explicitly managed via the registration\nendpoint and may point to any manifest hash.\n\nReturns an empty list if the dataset has no registered versions.",
+        "operationId": "list_dataset_versions",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{namespace}/{name}/versions/{revision}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}` endpoint",
+        "description": "Returns detailed dataset information for the specified revision.\n\n## Response\n- **200 OK**: Successfully retrieved dataset information\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or dataset store error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace, name, or revision in path parameters\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_MANIFEST_PATH_ERROR`: Failed to query manifest path from metadata database\n- `READ_MANIFEST_ERROR`: Failed to read manifest file from object store\n- `PARSE_MANIFEST_ERROR`: Failed to parse manifest JSON\n\n## Behavior\nThis endpoint retrieves detailed information about a specific dataset revision.\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\")\n- Manifest hash (SHA256 hash)\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version\n\nThe endpoint first resolves the revision to a manifest hash, then returns\nbasic dataset information including namespace, name, revision, manifest hash, and kind.",
+        "operationId": "get_dataset_by_revision",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved dataset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{namespace}/{name}/versions/{revision}/deploy": {
       "post": {
         "tags": [
           "datasets"
         ],
-        "summary": "Handler for dataset dump endpoint without version",
-        "description": "Triggers a data extraction job for the specified dataset using the latest version.\nURL pattern: `POST /datasets/{name}/dump`\n\n## Path Parameters\n- `name`: Dataset name\n\n## Request Body\n- `end_block`: (optional) The last block number to extract (if not specified, extracts indefinitely)\n\n## Response\n- **200 OK**: Returns the ID of the scheduled dump job\n- **400 Bad Request**: Invalid dataset name or invalid request parameters\n- **404 Not Found**: Dataset with the given name does not exist\n- **500 Internal Server Error**: Scheduler, database, or store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name is not valid (invalid name format or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name\n- `DATASET_STORE_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule the dump job",
-        "operationId": "datasets_dump",
+        "summary": "Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/deploy` endpoint",
+        "description": "Schedules a data extraction job for the specified dataset revision.\n\n## Response\n- **202 Accepted**: Job successfully scheduled\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n\n## Behavior\nThis endpoint schedules a data extraction job for a dataset:\n1. Resolves the revision to find the corresponding version tag\n2. Loads the full dataset configuration from the dataset store\n3. Schedules an extraction job with the specified parameters\n4. Returns job ID for tracking\n\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\") - uses that specific version\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version tag\n- Manifest hash (SHA256 hash) - finds the version that points to this hash\n\nJobs are executed asynchronously by worker nodes. Use the returned job ID\nto track progress via the jobs endpoints.",
+        "operationId": "deploy_dataset",
         "parameters": [
           {
-            "name": "id",
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
             "in": "path",
             "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
             "required": true,
             "schema": {
               "type": "string"
@@ -170,25 +323,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DumpOptions"
+                "$ref": "#/components/schemas/DeployRequest"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successfully scheduled dump job",
+          "202": {
+            "description": "Job successfully scheduled",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DumpResponse"
+                  "$ref": "#/components/schemas/DeployResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid dataset name or request parameters",
+            "description": "Bad request (invalid parameters)",
             "content": {
               "application/json": {
                 "schema": {
@@ -198,7 +351,7 @@
             }
           },
           "404": {
-            "description": "Dataset not found",
+            "description": "Dataset or revision not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -220,15 +373,24 @@
         }
       }
     },
-    "/datasets/{name}/versions": {
+    "/datasets/{namespace}/{name}/versions/{revision}/manifest": {
       "get": {
         "tags": [
           "datasets"
         ],
-        "summary": "Handler for the `GET /datasets/{name}/versions` endpoint",
-        "description": "Retrieves and returns a complete list of all versions for a specific dataset from the metadata database registry.\n\n## Path Parameters\n- `name`: Dataset name\n\n## Response\n- **200 OK**: Returns all dataset versions\n- **400 Bad Request**: Invalid dataset name format\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_SELECTOR`: Invalid dataset name format\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides comprehensive dataset version information from the registry including:\n- All versions for the specified dataset from the metadata database\n- Lexicographical ordering by version string DESC (e.g., \"2.0.0\" > \"1.9.0\" > \"1.2.3\" > \"1.10.0\")\n\nThe handler:\n- Accepts path parameter for dataset name\n- Validates the dataset name\n- Calls the metadata DB to list all dataset versions\n- Returns a structured response with all versions",
-        "operationId": "datasets_list_versions",
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/manifest` endpoint",
+        "description": "Retrieves the raw manifest JSON for the specified dataset revision.\n\n## Response\n- **200 OK**: Successfully retrieved manifest\n- **404 Not Found**: Dataset, revision, or manifest not found\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace, name, or revision in path parameters\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `MANIFEST_NOT_FOUND`: The manifest file was not found in object storage\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_MANIFEST_PATH_ERROR`: Failed to query manifest path from metadata database\n- `READ_MANIFEST_ERROR`: Failed to read manifest file from object store\n- `PARSE_MANIFEST_ERROR`: Failed to parse manifest JSON\n\n## Behavior\nThis endpoint returns the raw manifest JSON document for a dataset revision.\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\")\n- Manifest hash (SHA256 hash)\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version\n\nThe endpoint first resolves the revision to a manifest hash, then retrieves\nthe manifest JSON from object storage. Manifests are immutable and\ncontent-addressable, identified by their SHA256 hash.",
+        "operationId": "get_dataset_manifest",
         "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "name",
             "in": "path",
@@ -237,21 +399,30 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Returns all dataset versions",
+            "description": "Successfully retrieved manifest",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DatasetVersionsResponse"
+                  "$ref": "#/components/schemas/Value"
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid dataset name format",
+          "404": {
+            "description": "Dataset or revision not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -273,15 +444,24 @@
         }
       }
     },
-    "/datasets/{name}/versions/{version}": {
-      "get": {
+    "/datasets/{namespace}/{name}/versions/{version}": {
+      "delete": {
         "tags": [
           "datasets"
         ],
-        "summary": "Handler for dataset retrieval endpoint with specific version",
-        "description": "Retrieves detailed information about a specific version of a dataset,\nincluding its tables and active locations.\nURL pattern: `GET /datasets/{name}/versions/{version}`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Response\n- **200 OK**: Returns the dataset information as JSON\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store or database connection error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n- `METADATA_DB_ERROR`: Database error while retrieving active locations for tables",
-        "operationId": "datasets_get_version",
+        "summary": "Handler for the `DELETE /datasets/{namespace}/{name}/versions/{version}` endpoint",
+        "description": "Removes a semantic version tag from a dataset.\n\n## Response\n- **204 No Content**: Version successfully deleted (or didn't exist)\n- **400 Bad Request**: Invalid path parameters or attempting to delete the \"latest\" version\n- **500 Internal Server Error**: Database operation error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace, name, or version in path parameters\n- `CANNOT_DELETE_LATEST_VERSION`: Cannot delete the version currently tagged as \"latest\"\n- `RESOLVE_LATEST_REVISION_ERROR`: Failed to resolve the \"latest\" tag to its manifest hash\n- `RESOLVE_VERSION_REVISION_ERROR`: Failed to resolve the requested version to its manifest hash\n- `DELETE_VERSION_TAG_ERROR`: Failed to delete version tag from dataset store\n\n## Behavior\nThis endpoint removes a semantic version tag from a dataset. The deletion follows this flow:\n\n1. **Check version existence**: Resolves the requested version to its manifest hash.\n   If the version doesn't exist, returns 204 immediately (idempotent).\n\n2. **Check \"latest\" protection**: Resolves the \"latest\" tag to its manifest hash and compares\n   with the requested version's hash. If they point to the same manifest, deletion is rejected\n   with a 400 error. You must create a newer version first to update the \"latest\" tag.\n\n3. **Delete version tag**: Removes only the version tag from the database. The underlying\n   manifest file is never deleted (manifests are content-addressable and may be referenced\n   by other versions or datasets).\n\nThis operation is fully idempotent - it returns 204 even if the version doesn't exist.",
+        "operationId": "delete_dataset_version",
         "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "name",
             "in": "path",
@@ -294,7 +474,7 @@
           {
             "name": "version",
             "in": "path",
-            "description": "Dataset version",
+            "description": "Semantic version (e.g., 1.2.3)",
             "required": true,
             "schema": {
               "type": "string"
@@ -302,254 +482,11 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successfully retrieved dataset information",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetInfo"
-                }
-              }
-            }
+          "204": {
+            "description": "Version successfully deleted"
           },
           "400": {
-            "description": "Invalid dataset name or version",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Dataset not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/datasets/{name}/versions/{version}/dump": {
-      "post": {
-        "tags": [
-          "datasets"
-        ],
-        "summary": "Handler for dataset dump endpoint with specific version",
-        "description": "Triggers a data extraction job for the specified dataset version.\nURL pattern: `POST /datasets/{name}/versions/{version}/dump`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Request Body\n- `end_block`: (optional) The last block number to extract (if not specified, extracts indefinitely)\n\n## Response\n- **200 OK**: Returns the ID of the scheduled dump job\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Scheduler, database, or store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule the dump job",
-        "operationId": "datasets_dump_version",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "Dataset name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "description": "Dataset version",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DumpOptions"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successfully scheduled dump job",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DumpResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid dataset name or version",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Dataset not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/datasets/{name}/versions/{version}/manifest": {
-      "get": {
-        "tags": [
-          "datasets"
-        ],
-        "summary": "Handler for the `GET /datasets/{name}/versions/{version}/manifest` endpoint",
-        "description": "Retrieves the raw manifest JSON for a specific version of a dataset.\n\n## Path Parameters\n- `name`: Dataset name (validated identifier)\n- `version`: Dataset version using semantic versioning (e.g., \"1.0.0\")\n\n## Response\n- **200 OK**: Returns the raw manifest JSON\n- **400 Bad Request**: Invalid dataset name or version format\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `MANIFEST_NOT_FOUND`: No manifest exists with the given name/version\n- `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store\n- `METADATA_DB_ERROR`: Failed to query dataset details from metadata database\n\n## Retrieval Process\nThe retrieval process involves two steps:\n1. **Query metadata database**: Resolves the manifest hash for the namespace/name/version combination\n2. **Fetch manifest**: Retrieves the manifest content from hash-based storage\n\nThis handler:\n- Validates and extracts the dataset name and version from the URL path\n- Queries the metadata database to get the manifest hash for the version\n- Retrieves the raw manifest JSON from the dataset manifests store using the hash\n- Returns the manifest as a JSON response with proper Content-Type header",
-        "operationId": "datasets_get_manifest",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "Dataset name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "description": "Dataset version",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved manifest JSON",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid dataset name or version",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Manifest not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/datasets/{name}/versions/{version}/schema": {
-      "get": {
-        "tags": [
-          "datasets"
-        ],
-        "summary": "Handler for dataset schema retrieval endpoint with specific version",
-        "description": "Retrieves the schema for all tables in a specific version of a dataset.\nURL pattern: `GET /datasets/{name}/versions/{version}/schema`\n\n## Path Parameters\n- `name`: Dataset name\n- `version`: Specific dataset version\n\n## Response\n- **200 OK**: Returns the dataset schema information as JSON\n- **400 Bad Request**: Invalid dataset name/version or invalid request parameters\n- **404 Not Found**: Dataset with the given name/version does not exist\n- **500 Internal Server Error**: Dataset store error\n\n## Error Codes\n- `INVALID_SELECTOR`: The provided dataset name or version is not valid (invalid name format, malformed version, or parsing error)\n- `DATASET_NOT_FOUND`: No dataset exists with the given name/version\n- `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store\n\nThis handler:\n- Validates and extracts the dataset name and version from the URL path\n- Loads the dataset from the dataset store\n- Converts table schemas to TableSchemaInfo format with Arrow field details\n- Returns the dataset schema information as JSON",
-        "operationId": "datasets_get_version_schema",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "Dataset name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "description": "Dataset version",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved dataset schema",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetSchemaResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid dataset name or version",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Dataset not found",
+            "description": "Invalid path parameters",
             "content": {
               "application/json": {
                 "schema": {
@@ -1726,98 +1663,73 @@
       },
       "DatasetInfo": {
         "type": "object",
-        "description": "Represents dataset information for API responses from the dataset store",
+        "description": "Detailed dataset information",
         "required": [
+          "namespace",
           "name",
-          "version",
-          "kind",
-          "tables"
+          "revision",
+          "manifest_hash",
+          "kind"
         ],
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The kind/type of dataset (e.g., \"evm-rpc\", \"firehose\", \"substreams\", \"sql\")"
+            "description": "Dataset kind"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Manifest hash"
           },
           "name": {
             "type": "string",
-            "description": "The name of the dataset (validated identifier)"
+            "description": "Dataset name"
           },
-          "tables": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TableInfo"
-            },
-            "description": "List of tables contained in the dataset with their details"
-          },
-          "version": {
+          "namespace": {
             "type": "string",
-            "description": "The version of the dataset using semantic versioning (e.g., \"1.0.0\")"
+            "description": "Dataset namespace"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Revision requested"
           }
         }
       },
-      "DatasetRegistryInfo": {
+      "DatasetSummary": {
         "type": "object",
-        "description": "Represents dataset information for API responses from the metadata database registry",
+        "description": "Summary information for a single dataset",
         "required": [
+          "namespace",
           "name",
-          "version"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "The name of the dataset"
-          },
-          "version": {
-            "type": "string",
-            "description": "The version of the dataset"
-          }
-        }
-      },
-      "DatasetSchemaResponse": {
-        "type": "object",
-        "description": "Represents dataset schema information for API responses",
-        "required": [
-          "name",
-          "version",
-          "tables"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "The name of the dataset (validated identifier)"
-          },
-          "tables": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TableSchemaInfo"
-            },
-            "description": "List of tables with their schemas"
-          },
-          "version": {
-            "type": "string",
-            "description": "The version of the dataset using semantic versioning (e.g., \"1.0.0\")"
-          }
-        }
-      },
-      "DatasetVersionsResponse": {
-        "type": "object",
-        "description": "Collection response for dataset versions listing",
-        "required": [
           "versions"
         ],
         "properties": {
+          "latest_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Latest semantic version (if any)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
           "versions": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "List of all dataset versions"
+            "description": "All semantic versions (sorted descending)"
           }
         }
       },
       "DatasetsResponse": {
         "type": "object",
-        "description": "Collection response for dataset listings",
+        "description": "Response for listing all datasets",
         "required": [
           "datasets"
         ],
@@ -1825,31 +1737,31 @@
           "datasets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DatasetRegistryInfo"
+              "$ref": "#/components/schemas/DatasetSummary"
             },
-            "description": "List of all datasets"
+            "description": "List of all datasets across all namespaces"
           }
         }
       },
-      "DumpOptions": {
+      "DeployRequest": {
         "type": "object",
-        "description": "Request options for dataset dump operations\n\nControls the behavior and scope of the data extraction job.\nThese options determine the range of blocks to extract.",
+        "description": "Request for deploying a dataset",
         "properties": {
           "end_block": {
             "$ref": "#/components/schemas/EndBlock",
-            "description": "The end block configuration for the dump\n\nSupports multiple modes:\n- `null` or omitted: Continuous dumping (never stops)\n- `\"latest\"`: Stop at the latest available block\n- `<number>`: Stop at specific block number (e.g., `1000000`)\n- `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)\n\nIf not specified, defaults to continuous mode."
+            "description": "The end block configuration for the deployment\n\nSupports multiple modes:\n- `null` or omitted: Continuous dumping (never stops)\n- `\"latest\"`: Stop at the latest available block\n- `<number>`: Stop at specific block number (e.g., `1000000`)\n- `<negative number>`: Stop N blocks before latest (e.g., `-100` means latest - 100)\n\nIf not specified, defaults to continuous mode."
           },
-          "max_writers": {
+          "parallelism": {
             "type": "integer",
             "format": "int32",
-            "description": "Number of parallel writers to run\n\nEach writer will be responsible for an equal number of blocks.\nFor example, if extracting blocks 0-10,000,000 with max_writers=10,\neach writer will handle a contiguous section of 1 million blocks.\n\nOnly applicable to raw datasets (EVM RPC, Firehose, etc.).\nDerived datasets ignore this parameter.\n\nDefaults to 1 if not specified.",
+            "description": "Number of parallel workers to run\n\nEach worker will be responsible for an equal number of blocks.\nFor example, if extracting blocks 0-10,000,000 with parallelism=10,\neach worker will handle a contiguous section of 1 million blocks.\n\nOnly applicable to raw datasets (EVM RPC, Firehose, etc.).\nDerived datasets ignore this parameter.\n\nDefaults to 1 if not specified.",
             "minimum": 0
           }
         }
       },
-      "DumpResponse": {
+      "DeployResponse": {
         "type": "object",
-        "description": "Response returned by the dataset dump endpoint\n\nContains the ID of the scheduled dump job for tracking purposes.",
+        "description": "Response for deploy operation",
         "required": [
           "job_id"
         ],
@@ -1866,7 +1778,7 @@
           "string",
           "null"
         ],
-        "description": "End block configuration for API requests.\n\nDetermines when the dump process should stop extracting blocks.\nAccepts the following values:\n\n- `null` (or omitted): Continuous dumping - never stops, keeps extracting new blocks as they arrive\n- `\"latest\"`: Stop at the latest available block at the time the dump starts\n- A positive number as a string (e.g., `\"1000000\"`): Stop at the specified absolute block number\n- A negative number as a string (e.g., `\"-100\"`): Stop at (latest block - N), useful for staying N blocks behind the chain tip\n\n# Examples\n\n```json\n{\"end_block\": null}           // Continuous mode\n{\"end_block\": \"latest\"}       // Stop at latest block\n{\"end_block\": \"5000000\"}      // Stop at block 5,000,000\n{\"end_block\": \"-100\"}         // Stop 100 blocks before latest\n```"
+        "description": "End block configuration for API requests.\n\nDetermines when the dump process should stop extracting blocks.\nAccepts the following values:\n\n- `null` (or omitted): Continuous dumping - never stops, keeps extracting new blocks as they arrive\n- `\"latest\"`: Stop at the latest available block at the time the dump starts\n- A positive number as a string (e.g., `\"1000000\"`): Stop at the specified absolute block number\n- A negative number as a string (e.g., `\"-100\"`): Stop at (latest block - N), useful for staying N blocks behind the chain tip"
       },
       "ErrorResponse": {
         "type": "object",
@@ -2311,6 +2223,26 @@
           }
         }
       },
+      "SpecialTags": {
+        "type": "object",
+        "description": "Special tags pointing to versions or hashes",
+        "properties": {
+          "dev": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Dev tag pointing to manifest hash (if any)"
+          },
+          "latest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Latest semantic version (if any)"
+          }
+        }
+      },
       "String": {
         "type": "string",
         "description": "Status filter options for job deletion",
@@ -2321,50 +2253,63 @@
           "Error"
         ]
       },
-      "TableInfo": {
+      "Value": {},
+      "VersionInfo": {
         "type": "object",
-        "description": "Represents table information within a dataset",
+        "description": "Version information",
         "required": [
-          "name",
-          "network"
+          "version",
+          "manifest_hash",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
-          "active_location": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Currently active location URL for this table"
-          },
-          "name": {
+          "created_at": {
             "type": "string",
-            "description": "The name of the table"
+            "description": "When this version was created"
           },
-          "network": {
+          "manifest_hash": {
             "type": "string",
-            "description": "Associated network for this table"
+            "description": "Manifest hash for this version"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "When this version was last updated"
+          },
+          "version": {
+            "type": "string",
+            "description": "Semantic version"
           }
         }
       },
-      "TableSchemaInfo": {
+      "VersionsResponse": {
         "type": "object",
-        "description": "Represents table schema information within a dataset",
+        "description": "Response for listing dataset versions",
         "required": [
+          "namespace",
           "name",
-          "network",
-          "schema"
+          "versions",
+          "special_tags"
         ],
         "properties": {
           "name": {
             "type": "string",
-            "description": "The name of the table"
+            "description": "Dataset name"
           },
-          "network": {
+          "namespace": {
             "type": "string",
-            "description": "Associated network for this table"
+            "description": "Dataset namespace"
           },
-          "schema": {
-            "description": "The schema for this table"
+          "special_tags": {
+            "$ref": "#/components/schemas/SpecialTags",
+            "description": "Special tags (latest and dev)"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionInfo"
+            },
+            "description": "List of semantic versions (sorted descending)"
           }
         }
       },

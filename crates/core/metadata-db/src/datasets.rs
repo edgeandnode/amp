@@ -248,6 +248,24 @@ where
         .map_err(Into::into)
 }
 
+/// List all version tags with full details for a dataset
+///
+/// Queries semantic version tags with hash and timestamps from `tags` table
+/// (excludes "dev" and "latest"), ordered by version DESC.
+#[tracing::instrument(skip(exe))]
+pub async fn list_version_tags<'c, E>(
+    exe: E,
+    namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+) -> Result<Vec<DatasetTag>, Error>
+where
+    E: Executor<'c>,
+{
+    tags::sql::list_version_tags(exe, namespace.into(), name.into())
+        .await
+        .map_err(Into::into)
+}
+
 /// List all dataset tags from registry
 ///
 /// Queries all semantic version tags from `tags` table (excludes "dev"
@@ -260,11 +278,16 @@ where
     tags::sql::list_all(exe).await.map_err(Into::into)
 }
 
-/// List all dataset tags that reference a specific manifest hash
+/// List all dataset tags using a specific manifest
 ///
-/// Queries all semantic version tags from `tags` table that point to the
-/// given manifest hash (excludes "dev" and "latest" special tags).
-#[tracing::instrument(skip(exe))]
+/// Returns all dataset tags (namespace, name, version) that reference the given
+/// manifest hash. This is useful for discovering which datasets and versions
+/// are using a particular manifest.
+///
+/// System-managed tags ("latest" and "dev") are excluded from the results.
+///
+/// Returns an empty vector if no datasets use this manifest.
+#[tracing::instrument(skip(exe), err)]
 pub async fn list_tags_by_hash<'c, E>(
     exe: E,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
@@ -273,6 +296,67 @@ where
     E: Executor<'c>,
 {
     tags::sql::list_by_manifest_hash(exe, manifest_hash.into())
+        .await
+        .map_err(Into::into)
+}
+
+/// Delete a specific version tag
+///
+/// Removes a version tag from the `tags` table. This operation is idempotent -
+/// it succeeds even if the tag doesn't exist.
+#[tracing::instrument(skip(exe), err)]
+pub async fn delete_version_tag<'c, E>(
+    exe: E,
+    namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+    version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    tags::sql::delete_version(exe, namespace.into(), name.into(), version.into())
+        .await
+        .map_err(Into::into)
+}
+
+/// Delete all tags for a dataset
+///
+/// Removes all version tags (including "latest" and "dev") for a dataset.
+/// This operation is idempotent - it succeeds even if no tags exist.
+#[tracing::instrument(skip(exe), err)]
+pub async fn delete_all_tags<'c, E>(
+    exe: E,
+    namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    tags::sql::delete_all_for_dataset(exe, namespace.into(), name.into())
+        .await
+        .map_err(Into::into)
+}
+
+/// Delete all manifest links for a dataset
+///
+/// Removes all dataset-manifest associations for a dataset. Due to the database
+/// foreign key constraint with ON DELETE CASCADE, this will also automatically
+/// delete all associated version tags.
+///
+/// Returns the list of manifest hashes that were unlinked. These can be checked
+/// for orphaned manifests that should be cleaned up.
+///
+/// This operation is idempotent - it succeeds even if no manifest links exist.
+#[tracing::instrument(skip(exe), err)]
+pub async fn unlink_manifests<'c, E>(
+    exe: E,
+    namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+) -> Result<Vec<ManifestHashOwned>, Error>
+where
+    E: Executor<'c>,
+{
+    manifests::sql::delete_all_for_dataset(exe, namespace.into(), name.into())
         .await
         .map_err(Into::into)
 }

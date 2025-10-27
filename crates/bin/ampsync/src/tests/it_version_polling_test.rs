@@ -26,10 +26,25 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
+                "namespace": "default",
+                "name": "test_dataset",
                 "versions": [
-                    "0.2.0-LTcyNjgzMjc1NA",
-                    "0.1.0-LTcyNjgzMjc1NA"
-                ]
+                    {
+                        "version": "0.2.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash123",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    },
+                    {
+                        "version": "0.1.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash456",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    }
+                ],
+                "special_tags": {
+                    "latest": "0.2.0-LTcyNjgzMjc1NA"
+                }
             }"#,
         )
         .expect(1) // Should be called exactly once
@@ -82,7 +97,19 @@ async fn test_version_polling_detects_changes() {
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "versions": ["0.1.0-LTcyNjgzMjc1NA"]
+                "namespace": "default",
+                "name": "test_dataset",
+                "versions": [
+                    {
+                        "version": "0.1.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash123",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    }
+                ],
+                "special_tags": {
+                    "latest": "0.1.0-LTcyNjgzMjc1NA"
+                }
             }"#,
         )
         .expect_at_least(1)
@@ -114,7 +141,19 @@ async fn test_version_polling_detects_changes() {
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "versions": ["0.2.0-LTcyNjgzMjc1NA"]
+                "namespace": "default",
+                "name": "test_dataset",
+                "versions": [
+                    {
+                        "version": "0.2.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash789",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    }
+                ],
+                "special_tags": {
+                    "latest": "0.2.0-LTcyNjgzMjc1NA"
+                }
             }"#,
         )
         .expect_at_least(1)
@@ -179,7 +218,19 @@ async fn test_version_polling_handles_api_errors() {
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "versions": ["0.2.0-LTcyNjgzMjc1NA"]
+                "namespace": "default",
+                "name": "test_dataset",
+                "versions": [
+                    {
+                        "version": "0.2.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash789",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    }
+                ],
+                "special_tags": {
+                    "latest": "0.2.0-LTcyNjgzMjc1NA"
+                }
             }"#,
         )
         .expect_at_least(1)
@@ -216,11 +267,31 @@ async fn test_fetch_latest_version_returns_first_version() {
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
+                "namespace": "default",
+                "name": "test_dataset",
                 "versions": [
-                    "0.3.0-LTcyNjgzMjc1NA",
-                    "0.2.0-LTcyNjgzMjc1NA",
-                    "0.1.0-LTcyNjgzMjc1NA"
-                ]
+                    {
+                        "version": "0.3.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash123",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    },
+                    {
+                        "version": "0.2.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash456",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    },
+                    {
+                        "version": "0.1.0-LTcyNjgzMjc1NA",
+                        "manifest_hash": "hash789",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z"
+                    }
+                ],
+                "special_tags": {
+                    "latest": "0.3.0-LTcyNjgzMjc1NA"
+                }
             }"#,
         )
         .expect(1)
@@ -249,7 +320,14 @@ async fn test_fetch_latest_version_handles_empty_list() {
         .mock("GET", "/datasets/test_dataset/versions?limit=1000")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(r#"{ "versions": [] }"#)
+        .with_body(
+            r#"{
+                "namespace": "default",
+                "name": "test_dataset",
+                "versions": [],
+                "special_tags": {}
+            }"#,
+        )
         .expect(1)
         .create_async()
         .await;

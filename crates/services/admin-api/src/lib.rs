@@ -51,29 +51,27 @@ pub async fn serve(
     let mut app = Router::new()
         .route(
             "/datasets",
-            get(datasets::get_all::handler).post(datasets::register::handler),
-        )
-        .route("/datasets/{name}", get(datasets::get_by_id::handler))
-        .route(
-            "/datasets/{name}/versions",
-            get(datasets::get_versions::handler),
+            get(datasets::list_all::handler).post(datasets::register::handler),
         )
         .route(
-            "/datasets/{name}/versions/{version}",
-            get(datasets::get_by_id::handler_with_version),
+            "/datasets/{namespace}/{name}",
+            get(datasets::get::handler).delete(datasets::delete::handler),
         )
         .route(
-            "/datasets/{name}/versions/{version}/schema",
-            get(datasets::get_version_schema::handler_with_version),
+            "/datasets/{namespace}/{name}/versions",
+            get(datasets::list_versions::handler),
         )
         .route(
-            "/datasets/{name}/versions/{version}/manifest",
-            get(datasets::get_version_manifest::handler),
+            "/datasets/{namespace}/{name}/versions/{version}",
+            get(datasets::get::handler).delete(datasets::delete_version::handler),
         )
-        .route("/datasets/{name}/dump", post(datasets::dump::handler))
         .route(
-            "/datasets/{name}/versions/{version}/dump",
-            post(datasets::dump::handler_with_version),
+            "/datasets/{namespace}/{name}/versions/{revision}/manifest",
+            get(datasets::get_manifest::handler),
+        )
+        .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/deploy",
+            post(datasets::deploy::handler),
         )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
@@ -148,15 +146,14 @@ pub async fn serve(
     ),
     paths(
         // Dataset endpoints
-        handlers::datasets::get_all::handler,
-        handlers::datasets::get_by_id::handler,
-        handlers::datasets::get_by_id::handler_with_version,
-        handlers::datasets::get_versions::handler,
-        handlers::datasets::get_version_schema::handler_with_version,
-        handlers::datasets::get_version_manifest::handler,
+        handlers::datasets::list_all::handler,
+        handlers::datasets::list_versions::handler,
+        handlers::datasets::get::handler,
+        handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,
-        handlers::datasets::dump::handler,
-        handlers::datasets::dump::handler_with_version,
+        handlers::datasets::deploy::handler,
+        handlers::datasets::delete::handler,
+        handlers::datasets::delete_version::handler,
         // Manifest endpoints
         handlers::manifests::register::handler,
         handlers::manifests::get_by_id::handler,
@@ -193,16 +190,14 @@ pub async fn serve(
         handlers::manifests::list_datasets::ManifestDatasetsResponse,
         handlers::manifests::list_datasets::Dataset,
         // Dataset schemas
-        handlers::datasets::get_by_id::DatasetInfo,
-        handlers::datasets::get_by_id::TableInfo,
-        handlers::datasets::get_all::DatasetsResponse,
-        handlers::datasets::get_all::DatasetRegistryInfo,
-        handlers::datasets::get_versions::DatasetVersionsResponse,
-        handlers::datasets::get_version_schema::DatasetSchemaResponse,
-        handlers::datasets::get_version_schema::TableSchemaInfo,
+        handlers::datasets::get::DatasetInfo,
+        handlers::datasets::list_all::DatasetsResponse,
+        handlers::datasets::list_all::DatasetSummary,
+        handlers::datasets::list_versions::VersionsResponse,
+        handlers::datasets::list_versions::VersionInfo,
         handlers::datasets::register::RegisterRequest,
-        handlers::datasets::dump::DumpOptions,
-        handlers::datasets::dump::DumpResponse,
+        handlers::datasets::deploy::DeployRequest,
+        handlers::datasets::deploy::DeployResponse,
         // Job schemas
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,

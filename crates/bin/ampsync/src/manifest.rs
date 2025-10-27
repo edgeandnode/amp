@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use admin_api::handlers::datasets::get_versions::DatasetVersionsResponse;
+use admin_api::handlers::datasets::list_versions::VersionsResponse;
 use datasets_common::{name::Name, version::Version};
 use datasets_derived::Manifest;
 use lazy_static::lazy_static;
@@ -133,7 +133,7 @@ async fn resolve_qualified_version(
         });
     }
 
-    let versions_data: DatasetVersionsResponse =
+    let versions_data: VersionsResponse =
         versions_resp
             .json()
             .await
@@ -159,11 +159,12 @@ async fn resolve_qualified_version(
             versions_data
                 .versions
                 .iter()
-                .find(|ver| ver.to_string().starts_with(&version_prefix))
+                .find(|ver_info| ver_info.version.to_string().starts_with(&version_prefix))
                 .ok_or_else(|| ManifestError::DatasetNotFound {
                     dataset: name.to_string(),
                     version: version_prefix.clone(),
                 })?
+                .version
                 .clone()
         }
         None => {
@@ -172,6 +173,7 @@ async fn resolve_qualified_version(
                 .versions
                 .first()
                 .expect("versions list is not empty (checked above)")
+                .version
                 .clone()
         }
     };

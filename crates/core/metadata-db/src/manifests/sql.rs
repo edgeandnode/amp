@@ -2,17 +2,15 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::hash::Hash;
-use crate::{ManifestPath, ManifestPathOwned};
+use super::{
+    hash::Hash,
+    path::{Path, PathOwned},
+};
 
 /// Insert a new manifest record
 ///
 /// Idempotent (`ON CONFLICT DO NOTHING`).
-pub(crate) async fn insert<'c, E>(
-    exe: E,
-    hash: Hash<'_>,
-    path: ManifestPath<'_>,
-) -> Result<(), sqlx::Error>
+pub(crate) async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Path<'_>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -37,7 +35,7 @@ where
 pub(crate) async fn get_path_by_hash<'c, E>(
     exe: E,
     hash: Hash<'_>,
-) -> Result<Option<ManifestPathOwned>, sqlx::Error>
+) -> Result<Option<PathOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -69,10 +67,7 @@ where
 ///
 /// CASCADE deletes all `dataset_manifests` and `tags` entries.
 /// Returns `Some(path)` if deleted, `None` if not found.
-pub(crate) async fn delete<'c, E>(
-    exe: E,
-    hash: Hash<'_>,
-) -> Result<Option<ManifestPathOwned>, sqlx::Error>
+pub(crate) async fn delete<'c, E>(exe: E, hash: Hash<'_>) -> Result<Option<PathOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
