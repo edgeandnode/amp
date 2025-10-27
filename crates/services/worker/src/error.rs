@@ -16,7 +16,7 @@ pub enum Error {
     /// This occurs during the initial registration phase when the worker attempts to
     /// register itself in the metadata database. Registration is required before the
     /// worker can accept jobs.
-    #[error("worker registration failed")]
+    #[error("worker registration failed: {0}")]
     Registration(#[from] RegistrationError),
 
     /// Heartbeat setup failed.
@@ -24,14 +24,14 @@ pub enum Error {
     /// This occurs when establishing the dedicated database connection for the heartbeat
     /// loop. The heartbeat is required to maintain the worker's active status in the
     /// metadata database.
-    #[error("heartbeat setup failed")]
+    #[error("heartbeat setup failed: {0}")]
     HeartbeatSetup(#[from] HeartbeatSetupError),
 
     /// Notification listener setup failed.
     ///
     /// This occurs when establishing the `PostgreSQL` LISTEN connection for receiving job
     /// notifications. Without this connection, the worker cannot receive new job assignments.
-    #[error("notification listener setup failed")]
+    #[error("notification listener setup failed: {0}")]
     NotificationSetup(#[from] NotificationSetupError),
 
     /// Bootstrap phase failed.
@@ -39,7 +39,7 @@ pub enum Error {
     /// This occurs during worker startup when attempting to recover the worker's state
     /// by fetching and resuming previously scheduled or running jobs from the metadata
     /// database.
-    #[error("bootstrap failed")]
+    #[error("bootstrap failed: {0}")]
     Bootstrap(#[from] BootstrapError),
 
     /// Main loop error.
@@ -47,7 +47,7 @@ pub enum Error {
     /// This occurs during the worker's main event loop, which handles heartbeats, job
     /// notifications, job results, and periodic reconciliation. These are typically
     /// fatal errors that prevent the worker from continuing operation.
-    #[error("main loop error")]
+    #[error("main loop error: {0}")]
     MainLoop(#[from] MainLoopError),
 }
 
@@ -121,7 +121,7 @@ pub enum BootstrapError {
     /// but could not be spawned in the worker's job set.
     ///
     /// See [`SpawnJobError`] for specific failure modes during job spawning.
-    #[error("failed to spawn job {job_id} during bootstrap")]
+    #[error("failed to spawn job {job_id} during bootstrap: {source}")]
     SpawnJobFailed {
         job_id: JobId,
         source: SpawnJobError,
@@ -146,7 +146,7 @@ pub enum MainLoopError {
     /// status in the metadata database, so its failure is a fatal error.
     ///
     /// See [`HeartbeatTaskError`] for specific heartbeat failure modes.
-    #[error("heartbeat task died")]
+    #[error("heartbeat task died {0}")]
     HeartbeatTaskDied(#[source] HeartbeatTaskError),
 
     /// Error handling a job notification.
@@ -156,7 +156,7 @@ pub enum MainLoopError {
     /// metadata and spawning or aborting jobs.
     ///
     /// See [`NotificationError`] for specific notification handling failure modes.
-    #[error("notification handling error")]
+    #[error("notification handling error: {0}")]
     NotificationHandling(#[source] NotificationError),
 
     /// Error handling a job result.
@@ -165,7 +165,7 @@ pub enum MainLoopError {
     /// Result handling involves updating the job's status in the metadata database.
     ///
     /// See [`JobResultError`] for specific job result handling failure modes.
-    #[error("job result handling error")]
+    #[error("job result handling error: {0}")]
     JobResultHandling(#[source] JobResultError),
 
     /// Reconciliation error.
@@ -175,7 +175,7 @@ pub enum MainLoopError {
     /// database. Reconciliation helps recover from missed notifications.
     ///
     /// See [`ReconcileError`] for specific reconciliation failure modes.
-    #[error("reconciliation error")]
+    #[error("reconciliation error: {0}")]
     Reconciliation(#[source] ReconcileError),
 }
 
@@ -256,7 +256,7 @@ pub enum SpawnJobError {
     /// for job execution.
     ///
     /// See [`JobCreationError`] for specific job creation failure modes.
-    #[error("failed to create job instance")]
+    #[error("failed to create job instance: {0}")]
     JobCreationFailed(#[source] JobCreationError),
 }
 
