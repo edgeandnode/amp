@@ -400,6 +400,8 @@ export type DeleteLocationByIdError = Error.InvalidLocationId | Error.LocationNo
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .addError(Error.DatasetStoreError)
+  .addError(Error.PlanningError)
+  .addError(Error.CatalogForSqlError)
   .addSuccess(Model.OutputSchema)
   .setPayload(
     Schema.Struct({
@@ -412,8 +414,10 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
  * Error type for the `getOutputSchema` endpoint.
  *
  * - DatasetStoreError: Failure in dataset storage operations.
+ * - PlanningError: Query planning or schema inference failure.
+ * - CatalogForSqlError: Failed to build catalog for SQL query.
  */
-export type GetOutputSchemaError = Error.DatasetStoreError
+export type GetOutputSchemaError = Error.DatasetStoreError | Error.PlanningError | Error.CatalogForSqlError
 
 /**
  * The api group for the dataset endpoints.

@@ -584,3 +584,28 @@ export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
 ) {
   readonly _tag = "PlanningError" as const
 }
+
+/**
+ * CatalogForSqlError - Failure to build catalog for SQL query.
+ *
+ * Causes:
+ * - Failed to load datasets referenced in SQL query
+ * - Dataset store unavailable for catalog construction
+ * - Invalid dataset references in query
+ * - Catalog initialization failures
+ *
+ * Applies to:
+ * - Query execution operations
+ * - Schema inference operations (POST /schema)
+ */
+export class CatalogForSqlError extends Schema.Class<CatalogForSqlError>("CatalogForSqlError")(
+  {
+    code: Schema.Literal("CATALOG_FOR_SQL_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "CatalogForSqlError" as const
+}
