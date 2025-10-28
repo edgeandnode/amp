@@ -22,7 +22,8 @@ pub fn init(
     ) {
         (Some(url), trace_ratio) => {
             let compression = Some(opentelemetry_config.compression.clone());
-            let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0), compression)?;
+            let provider =
+                logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0), compression)?;
             Some(provider)
         }
         (None, trace_ratio) => {
