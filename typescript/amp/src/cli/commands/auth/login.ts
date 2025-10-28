@@ -5,7 +5,6 @@ import * as NodePath from "@effect/platform-node/NodePath"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
-import * as Config from "effect/Config"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -47,10 +46,6 @@ const generateCodeChallenge = (verifier: string) =>
     const hash = crypto.createHash("sha256").update(verifier).digest()
     return base64UrlEncode(hash)
   })
-
-const AUTH_PLATFORM_URL = Schema.Config("AUTH_PLATFORM_URL", Schema.URL).pipe(
-  Config.withDefault(new URL("https://platform-auth-ui.vercel.app/")),
-)
 
 // Branded types to prevent mixing up device codes and user codes
 const DeviceCode = Schema.NonEmptyTrimmedString.pipe(
@@ -123,12 +118,12 @@ const DeviceTokenPollingResponse = Schema.Union(
 
 const checkAlreadyAuthenticated = Effect.gen(function*() {
   const auth = yield* Auth.AuthService
-  const authPlatformUrl = yield* AUTH_PLATFORM_URL
 
-  return yield* auth.getWithDisplayName(authPlatformUrl)
+  const authResult = yield* auth.get()
+  return Option.isSome(authResult)
 }).pipe(
-  // if any error occurs, return and make the user authenticate
-  Effect.orElseSucceed(() => Option.none<string>()),
+  // if any error occurs, return false and make the user authenticate
+  Effect.orElseSucceed(() => false),
 )
 
 export const login = Command.make("login").pipe(
@@ -162,7 +157,7 @@ const showLoadingSpinner = (message: string) =>
   )
 
 const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(function*() {
-  const authPlatformUrl = yield* AUTH_PLATFORM_URL
+  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
   // Generate PKCE parameters
@@ -210,7 +205,7 @@ const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(funct
 })
 
 const pollForToken = Effect.fn("PollForDeviceToken")(function*(deviceCode: DeviceCode, codeVerifier: string) {
-  const authPlatformUrl = yield* AUTH_PLATFORM_URL
+  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
   const tokenUrl = new URL("/api/v1/device/token", authPlatformUrl)
@@ -314,10 +309,10 @@ const pollUntilAuthenticated = Effect.fn("PollUntilAuthenticated")(function*(
   return result
 })
 
-const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuthenticated: Option.Option<string>) {
+const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuthenticated: boolean) {
   // If we have a token, user is already authenticated
-  if (Option.isSome(alreadyAuthenticated)) {
-    return yield* Effect.logInfo(`amp cli already authenticated! Logged in as: ${alreadyAuthenticated.value}`)
+  if (alreadyAuthenticated) {
+    return yield* Effect.logInfo("amp cli already authenticated!")
   }
 
   const auth = yield* Auth.AuthService
@@ -343,13 +338,8 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
     userId: tokenResponse.user_id,
   })
 
-  // Step 5: Fetch and display user's display name
-  const connectedUser = yield* auth.fetchUserDisplayName(tokenResponse.user_id).pipe(
-    Effect.timeout(Duration.seconds(10)),
-    Effect.catchAll(() => Effect.succeed(tokenResponse.user_id)), // Fallback to user ID if display name fetch fails
-  )
-
-  yield* Effect.logInfo(`Successfully authenticated! Connected to account: ${connectedUser}`)
+  // Step 5: Log success
+  yield* Effect.logInfo("Successfully authenticated!")
 })
 
 /**
@@ -357,13 +347,13 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
  * 1. The token being pulled from the KeyValueStore (AuthService)
  * 2. The user being prompted to open their browser to authenticate
  *
- * @returns Option<string> with display name if already authenticated, Option.none() if user wants to open browser
+ * @returns boolean indicating if already authenticated (true) or needs to authenticate (false)
  */
 const resolveAuthToken = Effect.fn("ResolveAuthToken")(function*() {
   // check if the cli is already authenticated
   const alreadyAuthenticated = yield* checkAlreadyAuthenticated
-  if (Option.isSome(alreadyAuthenticated)) {
-    return alreadyAuthenticated
+  if (alreadyAuthenticated) {
+    return true
   }
 
   // user is not already authenticated - ask if they want to open browser
@@ -376,7 +366,7 @@ const resolveAuthToken = Effect.fn("ResolveAuthToken")(function*() {
     return yield* Effect.fail(new AuthenticationCancelledError())
   }
 
-  return Option.none<string>()
+  return false
 })
 
 const openBrowser = (url: string) =>
