@@ -1339,7 +1339,8 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for mut table in Arc::new(dataset).resolved_tables() {
+            let dataset_arc = Arc::new(dataset);
+            for table in &dataset_arc.tables {
                 // Only include tables that are actually referenced in the query
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
@@ -1355,9 +1356,11 @@ impl DatasetStore {
                 if is_referenced {
                     // Use partial reference string representation as schema name
                     let schema_name = partial_ref.to_string();
-                    let table_ref = TableReference::partial(schema_name, table.name());
-                    table.update_table_ref(table_ref);
-                    resolved_tables.push(table);
+                    let table_ref =
+                        TableReference::partial(schema_name.clone(), table.name().to_string());
+                    let resolved_table =
+                        common::ResolvedTable::new(table.clone(), dataset_arc.clone(), table_ref);
+                    resolved_tables.push(resolved_table);
                 }
             }
         }
