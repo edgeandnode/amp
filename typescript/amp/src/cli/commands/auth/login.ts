@@ -5,7 +5,6 @@ import * as NodePath from "@effect/platform-node/NodePath"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
-import * as Config from "effect/Config"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -47,10 +46,6 @@ const generateCodeChallenge = (verifier: string) =>
     const hash = crypto.createHash("sha256").update(verifier).digest()
     return base64UrlEncode(hash)
   })
-
-const AUTH_PLATFORM_URL = Schema.Config("AUTH_PLATFORM_URL", Schema.URL).pipe(
-  Config.withDefault(new URL("https://platform-auth-ui.vercel.app/")),
-)
 
 // Branded types to prevent mixing up device codes and user codes
 const DeviceCode = Schema.NonEmptyTrimmedString.pipe(
@@ -162,7 +157,7 @@ const showLoadingSpinner = (message: string) =>
   )
 
 const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(function*() {
-  const authPlatformUrl = yield* AUTH_PLATFORM_URL
+  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
   // Generate PKCE parameters
@@ -210,7 +205,7 @@ const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(funct
 })
 
 const pollForToken = Effect.fn("PollForDeviceToken")(function*(deviceCode: DeviceCode, codeVerifier: string) {
-  const authPlatformUrl = yield* AUTH_PLATFORM_URL
+  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
   const tokenUrl = new URL("/api/v1/device/token", authPlatformUrl)

@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
 import * as os from "node:os"
 import * as path from "node:path"
 
-const AUTH_PLATFORM_URL = Schema.Config("AUTH_PLATFORM_URL", Schema.URL).pipe(
+export const AUTH_PLATFORM_URL = Schema.Config("AUTH_PLATFORM_URL", Schema.URL).pipe(
   Config.withDefault(new URL("https://platform-auth-ui.vercel.app/")),
 )
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
