@@ -53,7 +53,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
       namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
       name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
       version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
-      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
+      manifest: Schema.parseJson(Model.DatasetManifest),
     }),
   )
 
@@ -177,7 +177,7 @@ const getDatasetManifest = HttpApiEndpoint.get(
   .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
   .addError(Error.MetadataDbError)
-  .addSuccess(Schema.Union(Model.DatasetManifest, Model.DatasetRpc))
+  .addSuccess(Model.DatasetManifest)
 
 /**
  * Error type for the `getDatasetManifest` endpoint.
@@ -474,15 +474,17 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   /**
    * Register a dataset manifest.
    *
+   * @param namespace The namespace of the dataset to register.
    * @param name The name of the dataset to register.
    * @param version The version of the dataset to register.
    * @param manifest The dataset manifest to register.
    * @return Whether the registration was successful.
    */
   readonly registerDataset: (
+    namespace: string,
     name: string,
     version: string,
-    manifest: Model.DatasetManifest | Model.DatasetRpc,
+    manifest: Model.DatasetManifest,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
@@ -656,11 +658,10 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const registerDataset = Effect.fn("registerDataset")(
-    function*(name: string, version: string, manifest: Model.DatasetManifest | Model.DatasetRpc) {
+    function*(namespace: string, name: string, version: string, manifest: Model.DatasetManifest) {
       const request = client.dataset.registerDataset({
         payload: {
-          // TODO: Extract namespace from dataset config's owner field instead of using placeholder
-          namespace: "_",
+          namespace,
           name,
           version,
           manifest,

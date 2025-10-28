@@ -706,7 +706,12 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                evm_rpc_datasets::dataset(manifest)
+                evm_rpc_datasets::dataset(
+                    namespace.clone(),
+                    name.clone(),
+                    version.clone(),
+                    manifest,
+                )
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
@@ -717,7 +722,12 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                eth_beacon_datasets::dataset(manifest)
+                eth_beacon_datasets::dataset(
+                    namespace.clone(),
+                    name.clone(),
+                    version.clone(),
+                    manifest,
+                )
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
@@ -728,7 +738,12 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                firehose_datasets::evm::dataset(manifest)
+                firehose_datasets::evm::dataset(
+                    namespace.clone(),
+                    name.clone(),
+                    version.clone(),
+                    manifest,
+                )
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content
@@ -739,19 +754,20 @@ impl DatasetStore {
                         version: Some(version.to_string()),
                         source: err,
                     })?;
-                derived::dataset(manifest).map_err(|err| GetDatasetError::DerivedCreationError {
-                    namespace: namespace.to_string(),
-                    name: name.to_string(),
-                    version: Some(version.to_string()),
-                    source: err,
-                })?
+                derived::dataset(namespace.clone(), name.clone(), version.clone(), manifest)
+                    .map_err(|err| GetDatasetError::DerivedCreationError {
+                        namespace: namespace.to_string(),
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
+                        source: err,
+                    })?
             }
         };
 
         Ok(Some(dataset))
     }
 
-    pub async fn get_all_datasets(&self) -> Result<Vec<Dataset>, GetAllDatasetsError> {
+    async fn get_all_datasets(&self) -> Result<Vec<Dataset>, GetAllDatasetsError> {
         let list = metadata_db::datasets::list_all(&self.metadata_db)
             .await
             .map_err(GetAllDatasetsError::ListDatasetsFromDb)?;

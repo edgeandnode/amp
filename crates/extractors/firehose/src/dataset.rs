@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use common::BlockNum;
 // Reuse types from datasets-common for consistency
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{name::Name, version::Version};
 
 use crate::dataset_kind::FirehoseDatasetKind;
 
@@ -24,14 +23,10 @@ impl Table {
     }
 }
 
+/// Firehose dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name
-    pub name: Name,
-    /// Dataset version, e.g., `1.0.0`
-    #[serde(default)]
-    pub version: Version,
     /// Dataset kind, must be `firehose`.
     pub kind: FirehoseDatasetKind,
 

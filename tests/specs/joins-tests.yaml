@@ -1,8 +1,8 @@
 - name: restore_eth_rpc
   restore: _/eth_rpc@0.0.0
 
-- name: deploy_joins
-  deploy: joins
+- name: register_joins
+  dataset: joins
   end: 15000000
 
 - name: dump_joins

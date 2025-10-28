@@ -1,5 +1,4 @@
 use ampctl::cmd::gen_manifest;
-use datasets_common::name::Name;
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
@@ -7,26 +6,17 @@ use monitoring::logging;
 
 #[tokio::test]
 async fn gen_manifest_produces_expected_eth_rpc_json() {
-    //* Given
     logging::init();
-    let name = "eth_rpc"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = EvmRpcDatasetKind;
     let network = "mainnet".to_string();
     let start_block = Some(15000000u64);
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest::generate_manifest(
-        name.clone(),
-        kind,
-        network.clone(),
-        start_block,
-        false,
-        &mut out,
-    )
-    .await;
+    let result =
+        gen_manifest::generate_manifest(kind, network.clone(), start_block, false, &mut out).await;
 
     //* Then
     assert!(result.is_ok(), "manifest generation should succeed");
@@ -53,19 +43,16 @@ async fn gen_manifest_produces_expected_eth_rpc_json() {
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
-    //* Given
     logging::init();
-    let name = "eth_rpc"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = EvmRpcDatasetKind;
     let network = "mainnet".to_string();
 
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
-            .await;
+        gen_manifest::generate_manifest(kind, network.clone(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -75,27 +62,23 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
     let manifest: evm_rpc_datasets::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.kind, kind, "kind should match input");
-    assert_eq!(manifest.name, name, "name should match input");
+    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.start_block, 0, "start_block should default to 0");
 }
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
-    //* Given
     logging::init();
-    let name = "firehose"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = FirehoseDatasetKind;
     let network = "mainnet".to_string();
 
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
-            .await;
+        gen_manifest::generate_manifest(kind, network.clone(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -105,25 +88,22 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
     let manifest: firehose_datasets::dataset::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
-    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.kind, kind, "kind should match input");
-    assert_eq!(manifest.name, name, "name should match input");
+    assert_eq!(manifest.network, network, "network should match input");
     assert_eq!(manifest.start_block, 0, "start_block should default to 0");
 }
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
-    //* Given
     logging::init();
-    let name = "basic_function"
-        .parse()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = DerivedDatasetKind;
     let network = "mainnet".to_string();
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest::generate_manifest(name, kind, network, None, false, &mut out).await;
+    let result = gen_manifest::generate_manifest(kind, network, None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -141,26 +121,18 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
-    //* Given
     logging::init();
-    let name = "eth_rpc"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = EvmRpcDatasetKind;
     let network = "mainnet".to_string();
     let start_block = 1000000u64;
 
     //* When
     let mut out = Vec::new();
-    let result = gen_manifest::generate_manifest(
-        name.clone(),
-        kind,
-        network.clone(),
-        Some(start_block),
-        false,
-        &mut out,
-    )
-    .await;
+    let result =
+        gen_manifest::generate_manifest(kind, network.clone(), Some(start_block), false, &mut out)
+            .await;
 
     //* Then
     assert!(
@@ -170,29 +142,26 @@ async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
     let manifest: evm_rpc_datasets::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
+    assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(
         manifest.start_block, start_block,
         "start_block should match input"
     );
-    assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(manifest.network, network, "network should match input");
 }
 
 #[tokio::test]
 async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
-    //* Given
     logging::init();
-    let name = "firehose"
-        .parse::<Name>()
-        .expect("should parse valid dataset name");
+
+    //* Given
     let kind = FirehoseDatasetKind;
     let network = "mainnet".to_string();
 
     //* When
     let mut out = Vec::new();
     let result =
-        gen_manifest::generate_manifest(name.clone(), kind, network.clone(), None, false, &mut out)
-            .await;
+        gen_manifest::generate_manifest(kind, network.clone(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -202,7 +171,7 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
     let manifest: firehose_datasets::dataset::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
+    assert_eq!(manifest.kind, kind, "kind should match input");
     assert_eq!(manifest.start_block, 0, "start_block should default to 0");
-    assert_eq!(manifest.name, name, "name should match input");
     assert_eq!(manifest.network, network, "network should match input");
 }

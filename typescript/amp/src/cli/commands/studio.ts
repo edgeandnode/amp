@@ -229,12 +229,12 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   onNone: () => Effect.fail("NoConfig" as const),
                   onSome: (configPath) =>
                     loader.build(configPath).pipe(
-                      Effect.map((manifest) => {
-                        const tables = Object.entries(manifest.tables)
+                      Effect.map((buildResult) => {
+                        const tables = Object.entries(buildResult.manifest.tables)
                         return tables.length > 0
                           ? Option.some({
                             title: `SELECT ... ${tables[0][0]}`,
-                            query: `SELECT * FROM "${manifest.name}"."${tables[0][0]}"`,
+                            query: `SELECT * FROM "${buildResult.metadata.name}"."${tables[0][0]}"`,
                           })
                           : Option.none()
                       }),

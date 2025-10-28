@@ -30,14 +30,19 @@ export const codegen = Command.make("codegen", {
         return yield* Console.log(result)
       }
 
-      const manifest = yield* Effect.serviceOptional(ManifestContext.ManifestContext).pipe(Effect.orDie)
-      yield* Console.log(generator.fromManifest(manifest))
+      const context = yield* Effect.serviceOptional(ManifestContext.ManifestContext).pipe(Effect.orDie)
+      yield* Console.log(generator.fromManifest(context.manifest))
     }),
   ),
   Command.provide(({ args }) =>
     Option.match(args.query, {
       onSome: () => Layer.empty,
-      onNone: () => ManifestContext.layerFromFile({ config: args.configFile, manifest: args.manifestFile }),
+      onNone: () =>
+        ManifestContext.layerFromFile({
+          metadata: Option.none(),
+          manifest: args.manifestFile,
+          config: args.configFile,
+        }),
     }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Admin.layer(`${args.adminUrl}`)))
   ),
 )

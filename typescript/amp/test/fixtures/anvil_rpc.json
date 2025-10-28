@@ -1,7 +1,5 @@
 {
   "$comment": "Generated with: cargo run --release -p ampctl -- gen-manifest --kind evm-rpc --name anvil --network anvil --start-block 0",
-  "name": "anvil",
-  "version": "0.1.0",
   "kind": "evm-rpc",
   "network": "anvil",
   "start_block": 0,

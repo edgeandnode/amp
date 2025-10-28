@@ -57,22 +57,22 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryMapPromise(jiti, {
-        try: (jiti) => jiti.import<(context: Context) => Model.DatasetDefinition>(file, { default: true }),
+        try: (jiti) => jiti.import<(context: Context) => Model.DatasetConfig>(file, { default: true }),
         catch: (cause) => cause,
       }).pipe(
         Effect.map((callback) => callback(new Context(file))),
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
+        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
 
     const loadJavaScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryPromise({
-        try: () => import(file).then((module) => module.default as (context: Context) => Model.DatasetDefinition),
+        try: () => import(file).then((module) => module.default as (context: Context) => Model.DatasetConfig),
         catch: (cause) => cause,
       }).pipe(
         Effect.map((callback) => callback(new Context(file))),
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
+        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
@@ -82,7 +82,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
         try: (content) => JSON.parse(content),
         catch: (cause) => cause,
       }).pipe(
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
+        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
@@ -120,7 +120,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
     const watch = <E, R>(
       file: string,
       options?: { onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R> },
-    ): Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R> => {
+    ): Stream.Stream<ManifestBuilder.ManifestBuildResult, ConfigLoaderError | E, R> => {
       const resolved = path.resolve(file)
       const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
 
@@ -131,7 +131,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
         Stream.mapEffect(() => open),
       )
 
-      const build = (config: Model.DatasetDefinition) =>
+      const build = (config: Model.DatasetConfig) =>
         builder.build(config).pipe(
           Effect.mapError(
             (cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` }),
@@ -143,11 +143,14 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
       return Stream.fromEffect(open).pipe(
         Stream.concat(updates),
         Stream.filterMap(Either.getRight),
-        Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
+        Stream.changesWith(Schema.equivalence(Model.DatasetConfig)),
         Stream.mapEffect((config) => build(config)),
         Stream.filterMap(Either.getRight),
-        Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-      ) as Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R>
+        Stream.changesWith((a, b) =>
+          Schema.equivalence(Model.DatasetMetadata)(a.metadata, b.metadata) &&
+          Schema.equivalence(Model.DatasetDerived)(a.manifest, b.manifest)
+        ),
+      ) as Stream.Stream<ManifestBuilder.ManifestBuildResult, ConfigLoaderError | E, R>
     }
 
     return { load, find, watch, build }

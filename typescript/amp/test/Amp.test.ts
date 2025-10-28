@@ -31,17 +31,17 @@ Testing.layer((it) => {
       const admin = yield* Admin.Admin
 
       // Register and dump the root dataset.
-      yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
-      const job = yield* admin.deployDataset("_", Anvil.dataset.name, Anvil.dataset.version, {
+      yield* admin.registerDataset("_", "anvil", "0.1.0", Anvil.dataset)
+      const job = yield* admin.deployDataset("_", "anvil", "0.1.0", {
         endBlock: "5",
       })
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", Anvil.dataset.name, "dev")
+      const response = yield* admin.getDatasetVersion("_", "anvil", "dev")
       assertInstanceOf(response, Model.DatasetVersionInfo)
-      deepStrictEqual(response.name, Anvil.dataset.name)
+      deepStrictEqual(response.name, "anvil")
     }),
   )
 
@@ -86,18 +86,18 @@ Testing.layer((it) => {
 
       // Register and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.registerDataset(dataset.name, dataset.version, dataset)
+      yield* admin.registerDataset("_", "example", "0.1.0", dataset)
 
-      const job = yield* admin.deployDataset("_", dataset.name, dataset.version, {
+      const job = yield* admin.deployDataset("_", "example", "0.1.0", {
         endBlock: "5",
       })
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", dataset.name, "dev")
+      const response = yield* admin.getDatasetVersion("_", "example", "dev")
       assertInstanceOf(response, Model.DatasetVersionInfo)
-      deepStrictEqual(response.name, dataset.name)
+      deepStrictEqual(response.name, "example")
     }),
   )
 

@@ -1,8 +1,8 @@
 - name: restore_eth_firehose
   restore: _/eth_firehose@0.0.0
 
-- name: deploy_intra_deps
-  deploy: intra_deps
+- name: register_intra_deps
+  dataset: intra_deps
   end: 15000000
 
 - name: dump_intra_deps

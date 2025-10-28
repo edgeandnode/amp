@@ -29,13 +29,15 @@ export function convertManifestsToMetadata(manifests: ReadonlyArray<DatasetManif
   const result: Array<ManifestTableMetadata> = []
 
   for (const manifest of manifests) {
-    // Extract dataset name and network
-    const datasetName = manifest.name
-    const network = manifest.network
+    // Extract dataset name (deprecated field, may be undefined)
+    const datasetName = "name" in manifest ? manifest.name : "unknown"
 
     // Convert each table in the manifest
     for (const [tableName, table] of Object.entries(manifest.tables)) {
       const fullyQualifiedName = `${datasetName}.${tableName}`
+
+      // Get network from table for DatasetDerived, or from manifest for DatasetEvmRpc
+      const network = "network" in table ? table.network : ("network" in manifest ? manifest.network : "unknown")
 
       // Convert Arrow schema fields to column metadata
       const columns = table.schema.arrow.fields.map((field: { name: string; type: any; nullable: boolean }) => ({

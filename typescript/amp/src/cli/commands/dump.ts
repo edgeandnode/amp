@@ -31,12 +31,15 @@ export const dump = Command.make("dump", {
   Command.withDescription("Dump a dataset"),
   Command.withHandler(
     Effect.fn(function*({ args }) {
-      const manifest = yield* ManifestContext.ManifestContext.pipe(Effect.serviceOption)
+      const context = yield* ManifestContext.ManifestContext.pipe(Effect.serviceOption)
       const admin = yield* Admin.Admin
       const dataset = yield* Option.match(args.dataset, {
         onSome: (dataset) => Effect.succeed(dataset),
         onNone: () =>
-          manifest.pipe(Effect.map((manifest) => `${manifest.name}@${manifest.version}` as const), Effect.orDie),
+          context.pipe(
+            Effect.map((ctx) => `${ctx.metadata.name}@${ctx.metadata.version}` as const),
+            Effect.orDie,
+          ),
       })
 
       const [name, version] = dataset.split("@") as [string, string | undefined]
@@ -58,7 +61,11 @@ export const dump = Command.make("dump", {
     Option.match(args.dataset, {
       onSome: () => Layer.empty,
       onNone: () =>
-        ManifestContext.layerFromFile({ manifest: args.manifestFile, config: args.configFile }).pipe(
+        ManifestContext.layerFromFile({
+          metadata: Option.none(),
+          manifest: args.manifestFile,
+          config: args.configFile,
+        }).pipe(
           Layer.provide(Admin.layer(`${args.adminUrl}`)),
         ),
     }).pipe(Layer.merge(Admin.layer(`${args.adminUrl}`)))

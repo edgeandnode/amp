@@ -1,7 +1,7 @@
 //! Dataset manifest generation command.
 //!
 //! Generates a dataset manifest file for supported dataset kinds by:
-//! 1. Accepting dataset configuration parameters (name, kind, network, etc.)
+//! 1. Accepting dataset configuration parameters (kind, network, etc.)
 //! 2. Creating a manifest structure appropriate for the dataset kind
 //! 3. Serializing to JSON and writing to output (file or stdout)
 //!
@@ -16,7 +16,6 @@
 //!
 //! # Configuration
 //!
-//! - Dataset Name: `--name` flag or `GM_NAME` env var
 //! - Dataset Kind: `--kind` flag or `GM_KIND` env var
 //! - Network: `--network` flag or `GM_NETWORK` env var
 //! - Output: `--out` flag or `GM_OUT` env var (optional, defaults to stdout)
@@ -26,18 +25,11 @@
 use std::path::PathBuf;
 
 use dataset_store::DatasetKind;
-use datasets_common::{
-    manifest::{ArrowSchema, Field, TableSchema},
-    name::Name,
-};
+use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 
 /// Command-line arguments for the `gen-manifest` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The name of the dataset.
-    #[arg(long, required = true, env = "GM_NAME", value_parser = clap::value_parser!(Name))]
-    pub name: Name,
-
     /// Kind of the dataset (evm-rpc, eth-beacon, firehose).
     #[arg(long, required = true, env = "GM_KIND", value_parser = clap::value_parser!(DatasetKind))]
     pub kind: DatasetKind,
@@ -92,7 +84,6 @@ fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
 /// or write errors.
 #[tracing::instrument(skip(writer))]
 pub async fn generate_manifest<W>(
-    name: Name,
     kind: impl Into<DatasetKind> + std::fmt::Debug,
     network: String,
     start_block: Option<u64>,
@@ -115,8 +106,6 @@ where
                 })
                 .collect();
             let manifest = evm_rpc_datasets::Manifest {
-                name,
-                version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network: network.clone(),
                 start_block: start_block.unwrap_or(0),
@@ -135,8 +124,6 @@ where
                 })
                 .collect();
             let manifest = eth_beacon_datasets::Manifest {
-                name,
-                version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network: network.clone(),
                 start_block: start_block.unwrap_or(0),
@@ -156,8 +143,6 @@ where
                 })
                 .collect();
             let manifest = firehose_datasets::dataset::Manifest {
-                name,
-                version: Default::default(),
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network: network.clone(),
                 start_block: start_block.unwrap_or(0),
@@ -193,7 +178,6 @@ where
 #[tracing::instrument]
 pub async fn run(
     Args {
-        name,
         kind,
         network,
         out,
@@ -219,7 +203,6 @@ pub async fn run(
     };
 
     generate_manifest(
-        name,
         kind,
         network,
         start_block,
@@ -232,23 +215,6 @@ pub async fn run(
 /// Errors specific to generate manifest operations
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The provided dataset name failed to parse according to the naming rules.
-    ///
-    /// This occurs during the initial validation of the dataset name string before
-    /// any manifest generation operations are performed. Dataset names must follow
-    /// strict rules: start with a lowercase letter or underscore, contain only
-    /// lowercase letters, digits, and underscores, and not be empty.
-    #[error("Invalid dataset name: {0}")]
-    InvalidName(#[source] datasets_common::name::NameError),
-
-    /// The dataset kind specified is not supported.
-    ///
-    /// This occurs when the `kind` parameter contains a value that doesn't match
-    /// any of the supported dataset types (evm-rpc, eth-beacon, firehose,
-    /// derived, sql).
-    #[error("Unsupported dataset kind '{0}'")]
-    InvalidKind(String),
-
     /// Derived datasets do not support automatic manifest generation.
     ///
     /// This occurs when attempting to generate a manifest for a Derived dataset type.

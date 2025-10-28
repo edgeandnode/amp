@@ -24,10 +24,6 @@
       "description": "Dataset kind, must be `manifest`",
       "const": "manifest"
     },
-    "name": {
-      "description": "Dataset name",
-      "$ref": "#/$defs/Name"
-    },
     "tables": {
       "description": "Table definitions mapped by table name",
       "type": "object",
@@ -35,15 +31,9 @@
         "$ref": "#/$defs/Table"
       },
       "default": {}
-    },
-    "version": {
-      "description": "Dataset version, e.g., `1.0.0`",
-      "$ref": "#/$defs/Version"
     }
   },
   "required": [
-    "name",
-    "version",
     "kind"
   ],
   "$defs": {
@@ -134,12 +124,6 @@
         "filename"
       ]
     },
-    "Name": {
-      "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^[a-z_][a-z0-9_]*$"
-    },
     "Reference": {
       "description": "A complete dataset reference combining namespace, name, and revision.\n\nThis type provides a fully versioned identifier for datasets by combining\na namespace, dataset name, and revision using `/` and `@` separators.\n\n## Format\n\nThe string representation follows the format: `<namespace>/<name>@<revision>`\n\n## Examples\n\n```text\nmy_namespace/my_dataset@1.0.0\nmy_namespace/my_dataset@0.4.10-rc.1+20230502\nmy_namespace/my_dataset@latest\nmy_namespace/my_dataset@dev\nmy_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9\n```\n\n## PURL Format\n\nReferences can also be represented as Package URLs (PURLs) with the format:\n`pkg:amp/<namespace>/<name>@<revision>`\n\nAll three components must follow their respective validation rules.",
       "type": "string",
@@ -197,10 +181,6 @@
       "required": [
         "arrow"
       ]
-    },
-    "Version": {
-      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
-      "type": "string"
     },
     "View": {
       "description": "SQL view definition for table input.",

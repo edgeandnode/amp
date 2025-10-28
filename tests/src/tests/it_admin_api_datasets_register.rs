@@ -9,14 +9,22 @@ use crate::testlib::ctx::TestCtxBuilder;
 async fn register_new_dataset_with_manifest_succeeds() {
     //* Given
     let ctx = TestCtx::setup("test_register_with_new_manifest").await;
-    let manifest = create_test_manifest("register_test_new", "1.0.0");
-    let manifest_json =
-        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "register_test_new"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    let manifest = create_test_manifest();
+    let manifest = serde_json::to_string(&manifest)
+        .expect("failed to serialize manifest to JSON")
+        .parse()
+        .expect("Valid JSON");
     let register_request = RegisterRequest {
-        namespace: "_".parse().expect("valid namespace"),
-        name: "register_test_new".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: manifest_json.parse().expect("Valid JSON"),
+        namespace: namespace.clone(),
+        name: name.clone(),
+        version: version.clone(),
+        manifest,
     };
 
     //* When
@@ -29,8 +37,7 @@ async fn register_new_dataset_with_manifest_succeeds() {
         "registration should succeed with valid manifest"
     );
     assert!(
-        ctx.verify_dataset_exists("register_test_new", "1.0.0")
-            .await,
+        ctx.verify_dataset_exists(&namespace, &name, &version).await,
         "dataset should exist after successful registration"
     );
 }
@@ -122,15 +129,21 @@ async fn register_with_invalid_version_fails() {
 async fn register_with_missing_dependency_fails() {
     //* Given
     let ctx = TestCtx::setup("test_register_invalid_dependency").await;
-    let mut manifest = create_test_manifest("missing_dep", "1.0.0");
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "missing_dep".parse::<Name>().expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    let mut manifest = create_test_manifest();
     manifest.dependencies.clear();
-    let manifest_json =
-        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+    let manifest = serde_json::to_string(&manifest)
+        .expect("failed to serialize manifest to JSON")
+        .parse()
+        .expect("Valid JSON");
     let register_request = RegisterRequest {
-        namespace: "_".parse().expect("valid namespace"),
-        name: "missing_dep".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: manifest_json.parse().expect("Valid JSON"),
+        namespace: namespace.clone(),
+        name: name.clone(),
+        version: version.clone(),
+        manifest,
     };
 
     //* When
@@ -151,10 +164,17 @@ async fn register_with_missing_dependency_fails() {
 async fn register_existing_dataset_is_idempotent() {
     //* Given
     let ctx = TestCtx::setup("test_register_dataset_idempotent").await;
-    let manifest = create_test_manifest("register_test_existing_dataset", "1.0.0");
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "register_test_existing_dataset"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+    let manifest = create_test_manifest();
 
     // Register dataset first to create existing state
-    let register_resp = ctx.register_dataset(&manifest).await;
+    let register_resp = ctx
+        .register_dataset(namespace.clone(), name.clone(), version.clone(), &manifest)
+        .await;
     assert_eq!(
         register_resp.status(),
         StatusCode::CREATED,
@@ -162,15 +182,15 @@ async fn register_existing_dataset_is_idempotent() {
     );
 
     // Prepare duplicate registration request with same hash
-    let manifest_json =
-        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+    let manifest = serde_json::to_string(&manifest)
+        .expect("failed to serialize manifest to JSON")
+        .parse()
+        .expect("valid JSON");
     let register_request = RegisterRequest {
-        namespace: "_".parse().expect("valid namespace"),
-        name: "register_test_existing_dataset"
-            .parse()
-            .expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: manifest_json.parse().expect("Valid JSON"),
+        namespace: namespace.clone(),
+        name: name.clone(),
+        version: version.clone(),
+        manifest,
     };
 
     //* When - Register same dataset again
@@ -185,8 +205,7 @@ async fn register_existing_dataset_is_idempotent() {
 
     // Verify dataset still exists and is accessible
     assert!(
-        ctx.verify_dataset_exists("register_test_existing_dataset", "1.0.0")
-            .await,
+        ctx.verify_dataset_exists(&namespace, &name, &version).await,
         "dataset should still exist after duplicate registration"
     );
 }
@@ -235,21 +254,27 @@ async fn register_with_invalid_manifest_json_fails() {
 async fn register_multiple_versions_of_same_dataset_succeeds() {
     //* Given
     let ctx = TestCtx::setup("test_register_multiple_versions").await;
-    let versions = vec!["1.0.0", "1.1.0", "2.0.0"];
+
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "register_test_multi_version"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let versions = vec!["1.0.0", "1.1.0", "2.0.0"]
+        .into_iter()
+        .map(|s| s.parse().expect("valid version"))
+        .collect::<Vec<Version>>();
 
     //* When
     // Register multiple versions of the same dataset
     for version in &versions {
-        let manifest = create_test_manifest("register_test_multi_version", version);
+        let manifest = create_test_manifest();
         let manifest_json =
             serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
 
         let register_request = RegisterRequest {
-            namespace: "_".parse().expect("valid namespace"),
-            name: "register_test_multi_version"
-                .parse()
-                .expect("valid dataset name"),
-            version: version.parse().expect("valid version"),
+            namespace: namespace.clone(),
+            name: name.clone(),
+            version: version.clone(),
             manifest: manifest_json.parse().expect("Valid JSON"),
         };
 
@@ -265,8 +290,7 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
     // Verify all versions exist
     for version in &versions {
         assert!(
-            ctx.verify_dataset_exists("register_test_multi_version", version)
-                .await,
+            ctx.verify_dataset_exists(&namespace, &name, version).await,
             "version {} should exist after registration",
             version
         );
@@ -305,14 +329,23 @@ impl TestCtx {
             .expect("failed to send register request")
     }
 
-    async fn register_dataset(&self, manifest: &DerivedDatasetManifest) -> reqwest::Response {
-        let manifest_json =
-            serde_json::to_string(manifest).expect("failed to serialize manifest to JSON");
+    async fn register_dataset(
+        &self,
+        namespace: Namespace,
+        name: Name,
+        version: Version,
+        manifest: &DerivedDatasetManifest,
+    ) -> reqwest::Response {
+        let manifest = serde_json::to_string(manifest)
+            .expect("failed to serialize manifest to JSON")
+            .parse()
+            .expect("Valid JSON");
+
         let request = RegisterRequest {
-            namespace: "_".parse().expect("valid namespace"),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
-            manifest: manifest_json.parse().expect("Valid JSON"),
+            namespace,
+            name,
+            version,
+            manifest,
         };
 
         self.register(request).await
@@ -327,12 +360,12 @@ impl TestCtx {
             .expect("failed to send HTTP request")
     }
 
-    async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
-        let name = name.parse::<Name>().expect("Invalid name");
-        let version = version.parse::<Version>().expect("Invalid version");
-        let namespace = "_"
-            .parse::<Namespace>()
-            .expect("'_' should be a valid namespace");
+    async fn verify_dataset_exists(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        version: &Version,
+    ) -> bool {
         metadata_db::datasets::get_version_tag(self.ctx.metadata_db(), namespace, name, version)
             .await
             .expect("failed to check if dataset exists")
@@ -340,63 +373,61 @@ impl TestCtx {
     }
 }
 
-fn create_test_manifest(name: &str, version: &str) -> DerivedDatasetManifest {
-    let manifest_json = indoc::formatdoc! {r#"
-        {{
-            "name": "{name}",
-            "version": "{version}",
+fn create_test_manifest() -> DerivedDatasetManifest {
+    let manifest_json = indoc::indoc! {r#"
+        {
             "kind": "manifest",
-            "dependencies": {{
+            "dependencies": {
                 "raw_mainnet": "_/eth_firehose@0.0.1"
-            }},
-            "tables": {{
-                "test_table": {{
-                    "input": {{
+            },
+            "tables": {
+                "test_table": {
+                    "input": {
                         "sql": "SELECT block_num, miner, hash, parent_hash FROM eth_firehose.blocks"
-                    }},
-                    "schema": {{
-                        "arrow": {{
+                    },
+                    "schema": {
+                        "arrow": {
                             "fields": [
-                                {{
+                                {
                                     "name": "_block_num",
                                     "type": "UInt64",
                                     "nullable": false
-                                }},
-                                {{
+                                },
+                                {
                                     "name": "block_num",
                                     "type": "UInt64",
                                     "nullable": false
-                                }},
-                                {{
+                                },
+                                {
                                     "name": "miner",
-                                    "type": {{
+                                    "type": {
                                         "FixedSizeBinary": 20
-                                    }},
+                                    },
                                     "nullable": false
-                                }},
-                                {{
+                                },
+                                {
                                     "name": "hash",
-                                    "type": {{
+                                    "type": {
                                         "FixedSizeBinary": 32
-                                    }},
+                                    },
                                     "nullable": false
-                                }},
-                                {{
+                                },
+                                {
                                     "name": "parent_hash",
-                                    "type": {{
+                                    "type": {
                                         "FixedSizeBinary": 32
-                                    }},
+                                    },
                                     "nullable": false
-                                }}
+                                }
                             ]
-                        }}
-                    }},
+                        }
+                    },
                     "network": "mainnet"
-                }}
-            }},
-            "functions": {{}}
-        }}
+                }
+            },
+            "functions": {}
+        }
     "#};
 
-    serde_json::from_str(&manifest_json).expect("failed to parse manifest JSON")
+    serde_json::from_str(manifest_json).expect("failed to parse manifest JSON")
 }

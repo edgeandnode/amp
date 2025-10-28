@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use serde_with::serde_as;
 use url::Url;
 
@@ -43,14 +43,10 @@ pub enum Error {
     StoreError(#[from] StoreError),
 }
 
+/// EVM RPC dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name
-    pub name: Name,
-    /// Dataset version, e.g., `1.0.0`
-    #[serde(default)]
-    pub version: Version,
     /// Dataset kind, must be `evm-rpc`
     pub kind: EvmRpcDatasetKind,
 
@@ -86,15 +82,21 @@ pub struct ProviderConfig {
     pub fetch_receipts_per_tx: bool,
 }
 
-pub fn dataset(manifest: Manifest) -> Dataset {
+/// Convert an EVM RPC manifest into a logical dataset representation.
+///
+/// Dataset identity (namespace, name, version) must be provided externally as they are not part
+/// of the manifest.
+pub fn dataset(namespace: Namespace, name: Name, version: Version, manifest: Manifest) -> Dataset {
+    let network = manifest.network;
     Dataset {
-        name: manifest.name,
-        version: Some(manifest.version),
+        namespace,
+        name,
+        version: Some(version),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: tables::all(&manifest.network),
-        network: Some(manifest.network),
+        tables: tables::all(&network),
+        network: Some(network),
         functions: vec![],
     }
 }

@@ -5,7 +5,7 @@
 //! - Version changes trigger manifest reload
 //! - Polling uses efficient endpoints
 
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use mockito::Server;
 use tokio::sync::watch;
 
@@ -17,34 +17,21 @@ use tokio::sync::watch;
 async fn test_fetch_latest_version_uses_versions_endpoint_only() {
     let mut server = Server::new_async().await;
 
+    let dataset_namespace: Namespace = "_".parse().unwrap();
     let dataset_name: Name = "test_dataset".parse().unwrap();
 
-    // Mock the versions endpoint - this is the ONLY endpoint that should be called
+    // Mock the versions/latest endpoint - this is the ONLY endpoint that should be called
     let versions_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "namespace": "default",
+                "namespace": "_",
                 "name": "test_dataset",
-                "versions": [
-                    {
-                        "version": "0.2.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash123",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    },
-                    {
-                        "version": "0.1.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash456",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    }
-                ],
-                "special_tags": {
-                    "latest": "0.2.0-LTcyNjgzMjc1NA"
-                }
+                "revision": "0.2.0-LTcyNjgzMjc1NA",
+                "manifest_hash": "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+                "kind": "evm-rpc"
             }"#,
         )
         .expect(1) // Should be called exactly once
@@ -55,7 +42,7 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
     let manifest_mock = server
         .mock(
             "GET",
-            "/datasets/test_dataset/versions/0.2.0-LTcyNjgzMjc1NA/manifest",
+            "/datasets/_/test_dataset/versions/0.2.0-LTcyNjgzMjc1NA/manifest",
         )
         .with_status(200)
         .expect(0) // Should NOT be called
@@ -63,7 +50,9 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
         .await;
 
     // Call fetch_latest_version
-    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result =
+        crate::manifest::fetch_latest_version(&server.url(), &dataset_namespace, &dataset_name)
+            .await;
 
     // Verify success
     assert!(result.is_ok(), "fetch_latest_version failed: {:?}", result);
@@ -83,33 +72,26 @@ async fn test_fetch_latest_version_uses_versions_endpoint_only() {
 async fn test_version_polling_detects_changes() {
     let mut server = Server::new_async().await;
 
+    let dataset_namespace: Namespace = "_".parse().unwrap();
     let dataset_name: Name = "test_dataset".parse().unwrap();
     let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
     // Create watch channel for version notifications
     let (tx, mut rx) = watch::channel::<Version>(initial_version.clone());
 
-    // Mock versions endpoint - returns old version first, then new version
+    // Mock versions/latest endpoint - returns old version first, then new version
     // Use expect_at_least since the polling task will continue running
     let _versions_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "namespace": "default",
+                "namespace": "_",
                 "name": "test_dataset",
-                "versions": [
-                    {
-                        "version": "0.1.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash123",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    }
-                ],
-                "special_tags": {
-                    "latest": "0.1.0-LTcyNjgzMjc1NA"
-                }
+                "revision": "0.1.0-LTcyNjgzMjc1NA",
+                "manifest_hash": "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+                "kind": "evm-rpc"
             }"#,
         )
         .expect_at_least(1)
@@ -123,6 +105,7 @@ async fn test_version_polling_detects_changes() {
     let poll_handle = tokio::spawn(async move {
         crate::version_polling::version_poll_task(
             admin_api_addr.clone(),
+            dataset_namespace.clone(),
             dataset_name.clone(),
             initial_version,
             poll_interval_secs,
@@ -136,24 +119,16 @@ async fn test_version_polling_detects_changes() {
 
     // Now update the mock to return new version
     let _new_version_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "namespace": "default",
+                "namespace": "_",
                 "name": "test_dataset",
-                "versions": [
-                    {
-                        "version": "0.2.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash789",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    }
-                ],
-                "special_tags": {
-                    "latest": "0.2.0-LTcyNjgzMjc1NA"
-                }
+                "revision": "0.2.0-LTcyNjgzMjc1NA",
+                "manifest_hash": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+                "kind": "evm-rpc"
             }"#,
         )
         .expect_at_least(1)
@@ -180,6 +155,7 @@ async fn test_version_polling_detects_changes() {
 async fn test_version_polling_handles_api_errors() {
     let mut server = Server::new_async().await;
 
+    let dataset_namespace: Namespace = "_".parse().unwrap();
     let dataset_name: Name = "test_dataset".parse().unwrap();
     let initial_version: Version = "0.1.0-LTcyNjgzMjc1NA".parse().unwrap();
 
@@ -187,7 +163,7 @@ async fn test_version_polling_handles_api_errors() {
 
     // First poll: API error (500) - should be retried at least once
     let _error_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(500)
         .with_body("Internal Server Error")
         .expect_at_least(1)
@@ -200,6 +176,7 @@ async fn test_version_polling_handles_api_errors() {
     let poll_handle = tokio::spawn(async move {
         crate::version_polling::version_poll_task(
             admin_api_addr.clone(),
+            dataset_namespace.clone(),
             dataset_name.clone(),
             initial_version,
             poll_interval_secs,
@@ -213,24 +190,16 @@ async fn test_version_polling_handles_api_errors() {
 
     // Now create success mock that will return new version
     let _success_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "namespace": "default",
+                "namespace": "_",
                 "name": "test_dataset",
-                "versions": [
-                    {
-                        "version": "0.2.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash789",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    }
-                ],
-                "special_tags": {
-                    "latest": "0.2.0-LTcyNjgzMjc1NA"
-                }
+                "revision": "0.2.0-LTcyNjgzMjc1NA",
+                "manifest_hash": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+                "kind": "evm-rpc"
             }"#,
         )
         .expect_at_least(1)
@@ -250,91 +219,68 @@ async fn test_version_polling_handles_api_errors() {
     poll_handle.abort();
 }
 
-/// Test that fetch_latest_version returns the first (latest) version from the list.
+/// Test that fetch_latest_version returns the latest version from the endpoint.
 ///
-/// The versions endpoint returns versions sorted with the latest first.
-/// We should use the first item in the array.
+/// The versions/latest endpoint returns the latest version directly.
 #[tokio::test]
 async fn test_fetch_latest_version_returns_first_version() {
     let mut server = Server::new_async().await;
 
+    let dataset_namespace: Namespace = "_".parse().unwrap();
     let dataset_name: Name = "test_dataset".parse().unwrap();
 
-    // Mock with multiple versions - latest should be first
+    // Mock the versions/latest endpoint
     let versions_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(
             r#"{
-                "namespace": "default",
+                "namespace": "_",
                 "name": "test_dataset",
-                "versions": [
-                    {
-                        "version": "0.3.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash123",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    },
-                    {
-                        "version": "0.2.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash456",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    },
-                    {
-                        "version": "0.1.0-LTcyNjgzMjc1NA",
-                        "manifest_hash": "hash789",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z"
-                    }
-                ],
-                "special_tags": {
-                    "latest": "0.3.0-LTcyNjgzMjc1NA"
-                }
+                "revision": "0.3.0-LTcyNjgzMjc1NA",
+                "manifest_hash": "c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2",
+                "kind": "evm-rpc"
             }"#,
         )
         .expect(1)
         .create_async()
         .await;
 
-    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result =
+        crate::manifest::fetch_latest_version(&server.url(), &dataset_namespace, &dataset_name)
+            .await;
 
     assert!(result.is_ok());
     let version = result.unwrap();
 
-    // Should return the first (latest) version
+    // Should return the latest version
     assert_eq!(version.to_string(), "0.3.0-LTcyNjgzMjc1NA");
 
     versions_mock.assert_async().await;
 }
 
-/// Test that fetch_latest_version handles empty versions list.
+/// Test that fetch_latest_version handles 404 when no versions exist.
 #[tokio::test]
 async fn test_fetch_latest_version_handles_empty_list() {
     let mut server = Server::new_async().await;
 
+    let dataset_namespace: Namespace = "_".parse().unwrap();
     let dataset_name: Name = "test_dataset".parse().unwrap();
 
+    // Mock 404 response when no versions exist
     let versions_mock = server
-        .mock("GET", "/datasets/test_dataset/versions?limit=1000")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(
-            r#"{
-                "namespace": "default",
-                "name": "test_dataset",
-                "versions": [],
-                "special_tags": {}
-            }"#,
-        )
+        .mock("GET", "/datasets/_/test_dataset/versions/latest")
+        .with_status(404)
         .expect(1)
         .create_async()
         .await;
 
-    let result = crate::manifest::fetch_latest_version(&server.url(), &dataset_name).await;
+    let result =
+        crate::manifest::fetch_latest_version(&server.url(), &dataset_namespace, &dataset_name)
+            .await;
 
-    // Should return error for empty versions list
+    // Should return error for 404 (no versions available)
     assert!(result.is_err());
     assert!(
         result

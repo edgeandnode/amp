@@ -3,6 +3,11 @@ import * as Effect from "effect/Effect"
 import * as Admin from "./api/Admin.ts"
 import * as Model from "./Model.ts"
 
+export interface ManifestBuildResult {
+  metadata: Model.DatasetMetadata
+  manifest: Model.DatasetDerived
+}
+
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
   readonly cause: unknown
   readonly message: string
@@ -12,10 +17,10 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/ManifestBuilder", {
   effect: Effect.gen(function*() {
     const client = yield* Admin.Admin
-    const build = (manifest: Model.DatasetDefinition) =>
+    const build = (definition: Model.DatasetConfig) =>
       Effect.gen(function*() {
         const tables = yield* Effect.forEach(
-          Object.entries(manifest.tables ?? {}),
+          Object.entries(definition.tables ?? {}),
           ([name, table]) =>
             Effect.gen(function*() {
               const schema = yield* client.getOutputSchema(table.sql, { isSqlDataset: true }).pipe(
@@ -43,22 +48,27 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           { concurrency: 5 },
         )
 
-        const functions = Object.entries(manifest.functions ?? {}).map(([name, func]) => {
+        const functions = Object.entries(definition.functions ?? {}).map(([name, func]) => {
           const { inputTypes, outputType, source } = func
           const functionManifest = new Model.FunctionManifest({ name, source, inputTypes, outputType })
 
           return [name, functionManifest] as const
         })
 
-        return new Model.DatasetManifest({
+        const metadata = new Model.DatasetMetadata({
+          namespace: definition.namespace ?? Model.DEFAULT_NAMESPACE,
+          name: definition.name,
+          version: definition.version,
+        })
+
+        const manifest = new Model.DatasetDerived({
           kind: "manifest",
-          name: manifest.name,
-          network: manifest.network,
-          version: manifest.version,
+          dependencies: definition.dependencies,
           tables: Object.fromEntries(tables),
           functions: Object.fromEntries(functions),
-          dependencies: manifest.dependencies,
         })
+
+        return { metadata, manifest }
       })
 
     return { build }
