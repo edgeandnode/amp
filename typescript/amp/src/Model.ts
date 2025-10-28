@@ -6,13 +6,30 @@ export class TableDefinition extends Schema.Class<TableDefinition>(
   sql: Schema.String,
 }) {}
 
-export const DatasetName = Schema.Lowercase.pipe(
+export const DEFAULT_NAMESPACE = "_"
+
+export const DatasetNamespace = Schema.String.pipe(
+  Schema.pattern(/^[a-z0-9_]+$/),
+  Schema.minLength(1),
+  Schema.annotations({
+    title: "Namespace",
+    description:
+      `the namespace/owner of the dataset. If not specified, defaults to "${DEFAULT_NAMESPACE}". Must contain only lowercase letters, digits, and underscores.`,
+    examples: ["edgeandnode", "0xdeadbeef", "my_org", "_"],
+  }),
+)
+export type DatasetNamespace = Schema.Schema.Type<typeof DatasetNamespace>
+
+export const DatasetName = Schema.String.pipe(
+  Schema.pattern(/^[a-z_][a-z0-9_]*$/),
+  Schema.minLength(1),
   Schema.annotations({
     title: "Name",
     description: "the name of the dataset",
-    examples: ["uniswap"],
+    examples: ["uniswap", "eth_mainnet", "_test"],
   }),
 )
+export type DatasetName = Schema.Schema.Type<typeof DatasetName>
 
 export const Reference = Schema.String.pipe(
   Schema.pattern(/^[a-z0-9_]+\/[a-z_][a-z0-9_]*@.+$/),
@@ -33,14 +50,16 @@ export const Reference = Schema.String.pipe(
  * const { namespace, name, version } = parseReference("edgeandnode/mainnet@1.0.0")
  * // { namespace: "edgeandnode", name: "mainnet", version: "1.0.0" }
  */
-export const parseReference = (reference: string): { namespace: string; name: string; version: string } => {
+export const parseReference = (
+  reference: string,
+): { namespace: DatasetNamespace; name: DatasetName; version: DatasetVersion } => {
   const atIndex = reference.lastIndexOf("@")
   const slashIndex = reference.indexOf("/")
 
   // Since the reference passed schema validation, we know it has the correct format
-  const namespace = reference.substring(0, slashIndex)
-  const name = reference.substring(slashIndex + 1, atIndex)
-  const version = reference.substring(atIndex + 1)
+  const namespace = reference.substring(0, slashIndex) as DatasetNamespace
+  const name = reference.substring(slashIndex + 1, atIndex) as DatasetName
+  const version = reference.substring(atIndex + 1) as DatasetVersion
 
   return { namespace, name, version }
 }
@@ -71,6 +90,7 @@ export const DatasetVersion = Schema.String.pipe(
     examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123", "1.0.0+1234567890"],
   }),
 )
+export type DatasetVersion = Schema.Schema.Type<typeof DatasetVersion>
 
 export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
   Schema.pattern(
@@ -113,9 +133,18 @@ export class FunctionDefinition extends Schema.Class<FunctionDefinition>(
   outputType: Schema.String,
 }) {}
 
-export class DatasetDefinition extends Schema.Class<DatasetDefinition>(
-  "DatasetDefinition",
+export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
+  "DatasetMetadata",
 )({
+  namespace: DatasetNamespace,
+  name: DatasetName,
+  version: DatasetVersion,
+}) {}
+
+export class DatasetConfig extends Schema.Class<DatasetConfig>(
+  "DatasetConfig",
+)({
+  namespace: DatasetNamespace.pipe(Schema.optional),
   name: DatasetName,
   network: Network,
   version: DatasetVersion,
@@ -125,6 +154,9 @@ export class DatasetDefinition extends Schema.Class<DatasetDefinition>(
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
 }) {}
+
+// Legacy alias for backwards compatibility
+export const DatasetDefinition = DatasetConfig
 
 export class TableInfo extends Schema.Class<TableInfo>("TableInfo")({
   name: Schema.String,
@@ -270,27 +302,43 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>(
   outputType: Schema.String,
 }) {}
 
-export class DatasetManifest extends Schema.Class<DatasetManifest>(
-  "DatasetManifest",
+export class DatasetDerived extends Schema.Class<DatasetDerived>(
+  "DatasetDerived",
 )({
   kind: Schema.Literal("manifest"),
-  network: Network.pipe(Schema.optional),
-  name: DatasetName,
-  version: DatasetVersion,
+  namespace: DatasetNamespace.pipe(Schema.optional), // Deprecated: moved to metadata
+  name: DatasetName.pipe(Schema.optional), // Deprecated: moved to metadata
+  version: DatasetVersion.pipe(Schema.optional), // Deprecated: moved to metadata
   dependencies: Schema.Record({ key: Schema.String, value: Reference }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
 }) {}
 
-export class DatasetRpc extends Schema.Class<DatasetRpc>("DatasetRpc")({
+export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")({
   kind: Schema.Literal("evm-rpc"),
+  namespace: DatasetNamespace.pipe(Schema.optional), // Deprecated: moved to metadata
+  name: DatasetName.pipe(Schema.optional), // Deprecated: moved to metadata
+  version: DatasetVersion.pipe(Schema.optional), // Deprecated: moved to metadata
   network: Network,
-  name: DatasetName,
-  version: DatasetVersion,
   start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
   finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
+
+/**
+ * Union type representing any dataset manifest kind.
+ *
+ * This type is used at API boundaries (registration, storage, retrieval).
+ * Metadata (namespace, name, version) is passed separately to the API.
+ *
+ * Supported kinds:
+ * - DatasetDerived (kind: "manifest") - SQL-based derived datasets
+ * - DatasetEvmRpc (kind: "evm-rpc") - EVM RPC extraction datasets
+ *
+ * Future kinds: DatasetFirehose, DatasetEthBeacon, etc.
+ */
+export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc)
+export type DatasetManifest = Schema.Schema.Type<typeof DatasetManifest>
 
 export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({
   kind: Schema.Literal("evm-rpc"),

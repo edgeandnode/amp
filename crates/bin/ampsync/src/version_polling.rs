@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use tracing::{debug, info, warn};
 
 use crate::manifest;
@@ -29,6 +29,7 @@ use crate::manifest;
 /// * `tx` - Watch channel sender to broadcast new version notifications
 pub async fn version_poll_task(
     admin_api_addr: String,
+    dataset_namespace: Namespace,
     dataset_name: Name,
     mut current_version: Version,
     poll_interval_secs: u64,
@@ -41,7 +42,9 @@ pub async fn version_poll_task(
         interval.tick().await;
 
         // Query admin-api versions endpoint ONLY (not schema) for efficiency
-        match manifest::fetch_latest_version(&admin_api_addr, &dataset_name).await {
+        match manifest::fetch_latest_version(&admin_api_addr, &dataset_namespace, &dataset_name)
+            .await
+        {
             Ok(latest_version) => {
                 if latest_version != current_version {
                     info!(

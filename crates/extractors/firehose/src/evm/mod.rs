@@ -1,19 +1,26 @@
 use common::Dataset;
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 
 use crate::dataset::Manifest;
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
 pub mod pb_to_rows;
 pub mod tables;
 
-pub fn dataset(manifest: Manifest) -> Dataset {
+/// Convert a Firehose manifest into a logical dataset representation.
+///
+/// Dataset identity (namespace, name, version) must be provided externally as they are not part
+/// of the manifest.
+pub fn dataset(namespace: Namespace, name: Name, version: Version, manifest: Manifest) -> Dataset {
+    let network = manifest.network;
     Dataset {
-        name: manifest.name,
-        version: Some(manifest.version),
+        namespace,
+        name,
+        version: Some(version),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: tables::all(&manifest.network),
-        network: Some(manifest.network),
+        tables: tables::all(&network),
+        network: Some(network),
         functions: vec![],
     }
 }

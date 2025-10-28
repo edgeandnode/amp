@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroU32};
 
 use common::{BlockNum, Dataset};
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use reqwest::Url;
 
 mod block;
@@ -33,14 +33,10 @@ impl Table {
     }
 }
 
+/// Eth Beacon dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name
-    pub name: Name,
-    /// Dataset version, e.g., `1.0.0`
-    #[serde(default)]
-    pub version: Version,
     /// Dataset kind, must be `eth-beacon`.
     pub kind: EthBeaconDatasetKind,
     /// Network name, e.g., `mainnet-beacon`.
@@ -68,15 +64,21 @@ pub struct ProviderConfig {
     pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
-pub fn dataset(manifest: Manifest) -> Dataset {
+/// Convert an Eth Beacon manifest into a logical dataset representation.
+///
+/// Dataset identity (namespace, name, version) must be provided externally as they are not part
+/// of the manifest.
+pub fn dataset(namespace: Namespace, name: Name, version: Version, manifest: Manifest) -> Dataset {
+    let network = manifest.network;
     Dataset {
-        name: manifest.name,
-        version: Some(manifest.version),
+        namespace,
+        name,
+        version: Some(version),
         kind: manifest.kind.to_string(),
-        network: Some(manifest.network.clone()),
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: all_tables(manifest.network),
+        tables: all_tables(network.clone()),
+        network: Some(network),
         functions: vec![],
     }
 }

@@ -1,8 +1,8 @@
 - name: restore_eth_rpc
   restore: _/eth_rpc@0.0.0
 
-- name: deploy_non_incremental
-  deploy: non_incremental
+- name: register_non_incremental
+  dataset: non_incremental
   end: 15000000
 
 - name: dump_non_incremental_fails

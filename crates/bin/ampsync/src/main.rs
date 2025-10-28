@@ -11,7 +11,7 @@ use amp_client::SqlClient;
 use clap::Parser as _;
 use common::BoxError;
 use conn::DbConnPool;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use tracing::{error, info};
 
 use crate::{
@@ -28,8 +28,12 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 #[derive(Clone, Debug, clap::Subcommand)]
 enum Command {
     Sync {
+        /// The namespace of the dataset to sync into the configured postgres database.
+        #[arg(long, default_value = "_", env = "AMP_DATASET_NAMESPACE", value_parser = clap::value_parser!(Namespace))]
+        dataset_namespace: Namespace,
+
         /// The name of the dataset to sync into the configured postgres database.
-        #[arg(long, required = true, env = "AMP_DATASET_NAME")]
+        #[arg(long, required = true, env = "AMP_DATASET_NAME", value_parser = clap::value_parser!(Name))]
         dataset_name: Name,
 
         /// The specific dataset version to pull the schema for.
@@ -144,6 +148,7 @@ async fn main() -> Result<(), BoxError> {
 
     match command {
         Command::Sync {
+            dataset_namespace,
             dataset_name,
             dataset_version,
             amp_admin_api_addr,
@@ -161,6 +166,7 @@ async fn main() -> Result<(), BoxError> {
             stream_max_concurrent_batches,
         } => {
             let mut config = AmpsyncConfig::from_cmd(
+                dataset_namespace,
                 dataset_name,
                 dataset_version,
                 amp_admin_api_addr,
@@ -190,7 +196,7 @@ async fn main() -> Result<(), BoxError> {
 
             info!(
                 dataset_name = %config.dataset_name,
-                dataset_version = %config.manifest.version,
+                dataset_version = ?config.dataset_version,
                 "manifest_loaded"
             );
 
@@ -219,13 +225,18 @@ async fn main() -> Result<(), BoxError> {
             // Set up version polling (only if AMP_DATASET_VERSION not specified)
             // Using watch channel - if multiple versions update before consumer processes,
             // only the latest version is retained (no need to process intermediate versions)
+            let mut current_version = config
+                .dataset_version
+                .clone()
+                .expect("dataset_version should always be Some after config build");
             let (version_change_tx, mut version_change_rx) =
-                tokio::sync::watch::channel::<Version>(config.manifest.version.clone());
+                tokio::sync::watch::channel::<Version>(current_version.clone());
             let version_poll_handle = if version_polling_enabled {
                 let admin_api_addr = config.amp_admin_api_addr.clone();
+                let dataset_namespace = config.dataset_namespace.clone();
                 let dataset_name = config.dataset_name.clone();
                 let poll_interval = config.version_poll_interval_secs;
-                let current_version = config.manifest.version.clone();
+                let version_for_polling = current_version.clone();
 
                 info!(
                     poll_interval_secs = poll_interval,
@@ -235,8 +246,9 @@ async fn main() -> Result<(), BoxError> {
                 Some(tokio::spawn(async move {
                     version_poll_task(
                         admin_api_addr,
+                        dataset_namespace,
                         dataset_name,
-                        current_version,
+                        version_for_polling,
                         poll_interval,
                         version_change_tx,
                     )
@@ -256,8 +268,8 @@ async fn main() -> Result<(), BoxError> {
             // Main reload loop
             loop {
                 info!(
-                    dataset_name = %config.manifest.name,
-                    dataset_version = %config.manifest.version,
+                    dataset_name = %config.dataset_name,
+                    dataset_version = %current_version,
                     table_count = config.manifest.tables.len(),
                     "starting_dataset_sync"
                 );
@@ -278,7 +290,7 @@ async fn main() -> Result<(), BoxError> {
                     Ok(()) = version_change_rx.changed() => {
                         let new_version = version_change_rx.borrow_and_update().clone();
                         info!(
-                            old_version = %config.manifest.version,
+                            old_version = %current_version,
                             new_version = %new_version,
                             "version_change_detected"
                         );
@@ -288,15 +300,16 @@ async fn main() -> Result<(), BoxError> {
                         shutdown_streams_gracefully(task_handles).await;
 
                         // Fetch new manifest with the detected version
-                        match manifest::fetch_manifest(&config.amp_admin_api_addr, &config.dataset_name, Some(&new_version)).await {
+                        match manifest::fetch_manifest(&config.amp_admin_api_addr, &config.dataset_namespace, &config.dataset_name, Some(&new_version)).await {
                             Ok(new_manifest) => {
                                 info!(
-                                    dataset_name = %new_manifest.name,
-                                    dataset_version = %new_manifest.version,
+                                    dataset_name = %config.dataset_name,
+                                    dataset_version = %new_version,
                                     table_count = new_manifest.tables.len(),
                                     "version_reload_success"
                                 );
                                 config.manifest = std::sync::Arc::new(new_manifest);
+                                current_version = new_version;
                                 // Loop continues with new manifest
                             }
                             Err(e) => {

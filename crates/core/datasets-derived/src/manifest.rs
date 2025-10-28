@@ -11,7 +11,7 @@ use std::{
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{manifest::DataType, name::Name, reference::Reference, version::Version};
+use datasets_common::{manifest::DataType, reference::Reference};
 
 use crate::dataset_kind::DerivedDatasetKind;
 
@@ -24,10 +24,6 @@ use crate::dataset_kind::DerivedDatasetKind;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name
-    pub name: Name,
-    /// Dataset version, e.g., `1.0.0`
-    pub version: Version,
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
 

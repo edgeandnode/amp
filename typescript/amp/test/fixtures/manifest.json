@@ -1,7 +1,5 @@
 {
   "kind": "manifest",
-  "name": "example",
-  "version": "0.1.0",
   "dependencies": {
     "anvil": "_/anvil@0.1.0"
   },

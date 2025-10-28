@@ -1,4 +1,4 @@
-import { ArrowField, ArrowSchema, DatasetManifest, Table, TableInput, TableSchema } from "@edgeandnode/amp/Model"
+import { ArrowField, ArrowSchema, DatasetDerived, Table, TableInput, TableSchema } from "@edgeandnode/amp/Model"
 import { renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -87,10 +87,9 @@ describe("useAmpConfigStreamQuery", () => {
 
   it("should connect to EventSource and decode server-sent events successfully", async () => {
     // Mock SSE data in the format the API would send
-    const mockManifest = DatasetManifest.make({
+    const mockManifest = DatasetDerived.make({
       kind: "manifest",
       name: "test_dataset",
-      network: "mainnet",
       version: "1.0.0",
       dependencies: {},
       tables: {
@@ -130,10 +129,9 @@ describe("useAmpConfigStreamQuery", () => {
   })
 
   it("should handle multiple SSE messages", async () => {
-    const mockManifest1 = DatasetManifest.make({
+    const mockManifest1 = DatasetDerived.make({
       kind: "manifest",
       name: "test_dataset_v1",
-      network: "mainnet",
       version: "1.0.0",
       dependencies: {},
       tables: {
@@ -150,10 +148,9 @@ describe("useAmpConfigStreamQuery", () => {
       functions: {},
     })
 
-    const mockManifest2 = DatasetManifest.make({
+    const mockManifest2 = DatasetDerived.make({
       kind: "manifest",
       name: "test_dataset_v2",
-      network: "mainnet",
       version: "2.0.0",
       dependencies: {},
       tables: {
@@ -319,10 +316,9 @@ describe("useAmpConfigStreamQuery", () => {
     expect(MockEventSource.instances[0].url).toBe("http://test-api.com/config/stream")
 
     // Simulate receiving data
-    const mockManifest = DatasetManifest.make({
+    const mockManifest = DatasetDerived.make({
       kind: "manifest",
       name: "shared_dataset",
-      network: "mainnet",
       version: "1.0.0",
       dependencies: {},
       tables: {

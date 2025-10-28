@@ -5,7 +5,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -14,6 +14,7 @@ use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
+    pub namespace: Namespace,
     pub name: Name,
     pub version: Option<Version>,
     pub kind: String,

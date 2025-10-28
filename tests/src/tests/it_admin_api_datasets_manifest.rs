@@ -34,11 +34,6 @@ async fn get_dataset_version_manifest_with_valid_dataset_succeeds() {
 
     // Verify key fields exist
     assert_eq!(
-        manifest.get("name").and_then(|v| v.as_str()),
-        Some("eth_rpc"),
-        "manifest should contain correct dataset name"
-    );
-    assert_eq!(
         manifest.get("kind").and_then(|v| v.as_str()),
         Some("evm-rpc"),
         "manifest should contain correct kind"

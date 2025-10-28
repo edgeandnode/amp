@@ -40,7 +40,7 @@ pub async fn spawn_stream_tasks(
         // The dataset has already been materialized by ampd, so we just stream from it
         let base_query = format!(
             "SELECT * FROM \"{}\".\"{}\" SETTINGS stream = true",
-            config.manifest.name, table_name
+            config.dataset_name, table_name
         );
 
         info!(
@@ -84,7 +84,7 @@ pub async fn spawn_stream_tasks(
                 // This filters out data we've already processed
                 let query_with_where = format!(
                     "SELECT * FROM \"{}\".\"{}\" WHERE _block_num > {} SETTINGS stream = true",
-                    config.manifest.name, table_name, max_block_num
+                    config.dataset_name, table_name, max_block_num
                 );
                 (None, query_with_where)
             }

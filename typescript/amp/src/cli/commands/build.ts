@@ -28,8 +28,8 @@ export const build = Command.make("build", {
     Effect.fn(function*({ args }) {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const json = yield* ManifestContext.ManifestContext.pipe(
-        Effect.flatMap(Schema.encode(Model.DatasetManifest)),
+      const context = yield* ManifestContext.ManifestContext
+      const json = yield* Schema.encode(Model.DatasetManifest)(context.manifest).pipe(
         Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
       )
 

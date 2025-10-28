@@ -13,7 +13,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "example",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -50,7 +49,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "example",
-        network: "ethereum",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -90,7 +88,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "test",
-        network: "testnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -122,7 +119,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "complex",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -156,7 +152,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "empty",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {},
@@ -284,7 +279,6 @@ describe("manifestConverter", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "uniswap",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {

@@ -44,7 +44,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "example",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -87,7 +86,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "multi",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -144,7 +142,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "complex",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -188,7 +185,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "custom",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -227,7 +223,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "empty",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {},
@@ -258,7 +253,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "test",
-        network: "testnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -299,7 +293,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "test",
-        network: "testnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -358,7 +351,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "test",
-        network: "testnet",
         version: "1.0.0",
         dependencies: {},
         tables: {
@@ -397,7 +389,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
         name: "example",
-        network: "mainnet",
         version: "1.0.0",
         dependencies: {},
         tables: {

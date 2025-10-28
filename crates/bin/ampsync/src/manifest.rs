@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use admin_api::handlers::datasets::list_versions::VersionsResponse;
-use datasets_common::{name::Name, version::Version};
+use admin_api::handlers::datasets::get::DatasetInfo;
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use datasets_derived::Manifest;
 use lazy_static::lazy_static;
-use thiserror::Error;
 
 /// Errors that can occur when fetching dataset manifests from admin-api.
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     #[error("Dataset '{dataset}' version '{version}' not found in admin-api")]
     DatasetNotFound { dataset: String, version: String },
@@ -48,9 +47,6 @@ impl ManifestError {
     }
 }
 
-/// Maximum number of dataset versions to fetch from admin-api when resolving version
-const ADMIN_API_VERSION_LIMIT: usize = 1000;
-
 lazy_static! {
     /// Shared HTTP client for admin-api requests with optimized connection pooling.
     ///
@@ -67,47 +63,20 @@ lazy_static! {
 /// Fetch ONLY the latest version without fetching the full schema.
 ///
 /// This is used by version polling to efficiently check for new versions
-/// without the overhead of fetching the schema. Only calls the versions endpoint.
+/// without the overhead of fetching the schema. Uses the "latest" version endpoint.
 ///
-/// # Arguments
-/// * `admin_api_addr` - Base URL of the admin-api service
-/// * `name` - Dataset name
-///
-/// # Returns
-/// * `Ok(Version)` - The latest (first) version from the versions list
-/// * `Err(ManifestError)` - If no versions available or HTTP request fails
+/// Uses the default namespace "_".
 pub async fn fetch_latest_version(
     admin_api_addr: &str,
+    namespace: &Namespace,
     name: &Name,
-) -> Result<Version, ManifestError> {
-    resolve_qualified_version(admin_api_addr, name, None).await
-}
-
-/// Resolve a simple version to a fully qualified version, or get the latest version.
-///
-/// This function queries the admin-api to get all versions for a dataset.
-/// - If `version` is Some: Find the first version that starts with the given version prefix (e.g., "0.2.0" → "0.2.0-LTcyNjgzMjc1NA")
-/// - If `version` is None: Return the first (latest) version from the list
-///
-/// # Arguments
-/// * `admin_api_addr` - Base URL of the admin-api service
-/// * `name` - Dataset name
-/// * `version` - Optional simple version from the config (e.g., "0.2.0"). If None, returns latest.
-///
-/// # Returns
-/// * `Ok(Version)` - The fully qualified version
-/// * `Err(ManifestError)` - If the version cannot be found or HTTP request fails
-async fn resolve_qualified_version(
-    admin_api_addr: &str,
-    name: &Name,
-    version: Option<&Version>,
 ) -> Result<Version, ManifestError> {
     let url = format!(
-        "{}/datasets/{}/versions?limit={}",
-        admin_api_addr, name, ADMIN_API_VERSION_LIMIT
+        "{}/datasets/{}/{}/versions/latest",
+        admin_api_addr, namespace, name
     );
 
-    let versions_resp =
+    let response =
         ADMIN_API_CLIENT
             .get(&url)
             .send()
@@ -117,15 +86,14 @@ async fn resolve_qualified_version(
                 message: e.to_string(),
             })?;
 
-    // Check for HTTP errors
-    let status = versions_resp.status();
+    let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
         return Err(ManifestError::NoVersionsAvailable {
             dataset: name.to_string(),
         });
     }
     if !status.is_success() {
-        let body = versions_resp.text().await.unwrap_or_default();
+        let body = response.text().await.unwrap_or_default();
         return Err(ManifestError::HttpError {
             status: status.as_u16(),
             url: url.clone(),
@@ -133,8 +101,8 @@ async fn resolve_qualified_version(
         });
     }
 
-    let versions_data: VersionsResponse =
-        versions_resp
+    let dataset_info: DatasetInfo =
+        response
             .json()
             .await
             .map_err(|e| ManifestError::NetworkError {
@@ -142,50 +110,10 @@ async fn resolve_qualified_version(
                 message: e.to_string(),
             })?;
 
-    // Check if any versions exist
-    if versions_data.versions.is_empty() {
-        return Err(ManifestError::NoVersionsAvailable {
-            dataset: name.to_string(),
-        });
-    }
-
-    // Resolve version: either match prefix or use first (latest) version
-    let qualified_version = match version {
-        Some(v) => {
-            // Find the first version that matches our config version prefix
-            // The config has a simple version like "0.2.0", but we need the fully qualified
-            // version like "0.2.0-LTcyNjgzMjc1NA"
-            let version_prefix = v.to_string();
-            versions_data
-                .versions
-                .iter()
-                .find(|ver_info| ver_info.version.to_string().starts_with(&version_prefix))
-                .ok_or_else(|| ManifestError::DatasetNotFound {
-                    dataset: name.to_string(),
-                    version: version_prefix.clone(),
-                })?
-                .version
-                .clone()
-        }
-        None => {
-            // No specific version requested - use first (latest) version
-            versions_data
-                .versions
-                .first()
-                .expect("versions list is not empty (checked above)")
-                .version
-                .clone()
-        }
-    };
-
-    tracing::info!(
-        dataset = %name,
-        requested_version = ?version,
-        qualified_version = %qualified_version,
-        "version_resolved"
-    );
-
-    Ok(qualified_version)
+    // The revision field contains the resolved version
+    dataset_info.revision.to_string().parse().map_err(|e| {
+        ManifestError::InvalidManifest(anyhow::anyhow!("Invalid version format: {}", e))
+    })
 }
 
 /// Fetch manifest with indefinite polling for initial startup.
@@ -208,6 +136,7 @@ async fn resolve_qualified_version(
 /// - Logs helpful messages to guide users to run `nozzle dump`
 pub async fn fetch_manifest_with_startup_poll(
     admin_api_addr: &str,
+    namespace: &Namespace,
     name: &Name,
     version: Option<&Version>,
 ) -> Result<Manifest, ManifestError> {
@@ -216,7 +145,7 @@ pub async fn fetch_manifest_with_startup_poll(
     let max_backoff_secs = 30u64;
 
     loop {
-        match fetch_manifest(admin_api_addr, name, version).await {
+        match fetch_manifest(admin_api_addr, namespace, name, version).await {
             Ok(manifest) => {
                 if attempt > 0 {
                     tracing::info!(
@@ -268,50 +197,30 @@ pub async fn fetch_manifest_with_startup_poll(
 
 /// Fetch and construct a dataset Manifest from admin-api schema.
 ///
-/// This function performs the following steps:
-/// 1. Resolves the version (if provided) to a fully qualified version
-/// 2. Fetches the raw manifest from the admin-api /datasets/{name}/versions/{version}/manifest endpoint
+/// Fetches the manifest from the admin-api endpoint. If version is None, uses "latest".
 ///
-/// # Arguments
-/// * `admin_api_addr` - Base URL of the admin-api service (e.g., "http://localhost:1610")
-/// * `name` - Dataset name
-/// * `version` - Optional dataset version. If None, uses first (latest) version from list.
-///
-/// # Returns
-/// * `Ok(Manifest)` - A complete manifest with schema and generated SQL
-/// * `Err(ManifestError)` - Various errors:
-///   - Invalid dataset name or version
-///   - HTTP request failure to admin-api
-///   - Dataset not found
-///
-/// # Example
-/// ```ignore
-/// let name: Name = "my_dataset".parse()?;
-/// let version: Version = "0.1.0".parse()?;
-/// let manifest = fetch_manifest(
-///     "http://localhost:1610",
-///     &name,
-///     Some(&version)
-/// ).await?;
-/// ```
+/// Uses the default namespace "_".
 pub async fn fetch_manifest(
     admin_api_addr: &str,
+    namespace: &Namespace,
     name: &Name,
     version: Option<&Version>,
 ) -> Result<Manifest, ManifestError> {
-    // Resolve version (handles both explicit version and "latest" via None)
-    let qualified_version = resolve_qualified_version(admin_api_addr, name, version).await?;
+    let version_str = version
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "latest".to_string());
 
     tracing::info!(
+        namespace = %namespace,
         dataset = %name,
-        version = %qualified_version,
+        version = %version_str,
         admin_api_addr = %admin_api_addr,
-        "fetching_schema"
+        "fetching_manifest"
     );
 
     let manifest_url = format!(
-        "{}/datasets/{}/versions/{}/manifest",
-        admin_api_addr, name, qualified_version
+        "{}/datasets/{}/{}/versions/{}/manifest",
+        admin_api_addr, namespace, name, version_str
     );
     let manifest_resp = ADMIN_API_CLIENT
         .get(&manifest_url)
@@ -322,6 +231,12 @@ pub async fn fetch_manifest(
             message: e.to_string(),
         })?;
     let status = manifest_resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err(ManifestError::DatasetNotFound {
+            dataset: name.to_string(),
+            version: version_str.clone(),
+        });
+    }
     if !status.is_success() {
         let body = manifest_resp.text().await.unwrap_or_default();
         return Err(ManifestError::HttpError {

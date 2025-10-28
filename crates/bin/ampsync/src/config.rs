@@ -6,7 +6,7 @@
 use std::{sync::Arc, time::Duration};
 
 use common::BoxError;
-use datasets_common::{name::Name, version::Version};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use datasets_derived::Manifest;
 
 use crate::manifest;
@@ -19,6 +19,8 @@ pub struct AmpsyncConfig {
     pub amp_flight_addr: String,
     /// Amp Admin API endpoint for schema resolution.
     pub amp_admin_api_addr: String,
+    /// Dataset namespace (from AMP_DATASET_NAMESPACE env var).
+    pub dataset_namespace: Namespace,
     /// Dataset name (from AMP_DATASET_NAME env var).
     pub dataset_name: Name,
     /// Optional dataset version (from AMP_DATASET_VERSION env var). If None, uses latest version.
@@ -48,6 +50,7 @@ impl AmpsyncConfig {
     /// Fetches the Manifest instance from the admin-api
     #[allow(clippy::too_many_arguments)]
     pub async fn from_cmd(
+        dataset_namespace: Namespace,
         dataset_name: Name,
         dataset_version: Option<Version>,
         amp_admin_api_addr: String,
@@ -68,19 +71,35 @@ impl AmpsyncConfig {
         let manifest = Arc::new(
             manifest::fetch_manifest_with_startup_poll(
                 &amp_admin_api_addr,
+                &dataset_namespace,
                 &dataset_name,
                 dataset_version.as_ref(),
             )
             .await?,
         );
 
+        // If no version was specified (using "latest"), try to resolve the actual version
+        let resolved_version = if dataset_version.is_none() {
+            Some(
+                manifest::fetch_latest_version(
+                    &amp_admin_api_addr,
+                    &dataset_namespace,
+                    &dataset_name,
+                )
+                .await?,
+            )
+        } else {
+            dataset_version.clone()
+        };
+
         if let Some(url) = database_url {
             return Ok(Self {
                 database_url: url,
                 amp_flight_addr,
                 amp_admin_api_addr,
+                dataset_namespace,
                 dataset_name,
-                dataset_version,
+                dataset_version: resolved_version,
                 version_poll_interval_secs,
                 manifest,
                 db_pool_size,
@@ -127,8 +146,9 @@ impl AmpsyncConfig {
             database_url,
             amp_flight_addr,
             amp_admin_api_addr,
+            dataset_namespace,
             dataset_name,
-            dataset_version,
+            dataset_version: resolved_version,
             version_poll_interval_secs,
             manifest,
             db_pool_size,

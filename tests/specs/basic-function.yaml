@@ -1,5 +1,5 @@
-- name: deploy_basic_function
-  deploy: basic_function
+- name: register_basic_function
+  dataset: basic_function
 
 - name: query_basic_function
   query: SELECT basic_function.testString()

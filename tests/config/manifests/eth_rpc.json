@@ -1,6 +1,4 @@
 {
-  "name": "eth_rpc",
-  "version": "0.0.0",
   "kind": "evm-rpc",
   "network": "mainnet",
   "start_block": 15000000,

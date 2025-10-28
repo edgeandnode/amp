@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use datafusion::sql::{parser, resolve::resolve_table_references};
+use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use datasets_derived::{DerivedDatasetKind, Manifest, manifest::TableInput};
 
 use crate::{
@@ -32,8 +33,14 @@ pub fn queries(
 /// Convert a derived dataset manifest into a logical dataset representation.
 ///
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
-/// into the internal `Dataset` structure used by the query engine.
-pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
+/// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
+/// name, version) must be provided externally as they are not part of the manifest.
+pub fn dataset(
+    namespace: Namespace,
+    name: Name,
+    version: Version,
+    manifest: Manifest,
+) -> Result<Dataset, BoxError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
@@ -52,7 +59,7 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
             LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
         })
         .collect();
-    let tables = sort_tables_by_dependencies(&manifest.name, unsorted_tables, &queries)?;
+    let tables = sort_tables_by_dependencies(name.as_ref(), unsorted_tables, &queries)?;
 
     // Convert manifest functions into logical functions
     let functions = manifest
@@ -70,10 +77,11 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
         .collect();
 
     Ok(Dataset {
+        namespace,
+        name,
+        version: Some(version),
         kind: DerivedDatasetKind.to_string(),
         network: None,
-        name: manifest.name,
-        version: Some(manifest.version),
         start_block: None,
         finalized_blocks_only: false,
         tables,

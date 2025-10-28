@@ -117,7 +117,7 @@ use crate::{
 };
 
 /// Dumps a derived dataset table
-#[instrument(skip_all, fields(dataset = %manifest.name), err)]
+#[instrument(skip_all, fields(dataset = %table.dataset().name), err)]
 #[allow(clippy::too_many_arguments)]
 pub async fn dump_table(
     ctx: Ctx,
@@ -131,7 +131,7 @@ pub async fn dump_table(
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
 
-    let dataset_name = manifest.name.clone();
+    let dataset_name = table.dataset().name.clone();
     let table_name = table.table_name().to_string();
 
     // Clone values needed for metrics after async block
@@ -223,7 +223,7 @@ pub async fn dump_table(
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%manifest.name, error=%err, "dataset dump failed");
+        tracing::error!(dataset=%dataset_name_for_metrics, error=%err, "dataset dump failed");
 
         // Record error metrics
         if let Some(ref metrics) = metrics_for_after {

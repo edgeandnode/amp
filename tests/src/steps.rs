@@ -10,9 +10,9 @@ use fs_err as fs;
 
 // Submodules of the step implementations
 mod clean_dump_location;
-mod deploy;
 mod dump;
 mod query;
+mod register;
 mod restore;
 mod stream;
 mod stream_take;
@@ -36,8 +36,8 @@ pub enum TestStep {
     Query(query::Step),
     /// Restore dataset snapshot.
     Restore(restore::Step),
-    /// Deploy dataset package.
-    Deploy(deploy::Step),
+    /// Register dataset package.
+    Register(register::Step),
     /// Clean dump location directory.
     CleanDumpLocation(clean_dump_location::Step),
 }
@@ -54,7 +54,7 @@ impl TestStep {
             TestStep::Query(step) => &step.name,
             TestStep::Stream(step) => &step.name,
             TestStep::Restore(step) => &step.name,
-            TestStep::Deploy(step) => &step.name,
+            TestStep::Register(step) => &step.name,
             TestStep::CleanDumpLocation(step) => &step.clean_dump_location,
         }
     }
@@ -70,7 +70,7 @@ impl TestStep {
             TestStep::Query(step) => step.run(client).await,
             TestStep::Stream(step) => step.run(client).await,
             TestStep::Restore(step) => step.run(ctx).await,
-            TestStep::Deploy(step) => step.run(ctx).await,
+            TestStep::Register(step) => step.run(ctx).await,
             TestStep::CleanDumpLocation(step) => step.run(ctx).await,
         };
 

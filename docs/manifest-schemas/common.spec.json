@@ -1,16 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Manifest",
-  "description": "Common metadata fields required by all dataset definitions.\n\nAll dataset definitions must have a kind, network and name. The name must match the filename.\nSchema is optional for TOML dataset format.",
+  "description": "Common metadata fields required by all dataset definitions.",
   "type": "object",
   "properties": {
     "kind": {
       "description": "Dataset kind. See specific dataset definitions for supported values.\n\nCommon values include: `manifest`, `evm-rpc`, `firehose`.",
       "type": "string"
-    },
-    "name": {
-      "description": "Dataset name",
-      "$ref": "#/$defs/Name"
     },
     "network": {
       "description": "Network name, e.g., `mainnet`, `sepolia`\n\nRaw datasets' specific",
@@ -18,27 +14,9 @@
         "string",
         "null"
       ]
-    },
-    "version": {
-      "description": "Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`",
-      "$ref": "#/$defs/Version",
-      "default": "0.0.0"
     }
   },
   "required": [
-    "name",
     "kind"
-  ],
-  "$defs": {
-    "Name": {
-      "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^[a-z_][a-z0-9_]*$"
-    },
-    "Version": {
-      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
-      "type": "string"
-    }
-  }
+  ]
 }

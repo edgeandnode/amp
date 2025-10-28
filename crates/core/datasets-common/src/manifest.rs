@@ -12,20 +12,10 @@ use datafusion::{
     common::DFSchemaRef,
 };
 
-use crate::{name::Name, version::Version};
-
 /// Common metadata fields required by all dataset definitions.
-///
-/// All dataset definitions must have a kind, network and name. The name must match the filename.
-/// Schema is optional for TOML dataset format.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name
-    pub name: Name,
-    /// Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`
-    #[serde(default)]
-    pub version: Version,
     /// Dataset kind. See specific dataset definitions for supported values.
     ///
     /// Common values include: `manifest`, `evm-rpc`, `firehose`.
