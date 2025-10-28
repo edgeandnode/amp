@@ -22,7 +22,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
-use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use datasets_common::reference::Reference;
 use object_store::path::Path as ObjectStorePath;
 use url::Url;
 
@@ -110,97 +110,24 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 
 /// Register the manifest with the admin API.
 ///
-/// POSTs to `/datasets` endpoint with namespace, name, version, and manifest content.
+/// Uses the [`DatasetsClient`] to POST to `/datasets` endpoint with namespace, name, version, and manifest content.
 #[tracing::instrument(skip_all)]
 pub async fn register_manifest(
     admin_url: &Url,
     dataset_ref: &Reference,
     dataset_manifest: &str,
 ) -> Result<(), Error> {
-    let url = admin_url.join("datasets").map_err(|err| {
-        tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-        Error::InvalidAdminUrl {
-            url: admin_url.to_string(),
-            source: err,
-        }
-    })?;
+    tracing::debug!("Creating admin API client");
+
+    let client = crate::client::Client::new(admin_url.clone());
+    let datasets_client = client.datasets();
 
     tracing::debug!("Sending registration request");
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(url.as_str())
-        .json(&RegisterRequest {
-            namespace: dataset_ref.namespace(),
-            name: dataset_ref.name(),
-            version: dataset_ref.revision(),
-            manifest: dataset_manifest,
-        })
-        .send()
+    datasets_client
+        .register(dataset_ref, dataset_manifest)
         .await
-        .map_err(|err| {
-            tracing::error!(error = %err, "Network error during API request");
-            Error::NetworkError {
-                url: url.to_string(),
-                source: err,
-            }
-        })?;
-
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
-
-    match status.as_u16() {
-        201 => Ok(()),
-        400 | 409 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
-    }
-}
-
-/// Request body for the POST /datasets endpoint.
-#[derive(Debug, serde::Serialize)]
-struct RegisterRequest<'a> {
-    namespace: &'a Namespace,
-    name: &'a Name,
-    version: &'a Revision,
-    manifest: &'a str,
-}
-
-/// Error response from the admin API (400/409/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+        .map_err(|err| Error::ClientError { source: err })
 }
 
 /// Errors for manifest registration operations.
@@ -224,28 +151,12 @@ pub enum Error {
         source: common::store::StoreError,
     },
 
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Client error during registration
+    #[error("dataset registration failed")]
+    ClientError {
+        #[source]
+        source: crate::client::datasets::RegisterError,
     },
-
-    /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
-    },
-
-    /// Network or connection error
-    #[error("network error connecting to {url}")]
-    NetworkError { url: String, source: reqwest::Error },
-
-    /// Unexpected response from API
-    #[error("unexpected response (status {status}): {message}")]
-    UnexpectedResponse { status: u16, message: String },
 }
 
 /// Manifest file path supporting local and remote storage.
