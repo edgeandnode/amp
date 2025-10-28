@@ -723,6 +723,16 @@ pub struct ListAllDatasetsError(#[source] pub metadata_db::Error);
 #[error("Failed to delete version tag from metadata database")]
 pub struct DeleteVersionTagError(#[source] pub metadata_db::Error);
 
+/// Error when listing orphaned manifests
+///
+/// This error type is used by `DatasetStore::list_orphaned_manifests()`.
+///
+/// This occurs when failing to query orphaned manifests from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list orphaned manifests from metadata database")]
+pub struct ListOrphanedManifestsError(#[source] pub metadata_db::Error);
+
 /// Errors that occur when listing datasets that use a specific manifest
 ///
 /// This error type is used by `DatasetStore::list_manifest_linked_datasets()`.

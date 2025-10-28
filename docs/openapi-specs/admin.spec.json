@@ -1177,6 +1177,36 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `DELETE /manifests` endpoint",
+        "description": "Deletes all orphaned manifests (manifests with no dataset links).\nThis is a bulk cleanup operation for removing unused manifests and reclaiming storage space.\n\n## Response\n- **200 OK**: Returns JSON with count of deleted manifests\n- **500 Internal Server Error**: Database error\n\n## Error Codes\n- `LIST_ORPHANED_MANIFESTS_ERROR`: Failed to list orphaned manifests\n\n## Pruning Process\nThis handler:\n1. Queries the metadata database for all manifests not linked to any datasets\n2. Deletes each orphaned manifest concurrently from both object store and metadata database\n3. Logs individual deletion failures but continues processing remaining manifests\n4. Returns the count of successfully deleted manifests\n\nIndividual manifest deletion failures are logged as warnings but don't fail the entire operation,\nallowing partial cleanup even if some manifests cannot be removed.\nThe operation is idempotent - safe to call repeatedly.",
+        "operationId": "manifests_prune",
+        "responses": {
+          "200": {
+            "description": "Orphaned manifests pruned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PruneResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/manifests/{hash}": {
@@ -2179,6 +2209,20 @@
               "$ref": "#/components/schemas/ProviderInfo"
             },
             "description": "List of all provider configurations with complete configuration details"
+          }
+        }
+      },
+      "PruneResponse": {
+        "type": "object",
+        "description": "Response payload for manifest pruning operation\n\nContains the count of successfully deleted orphaned manifests.",
+        "required": [
+          "deleted_count"
+        ],
+        "properties": {
+          "deleted_count": {
+            "type": "integer",
+            "description": "Number of orphaned manifests successfully deleted",
+            "minimum": 0
           }
         }
       },

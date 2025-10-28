@@ -57,8 +57,8 @@ pub use self::{
         ExtractDatasetFromFunctionNamesError, ExtractDatasetFromTableRefsError,
         GetAllDatasetsError, GetClientError, GetDatasetError, GetDerivedManifestError,
         GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError, ListAllDatasetsError,
-        ListDatasetsUsingManifestError, ListVersionTagsError, PlanningCtxForSqlError,
-        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
+        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
+        PlanningCtxForSqlError, RegisterManifestError, ResolveRevisionError, SetVersionTagError,
         UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
@@ -241,6 +241,17 @@ impl DatasetStore {
             .collect();
 
         Ok(Some(tags))
+    }
+
+    /// List all orphaned manifests (manifests with no dataset links)
+    ///
+    /// Returns manifest hashes for all manifests that exist in storage but are not
+    /// linked to any datasets. These manifests can be safely deleted.
+    pub async fn list_orphaned_manifests(&self) -> Result<Vec<Hash>, ListOrphanedManifestsError> {
+        metadata_db::manifests::list_orphaned(&self.metadata_db)
+            .await
+            .map(|hashes| hashes.into_iter().map(Into::into).collect())
+            .map_err(ListOrphanedManifestsError)
     }
 }
 

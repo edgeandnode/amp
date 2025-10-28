@@ -30,6 +30,13 @@ fn manifest_delete_by_id(hash: &Hash) -> String {
     format!("/manifests/{hash}")
 }
 
+/// Build URL path for pruning orphaned manifests.
+///
+/// DELETE `/manifests`
+fn manifest_prune() -> &'static str {
+    "/manifests"
+}
+
 /// Client for manifest-related API operations.
 ///
 /// Created via [`Client::manifests`](crate::client::Client::manifests).
@@ -341,6 +348,91 @@ impl<'a> ManifestsClient<'a> {
             }
         }
     }
+
+    /// Prune all orphaned manifests (not linked to any datasets).
+    ///
+    /// DELETEs to `/manifests` endpoint.
+    ///
+    /// Returns count of deleted manifests.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PruneError`] for network errors, API errors (500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self))]
+    pub async fn prune(&self) -> Result<PruneResponse, PruneError> {
+        let url = self
+            .client
+            .base_url()
+            .join(manifest_prune())
+            .expect("valid URL");
+
+        tracing::debug!("Sending prune request");
+
+        let response = self
+            .client
+            .http()
+            .delete(url.as_str())
+            .send()
+            .await
+            .map_err(|err| PruneError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let prune_response = response.json::<PruneResponse>().await.map_err(|err| {
+                    tracing::error!(error = %err, "Failed to parse prune response");
+                    PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to parse response: {}", err),
+                    }
+                })?;
+                Ok(prune_response)
+            }
+            500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "LIST_ORPHANED_MANIFESTS_ERROR" => Err(PruneError::ListOrphanedManifestsError(
+                        error_response.into(),
+                    )),
+                    _ => Err(PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(PruneError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Response body for POST /manifests endpoint (201 success).
@@ -553,6 +645,34 @@ pub enum DeleteError {
         #[source]
         source: reqwest::Error,
     },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response body for DELETE /manifests endpoint (200 success).
+#[derive(Debug, serde::Deserialize)]
+pub struct PruneResponse {
+    /// Number of orphaned manifests deleted
+    pub deleted_count: usize,
+}
+
+/// Errors that can occur when pruning orphaned manifests.
+#[derive(Debug, thiserror::Error)]
+pub enum PruneError {
+    /// Failed to list orphaned manifests (500, LIST_ORPHANED_MANIFESTS_ERROR)
+    ///
+    /// This occurs when:
+    /// - Database connection is lost
+    /// - Failed to query orphaned manifests
+    /// - Database errors during query
+    #[error("list orphaned manifests error")]
+    ListOrphanedManifestsError(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
 
     /// Unexpected response from API
     #[error("unexpected response (status {status}): {message}")]
