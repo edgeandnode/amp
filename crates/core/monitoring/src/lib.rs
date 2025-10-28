@@ -21,7 +21,8 @@ pub fn init(
         opentelemetry_config.trace_ratio,
     ) {
         (Some(url), trace_ratio) => {
-            let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0))?;
+            let compression = Some(opentelemetry_config.compression.clone());
+            let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0), compression)?;
             Some(provider)
         }
         (None, trace_ratio) => {
@@ -42,7 +43,8 @@ pub fn init(
         opentelemetry_config.metrics_export_interval,
     ) {
         (Some(url), export_interval) => {
-            let (provider, meter) = telemetry::metrics::start(url, export_interval)?;
+            let compression = Some(opentelemetry_config.compression.clone());
+            let (provider, meter) = telemetry::metrics::start(url, export_interval, compression)?;
             (Some(provider), Some(meter))
         }
         (None, export_interval) => {

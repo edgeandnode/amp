@@ -28,12 +28,16 @@ pub fn init() {
 }
 
 /// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
-pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
-    let env_filter = env_filter();
+pub fn init_with_telemetry(
+    url: String,
+    trace_ratio: f64,
+    compression: Option<String>,
+) -> telemetry::traces::Result {
+    let (env_filter, amp_log_level) = env_filter_and_log_level();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
-        let tracer_provider = telemetry::traces::provider(url, trace_ratio)?;
+        let tracer_provider = telemetry::traces::provider(url, trace_ratio, compression)?;
         let tracer = tracer_provider.tracer("amp-tracer");
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 

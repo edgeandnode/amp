@@ -17,7 +17,23 @@ In order to connect to the telemetry stack when running Amp, you need to add the
 [opentelemetry]
 trace_url = "http://localhost:4317/v1/traces"
 metrics_url = "http://localhost:4318/v1/metrics"
+# Optional: Compression method for OpenTelemetry data export
+# Supported values: "none", "gzip" (default: "none")
+compression = "none"
 ```
+
+#### Compression Configuration
+
+The `compression` field controls how OpenTelemetry data is compressed before transmission:
+
+- `"none"` (default): Disables compression (useful for debugging and development)
+- `"gzip"`: Enables gzip compression for optimal performance and reduced bandwidth usage
+
+You can also control compression via environment variables:
+- `AMP_CONFIG_OPENTELEMETRY_COMPRESSION`: Override the compression setting
+- `OTLP_TRACES_COMPRESSION`: Control compression for traces only
+- `OTLP_METRICS_COMPRESSION`: Control compression for metrics only
+- `OTEL_EXPORTER_OTLP_COMPRESSION`: Standard OpenTelemetry environment variable (affects all signals)
 
 where `4317` and `4318` are the default gRPC and HTTP (respectively) ports for the `grafana/otel-lgmt` image (make sure
 that your `dockere-compose` setup is using the same ports).

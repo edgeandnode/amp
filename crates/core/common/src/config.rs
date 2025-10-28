@@ -283,6 +283,14 @@ pub struct OpenTelemetryConfig {
     pub trace_url: Option<String>,
     /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
     pub trace_ratio: Option<f64>,
+    /// Compression method for OpenTelemetry data export. Supported values: "none", "gzip".
+    /// Defaults to "none" for debugging and development.
+    #[serde(default = "default_otlp_compression")]
+    pub compression: String,
+}
+
+fn default_otlp_compression() -> String {
+    "none".to_string()
 }
 
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
