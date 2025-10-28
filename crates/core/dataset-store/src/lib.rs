@@ -19,7 +19,8 @@ use datafusion::{
 };
 use datasets_common::{
     hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
-    reference::Reference, revision::Revision, version::Version,
+    partial_reference::PartialReference, reference::Reference, revision::Revision,
+    version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -1302,14 +1303,21 @@ impl DatasetStore {
 
         let mut resolved_tables = Vec::new();
         let mut udfs = Vec::new();
-        for (dataset_name, dataset_version) in datasets {
+        for partial_ref in datasets {
+            // Extract version from partial reference
+            let dataset_version = partial_ref
+                .revision
+                .as_ref()
+                .and_then(|r| r.as_version())
+                .cloned();
+
             let Some(dataset) = self
-                .get_dataset(&dataset_name, &dataset_version)
+                .get_dataset(&partial_ref.name, &dataset_version)
                 .await
                 .map_err(GetLogicalCatalogError::GetDataset)?
             else {
                 return Err(GetLogicalCatalogError::DatasetNotFound {
-                    name: dataset_name.to_string(),
+                    name: partial_ref.name.to_string(),
                     version: dataset_version.clone(),
                 });
             };
@@ -1317,7 +1325,7 @@ impl DatasetStore {
             if dataset.kind == EvmRpcDatasetKind {
                 let udf = self.eth_call_for_dataset(&dataset).await.map_err(|err| {
                     GetLogicalCatalogError::EthCallUdfCreation {
-                        dataset: dataset_name.to_string(),
+                        dataset: partial_ref.name.to_string(),
                         source: err,
                     }
                 })?;
@@ -1336,28 +1344,18 @@ impl DatasetStore {
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
                         (Some(schema), table_name) => {
-                            let versioned_name = match &dataset_version {
-                                None => dataset_name.to_string(),
-                                Some(v) => {
-                                    format!("{}__{}", dataset_name, v.to_underscore_version())
-                                }
-                            };
-
-                            schema == versioned_name && table_name == table.name()
+                            // Reconstruct the schema name from partial reference
+                            let schema_name = partial_ref.to_string();
+                            schema == schema_name && table_name == table.name()
                         }
                         _ => false, // Unqualified table
                     }
                 });
 
                 if is_referenced {
-                    let versioned_name = match &dataset_version {
-                        None => dataset_name.to_string(),
-                        Some(v) => {
-                            format!("{}__{}", dataset_name, v.to_underscore_version())
-                        }
-                    };
-
-                    let table_ref = TableReference::partial(versioned_name, table.name());
+                    // Use partial reference string representation as schema name
+                    let schema_name = partial_ref.to_string();
+                    let table_ref = TableReference::partial(schema_name, table.name());
                     table.update_table_ref(table_ref);
                     resolved_tables.push(table);
                 }
@@ -1454,15 +1452,16 @@ impl DatasetStore {
 /// and optional versions from the schema portion of qualified table names.
 ///
 /// # Table Reference Format
-/// - All tables must be qualified with a dataset name: `dataset_name.table_name`
-/// - Versioned datasets: `dataset_name__x_y_z.table_name` where x, y, z are version numbers
+/// - All tables must be qualified with namespace and dataset name: `namespace/dataset_name.table_name`
+/// - Versioned datasets: `namespace/dataset_name@version.table_name` (e.g., `_/eth_rpc@1.0.0.blocks`)
+/// - Unversioned datasets: `namespace/dataset_name.table_name` (e.g., `_/eth_rpc.blocks`)
 /// - Catalog-qualified tables are not supported
 ///
 /// # Returns
-/// A set of unique (dataset_name, version) tuples extracted from the table references.
+/// A set of unique partial references extracted from the table references.
 fn dataset_versions_from_table_refs<'a>(
     table_refs: impl Iterator<Item = &'a TableReference>,
-) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromTableRefsError> {
+) -> Result<BTreeSet<PartialReference>, ExtractDatasetFromTableRefsError> {
     let mut datasets = BTreeSet::new();
 
     for table_ref in table_refs {
@@ -1478,32 +1477,25 @@ fn dataset_versions_from_table_refs<'a>(
             });
         };
 
-        // Parse and extract dataset name and version if present.
-        let (name_str, version_str) = catalog_schema
-            .rsplit_once("__")
-            .map(|(name_str, version_str)| (name_str, Some(version_str)))
-            .unwrap_or((catalog_schema, None));
-
-        let name = name_str.parse::<Name>().map_err(|err| {
-            ExtractDatasetFromTableRefsError::InvalidDatasetName {
-                name: name_str.to_string(),
+        // Parse using PartialReference to handle namespace/name@version format
+        let partial_ref = catalog_schema.parse::<PartialReference>().map_err(|err| {
+            ExtractDatasetFromTableRefsError::ReferenceParse {
                 schema: catalog_schema.to_string(),
                 source: err,
             }
         })?;
 
-        let version = version_str
-            .map(|v| v.replace("_", "."))
-            .map(|v| {
-                v.parse::<Version>()
-                    .map_err(|_| ExtractDatasetFromTableRefsError::InvalidVersion {
-                        version: v,
-                        schema: catalog_schema.to_string(),
-                    })
-            })
-            .transpose()?;
+        // Validate that revision (if present) is a Version type, not hash/latest/dev
+        if let Some(revision) = &partial_ref.revision {
+            if !revision.is_version() {
+                return Err(ExtractDatasetFromTableRefsError::InvalidVersion {
+                    version: revision.to_string(),
+                    schema: catalog_schema.to_string(),
+                });
+            }
+        }
 
-        datasets.insert((name, version));
+        datasets.insert(partial_ref);
     }
 
     Ok(datasets)
@@ -1511,19 +1503,19 @@ fn dataset_versions_from_table_refs<'a>(
 
 /// Extracts dataset names and versions from function names in SQL queries.
 ///
-/// This function processes qualified function names (e.g., `dataset.function` or `dataset__1_0_0.function`)
+/// This function processes qualified function names (e.g., `namespace/dataset.function` or `namespace/dataset@version.function`)
 /// and extracts the dataset name and optional version from the qualifier.
 ///
 /// # Function Name Format
 /// - Simple function names (no qualifier) are assumed to be built-in DataFusion functions
-/// - Qualified functions: `dataset_name.function_name` or `dataset_name__x_y_z.function_name`
-/// - Version format in qualifier: `__x_y_z` where x, y, z are version numbers
+/// - Qualified functions: `namespace/dataset_name.function_name` or `namespace/dataset_name@version.function_name`
+/// - Examples: `_/eth_rpc.my_function()` or `_/eth_rpc@1.0.0.my_function()`
 ///
 /// # Returns
-/// A set of unique (dataset_name, version) tuples extracted from the function names.
+/// A set of unique partial references extracted from the function names.
 fn dataset_versions_from_function_names<'a>(
     function_names: impl IntoIterator<Item = &'a str>,
-) -> Result<BTreeSet<(Name, Option<Version>)>, ExtractDatasetFromFunctionNamesError> {
+) -> Result<BTreeSet<PartialReference>, ExtractDatasetFromFunctionNamesError> {
     let mut datasets = BTreeSet::new();
 
     for func_name in function_names {
@@ -1541,33 +1533,25 @@ fn dataset_versions_from_function_names<'a>(
             }
         };
 
-        // Parse and extract dataset name and version if present.
-        let (name_str, version_str) = fn_dataset
-            .rsplit_once("__")
-            .map(|(name_str, version_str)| (name_str, Some(version_str)))
-            .unwrap_or((fn_dataset, None));
-
-        let name = name_str.parse::<Name>().map_err(|err| {
-            ExtractDatasetFromFunctionNamesError::InvalidDatasetName {
-                name: name_str.to_string(),
-                function: fn_dataset.to_string(),
+        // Parse using PartialReference to handle namespace/name@version format
+        let partial_ref = fn_dataset.parse::<PartialReference>().map_err(|err| {
+            ExtractDatasetFromFunctionNamesError::ReferenceParse {
+                function: func_name.to_string(),
                 source: err,
             }
         })?;
 
-        let version = version_str
-            .map(|v| v.replace("_", "."))
-            .map(|v| {
-                v.parse::<Version>().map_err(|_| {
-                    ExtractDatasetFromFunctionNamesError::InvalidVersion {
-                        version: v,
-                        function: fn_dataset.to_string(),
-                    }
-                })
-            })
-            .transpose()?;
+        // Validate that revision (if present) is a Version type, not hash/latest/dev
+        if let Some(revision) = &partial_ref.revision {
+            if !revision.is_version() {
+                return Err(ExtractDatasetFromFunctionNamesError::InvalidVersion {
+                    version: revision.to_string(),
+                    function: func_name.to_string(),
+                });
+            }
+        }
 
-        datasets.insert((name, version));
+        datasets.insert(partial_ref);
     }
 
     Ok(datasets)

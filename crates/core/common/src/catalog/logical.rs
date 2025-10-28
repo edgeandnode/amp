@@ -59,13 +59,6 @@ impl Dataset {
     pub fn dataset_version(&self) -> Option<String> {
         self.version.as_ref().map(|v| v.to_string())
     }
-
-    pub fn to_identifier(&self) -> String {
-        match &self.version {
-            Some(v) => format!("{}__{}", self.name, v.to_underscore_version()),
-            None => self.name.to_string(),
-        }
-    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
