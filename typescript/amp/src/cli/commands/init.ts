@@ -40,6 +40,10 @@ const datasetVersionPrompt = Prompt.text({
 const projectNamePrompt = Prompt.text({
   message: "Project name (for README):",
   default: "amp_project",
+  validate: (input) =>
+    input.trim().length > 0
+      ? Effect.succeed(input.trim())
+      : Effect.fail("Project name cannot be empty"),
 })
 
 /**
@@ -140,12 +144,34 @@ const initializeProject = (
 ): Effect.Effect<void, TemplateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
+    const fs = yield* FileSystem.FileSystem
 
     // Validate dataset name
     yield* validateDatasetName(datasetName)
 
     // Use current directory
     const targetPath = path.resolve(".")
+
+    // Check if amp.config.ts already exists
+    const configPath = path.join(targetPath, "amp.config.ts")
+    const configExists = yield* fs.exists(configPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new TemplateError({
+            message: `Failed to check for existing amp.config.ts`,
+            cause,
+          }),
+      ),
+    )
+
+    if (configExists) {
+      yield* Effect.fail(
+        new TemplateError({
+          message:
+            `amp.config.ts already exists in this directory. Remove it or run amp init in a different directory.`,
+        }),
+      )
+    }
 
     // Get template (only local-evm-rpc for now)
     const template = yield* getTemplate("local-evm-rpc")
@@ -231,6 +257,9 @@ export const init = Command.make("init", {
       const datasetNameAnswer = yield* datasetNamePrompt
       const datasetVersionAnswer = yield* datasetVersionPrompt
       const projectNameAnswer = yield* projectNamePrompt
+
+      // Add spacing before initialization output
+      yield* Console.log("")
 
       yield* initializeProject(datasetNameAnswer, datasetVersionAnswer, projectNameAnswer)
     })
