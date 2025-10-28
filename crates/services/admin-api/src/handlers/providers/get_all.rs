@@ -40,8 +40,7 @@ use crate::ctx::Ctx;
 pub async fn handler(State(ctx): State<Ctx>) -> Json<ProvidersResponse> {
     let providers = ctx
         .dataset_store
-        .providers()
-        .get_all()
+        .get_all_providers()
         .await
         .iter()
         .filter_map(

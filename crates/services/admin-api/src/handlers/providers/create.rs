@@ -81,8 +81,7 @@ pub async fn handler(
     };
 
     ctx.dataset_store
-        .providers()
-        .register(provider_config)
+        .register_provider(provider_config)
         .await
         .map_err(|err| match err {
             RegisterError::Conflict { name } => {
