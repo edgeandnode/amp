@@ -73,33 +73,48 @@ impl TempInstallDir {
     }
 }
 
-/// Helper for creating mock ampd binaries for testing.
+/// Helper for creating mock ampd and ampctl binaries for testing.
 pub struct MockBinary;
 
 impl MockBinary {
-    /// Create a mock ampd binary for a specific version.
+    /// Create mock ampd and ampctl binaries for a specific version.
     pub fn create(temp: &TempInstallDir, version: &str) -> Result<()> {
         let version_dir = temp.version_dir(version);
         fs::create_dir_all(&version_dir)
             .with_context(|| format!("Failed to create version directory for {}", version))?;
 
-        let binary_path = version_dir.join("ampd");
+        // Create mock ampd binary
+        let ampd_path = version_dir.join("ampd");
+        let ampd_script = format!("#!/bin/sh\necho 'ampd {}'", version);
+        fs::write(&ampd_path, ampd_script)
+            .with_context(|| format!("Failed to write mock ampd binary for {}", version))?;
 
-        // Create a simple shell script that outputs the version
-        let script = format!("#!/bin/sh\necho 'ampd {}'", version);
-        fs::write(&binary_path, script)
-            .with_context(|| format!("Failed to write mock binary for {}", version))?;
-
-        // Make it executable on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&binary_path)
-                .context("Failed to get binary metadata")?
+            let mut perms = fs::metadata(&ampd_path)
+                .context("Failed to get ampd metadata")?
                 .permissions();
             perms.set_mode(0o755);
-            fs::set_permissions(&binary_path, perms)
-                .context("Failed to set executable permissions")?;
+            fs::set_permissions(&ampd_path, perms)
+                .context("Failed to set executable permissions on ampd")?;
+        }
+
+        // Create mock ampctl binary
+        let ampctl_path = version_dir.join("ampctl");
+        let ampctl_script = format!("#!/bin/sh\necho 'ampctl {}'", version);
+        fs::write(&ampctl_path, ampctl_script)
+            .with_context(|| format!("Failed to write mock ampctl binary for {}", version))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&ampctl_path)
+                .context("Failed to get ampctl metadata")?
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&ampctl_path, perms)
+                .context("Failed to set executable permissions on ampctl")?;
         }
 
         Ok(())

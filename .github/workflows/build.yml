@@ -41,7 +41,7 @@ jobs:
           cache: true
 
       - name: Build binaries
-        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampup -p ampsync
+        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampctl -p ampup -p ampsync
 
       - name: Sign binaries
         if: contains(matrix.target, 'apple-darwin')
@@ -69,8 +69,14 @@ jobs:
             --options runtime \
             --entitlements entitlements.plist \
             --timestamp \
+            target/${{ matrix.target }}/release/ampctl
+
+          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
+            --options runtime \
+            --entitlements entitlements.plist \
+            --timestamp \
             target/${{ matrix.target }}/release/ampup
-          
+
           /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
             --options runtime \
             --entitlements entitlements.plist \
@@ -87,6 +93,16 @@ jobs:
         uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
         with:
           product-path: target/${{ matrix.target }}/release/ampd
+          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
+          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
+          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          verbose: true
+
+      - name: Notarize ampctl
+        if: contains(matrix.target, 'apple-darwin')
+        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
+        with:
+          product-path: target/${{ matrix.target }}/release/ampctl
           appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
           appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
           appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
@@ -117,6 +133,13 @@ jobs:
         with:
           name: ${{ matrix.target }}-ampd
           path: target/${{ matrix.target }}/release/ampd
+          retention-days: 30
+
+      - name: Upload ampctl artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}-ampctl
+          path: target/${{ matrix.target }}/release/ampctl
           retention-days: 30
 
       - name: Upload ampup artifact
@@ -160,12 +183,18 @@ jobs:
           cp artifacts/x86_64-apple-darwin-ampd/ampd release/ampd-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampd/ampd release/ampd-darwin-aarch64
 
+          # Copy and rename ampctl binaries
+          cp artifacts/x86_64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-aarch64
+          cp artifacts/x86_64-apple-darwin-ampctl/ampctl release/ampctl-darwin-x86_64
+          cp artifacts/aarch64-apple-darwin-ampctl/ampctl release/ampctl-darwin-aarch64
+
           # Copy and rename ampup binaries
           cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampup/ampup release/ampup-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampup/ampup release/ampup-darwin-aarch64
-          
+
           # Copy and rename ampsync binaries
           cp artifacts/x86_64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-aarch64

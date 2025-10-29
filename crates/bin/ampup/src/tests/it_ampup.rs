@@ -290,16 +290,28 @@ async fn build_from_local_path_with_custom_name() -> Result<()> {
     let target_dir = fake_repo.path().join("target/release");
     fs::create_dir_all(&target_dir)?;
 
-    // Create a mock ampd binary
-    let mock_binary = target_dir.join("ampd");
-    fs::write(&mock_binary, "#!/bin/sh\necho 'ampd test-version'")?;
+    // Create mock ampd binary
+    let mock_ampd = target_dir.join("ampd");
+    fs::write(&mock_ampd, "#!/bin/sh\necho 'ampd test-version'")?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&mock_binary)?.permissions();
+        let mut perms = fs::metadata(&mock_ampd)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&mock_binary, perms)?;
+        fs::set_permissions(&mock_ampd, perms)?;
+    }
+
+    // Create mock ampctl binary
+    let mock_ampctl = target_dir.join("ampctl");
+    fs::write(&mock_ampctl, "#!/bin/sh\necho 'ampctl test-version'")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&mock_ampctl)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&mock_ampctl, perms)?;
     }
 
     // Mock cargo by creating a fake cargo script
