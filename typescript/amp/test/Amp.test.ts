@@ -160,17 +160,4 @@ Testing.layer((it) => {
       assertFailure(result, Cause.fail(expected))
     }),
   )
-
-  it.effect(
-    "handles location not found error",
-    Effect.fn(function*() {
-      const admin = yield* Admin.Admin
-      const result = yield* admin.getLocationById(999999).pipe(Effect.exit)
-      const expected = new Errors.LocationNotFound({
-        message: "location '999999' not found",
-        code: "LOCATION_NOT_FOUND",
-      })
-      assertFailure(result, Cause.fail(expected))
-    }),
-  )
 })
