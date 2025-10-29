@@ -12,6 +12,7 @@ use super::job_info::JobInfo;
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
+    scheduler,
 };
 
 /// Default number of jobs returned per page
@@ -50,15 +51,9 @@ fn default_limit() -> usize {
 ///
 /// ## Error Codes
 /// - `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)
-/// - `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value
-/// - `LIMIT_INVALID`: Limit is zero or negative
-/// - `METADATA_DB_ERROR`: Internal database error occurred
-///
-/// This handler:
-/// - Accepts query parameters for pagination (limit, last_job_id)
-/// - Validates the limit parameter (max 1000)
-/// - Calls the metadata DB to list jobs with pagination
-/// - Returns a structured response with jobs and next cursor
+/// - `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)
+/// - `LIMIT_INVALID`: Limit is zero
+/// - `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -102,14 +97,17 @@ pub async fn handler(
         query.limit
     };
 
-    // Fetch jobs from metadata DB
+    // Fetch jobs from scheduler
     let jobs = ctx
-        .metadata_db
-        .list_jobs(limit as i64, query.last_job_id.map(Into::into)) // SAFETY: limit is capped at 1000 by validation above
+        .scheduler
+        .list_jobs(
+            limit as i64,
+            query.last_job_id, // SAFETY: limit is capped at 1000 by validation above
+        )
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, "failed to list jobs");
-            Error::MetadataDbError(err)
+            Error::ListJobs(err)
         })?;
 
     // Determine next cursor (ID of the last job in this page)
@@ -139,9 +137,10 @@ pub struct JobsResponse {
 pub enum Error {
     /// The query parameters are invalid or malformed
     ///
-    /// This occurs when query parameters cannot be parsed, such as:
-    /// - Invalid integer format for limit or last_job_id
-    /// - Malformed query string syntax
+    /// This occurs when:
+    /// - The limit parameter has an invalid integer format
+    /// - The last_job_id parameter has an invalid format
+    /// - Required query parameters are missing
     #[error("invalid query parameters: {err}")]
     InvalidQueryParams {
         /// The rejection details from Axum's query extractor
@@ -150,8 +149,10 @@ pub enum Error {
 
     /// The requested limit exceeds the maximum allowed value
     ///
-    /// This occurs when the limit parameter is greater than the maximum
-    /// allowed page size.
+    /// This occurs when:
+    /// - The limit parameter is greater than 1000
+    /// - Client requests more results than the server allows in one page
+    /// - Pagination constraint is violated
     #[error("limit {limit} exceeds maximum allowed limit of {max}")]
     LimitTooLarge {
         /// The requested limit value
@@ -160,16 +161,23 @@ pub enum Error {
         max: usize,
     },
 
-    /// The requested limit is invalid (zero or negative)
+    /// The requested limit is invalid (zero)
     ///
-    /// This occurs when the limit parameter is 0, which would result
-    /// in no items being returned.
+    /// This occurs when:
+    /// - The limit parameter is explicitly set to 0
+    /// - Client requests zero results (meaningless pagination)
+    /// - Invalid pagination request is made
     #[error("limit must be greater than 0")]
     LimitInvalid,
 
-    /// Metadata DB error
-    #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    /// Failed to list jobs from scheduler
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during pagination query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to list jobs")]
+    ListJobs(#[source] scheduler::ListJobsError),
 }
 
 impl IntoErrorResponse for Error {
@@ -178,7 +186,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidQueryParams { .. } => "INVALID_QUERY_PARAMETERS",
             Error::LimitTooLarge { .. } => "LIMIT_TOO_LARGE",
             Error::LimitInvalid => "LIMIT_INVALID",
-            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+            Error::ListJobs(_) => "LIST_JOBS_ERROR",
         }
     }
 
@@ -187,7 +195,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidQueryParams { .. } => StatusCode::BAD_REQUEST,
             Error::LimitTooLarge { .. } => StatusCode::BAD_REQUEST,
             Error::LimitInvalid => StatusCode::BAD_REQUEST,
-            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ListJobs(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

@@ -126,7 +126,7 @@ impl<'a> JobsClient<'a> {
 
                 match error_response.error_code.as_str() {
                     "INVALID_JOB_ID" => Err(GetError::InvalidJobId(error_response.into())),
-                    "METADATA_DB_ERROR" => Err(GetError::MetadataDbError(error_response.into())),
+                    "GET_JOB_ERROR" => Err(GetError::GetJobError(error_response.into())),
                     _ => Err(GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text,
@@ -205,7 +205,10 @@ impl<'a> JobsClient<'a> {
                 match error_response.error_code.as_str() {
                     "INVALID_JOB_ID" => Err(StopError::InvalidJobId(error_response.into())),
                     "JOB_NOT_FOUND" => Err(StopError::NotFound(error_response.into())),
-                    "METADATA_DB_ERROR" => Err(StopError::MetadataDbError(error_response.into())),
+                    "STOP_JOB_ERROR" => Err(StopError::StopJobError(error_response.into())),
+                    "UNEXPECTED_STATE_CONFLICT" => {
+                        Err(StopError::UnexpectedStateConflict(error_response.into()))
+                    }
                     _ => Err(StopError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text,
@@ -284,8 +287,9 @@ impl<'a> JobsClient<'a> {
                 match error_response.error_code.as_str() {
                     "INVALID_JOB_ID" => Err(DeleteByIdError::InvalidJobId(error_response.into())),
                     "JOB_CONFLICT" => Err(DeleteByIdError::Conflict(error_response.into())),
-                    "METADATA_DB_ERROR" => {
-                        Err(DeleteByIdError::MetadataDbError(error_response.into()))
+                    "GET_JOB_ERROR" => Err(DeleteByIdError::GetJobError(error_response.into())),
+                    "DELETE_JOB_ERROR" => {
+                        Err(DeleteByIdError::DeleteJobError(error_response.into()))
                     }
                     _ => Err(DeleteByIdError::UnexpectedResponse {
                         status: status.as_u16(),
@@ -375,9 +379,9 @@ impl<'a> JobsClient<'a> {
                     "INVALID_QUERY_PARAM" => Err(DeleteByStatusError::InvalidQueryParam(
                         error_response.into(),
                     )),
-                    "METADATA_DB_ERROR" => {
-                        Err(DeleteByStatusError::MetadataDbError(error_response.into()))
-                    }
+                    "DELETE_JOBS_BY_STATUS_ERROR" => Err(
+                        DeleteByStatusError::DeleteJobsByStatusError(error_response.into()),
+                    ),
                     _ => Err(DeleteByStatusError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text,
@@ -474,7 +478,7 @@ impl<'a> JobsClient<'a> {
                     }
                     "LIMIT_TOO_LARGE" => Err(ListError::LimitTooLarge(error_response.into())),
                     "LIMIT_INVALID" => Err(ListError::LimitInvalid(error_response.into())),
-                    "METADATA_DB_ERROR" => Err(ListError::MetadataDbError(error_response.into())),
+                    "LIST_JOBS_ERROR" => Err(ListError::ListJobsError(error_response.into())),
                     _ => Err(ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text,
@@ -586,13 +590,14 @@ pub enum ListError {
     #[error("limit invalid")]
     LimitInvalid(#[source] ApiError),
 
-    /// Metadata database error (500, METADATA_DB_ERROR)
+    /// Failed to list jobs from scheduler (500, LIST_JOBS_ERROR)
     ///
     /// This occurs when:
-    /// - Database connection issues
-    /// - Query failures or internal database errors
-    #[error("metadata database error")]
-    MetadataDbError(#[source] ApiError),
+    /// - Database connection fails or is lost during pagination query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to list jobs")]
+    ListJobsError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
@@ -612,13 +617,14 @@ pub enum GetError {
     #[error("invalid job ID")]
     InvalidJobId(#[source] ApiError),
 
-    /// Metadata database error (500, METADATA_DB_ERROR)
+    /// Failed to retrieve job from scheduler (500, GET_JOB_ERROR)
     ///
     /// This occurs when:
-    /// - Database connection issues
-    /// - Query failures or internal database errors
-    #[error("metadata database error")]
-    MetadataDbError(#[source] ApiError),
+    /// - Database connection fails or is lost during the query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to get job")]
+    GetJobError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
@@ -645,13 +651,21 @@ pub enum StopError {
     #[error("job not found")]
     NotFound(#[source] ApiError),
 
-    /// Metadata database error (500, METADATA_DB_ERROR)
+    /// Database error during stop operation (500, STOP_JOB_ERROR)
     ///
     /// This occurs when:
-    /// - Database connection issues
-    /// - Query failures or internal database errors
-    #[error("metadata database error")]
-    MetadataDbError(#[source] ApiError),
+    /// - Database connection fails or is lost during the transaction
+    /// - Transaction conflicts or deadlocks occur
+    /// - Database constraint violations are encountered
+    #[error("failed to stop job")]
+    StopJobError(#[source] ApiError),
+
+    /// Unexpected state conflict during stop operation (500, UNEXPECTED_STATE_CONFLICT)
+    ///
+    /// This indicates an internal inconsistency in the state machine.
+    /// It should not occur under normal operation and indicates a bug.
+    #[error("unexpected state conflict")]
+    UnexpectedStateConflict(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
@@ -678,13 +692,23 @@ pub enum DeleteByIdError {
     #[error("job cannot be deleted from current state")]
     Conflict(#[source] ApiError),
 
-    /// Metadata database error (500, METADATA_DB_ERROR)
+    /// Failed to retrieve job from scheduler (500, GET_JOB_ERROR)
     ///
     /// This occurs when:
-    /// - Database connection issues
-    /// - Query failures or internal database errors
-    #[error("metadata database error")]
-    MetadataDbError(#[source] ApiError),
+    /// - Database connection fails or is lost during the query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to get job")]
+    GetJobError(#[source] ApiError),
+
+    /// Failed to delete job from scheduler (500, DELETE_JOB_ERROR)
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during deletion
+    /// - Delete operation encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to delete job")]
+    DeleteJobError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
@@ -706,13 +730,14 @@ pub enum DeleteByStatusError {
     #[error("invalid query parameter")]
     InvalidQueryParam(#[source] ApiError),
 
-    /// Metadata database error (500, METADATA_DB_ERROR)
+    /// Failed to delete jobs by status from scheduler (500, DELETE_JOBS_BY_STATUS_ERROR)
     ///
     /// This occurs when:
-    /// - Database connection issues
-    /// - Query failures or internal database errors
-    #[error("metadata database error")]
-    MetadataDbError(#[source] ApiError),
+    /// - Database connection fails or is lost during bulk deletion
+    /// - Status-filtered delete operation encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to delete jobs by status")]
+    DeleteJobsByStatusError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

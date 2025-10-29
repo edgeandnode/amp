@@ -2,7 +2,7 @@
 
 use pgtemp::PgTempDB;
 
-use crate::{JobStatus, MetadataDb, WorkerNodeId};
+use crate::{JobStatus, MetadataDb, WorkerNodeId, jobs};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {
@@ -32,14 +32,12 @@ async fn schedule_and_retrieve_job() {
 
     //* When
     // Schedule the job
-    let job_id = metadata_db
-        .schedule_job(&worker_id, &job_desc_str, &[])
+    let job_id = jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
         .await
         .expect("Failed to schedule job");
 
     // Get the job
-    let job = metadata_db
-        .get_job(job_id)
+    let job = jobs::get_by_id(&metadata_db, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -75,8 +73,7 @@ async fn pagination_traverses_all_jobs_ordered() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = metadata_db
-            .schedule_job(&worker_id, &job_desc_str, &[])
+        let job_id = jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
             .await
             .expect("Failed to schedule job");
         created_job_ids.push(job_id);
@@ -88,8 +85,7 @@ async fn pagination_traverses_all_jobs_ordered() {
     let mut cursor = None;
 
     loop {
-        let page = metadata_db
-            .list_jobs(page_size, cursor)
+        let page = jobs::list(&metadata_db, page_size, cursor)
             .await
             .expect("Failed to list jobs");
 
