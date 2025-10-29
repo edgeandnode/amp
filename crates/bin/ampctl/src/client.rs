@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod datasets;
 pub mod error;
+pub mod jobs;
 pub mod manifests;
 pub mod providers;
 
@@ -67,6 +68,11 @@ impl Client {
     /// Get a manifest client for manifest-related operations.
     pub fn manifests(&self) -> manifests::ManifestsClient<'_> {
         manifests::ManifestsClient::new(self)
+    }
+
+    /// Get a jobs client for jobs-related operations.
+    pub fn jobs(&self) -> jobs::JobsClient<'_> {
+        jobs::JobsClient::new(self)
     }
 }
 
