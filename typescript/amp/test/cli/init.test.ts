@@ -57,7 +57,7 @@ describe("amp init command", () => {
       expect(content).toContain("network: \"anvil\"")
     })
 
-    it("should generate README.md with project name", () => {
+    it("should generate README-local-evm-rpc.md with project name", () => {
       const answers: TemplateAnswers = {
         datasetName: "my_dataset",
         datasetVersion: "1.0.0",
@@ -65,18 +65,18 @@ describe("amp init command", () => {
         network: "anvil",
       }
 
-      const readmeFile = localEvmRpc.files["README.md"]
+      const readmeFile = localEvmRpc.files["README-local-evm-rpc.md"]
       const content = resolveTemplateFile(readmeFile, answers)
 
       expect(content).toContain("# My Cool Project")
-      expect(content).toContain("Dataset Name**: `my_dataset`")
-      expect(content).toContain("Dataset Version**: `1.0.0`")
+      expect(content).toContain("**Dataset**: `my_dataset` (version `1.0.0`)")
+      expect(content).toContain("**Network**: Anvil local testnet")
     })
 
     it("should include all required files", () => {
       const requiredFiles = [
         "amp.config.ts",
-        "README.md",
+        "README-local-evm-rpc.md",
         "contracts/foundry.toml",
         "contracts/src/Counter.sol",
         "contracts/script/Deploy.s.sol",

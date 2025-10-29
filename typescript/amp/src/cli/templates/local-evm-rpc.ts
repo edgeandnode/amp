@@ -53,22 +53,18 @@ export default defineDataset(() => ({
 }))
 `,
 
-    "README.md": (answers: TemplateAnswers) =>
+    "README-local-evm-rpc.md": (answers: TemplateAnswers) =>
       `# ${answers.projectName || answers.datasetName}
 
-A local Amp development project using Anvil for blockchain data extraction and querying.
+Local Amp development with Anvil blockchain testnet.
 
-## 📋 Configuration Summary
+## What This Template Provides
 
-This project was initialized with the following settings:
+**Dataset**: \`${answers.datasetName}\` (version \`${answers.datasetVersion || "0.1.0"}\`)
+**Network**: Anvil local testnet
+**Sample Contract**: Counter.sol with Count and Transfer events
 
-- **Dataset Name**: \`${answers.datasetName}\`
-- **Dataset Version**: \`${answers.datasetVersion || "0.1.0"}\`
-- **Network**: Anvil (local testnet)
-- **Template**: local-evm-rpc
-- **Provider**: Local EVM RPC (http://localhost:8545)
-
-These settings are configured in \`amp.config.ts\` and can be modified at any time.
+This template sets up everything you need to learn Amp's data extraction flow using a local blockchain.
 
 ## 🚀 Quick Start
 
@@ -154,29 +150,24 @@ amp studio
 Note: The \`data/\` directory will be created automatically when you run \`amp dev\`
 \`\`\`
 
-## 🔧 What's Configured
+## 🔧 Pre-configured Tables
 
-### Dataset: \`${answers.datasetName}@${answers.datasetVersion || "0.1.0"}\`
+Your \`amp.config.ts\` defines two SQL views that will extract and decode event data once you run \`amp dev\`:
 
-Your dataset extracts and transforms data from the Anvil local testnet. It includes two tables:
+1. **\`${answers.datasetName}.counts\`** - Decodes Count events from the Counter contract
+   - Extracts: block_hash, tx_hash, address, block_num, timestamp, count
+   - Uses \`evm_decode_log\` UDF to parse event data
 
-1. **\`${answers.datasetName}.counts\`** - Count events from the Counter contract
-   - Columns: block_hash, tx_hash, address, block_num, timestamp, count
+2. **\`${answers.datasetName}.transfers\`** - Decodes Transfer events from the Counter contract
+   - Extracts: block_num, timestamp, from, to, value
+   - Uses \`evm_decode_log\` UDF to parse event data
 
-2. **\`${answers.datasetName}.transfers\`** - Transfer events from the Counter contract
-   - Columns: block_num, timestamp, from, to, value
+These are SQL view definitions, not extracted data yet. Data extraction happens when you run \`amp dev\`.
 
 ### Dependencies
 
 Your dataset depends on:
-- **\`anvil\`** - Raw blockchain data (blocks, transactions, logs) from Anvil
-
-### Sample Contract
-
-The included \`Counter.sol\` contract demonstrates:
-- State management (count variable)
-- Event emission (Count and Transfer events)
-- Basic Solidity patterns
+- **\`anvil\`** (_/anvil@0.1.0) - Provides raw blockchain data (blocks, transactions, logs)
 
 ## 📚 Learn More
 

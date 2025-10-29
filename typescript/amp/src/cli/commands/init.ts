@@ -38,7 +38,7 @@ const datasetVersionPrompt = Prompt.text({
 })
 
 const projectNamePrompt = Prompt.text({
-  message: "Project name (for README):",
+  message: "Project name:",
   default: "amp_project",
   validate: (input) =>
     input.trim().length > 0
@@ -200,7 +200,7 @@ const initializeProject = (
     yield* Console.log(`Next steps:`)
     yield* Console.log(`  1. anvil (in another terminal)`)
     yield* Console.log(`  2. amp dev`)
-    yield* Console.log(`\nFor more information, see README.md\n`)
+    yield* Console.log(`\nFor more information, see README-local-evm-rpc.md\n`)
   })
 
 /**
