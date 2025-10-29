@@ -58,7 +58,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<PruneResponse>, Erro
                 error = ?err,
                 "failed to list orphaned manifests"
             );
-            Error::ListOrphanedManifestsError(err)
+            Error(err)
         })?;
 
     if orphaned_hashes.is_empty() {
@@ -154,32 +154,22 @@ pub struct PruneResponse {
     pub deleted_count: usize,
 }
 
-/// Errors that can occur during manifest pruning
+/// Error for manifest pruning operations.
 ///
-/// This enum represents all possible error conditions when handling
-/// a request to prune orphaned manifests.
+/// This error occurs when failing to list orphaned manifests, which can happen when:
+/// - Database connection is lost
+/// - Failed to query orphaned manifests
+/// - Database errors during query
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Failed to list orphaned manifests
-    ///
-    /// This occurs when:
-    /// - Database connection is lost
-    /// - Failed to query orphaned manifests
-    /// - Database errors during query
-    #[error("failed to list orphaned manifests: {0}")]
-    ListOrphanedManifestsError(#[source] dataset_store::ListOrphanedManifestsError),
-}
+#[error("failed to list orphaned manifests")]
+pub struct Error(#[source] pub dataset_store::ListOrphanedManifestsError);
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
-        match self {
-            Error::ListOrphanedManifestsError(_) => "LIST_ORPHANED_MANIFESTS_ERROR",
-        }
+        "LIST_ORPHANED_MANIFESTS_ERROR"
     }
 
     fn status_code(&self) -> StatusCode {
-        match self {
-            Error::ListOrphanedManifestsError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }

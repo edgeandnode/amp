@@ -746,7 +746,7 @@
           "jobs"
         ],
         "summary": "Handler for the `DELETE /jobs/{id}` endpoint",
-        "description": "Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).\nThis is a safe operation that only removes finalized jobs from the system.\n\n## Path Parameters\n- `id`: The unique identifier of the job to delete (must be a valid JobId)\n\n## Response\n- **204 No Content**: Job was successfully deleted\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job exists but is not in a terminal state\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides safe job deletion with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) can be deleted\n- Non-terminal jobs are protected from accidental deletion\n- Clear error messages distinguish between non-existent jobs and non-terminal jobs\n- Database layer ensures atomic deletion\n\n## Terminal States\nJobs can only be deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (cannot be deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state",
+        "description": "Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).\nThis is a safe, idempotent operation that only removes finalized jobs from the system.\n\n## Path Parameters\n- `id`: The unique identifier of the job to delete (must be a valid JobId)\n\n## Response\n- **204 No Content**: Job was successfully deleted or does not exist (idempotent)\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_CONFLICT`: Job exists but is not in a terminal state\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Idempotent Behavior\nThis handler is idempotent - deleting a non-existent job returns 204 (success).\nThis allows clients to safely retry deletions without worrying about 404 errors.\n\n## Behavior\nThis handler provides safe job deletion with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) can be deleted\n- Non-terminal jobs are protected from accidental deletion\n- Non-existent jobs return success (idempotent behavior)\n- Database layer ensures atomic deletion\n\n## Terminal States\nJobs can only be deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (cannot be deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state",
         "operationId": "jobs_delete",
         "parameters": [
           {
@@ -762,20 +762,10 @@
         ],
         "responses": {
           "204": {
-            "description": "Job deleted successfully"
+            "description": "Job deleted successfully or does not exist (idempotent)"
           },
           "400": {
             "description": "Invalid job ID",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Job not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -813,7 +803,7 @@
           "jobs"
         ],
         "summary": "Handler for the `PUT /jobs/{id}/stop` endpoint",
-        "description": "Stops a running job using the specified job ID. This is an idempotent\noperation that handles job termination requests safely.\n\n## Path Parameters\n- `id`: The unique identifier of the job to stop (must be a valid JobId)\n\n## Response\n- **200 OK**: Job stop request processed successfully\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job cannot be stopped from current state (already terminal or invalid transition)\n- **500 Internal Server Error**: Database connection or scheduler error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job is in a state that cannot be stopped (terminal or invalid transition)\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides idempotent job stopping with the following characteristics:\n- Jobs already in terminal states return conflict error\n- Only running/scheduled jobs can be transitioned to stop-requested\n- The scheduler handles atomic status updates and worker notifications\n- Database layer validates state transitions and prevents race conditions\n\n## State Transitions\nValid stop transitions:\n- Scheduled → StopRequested\n- Running → StopRequested\n\nInvalid transitions (return conflict):\n- Completed → (no change)\n- Failed → (no change)\n- Stopped → (no change)\n- Unknown → (no change)\n\nThe handler:\n- Validates and extracts the job ID from the URL path\n- Retrieves current job status to validate it exists\n- Delegates to scheduler for atomic stop operation with worker notification\n- Returns appropriate HTTP status codes and error messages",
+        "description": "Stops a running job using the specified job ID. This is an idempotent\noperation that handles job termination requests safely.\n\n## Path Parameters\n- `id`: The unique identifier of the job to stop (must be a valid JobId)\n\n## Response\n- **200 OK**: Job stop request processed successfully, or job already in terminal state (idempotent)\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or scheduler error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `GET_JOB_DB_ERROR`: Database error while fetching job information\n- `STOP_JOB_DB_ERROR`: Database error during stop operation execution\n- `UNEXPECTED_STATE_CONFLICT`: Internal state machine error (indicates a bug)\n\n## Idempotent Behavior\nThis handler is idempotent - stopping a job that's already in a terminal state returns success (200).\nThis allows clients to safely retry stop requests without worrying about conflict errors.\n\nThe desired outcome of a stop request is that the job is not running. If the job is already\nstopped, completed, or failed, this outcome is achieved, so we return success.\n\n## Behavior\nThis handler provides idempotent job stopping with the following characteristics:\n- Jobs already in terminal states (Stopped, Completed, Failed) return success (idempotent)\n- Only running/scheduled jobs transition to stop-requested state\n- The scheduler handles atomic status updates and worker notifications\n- Database layer validates state transitions and prevents race conditions\n\n## State Transitions\nValid stop transitions:\n- Scheduled → StopRequested (200 OK)\n- Running → StopRequested (200 OK)\n\nAlready terminal (idempotent - return success):\n- Stopped → no change (200 OK)\n- Completed → no change (200 OK)\n- Failed → no change (200 OK)\n\nThe handler:\n- Validates and extracts the job ID from the URL path\n- Retrieves current job status to validate it exists\n- Returns success if job is already in terminal state (idempotent)\n- Delegates to scheduler for atomic stop operation with worker notification\n- Returns appropriate HTTP status codes and error messages",
         "operationId": "jobs_stop",
         "parameters": [
           {
@@ -829,7 +819,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Job stop request processed successfully"
+            "description": "Job stop request processed successfully, or job already in terminal state (idempotent)"
           },
           "400": {
             "description": "Invalid job ID",
@@ -843,16 +833,6 @@
           },
           "404": {
             "description": "Job not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Job cannot be stopped from current state",
             "content": {
               "application/json": {
                 "schema": {

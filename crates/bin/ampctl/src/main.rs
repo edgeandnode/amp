@@ -60,13 +60,21 @@ enum Commands {
 
     /// Manage manifests in content-addressable storage
     #[command(subcommand)]
+    #[command(alias = "manifests")]
     #[command(long_about = include_str!("cmd/manifest__long_about.md"))]
     Manifest(cmd::manifest::Commands),
 
     /// Manage provider configurations
     #[command(subcommand)]
+    #[command(alias = "providers")]
     #[command(long_about = include_str!("cmd/provider__long_about.md"))]
     Provider(cmd::provider::Commands),
+
+    /// Manage extraction and deployment jobs
+    #[command(subcommand)]
+    #[command(alias = "jobs")]
+    #[command(long_about = include_str!("cmd/job__long_about.md"))]
+    Job(cmd::job::Commands),
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -78,6 +86,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
         Commands::Manifest(command) => cmd::manifest::run(command).await?,
         Commands::Provider(command) => cmd::provider::run(command).await?,
+        Commands::Job(command) => cmd::job::run(command).await?,
     }
 
     Ok(())
