@@ -17,18 +17,14 @@
 
 use datasets_common::reference::Reference;
 use dump::EndBlock;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `dep-dataset` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
-
-    /// Bearer token for authenticating requests to the admin API
-    #[arg(long, env = "AMP_AUTH_TOKEN")]
-    pub auth_token: Option<String>,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// The dataset reference in format: namespace/name@version
     ///
@@ -67,11 +63,10 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for invalid paths/URLs, API errors (400/404/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %dataset_ref))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
 pub async fn run(
     Args {
-        admin_url,
-        auth_token,
+        global,
         dataset_ref,
         end_block,
         parallelism,
@@ -84,14 +79,7 @@ pub async fn run(
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(
-        &admin_url,
-        auth_token.as_deref(),
-        &dataset_ref,
-        end_block,
-        parallelism,
-    )
-    .await?;
+    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism).await?;
 
     crate::success!("Dataset deployed successfully");
     crate::info!("Job ID: {}", job_id);
@@ -105,25 +93,12 @@ pub async fn run(
 /// and returns the job ID.
 #[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
 async fn deploy_dataset(
-    admin_url: &Url,
-    auth_token: Option<&str>,
+    global: &GlobalArgs,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
 ) -> Result<worker::JobId, Error> {
-    let mut client_builder = crate::client::build(admin_url.clone());
-
-    if let Some(token) = auth_token {
-        client_builder = client_builder.with_bearer_token(
-            token
-                .parse()
-                .map_err(|err| Error::InvalidAuthToken { source: err })?,
-        );
-    }
-
-    let client = client_builder
-        .build()
-        .map_err(|err| Error::ClientBuildError { source: err })?;
+    let client = global.build_client()?;
     let job_id = client
         .datasets()
         .deploy(dataset_ref, end_block, parallelism)
@@ -136,18 +111,11 @@ async fn deploy_dataset(
 /// Errors for dataset deployment operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Invalid authentication token
-    #[error("invalid authentication token")]
-    InvalidAuthToken {
-        #[source]
-        source: crate::client::auth::BearerTokenError,
-    },
-
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[source]
-        source: crate::client::BuildError,
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// Deployment error from the client

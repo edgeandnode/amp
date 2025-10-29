@@ -11,18 +11,14 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::hash::Hash;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest inspect` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
-
-    /// Bearer token for authenticating requests to the admin API
-    #[arg(long, env = "AMP_AUTH_TOKEN")]
-    pub auth_token: Option<String>,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Manifest content hash to retrieve
     #[arg(value_name = "HASH", required = true, value_parser = clap::value_parser!(Hash))]
@@ -37,17 +33,11 @@ pub struct Args {
 ///
 /// Returns [`Error`] for invalid hash, manifest not found (404),
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %hash))]
-pub async fn run(
-    Args {
-        admin_url,
-        auth_token,
-        hash,
-    }: Args,
-) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %hash))]
+pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving manifest from admin API");
 
-    let manifest_json = get_manifest(&admin_url, auth_token.as_deref(), &hash).await?;
+    let manifest_json = get_manifest(&global, &hash).await?;
 
     // Pretty-print the manifest JSON to stdout
     println!("{}", manifest_json);
@@ -59,26 +49,10 @@ pub async fn run(
 ///
 /// GETs from `/manifests/{hash}` endpoint and returns the raw manifest JSON.
 #[tracing::instrument(skip_all)]
-async fn get_manifest(
-    admin_url: &Url,
-    auth_token: Option<&str>,
-    hash: &Hash,
-) -> Result<String, Error> {
+async fn get_manifest(global: &GlobalArgs, hash: &Hash) -> Result<String, Error> {
     tracing::debug!("Creating client and retrieving manifest");
 
-    let mut client_builder = crate::client::build(admin_url.clone());
-
-    if let Some(token) = auth_token {
-        client_builder = client_builder.with_bearer_token(
-            token
-                .parse()
-                .map_err(|err| Error::InvalidAuthToken { source: err })?,
-        );
-    }
-
-    let client = client_builder
-        .build()
-        .map_err(|err| Error::ClientBuildError { source: err })?;
+    let client = global.build_client()?;
 
     let manifest_value = client
         .manifests()
@@ -110,18 +84,11 @@ pub enum Error {
     #[error("manifest not found: {hash}")]
     ManifestNotFound { hash: String },
 
-    /// Invalid authentication token
-    #[error("invalid authentication token")]
-    InvalidAuthToken {
-        #[source]
-        source: crate::client::auth::BearerTokenError,
-    },
-
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[source]
-        source: crate::client::BuildError,
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// Client error from ManifestsClient

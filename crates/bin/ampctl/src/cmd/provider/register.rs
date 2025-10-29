@@ -20,18 +20,14 @@
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use object_store::path::Path as ObjectStorePath;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `provider register` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
-
-    /// Bearer token for authenticating requests to the admin API
-    #[arg(long, env = "AMP_AUTH_TOKEN")]
-    pub auth_token: Option<String>,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// The name of the provider configuration
     ///
@@ -52,11 +48,10 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// TOML parse errors, API errors (400/409/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %provider_name))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %provider_name))]
 pub async fn run(
     Args {
-        admin_url,
-        auth_token,
+        global,
         provider_name,
         provider_file,
     }: Args,
@@ -69,13 +64,7 @@ pub async fn run(
 
     let provider_toml = load_provider(&provider_file).await?;
 
-    register_provider(
-        &admin_url,
-        auth_token.as_deref(),
-        &provider_name,
-        &provider_toml,
-    )
-    .await?;
+    register_provider(&global, &provider_name, &provider_toml).await?;
 
     crate::success!("Provider registered successfully");
 
@@ -122,8 +111,7 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
 /// Parses TOML content, converts to JSON, and POSTs to `/providers` endpoint.
 #[tracing::instrument(skip_all)]
 async fn register_provider(
-    admin_url: &Url,
-    auth_token: Option<&str>,
+    global: &GlobalArgs,
     provider_name: &str,
     provider_toml: &str,
 ) -> Result<(), Error> {
@@ -148,19 +136,7 @@ async fn register_provider(
     }
 
     // Create client and register provider
-    let mut client_builder = crate::client::build(admin_url.clone());
-
-    if let Some(token) = auth_token {
-        client_builder = client_builder.with_bearer_token(
-            token
-                .parse()
-                .map_err(|err| Error::InvalidAuthToken { source: err })?,
-        );
-    }
-
-    let client = client_builder
-        .build()
-        .map_err(|err| Error::ClientBuildError { source: err })?;
+    let client = global.build_client()?;
 
     client
         .providers()
@@ -204,18 +180,11 @@ pub enum Error {
     #[error("invalid provider structure: {message}")]
     InvalidProviderStructure { message: String },
 
-    /// Invalid authentication token
-    #[error("invalid authentication token")]
-    InvalidAuthToken {
-        #[source]
-        source: crate::client::auth::BearerTokenError,
-    },
-
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[source]
-        source: crate::client::BuildError,
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// Error from the provider client

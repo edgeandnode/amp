@@ -12,20 +12,13 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use url::Url;
-
-use crate::client::providers::DeleteError;
+use crate::{args::GlobalArgs, client::providers::DeleteError};
 
 /// Command-line arguments for the `provider rm` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
-
-    /// Bearer token for authenticating requests to the admin API
-    #[arg(long, env = "AMP_AUTH_TOKEN")]
-    pub auth_token: Option<String>,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Provider name to delete
     #[arg(value_name = "NAME", required = true)]
@@ -40,17 +33,11 @@ pub struct Args {
 ///
 /// Returns [`Error`] for invalid name, provider not found (404),
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %name))]
-pub async fn run(
-    Args {
-        admin_url,
-        auth_token,
-        name,
-    }: Args,
-) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %name))]
+pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting provider from admin API");
 
-    delete_provider(&admin_url, auth_token.as_deref(), &name).await?;
+    delete_provider(&global, &name).await?;
 
     crate::success!("Provider deleted successfully");
 
@@ -61,26 +48,10 @@ pub async fn run(
 ///
 /// DELETEs to `/providers/{name}` endpoint using the API client.
 #[tracing::instrument(skip_all)]
-async fn delete_provider(
-    admin_url: &Url,
-    auth_token: Option<&str>,
-    name: &str,
-) -> Result<(), Error> {
+async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
     tracing::debug!("Creating API client");
 
-    let mut client_builder = crate::client::build(admin_url.clone());
-
-    if let Some(token) = auth_token {
-        client_builder = client_builder.with_bearer_token(
-            token
-                .parse()
-                .map_err(|err| Error::InvalidAuthToken { source: err })?,
-        );
-    }
-
-    let client = client_builder
-        .build()
-        .map_err(|err| Error::ClientBuildError { source: err })?;
+    let client = global.build_client()?;
 
     client
         .providers()
@@ -109,18 +80,11 @@ async fn delete_provider(
 /// Errors for provider removal operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Invalid authentication token
-    #[error("invalid authentication token")]
-    InvalidAuthToken {
-        #[source]
-        source: crate::client::auth::BearerTokenError,
-    },
-
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[source]
-        source: crate::client::BuildError,
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// Invalid provider name

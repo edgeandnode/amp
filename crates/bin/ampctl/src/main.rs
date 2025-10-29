@@ -20,10 +20,6 @@ async fn main() {
 #[command(after_long_help = include_str!("cmd/root__after_long_help.md"))]
 #[command(version = env!("VERGEN_GIT_DESCRIBE"))]
 struct Cli {
-    /// Bearer token for authenticating requests to the admin API
-    #[arg(long, env = "AMP_AUTH_TOKEN", global = true)]
-    auth_token: Option<String>,
-
     #[command(subcommand)]
     command: Commands,
 }
