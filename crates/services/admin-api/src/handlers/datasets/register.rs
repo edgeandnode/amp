@@ -38,7 +38,7 @@ use crate::{
 ///
 /// ## Request Body
 /// - `dataset_name`: Name of the dataset to be registered (must be valid dataset name)
-/// - `version`: Version of the dataset to register (must be valid version string)
+/// - `version`: Optional version of the dataset to register. If omitted, only the "dev" tag is updated.
 /// - `manifest`: JSON string representation of the dataset manifest
 ///
 /// ## Response
@@ -64,14 +64,17 @@ use crate::{
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
 /// ## Registration Process
-/// The registration process involves two steps:
-/// 1. **Register manifest**: Stores the manifest file in hash-based storage and creates a metadata database entry
-/// 2. **Tag version**: Associates the version identifier with the manifest hash (upsert operation)
+/// The registration process involves one or two steps depending on whether a version is provided:
+/// 1. **Register manifest**: Stores the manifest file in hash-based storage, creates a metadata database entry,
+///    and automatically updates the "dev" tag to point to this manifest
+/// 2. **Tag version** (optional): If a version is provided, associates the version identifier with the manifest hash (upsert operation)
 ///
-/// This two-step approach enables:
+/// This approach enables:
 /// - Content-addressable storage by manifest hash
 /// - Deduplication of identical manifests
 /// - Separation of manifest storage from version management
+/// - Development workflow: register without version to only update "dev" tag
+/// - Release workflow: register with version to create semantic version tags
 ///
 /// The tag operation is idempotent:
 /// - If the version tag doesn't exist, it is created
@@ -126,7 +129,7 @@ pub async fn handler(
             tracing::error!(
                 namespace = %namespace,
                 name = %name,
-                version = %version,
+                version = ?version,
                 error = ?err,
                 "Failed to parse common manifest JSON"
             );
@@ -177,30 +180,39 @@ pub async fn handler(
             Error::ManifestRegistrationError(err)
         })?;
 
-    // Tag the manifest with the version
-    ctx.dataset_store
-        .set_dataset_version_tag(&namespace, &name, &version, &manifest_hash)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                namespace = %namespace,
-                name = %name,
-                version = %version,
-                manifest_hash = %manifest_hash,
-                kind = %dataset_kind,
-                error = ?err,
-                "Failed to set version tag"
-            );
-            Error::VersionTaggingError(err)
-        })?;
-
     tracing::info!(
-        "Registered manifest for dataset '{}/{}' version '{}' (hash: {})",
+        "Registered manifest for dataset '{}/{}' (hash: {})",
         namespace,
         name,
-        version,
         manifest_hash
     );
+
+    // Tag the manifest with the version, if provided
+    if let Some(version) = version {
+        ctx.dataset_store
+            .set_dataset_version_tag(&namespace, &name, &version, &manifest_hash)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    namespace = %namespace,
+                    name = %name,
+                    version = %version,
+                    manifest_hash = %manifest_hash,
+                    kind = %dataset_kind,
+                    error = ?err,
+                    "Failed to set version tag"
+                );
+                Error::VersionTaggingError(err)
+            })?;
+
+        tracing::info!(
+            "Tagged version '{}' for dataset '{}/{}' (hash: {})",
+            version,
+            namespace,
+            name,
+            manifest_hash
+        );
+    }
 
     Ok(StatusCode::CREATED)
 }
@@ -218,9 +230,11 @@ pub struct RegisterRequest {
     /// Name of the dataset to be registered (validated identifier format)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: Name,
-    /// Version of the dataset to register using semantic versioning (e.g., "1.0.0")
+    /// Optional version of the dataset to register using semantic versioning (e.g., "1.0.0").
+    /// If omitted, only the "dev" tag is updated. If provided, both "dev" and the semantic version tag are created/updated.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub version: Version,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<Version>,
     /// JSON string representation of the dataset manifest (required)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub manifest: NonEmptyString,
