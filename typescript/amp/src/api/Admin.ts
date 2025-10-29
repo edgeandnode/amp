@@ -194,31 +194,6 @@ export type GetDatasetManifestError =
   | Error.MetadataDbError
 
 /**
- * The get jobs endpoint (GET /jobs).
- */
-const getJobs = HttpApiEndpoint.get("getJobs")`/jobs`
-  .addError(Error.InvalidQueryParameters)
-  .addError(Error.LimitTooLarge)
-  .addError(Error.LimitInvalid)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Model.JobsResponse)
-  .setUrlParams(
-    Schema.Struct({
-      limit: Schema.optional(Schema.NumberFromString),
-      lastJobId: Schema.optional(Model.JobIdParam).pipe(Schema.fromKey("last_job_id")),
-    }),
-  )
-
-/**
- * Error type for the `getJobs` endpoint.
- */
-export type GetJobsError =
-  | Error.InvalidQueryParameters
-  | Error.LimitTooLarge
-  | Error.LimitInvalid
-  | Error.MetadataDbError
-
-/**
  * The get job by ID endpoint (GET /jobs/{jobId}).
  */
 const getJobById = HttpApiEndpoint.get("getJobById")`/jobs/${jobId}`
@@ -235,64 +210,6 @@ const getJobById = HttpApiEndpoint.get("getJobById")`/jobs/${jobId}`
  * - MetadataDbError: Internal database error occurred.
  */
 export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.MetadataDbError
-
-/**
- * The delete all jobs endpoint (DELETE /jobs).
- */
-const deleteAllJobs = HttpApiEndpoint.del("deleteAllJobs")`/jobs`
-  .addError(Error.InvalidQueryParam)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Schema.Void, { status: 204 })
-  .setUrlParams(
-    Schema.Struct({
-      status: Model.JobStatusParam,
-    }),
-  )
-
-/**
- * Error type for the `deleteAllJobs` endpoint.
- */
-export type DeleteAllJobsError = Error.InvalidQueryParam | Error.MetadataDbError
-
-/**
- * The delete job by ID endpoint (DELETE /jobs/{jobId}).
- */
-const deleteJobById = HttpApiEndpoint.del("deleteJobById")`/jobs/${jobId}`
-  .addError(Error.InvalidJobId)
-  .addError(Error.JobNotFound)
-  .addError(Error.JobConflict)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Schema.Void, { status: 204 })
-
-/**
- * Error type for the `deleteJobById` endpoint.
- *
- * - InvalidJobId: The provided ID is not a valid job identifier.
- * - JobNotFound: No job exists with the given ID.
- * - JobConflict: Job exists but is not in a terminal state.
- * - MetadataDbError: Internal database error occurred.
- */
-export type DeleteJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.JobConflict | Error.MetadataDbError
-
-/**
- * The stop job endpoint (PUT /jobs/{jobId}/stop).
- */
-const stopJob = HttpApiEndpoint.put("stopJob")`/jobs/${jobId}/stop`
-  .addError(Error.InvalidJobId)
-  .addError(Error.JobNotFound)
-  .addError(Error.JobConflict)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Schema.Void, { status: 204 })
-
-/**
- * Error type for the `stopJob` endpoint.
- *
- * - InvalidJobId: The provided ID is not a valid job identifier.
- * - JobNotFound: No job exists with the given ID.
- * - JobConflict: Job is in a state that cannot be stopped.
- * - MetadataDbError: Internal database error occurred.
- */
-export type StopJobError = Error.InvalidJobId | Error.JobNotFound | Error.JobConflict | Error.MetadataDbError
 
 /**
  * The get locations endpoint (GET /locations).
@@ -408,11 +325,7 @@ export class DatasetGroup extends HttpApiGroup.make("dataset")
  * The api group for the job endpoints.
  */
 export class JobGroup extends HttpApiGroup.make("job")
-  .add(getJobs)
   .add(getJobById)
-  .add(deleteAllJobs)
-  .add(deleteJobById)
-  .add(stopJob)
 {}
 
 /**
@@ -554,17 +467,6 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   ) => Effect.Effect<any, HttpClientError.HttpClientError | GetDatasetManifestError>
 
   /**
-   * Get all jobs with pagination.
-   *
-   * @param options The pagination options.
-   * @return The paginated jobs response.
-   */
-  readonly getJobs: (options?: {
-    limit?: number | undefined
-    lastJobId?: number | undefined
-  }) => Effect.Effect<Model.JobsResponse, HttpClientError.HttpClientError | GetJobsError>
-
-  /**
    * Get a job by ID.
    *
    * @param jobId The ID of the job to get.
@@ -573,31 +475,6 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   readonly getJobById: (
     jobId: number,
   ) => Effect.Effect<Model.JobInfo, HttpClientError.HttpClientError | GetJobByIdError>
-
-  /**
-   * Delete all jobs by status filter.
-   *
-   * @param status The status filter for jobs to delete ("terminal", "complete", "stopped", "error")
-   */
-  readonly deleteAllJobs: (
-    status: "terminal" | "complete" | "stopped" | "error",
-  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteAllJobsError>
-
-  /**
-   * Delete a job by ID.
-   *
-   * @param jobId The ID of the job to delete.
-   */
-  readonly deleteJobById: (
-    jobId: number,
-  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteJobByIdError>
-
-  /**
-   * Stop a job.
-   *
-   * @param jobId The ID of the job to stop.
-   */
-  readonly stopJob: (jobId: number) => Effect.Effect<void, HttpClientError.HttpClientError | StopJobError>
 
   /**
    * Get all locations with pagination.
@@ -777,27 +654,6 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getJobs = Effect.fn("getJobs")(
-    function*(options?: {
-      limit?: number | undefined
-      lastJobId?: number | undefined
-    }) {
-      const result = yield* client.job.getJobs({
-        urlParams: {
-          limit: options?.limit,
-          lastJobId: options?.lastJobId,
-        },
-      }).pipe(
-        Effect.catchTags({
-          HttpApiDecodeError: Effect.die,
-          ParseError: Effect.die,
-        }),
-      )
-
-      return result
-    },
-  )
-
   const getJobById = Effect.fn("getJobById")(function*(jobId: number) {
     const result = yield* client.job.getJobById({
       path: {
@@ -811,45 +667,6 @@ export const make = Effect.fn(function*(url: string) {
     )
 
     return result
-  })
-
-  const deleteAllJobs = Effect.fn("deleteAllJobs")(function*(status: "terminal" | "complete" | "stopped" | "error") {
-    yield* client.job.deleteAllJobs({
-      urlParams: {
-        status,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-  })
-
-  const deleteJobById = Effect.fn("deleteJobById")(function*(jobId: number) {
-    yield* client.job.deleteJobById({
-      path: {
-        jobId,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-  })
-
-  const stopJob = Effect.fn("stopJob")(function*(jobId: number) {
-    yield* client.job.stopJob({
-      path: {
-        jobId,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
   })
 
   const getLocations = Effect.fn("getLocations")(function*(options?: {
@@ -932,11 +749,7 @@ export const make = Effect.fn(function*(url: string) {
     getDatasetVersion,
     deployDataset,
     getDatasetManifest,
-    getJobs,
     getJobById,
-    deleteAllJobs,
-    deleteJobById,
-    stopJob,
     getLocations,
     getLocationById,
     deleteLocationById,
