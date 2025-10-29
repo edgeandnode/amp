@@ -1489,13 +1489,13 @@ fn dataset_versions_from_table_refs<'a>(
         })?;
 
         // Validate that revision (if present) is a Version type, not hash/latest/dev
-        if let Some(revision) = &partial_ref.revision {
-            if !revision.is_version() {
-                return Err(ExtractDatasetFromTableRefsError::InvalidVersion {
-                    version: revision.to_string(),
-                    schema: catalog_schema.to_string(),
-                });
-            }
+        if let Some(revision) = &partial_ref.revision
+            && !revision.is_version()
+        {
+            return Err(ExtractDatasetFromTableRefsError::InvalidVersion {
+                version: revision.to_string(),
+                schema: catalog_schema.to_string(),
+            });
         }
 
         datasets.insert(partial_ref);
@@ -1545,13 +1545,13 @@ fn dataset_versions_from_function_names<'a>(
         })?;
 
         // Validate that revision (if present) is a Version type, not hash/latest/dev
-        if let Some(revision) = &partial_ref.revision {
-            if !revision.is_version() {
-                return Err(ExtractDatasetFromFunctionNamesError::InvalidVersion {
-                    version: revision.to_string(),
-                    function: func_name.to_string(),
-                });
-            }
+        if let Some(revision) = &partial_ref.revision
+            && !revision.is_version()
+        {
+            return Err(ExtractDatasetFromFunctionNamesError::InvalidVersion {
+                version: revision.to_string(),
+                function: func_name.to_string(),
+            });
         }
 
         datasets.insert(partial_ref);
