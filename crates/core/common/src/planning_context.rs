@@ -1,8 +1,6 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use bincode::{Decode, Encode, config};
-use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, TableProvider},
@@ -17,43 +15,18 @@ use datafusion::{
     physical_plan::ExecutionPlan,
     sql::parser,
 };
-use datafusion_proto::bytes::{
-    logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
-};
 use tracing::instrument;
 
 use crate::{
-    BlockNum, BoxError, LogicalCatalog, QueryContext, ResolvedTable,
-    metadata::segments::ResumeWatermark,
+    BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     plan_visitors::{is_incremental, propagate_block_num},
-    query_context::{Error, TableProviderCodec, default_catalog_name},
-    stream_helpers::is_streaming,
+    query_context::{Error, default_catalog_name},
 };
 
 /// A context for planning SQL queries.
 pub struct PlanningContext {
     session_config: SessionConfig,
     catalog: LogicalCatalog,
-}
-
-// Serialized plan with additional options
-#[derive(Encode, Decode)]
-pub struct RemotePlan {
-    pub serialized_plan: Vec<u8>,
-    pub is_streaming: bool,
-    pub resume_watermark: Option<BTreeMap<String, (BlockNum, [u8; 32])>>,
-    pub table_refs: Vec<String>,
-    pub function_refs: Vec<String>,
-}
-
-pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
-    let (remote_plan, _) = bincode::decode_from_slice(bytes, config::standard()).map_err(|e| {
-        Error::PlanDecodingError(DataFusionError::Plan(format!(
-            "Failed to serialize remote plan: {}",
-            e
-        )))
-    })?;
-    Ok(remote_plan)
 }
 
 impl PlanningContext {
@@ -74,43 +47,6 @@ impl PlanningContext {
         let ctx = self.datafusion_ctx()?;
         let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
         Ok(plan.schema().clone())
-    }
-
-    /// This will plan the query against empty tables, and then serialize that plan using
-    /// datafusion-proto. This is useful for sending the plan to a remote server for execution.
-    ///
-    /// Returns the serialized plan and its output schema.
-    pub async fn sql_to_remote_plan(
-        &self,
-        query: parser::Statement,
-        resume_watermark: Option<ResumeWatermark>,
-    ) -> Result<(Bytes, DFSchemaRef), Error> {
-        let is_streaming = is_streaming(&query);
-        let ctx = self.datafusion_ctx()?;
-        let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
-        let schema = plan.schema().clone();
-        let serialized_plan =
-            logical_plan_to_bytes_with_extension_codec(&plan, &TableProviderCodec)
-                .map_err(Error::PlanEncodingError)?;
-        let LogicalCatalog { tables, udfs } = &self.catalog;
-        let table_refs = tables.iter().map(|t| t.table_ref().to_string()).collect();
-        let remote_plan = RemotePlan {
-            serialized_plan: serialized_plan.to_vec(),
-            is_streaming,
-            resume_watermark: resume_watermark.map(Into::into),
-            table_refs,
-            function_refs: udfs.iter().map(|f| f.name().to_string()).collect(),
-        };
-        let serialized_plan = Bytes::from(
-            bincode::encode_to_vec(&remote_plan, config::standard()).map_err(|e| {
-                Error::PlanEncodingError(DataFusionError::Plan(format!(
-                    "Failed to serialize remote plan: {}",
-                    e
-                )))
-            })?,
-        );
-
-        Ok((serialized_plan, schema))
     }
 
     fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
@@ -162,14 +98,6 @@ impl PlanningContext {
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<DetachedLogicalPlan, Error> {
         let ctx = self.datafusion_ctx()?;
         let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
-        Ok(DetachedLogicalPlan(plan))
-    }
-
-    pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<DetachedLogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
-            .map_err(Error::PlanDecodingError)?;
-        crate::query_context::verify_plan(&plan)?;
         Ok(DetachedLogicalPlan(plan))
     }
 }

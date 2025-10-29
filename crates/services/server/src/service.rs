@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc};
+use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
@@ -13,7 +13,7 @@ use async_stream::stream;
 use axum::{http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    DetachedLogicalPlan, PlanningContext, QueryContext,
+    BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext,
     arrow::{
         self,
         array::RecordBatch,
@@ -82,6 +82,12 @@ pub enum Error {
 
     #[error("streaming query execution error: {0}")]
     StreamingExecutionError(String),
+
+    #[error("ticket encoding error: {0}")]
+    TicketEncodingError(DataFusionError),
+
+    #[error("ticket decoding error: {0}")]
+    TicketDecodingError(DataFusionError),
 }
 
 impl Error {
@@ -97,8 +103,6 @@ impl Error {
             Error::PlanningCtxForSqlError(_) => "PLANNING_CTX_FOR_SQL_ERROR",
             Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
             Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
-            Error::CoreError(CoreError::PlanEncodingError(_)) => "PLAN_ENCODING_ERROR",
-            Error::CoreError(CoreError::PlanDecodingError(_)) => "PLAN_DECODING_ERROR",
             Error::CoreError(CoreError::DatasetError(_)) => "DATASET_ERROR",
             Error::CoreError(CoreError::ConfigError(_)) => "CONFIG_ERROR",
             Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
@@ -107,6 +111,8 @@ impl Error {
             Error::CoreError(CoreError::TableNotFoundError(_)) => "TABLE_NOT_FOUND_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
+            Error::TicketEncodingError(_) => "TICKET_ENCODING_ERROR",
+            Error::TicketDecodingError(_) => "TICKET_DECODING_ERROR",
         }
     }
 }
@@ -127,12 +133,9 @@ fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let status_code = match self {
-            Error::CoreError(
-                CoreError::InvalidPlan(_)
-                | CoreError::SqlParseError(_)
-                | CoreError::PlanEncodingError(_)
-                | CoreError::PlanDecodingError(_),
-            ) => StatusCode::BAD_REQUEST,
+            Error::CoreError(CoreError::InvalidPlan(_) | CoreError::SqlParseError(_)) => {
+                StatusCode::BAD_REQUEST
+            }
             Error::CoreError(
                 CoreError::DatasetError(_)
                 | CoreError::ConfigError(_)
@@ -151,6 +154,8 @@ impl IntoResponse for Error {
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
             Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
+            Error::TicketEncodingError(_) => StatusCode::BAD_REQUEST,
+            Error::TicketDecodingError(_) => StatusCode::BAD_REQUEST,
         };
         let res = json!({
             "error_code": self.error_code(),
@@ -173,9 +178,6 @@ impl From<Error> for Status {
             Error::CoreError(CoreError::SqlParseError(_)) => {
                 Status::invalid_argument(e.to_string())
             }
-            Error::CoreError(CoreError::PlanEncodingError(_) | CoreError::PlanDecodingError(_)) => {
-                Status::invalid_argument(e.to_string())
-            }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::ConfigError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(e.to_string()),
@@ -192,22 +194,30 @@ impl From<Error> for Status {
             Error::GetPhysicalCatalogError(_) => Status::internal(e.to_string()),
             Error::PlanningCtxForSqlError(_) => Status::internal(e.to_string()),
             Error::InvalidQuery(_) => Status::invalid_argument(e.to_string()),
+            Error::TicketEncodingError(_) => Status::invalid_argument(e.to_string()),
+            Error::TicketDecodingError(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
 
 pub enum QueryResultStream {
-    NonIncremental(BoxStream<'static, Result<RecordBatch, DataFusionError>>),
-    Incremental(BoxStream<'static, Result<QueryMessage, Error>>),
+    NonIncremental {
+        stream: BoxStream<'static, Result<RecordBatch, DataFusionError>>,
+        schema: SchemaRef,
+    },
+    Incremental {
+        stream: BoxStream<'static, Result<QueryMessage, Error>>,
+        schema: SchemaRef,
+    },
 }
 
 impl QueryResultStream {
     pub fn record_batches(self) -> BoxStream<'static, Result<RecordBatch, Error>> {
         match self {
-            Self::NonIncremental(stream) => stream
+            Self::NonIncremental { stream, schema: _ } => stream
                 .map_err(|err| Error::StreamingExecutionError(err.to_string()))
                 .boxed(),
-            Self::Incremental(stream) => stream
+            Self::Incremental { stream, schema: _ } => stream
                 .filter_map(async |result| match result {
                     Err(err) => Some(Err(err)),
                     Ok(QueryMessage::Data(batch)) => Some(Ok(batch)),
@@ -225,6 +235,14 @@ pub struct Service {
     dataset_store: Arc<DatasetStore>,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+}
+
+// Flight service ticket
+#[derive(bincode::Encode, bincode::Decode)]
+pub struct AmpTicket {
+    pub query: String,
+    pub is_streaming: bool,
+    pub resume_watermark: Option<BTreeMap<String, (BlockNum, [u8; 32])>>,
 }
 
 impl Service {
@@ -258,7 +276,12 @@ impl Service {
         })
     }
 
-    pub async fn execute_query(&self, sql: &str) -> Result<QueryResultStream, Error> {
+    pub async fn execute_query(
+        &self,
+        sql: &str,
+        is_streaming: Option<bool>,
+        resume_watermark: Option<ResumeWatermark>,
+    ) -> Result<QueryResultStream, Error> {
         let query = parse_sql(sql).map_err(Error::from)?;
         let dataset_store = self.dataset_store.clone();
         let catalog = dataset_store
@@ -268,9 +291,10 @@ impl Service {
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
 
-        let is_streaming = common::stream_helpers::is_streaming(&query);
+        let is_streaming =
+            is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
         let result = self
-            .execute_plan(catalog, dataset_store, plan, is_streaming, None)
+            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
             .await;
 
         // Record execution error
@@ -298,15 +322,17 @@ impl Service {
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
         let query_start_time = std::time::Instant::now();
+        let schema: SchemaRef = plan.schema().as_ref().clone().into();
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
             let record_batches = ctx.execute_plan(plan, true).await?;
-            let stream = QueryResultStream::NonIncremental(
-                NonEmptyRecordBatchStream::new(record_batches).boxed(),
-            );
+            let stream = QueryResultStream::NonIncremental {
+                stream: NonEmptyRecordBatchStream::new(record_batches).boxed(),
+                schema,
+            };
 
             if let Some(metrics) = &self.metrics {
                 Ok(track_query_metrics(stream, metrics, query_start_time))
@@ -330,9 +356,11 @@ impl Service {
 
             // If no tables are synced, we return an empty stream.
             let Some(earliest_block) = earliest_block else {
-                let schema = plan.schema().as_ref().clone().into();
-                let empty_stream = RecordBatchStreamAdapter::new(schema, stream::empty());
-                return Ok(QueryResultStream::NonIncremental(Box::pin(empty_stream)));
+                let empty_stream = RecordBatchStreamAdapter::new(schema.clone(), stream::empty());
+                return Ok(QueryResultStream::NonIncremental {
+                    stream: Box::pin(empty_stream),
+                    schema,
+                });
             };
 
             let query = StreamingQuery::spawn(
@@ -350,12 +378,13 @@ impl Service {
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
-            let stream = QueryResultStream::Incremental(
-                query
+            let stream = QueryResultStream::Incremental {
+                stream: query
                     .as_stream()
                     .map_err(|err| Error::StreamingExecutionError(err.to_string()))
                     .boxed(),
-            );
+                schema,
+            };
 
             if let Some(metrics) = &self.metrics {
                 Ok(track_query_metrics(stream, metrics, query_start_time))
@@ -462,7 +491,7 @@ impl Service {
         descriptor: FlightDescriptor,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<FlightInfo, Error> {
-        let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)
+        let (ticket, schema) = match DescriptorType::try_from(descriptor.r#type)
             .map_err(|e| Error::PbDecodeError(e.to_string()))?
         {
             DescriptorType::Cmd => {
@@ -479,14 +508,15 @@ impl Service {
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
                     let query = parse_sql(&sql_query.query)?;
-                    let query_ctx = self
-                        .dataset_store
-                        .clone()
-                        .planning_ctx_for_sql(&query)
-                        .await?;
-                    query_ctx
-                        .sql_to_remote_plan(query, resume_watermark)
-                        .await?
+                    let plan_ctx = self.dataset_store.planning_ctx_for_sql(&query).await?;
+                    let is_streaming = common::stream_helpers::is_streaming(&query);
+                    let schema = plan_ctx.sql_output_schema(query).await?;
+                    let ticket = AmpTicket {
+                        query: sql_query.query,
+                        is_streaming,
+                        resume_watermark: resume_watermark.map(Into::into),
+                    };
+                    (ticket, schema)
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
@@ -498,8 +528,16 @@ impl Service {
             }
         };
 
+        let ticket = Bytes::from(
+            bincode::encode_to_vec(&ticket, bincode::config::standard()).map_err(|e| {
+                Error::TicketEncodingError(DataFusionError::Plan(format!(
+                    "Failed to serialize remote plan: {}",
+                    e
+                )))
+            })?,
+        );
         let endpoint = FlightEndpoint {
-            ticket: Some(Ticket::new(serialized_plan)),
+            ticket: Some(Ticket::new(ticket)),
 
             // We may eventually want to leverage the load-balancing capabilities of Arrow Flight.
             // But for now leaving `location` this empty is fine, per the docs
@@ -532,27 +570,24 @@ impl Service {
 
     #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        let remote_plan = common::remote_plan_from_bytes(&ticket.ticket)?;
-        let is_streaming = remote_plan.is_streaming;
-        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
-        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
+        let (ticket, _) =
+            bincode::decode_from_slice::<AmpTicket, _>(&ticket.ticket, bincode::config::standard())
+                .map_err(|e| {
+                    Error::TicketDecodingError(DataFusionError::Plan(format!(
+                        "Failed to deserialize remote plan: {}",
+                        e
+                    )))
+                })?;
 
-        let catalog = self
-            .dataset_store
-            .get_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
-            .await?;
-        let query_ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = query_ctx
-            .plan_from_bytes(&remote_plan.serialized_plan)
-            .await?;
-        let schema: SchemaRef = plan.schema().as_ref().clone().into();
-
-        let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
+            .execute_query(
+                &ticket.query,
+                Some(ticket.is_streaming),
+                ticket.resume_watermark.map(Into::into),
+            )
             .await?;
 
-        Ok(flight_data_stream(stream, schema))
+        Ok(flight_data_stream(stream))
     }
 }
 
@@ -582,7 +617,10 @@ fn track_query_metrics(
     let metrics = metrics.clone();
 
     match stream {
-        QueryResultStream::NonIncremental(record_batch_stream) => {
+        QueryResultStream::NonIncremental {
+            stream: record_batch_stream,
+            schema,
+        } => {
             let wrapped_stream = stream! {
                 let mut total_rows = 0u64;
                 let mut total_bytes = 0u64;
@@ -617,9 +655,15 @@ fn track_query_metrics(
                 metrics.record_query_execution(duration, total_rows, total_bytes);
             };
 
-            QueryResultStream::NonIncremental(wrapped_stream.boxed())
+            QueryResultStream::NonIncremental {
+                stream: wrapped_stream.boxed(),
+                schema,
+            }
         }
-        QueryResultStream::Incremental(message_stream) => {
+        QueryResultStream::Incremental {
+            stream: message_stream,
+            schema,
+        } => {
             // Increment active streaming query counter
             metrics.streaming_queries_active.inc();
             metrics.streaming_queries_started.inc();
@@ -672,17 +716,20 @@ fn track_query_metrics(
             }
             .boxed();
 
-            QueryResultStream::Incremental(wrapped)
+            QueryResultStream::Incremental {
+                stream: wrapped,
+                schema,
+            }
         }
     }
 }
 
-fn flight_data_stream(
-    query_result_stream: QueryResultStream,
-    schema: SchemaRef,
-) -> TonicStream<FlightData> {
+fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<FlightData> {
     match query_result_stream {
-        QueryResultStream::NonIncremental(non_incremental_stream) => {
+        QueryResultStream::NonIncremental {
+            stream: non_incremental_stream,
+            schema,
+        } => {
             // Use manual encoding for NonIncremental streams to preserve empty batches
             // (arrow-flight's FlightDataEncoderBuilder filters them out)
             stream! {
@@ -718,7 +765,10 @@ fn flight_data_stream(
             }
             .boxed()
         }
-        QueryResultStream::Incremental(mut incremental_stream) => {
+        QueryResultStream::Incremental {
+            stream: mut incremental_stream,
+            schema,
+        } => {
             stream! {
         let mut dictionary_tracker = DictionaryTracker::new(true);
         let mut ranges: Vec<BlockRange> = Default::default();
