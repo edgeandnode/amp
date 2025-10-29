@@ -173,17 +173,4 @@ Testing.layer((it) => {
       assertFailure(result, Cause.fail(expected))
     }),
   )
-
-  it.effect(
-    "handles pagination limit validation",
-    Effect.fn(function*() {
-      const admin = yield* Admin.Admin
-      const result = yield* admin.getJobs({ limit: 0 }).pipe(Effect.exit)
-      const expected = new Errors.LimitInvalid({
-        message: "limit must be greater than 0",
-        code: "LIMIT_INVALID",
-      })
-      assertFailure(result, Cause.fail(expected))
-    }),
-  )
 })

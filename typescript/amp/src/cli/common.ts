@@ -29,12 +29,6 @@ export const configFile = Options.file("config", { exists: "yes" }).pipe(
   Options.withDescription("The dataset definition config file"),
 )
 
-export const force = Options.boolean("force").pipe(
-  Options.withAlias("f"),
-  Options.withDefault(false),
-  Options.withDescription("Skip confirmation prompts"),
-)
-
 /**
  * Dataset reference option in format: namespace/name@version
  *

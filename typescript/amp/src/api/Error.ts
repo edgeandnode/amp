@@ -487,55 +487,6 @@ export class InvalidLocationId extends Schema.Class<InvalidLocationId>("InvalidL
 }
 
 /**
- * JobConflict - Job is in a state that conflicts with the requested operation.
- *
- * Causes:
- * - Attempting to delete a job that is not in terminal state
- * - Attempting to stop a job that is already in terminal state
- * - Invalid state transitions for job operations
- *
- * Applies to:
- * - DELETE /jobs/{id} - When job is not in terminal state
- * - PUT /jobs/{id}/stop - When job cannot be stopped from current state
- */
-export class JobConflict extends Schema.Class<JobConflict>("JobConflict")(
-  {
-    code: Schema.Literal("JOB_CONFLICT").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 409,
-  },
-) {
-  readonly _tag = "JobConflict" as const
-}
-
-/**
- * InvalidQueryParam - The query parameters are invalid or malformed.
- *
- * Causes:
- * - Invalid query parameter values
- * - Missing required query parameters
- * - Query parameter validation failures
- * - Unsupported parameter combinations
- *
- * Applies to:
- * - DELETE /jobs - Invalid status parameter
- * - Any endpoint with query parameter validation
- */
-export class InvalidQueryParam extends Schema.Class<InvalidQueryParam>("InvalidQueryParam")(
-  {
-    code: Schema.Literal("INVALID_QUERY_PARAM").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 400,
-  },
-) {
-  readonly _tag = "InvalidQueryParam" as const
-}
-
-/**
  * RegistrationFailed - Failed to register manifest in the registry system.
  *
  * Causes:
