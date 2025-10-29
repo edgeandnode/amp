@@ -46,14 +46,10 @@ pub enum BuildClientError {
     /// Invalid authentication token
     #[error("invalid authentication token")]
     InvalidAuthToken {
-        #[source]
         source: crate::client::auth::BearerTokenError,
     },
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[source]
-        source: crate::client::BuildError,
-    },
+    ClientBuildError { source: crate::client::BuildError },
 }
