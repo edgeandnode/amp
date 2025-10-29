@@ -92,7 +92,10 @@ pub async fn serve(
             "/locations/{location_id}/files",
             get(locations::get_files::handler),
         )
-        .route("/manifests", post(manifests::register::handler))
+        .route(
+            "/manifests",
+            post(manifests::register::handler).delete(manifests::prune::handler),
+        )
         .route(
             "/manifests/{hash}",
             get(manifests::get_by_id::handler).delete(manifests::delete_by_id::handler),
@@ -159,6 +162,7 @@ pub async fn serve(
         handlers::manifests::get_by_id::handler,
         handlers::manifests::delete_by_id::handler,
         handlers::manifests::list_datasets::handler,
+        handlers::manifests::prune::handler,
         // Job endpoints
         handlers::jobs::get_all::handler,
         handlers::jobs::get_by_id::handler,
@@ -189,6 +193,7 @@ pub async fn serve(
         handlers::manifests::register::RegisterManifestResponse,
         handlers::manifests::list_datasets::ManifestDatasetsResponse,
         handlers::manifests::list_datasets::Dataset,
+        handlers::manifests::prune::PruneResponse,
         // Dataset schemas
         handlers::datasets::get::DatasetInfo,
         handlers::datasets::list_all::DatasetsResponse,

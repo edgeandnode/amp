@@ -54,6 +54,21 @@ where
         .map_err(Into::into)
 }
 
+/// List all orphaned manifests (manifests with no dataset links)
+///
+/// Queries for all manifests in the `manifest_files` table that have no corresponding
+/// entries in the `dataset_manifests` table. These are manifests that were registered
+/// but are no longer linked to any datasets.
+///
+/// Returns a vector of manifest hashes for all orphaned manifests.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<ManifestHashOwned>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_orphaned(exe).await.map_err(Into::into)
+}
+
 /// Count dataset links and lock rows to prevent concurrent modifications
 ///
 /// This function counts how many datasets are linked to a manifest while acquiring
