@@ -29,6 +29,10 @@ pub struct Args {
     #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
     pub admin_url: Url,
 
+    /// Bearer token for authenticating requests to the admin API
+    #[arg(long, env = "AMP_AUTH_TOKEN")]
+    pub auth_token: Option<String>,
+
     /// The name of the provider configuration
     ///
     /// Examples: mainnet-rpc, goerli-firehose, polygon-rpc
@@ -52,6 +56,7 @@ pub struct Args {
 pub async fn run(
     Args {
         admin_url,
+        auth_token,
         provider_name,
         provider_file,
     }: Args,
@@ -64,7 +69,13 @@ pub async fn run(
 
     let provider_toml = load_provider(&provider_file).await?;
 
-    register_provider(&admin_url, &provider_name, &provider_toml).await?;
+    register_provider(
+        &admin_url,
+        auth_token.as_deref(),
+        &provider_name,
+        &provider_toml,
+    )
+    .await?;
 
     crate::success!("Provider registered successfully");
 
@@ -112,6 +123,7 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
 #[tracing::instrument(skip_all)]
 async fn register_provider(
     admin_url: &Url,
+    auth_token: Option<&str>,
     provider_name: &str,
     provider_toml: &str,
 ) -> Result<(), Error> {
@@ -136,7 +148,20 @@ async fn register_provider(
     }
 
     // Create client and register provider
-    let client = crate::client::Client::new(admin_url.clone());
+    let mut client_builder = crate::client::build(admin_url.clone());
+
+    if let Some(token) = auth_token {
+        client_builder = client_builder.with_bearer_token(
+            token
+                .parse()
+                .map_err(|err| Error::InvalidAuthToken { source: err })?,
+        );
+    }
+
+    let client = client_builder
+        .build()
+        .map_err(|err| Error::ClientBuildError { source: err })?;
+
     client
         .providers()
         .register(provider_name, &json_value)
@@ -178,6 +203,20 @@ pub enum Error {
     /// Invalid provider structure
     #[error("invalid provider structure: {message}")]
     InvalidProviderStructure { message: String },
+
+    /// Invalid authentication token
+    #[error("invalid authentication token")]
+    InvalidAuthToken {
+        #[source]
+        source: crate::client::auth::BearerTokenError,
+    },
+
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[source]
+        source: crate::client::BuildError,
+    },
 
     /// Error from the provider client
     #[error("provider registration failed")]

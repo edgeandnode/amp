@@ -33,6 +33,10 @@ pub struct Args {
     /// The URL of the engine admin interface
     #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
     pub admin_url: Url,
+
+    /// Bearer token for authenticating requests to the admin API
+    #[arg(long, env = "AMP_AUTH_TOKEN")]
+    pub auth_token: Option<String>,
 }
 
 /// Prune jobs via the admin API.
@@ -43,8 +47,26 @@ pub struct Args {
 ///
 /// Returns [`Error`] for API errors (400/500) or network failures.
 #[tracing::instrument(skip_all, fields(%admin_url, status = ?status))]
-pub async fn run(Args { status, admin_url }: Args) -> Result<(), Error> {
-    let client = Client::new(admin_url.clone());
+pub async fn run(
+    Args {
+        status,
+        admin_url,
+        auth_token,
+    }: Args,
+) -> Result<(), Error> {
+    let mut client_builder = crate::client::build(admin_url.clone());
+
+    if let Some(token) = auth_token {
+        client_builder = client_builder.with_bearer_token(
+            token
+                .parse()
+                .map_err(|err| Error::InvalidAuthToken { source: err })?,
+        );
+    }
+
+    let client = client_builder
+        .build()
+        .map_err(|err| Error::ClientBuildError { source: err })?;
 
     prune_jobs(&client, status.as_ref()).await?;
 
@@ -69,13 +91,30 @@ async fn prune_jobs(
 
     client.jobs().delete(status).await.map_err(|err| {
         tracing::error!(error = %err, "Failed to prune jobs");
-        Error(err)
+        Error::DeleteError(err)
     })?;
 
     Ok(())
 }
 
-/// Error for job pruning operations.
+/// Errors for job pruning operations.
 #[derive(Debug, thiserror::Error)]
-#[error("failed to prune jobs")]
-pub struct Error(#[source] pub client::jobs::DeleteByStatusError);
+pub enum Error {
+    /// Invalid authentication token
+    #[error("invalid authentication token")]
+    InvalidAuthToken {
+        #[source]
+        source: crate::client::auth::BearerTokenError,
+    },
+
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[source]
+        source: crate::client::BuildError,
+    },
+
+    /// Error for job pruning operations.
+    #[error("failed to prune jobs")]
+    DeleteError(#[source] client::jobs::DeleteByStatusError),
+}

@@ -33,6 +33,10 @@ pub struct Args {
     #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
     pub admin_url: Url,
 
+    /// Bearer token for authenticating requests to the admin API
+    #[arg(long, env = "AMP_AUTH_TOKEN")]
+    pub auth_token: Option<String>,
+
     /// The dataset reference in format: namespace/name@version
     ///
     /// Examples: my_namespace/my_dataset@1.0.0, my_namespace/my_dataset@latest
@@ -56,6 +60,7 @@ pub struct Args {
 pub async fn run(
     Args {
         admin_url,
+        auth_token,
         dataset_ref,
         manifest_file,
     }: Args,
@@ -68,7 +73,13 @@ pub async fn run(
 
     let manifest_str = load_manifest(&manifest_file).await?;
 
-    register_manifest(&admin_url, &dataset_ref, &manifest_str).await?;
+    register_manifest(
+        &admin_url,
+        auth_token.as_deref(),
+        &dataset_ref,
+        &manifest_str,
+    )
+    .await?;
 
     Ok(())
 }
@@ -114,12 +125,25 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 #[tracing::instrument(skip_all)]
 pub async fn register_manifest(
     admin_url: &Url,
+    auth_token: Option<&str>,
     dataset_ref: &Reference,
     dataset_manifest: &str,
 ) -> Result<(), Error> {
     tracing::debug!("Creating admin API client");
 
-    let client = crate::client::Client::new(admin_url.clone());
+    let mut client_builder = crate::client::build(admin_url.clone());
+
+    if let Some(token) = auth_token {
+        client_builder = client_builder.with_bearer_token(
+            token
+                .parse()
+                .map_err(|err| Error::InvalidAuthToken { source: err })?,
+        );
+    }
+
+    let client = client_builder
+        .build()
+        .map_err(|err| Error::ClientBuildError { source: err })?;
     let datasets_client = client.datasets();
 
     tracing::debug!("Sending registration request");
@@ -149,6 +173,20 @@ pub enum Error {
     ManifestReadError {
         path: String,
         source: common::store::StoreError,
+    },
+
+    /// Invalid authentication token
+    #[error("invalid authentication token")]
+    InvalidAuthToken {
+        #[source]
+        source: crate::client::auth::BearerTokenError,
+    },
+
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[source]
+        source: crate::client::BuildError,
     },
 
     /// Client error during registration
