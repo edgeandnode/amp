@@ -1,6 +1,4 @@
 {
-  "name": "anvil_rpc_finalized",
-  "version": "0.0.0",
   "kind": "evm-rpc",
   "network": "anvil",
   "start_block": 0,

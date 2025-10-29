@@ -3,7 +3,6 @@ import { defineDataset } from "@edgeandnode/amp"
 export default defineDataset(() => ({
   name: "sql_stream_ds",
   network: "mainnet",
-  version: "0.1.0",
   dependencies: {
     eth_rpc: "_/eth_rpc@0.0.0",
   },

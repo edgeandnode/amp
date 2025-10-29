@@ -1,3 +1,5 @@
+import * as Effect from "effect/Effect"
+import type * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
 
 export class TableDefinition extends Schema.Class<TableDefinition>(
@@ -25,44 +27,12 @@ export const DatasetName = Schema.String.pipe(
   Schema.minLength(1),
   Schema.annotations({
     title: "Name",
-    description: "the name of the dataset",
+    description:
+      "the name of the dataset (must start with lowercase letter or underscore, followed by lowercase letters, digits, or underscores)",
     examples: ["uniswap", "eth_mainnet", "_test"],
   }),
 )
 export type DatasetName = Schema.Schema.Type<typeof DatasetName>
-
-export const Reference = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9_]+\/[a-z_][a-z0-9_]*@.+$/),
-  Schema.annotations({
-    title: "Reference",
-    description: "a dataset reference in the format namespace/name@version",
-    examples: ["edgeandnode/mainnet@0.0.0", "0xdeadbeef/eth_firehose@0.0.0"],
-  }),
-)
-
-/**
- * Parses a Reference to extract the namespace, name, and version components.
- *
- * @param reference - The Reference string to parse in format "namespace/name@version"
- * @returns An object with namespace, name, and version properties
- *
- * @example
- * const { namespace, name, version } = parseReference("edgeandnode/mainnet@1.0.0")
- * // { namespace: "edgeandnode", name: "mainnet", version: "1.0.0" }
- */
-export const parseReference = (
-  reference: string,
-): { namespace: DatasetNamespace; name: DatasetName; version: DatasetVersion } => {
-  const atIndex = reference.lastIndexOf("@")
-  const slashIndex = reference.indexOf("/")
-
-  // Since the reference passed schema validation, we know it has the correct format
-  const namespace = reference.substring(0, slashIndex) as DatasetNamespace
-  const name = reference.substring(slashIndex + 1, atIndex) as DatasetName
-  const version = reference.substring(atIndex + 1) as DatasetVersion
-
-  return { namespace, name, version }
-}
 
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
@@ -72,11 +42,11 @@ export const Network = Schema.Lowercase.pipe(
   }),
 )
 
-export const DatasetKind = Schema.Literal("manifest", "sql", "firehose", "evm-rpc").pipe(
+export const DatasetKind = Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose").pipe(
   Schema.annotations({
     title: "Kind",
     description: "the kind of dataset",
-    examples: ["manifest", "sql", "firehose", "evm-rpc"],
+    examples: ["manifest", "evm-rpc", "eth-beacon", "firehose"],
   }),
 )
 
@@ -91,6 +61,97 @@ export const DatasetVersion = Schema.String.pipe(
   }),
 )
 export type DatasetVersion = Schema.Schema.Type<typeof DatasetVersion>
+
+export const DatasetHash = Schema.String.pipe(
+  Schema.pattern(/^[0-9a-fA-F]{64}$/),
+  Schema.length(64),
+  Schema.annotations({
+    title: "Hash",
+    description: "a 32-byte SHA-256 hash (64 hex characters)",
+    examples: ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
+  }),
+)
+export type DatasetHash = Schema.Schema.Type<typeof DatasetHash>
+
+export const DatasetLatestTag = Schema.Literal("latest").pipe(
+  Schema.annotations({
+    title: "LatestTag",
+    description: "the 'latest' tag pointing to the most recent version",
+  }),
+)
+export type DatasetLatestTag = Schema.Schema.Type<typeof DatasetLatestTag>
+
+export const DatasetDevTag = Schema.Literal("dev").pipe(
+  Schema.annotations({
+    title: "DevTag",
+    description: "the 'dev' tag for development versions",
+  }),
+)
+export type DatasetDevTag = Schema.Schema.Type<typeof DatasetDevTag>
+
+export const DatasetRevision = Schema.Union(
+  DatasetVersion,
+  DatasetHash,
+  DatasetLatestTag,
+  DatasetDevTag,
+).pipe(
+  Schema.annotations({
+    title: "Revision",
+    description: "a dataset revision reference (semver tag, 64-char hex hash, 'latest', or 'dev')",
+    examples: ["1.0.0", "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", "latest", "dev"],
+  }),
+)
+export type DatasetRevision = Schema.Schema.Type<typeof DatasetRevision>
+
+export const DatasetReferenceStr = Schema.String.pipe(
+  Schema.pattern(/^[a-z0-9_]+\/[a-z_][a-z0-9_]*@.+$/),
+  Schema.annotations({
+    title: "DatasetReferenceStr",
+    description: "a dataset reference string in the format namespace/name@revision (version, hash, 'latest', or 'dev')",
+    examples: [
+      "edgeandnode/mainnet@1.0.0",
+      "edgeandnode/mainnet@latest",
+      "edgeandnode/mainnet@dev",
+      "0xdeadbeef/eth_firehose@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+    ],
+  }),
+)
+export type DatasetReferenceStr = Schema.Schema.Type<typeof DatasetReferenceStr>
+
+export class DatasetReference extends Schema.Class<DatasetReference>("DatasetReference")({
+  namespace: DatasetNamespace,
+  name: DatasetName,
+  revision: DatasetRevision,
+}) {}
+
+/**
+ * Parses a dataset reference string to extract and validate namespace, name, and revision components.
+ *
+ * @param reference - The reference string to parse in format "namespace/name@revision"
+ * @returns An Effect that yields a DatasetReference instance
+ *
+ * @example
+ * const ref = yield* parseDatasetReference("edgeandnode/mainnet@1.0.0")
+ * // DatasetReference { namespace: "edgeandnode", name: "mainnet", revision: "1.0.0" }
+ *
+ * const ref = yield* parseDatasetReference("edgeandnode/mainnet@latest")
+ * // DatasetReference { namespace: "edgeandnode", name: "mainnet", revision: "latest" }
+ */
+export const parseDatasetReference = (
+  reference: DatasetReferenceStr,
+): Effect.Effect<DatasetReference, ParseResult.ParseError> => {
+  return Effect.gen(function*() {
+    const atIndex = reference.lastIndexOf("@")
+    const slashIndex = reference.indexOf("/")
+
+    // Extract and validate each component
+    const namespace = yield* Schema.decodeUnknown(DatasetNamespace)(reference.substring(0, slashIndex))
+    const name = yield* Schema.decodeUnknown(DatasetName)(reference.substring(slashIndex + 1, atIndex))
+    const revision = yield* Schema.decodeUnknown(DatasetRevision)(reference.substring(atIndex + 1))
+
+    return new DatasetReference({ namespace, name, revision })
+  })
+}
 
 export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
   Schema.pattern(
@@ -138,7 +199,8 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
 )({
   namespace: DatasetNamespace,
   name: DatasetName,
-  version: DatasetVersion,
+  readme: DatasetReadme.pipe(Schema.optional),
+  repository: DatasetRepository.pipe(Schema.optional),
 }) {}
 
 export class DatasetConfig extends Schema.Class<DatasetConfig>(
@@ -147,10 +209,9 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   namespace: DatasetNamespace.pipe(Schema.optional),
   name: DatasetName,
   network: Network,
-  version: DatasetVersion,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
-  dependencies: Schema.Record({ key: Schema.String, value: Reference }),
+  dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
 }) {}
@@ -249,19 +310,13 @@ export class DatasetDerived extends Schema.Class<DatasetDerived>(
   "DatasetDerived",
 )({
   kind: Schema.Literal("manifest"),
-  namespace: DatasetNamespace.pipe(Schema.optional), // Deprecated: moved to metadata
-  name: DatasetName.pipe(Schema.optional), // Deprecated: moved to metadata
-  version: DatasetVersion.pipe(Schema.optional), // Deprecated: moved to metadata
-  dependencies: Schema.Record({ key: Schema.String, value: Reference }),
+  dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
 }) {}
 
 export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")({
   kind: Schema.Literal("evm-rpc"),
-  namespace: DatasetNamespace.pipe(Schema.optional), // Deprecated: moved to metadata
-  name: DatasetName.pipe(Schema.optional), // Deprecated: moved to metadata
-  version: DatasetVersion.pipe(Schema.optional), // Deprecated: moved to metadata
   network: Network,
   start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
   finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),

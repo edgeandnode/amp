@@ -55,9 +55,10 @@
 
 - name: register_sql_stream_ds
   dataset: sql_stream_ds
+  tag: "0.0.0"
 
 - name: dump_sql_stream_ds
-  dataset: _/sql_stream_ds@0.1.0
+  dataset: _/sql_stream_ds@0.0.0
   end: 15000004
 
 - name: sql_dataset_even_blocks

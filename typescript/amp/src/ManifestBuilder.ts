@@ -1,11 +1,13 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Admin from "./api/Admin.ts"
+import * as ManifestContext from "./ManifestContext.ts"
 import * as Model from "./Model.ts"
 
 export interface ManifestBuildResult {
   metadata: Model.DatasetMetadata
   manifest: Model.DatasetDerived
+  dependencies: ReadonlyArray<Model.DatasetReference>
 }
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
@@ -17,10 +19,19 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/ManifestBuilder", {
   effect: Effect.gen(function*() {
     const client = yield* Admin.Admin
-    const build = (definition: Model.DatasetConfig) =>
+    const build = (config: Model.DatasetConfig) =>
       Effect.gen(function*() {
+        // Extract metadata
+        const metadata = new Model.DatasetMetadata({
+          namespace: config.namespace ?? Model.DEFAULT_NAMESPACE,
+          name: config.name,
+          readme: config.readme,
+          repository: config.repository,
+        })
+
+        // Build manifest tables
         const tables = yield* Effect.forEach(
-          Object.entries(definition.tables ?? {}),
+          Object.entries(config.tables ?? {}),
           ([name, table]) =>
             Effect.gen(function*() {
               const schema = yield* client.getOutputSchema(table.sql, { isSqlDataset: true }).pipe(
@@ -48,27 +59,25 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           { concurrency: 5 },
         )
 
-        const functions = Object.entries(definition.functions ?? {}).map(([name, func]) => {
+        // Build manifest functions
+        const functions = Object.entries(config.functions ?? {}).map(([name, func]) => {
           const { inputTypes, outputType, source } = func
           const functionManifest = new Model.FunctionManifest({ name, source, inputTypes, outputType })
 
           return [name, functionManifest] as const
         })
 
-        const metadata = new Model.DatasetMetadata({
-          namespace: definition.namespace ?? Model.DEFAULT_NAMESPACE,
-          name: definition.name,
-          version: definition.version,
-        })
-
         const manifest = new Model.DatasetDerived({
           kind: "manifest",
-          dependencies: definition.dependencies,
+          dependencies: config.dependencies,
           tables: Object.fromEntries(tables),
           functions: Object.fromEntries(functions),
         })
 
-        return { metadata, manifest }
+        // Parse all dependencies
+        const dependencies = yield* ManifestContext.parseDependencies(config.dependencies)
+
+        return { metadata, manifest, dependencies }
       })
 
     return { build }

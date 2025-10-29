@@ -419,7 +419,7 @@ impl ReorgTestCtx {
         for dataset_name in derived_datasets {
             let dataset = DatasetPackage::new(dataset_name, Some("amp.config.ts"));
             dataset
-                .register(&cli)
+                .register(&cli, "0.0.0")
                 .await
                 .unwrap_or_else(|e| panic!("Failed to register {} dataset: {}", dataset_name, e));
         }

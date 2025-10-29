@@ -89,8 +89,6 @@ describe("useAmpConfigStreamQuery", () => {
     // Mock SSE data in the format the API would send
     const mockManifest = DatasetDerived.make({
       kind: "manifest",
-      name: "test_dataset",
-      version: "1.0.0",
       dependencies: {},
       tables: {
         blocks: Table.make({
@@ -131,8 +129,6 @@ describe("useAmpConfigStreamQuery", () => {
   it("should handle multiple SSE messages", async () => {
     const mockManifest1 = DatasetDerived.make({
       kind: "manifest",
-      name: "test_dataset_v1",
-      version: "1.0.0",
       dependencies: {},
       tables: {
         blocks: Table.make({
@@ -150,8 +146,6 @@ describe("useAmpConfigStreamQuery", () => {
 
     const mockManifest2 = DatasetDerived.make({
       kind: "manifest",
-      name: "test_dataset_v2",
-      version: "2.0.0",
       dependencies: {},
       tables: {
         blocks: Table.make({
@@ -318,8 +312,6 @@ describe("useAmpConfigStreamQuery", () => {
     // Simulate receiving data
     const mockManifest = DatasetDerived.make({
       kind: "manifest",
-      name: "shared_dataset",
-      version: "1.0.0",
       dependencies: {},
       tables: {
         blocks: Table.make({

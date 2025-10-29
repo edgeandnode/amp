@@ -2,7 +2,6 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
-import type { DatasetManifest } from "@edgeandnode/amp/Model"
 import { PlusIcon, TableIcon } from "@graphprotocol/gds-react/icons"
 import { String } from "effect"
 
@@ -11,7 +10,8 @@ import { useAmpConfigStreamQuery } from "@/hooks/useAmpConfigStream"
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
 export type AmpConfigBrowserProps = {
-  onTableSelected: (dataset: DatasetManifest["name"], table: string) => void
+  // TODO: DatasetManifest no longer has 'name' field after versioning refactor. Name should be passed separately from metadata.
+  onTableSelected: (dataset: string, table: string) => void
 }
 export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserProps>) {
   const { data: config } = useAmpConfigStreamQuery()
@@ -48,7 +48,11 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
                       <Tooltip.Trigger
                         type="button"
                         className="rounded-full p-2 bg-transparent hover:bg-space-1500 cursor-pointer inline-flex items-center justify-center shadow"
-                        onClick={() => onTableSelected(config.name, table)}
+                        onClick={() => {
+                          // TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately.
+                          const datasetName = ("name" in config ? config.name : "unknown") as string
+                          onTableSelected(datasetName, table)
+                        }}
                       >
                         <PlusIcon alt={`Add ${table}`} size={4} className="text-space-500" aria-hidden="true" />
                       </Tooltip.Trigger>

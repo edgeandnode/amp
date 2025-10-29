@@ -1,6 +1,4 @@
 {
-  "name": "eth_firehose_stream",
-  "version": "0.0.0",
   "kind": "firehose",
   "network": "mainnet",
   "start_block": 0,

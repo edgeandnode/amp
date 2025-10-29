@@ -13,12 +13,16 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Error from "./Error.ts"
 
-export const JsonLinesErrorUnion = Schema.Union(Error.DatasetStoreError, Error.PlanningError)
+export const JsonLinesErrorUnion = Schema.Union(
+  Error.DatasetStoreError,
+  Error.PlanningError,
+  Error.CatalogForSqlError,
+)
 
 /**
  * Error type for the json lines api service.
  */
-export type JsonLinesError = Error.DatasetStoreError | Error.PlanningError
+export type JsonLinesError = Error.DatasetStoreError | Error.PlanningError | Error.CatalogForSqlError
 
 /**
  * Service definition for the jsonl api.

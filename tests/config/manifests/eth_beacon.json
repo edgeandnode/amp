@@ -1,6 +1,4 @@
 {
-  "name": "eth_beacon",
-  "version": "0.0.0",
   "kind": "eth-beacon",
   "network": "mainnet-beacon",
   "start_block": 12000000,

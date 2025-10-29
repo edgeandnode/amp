@@ -3,10 +3,11 @@
 
 - name: register_joins
   dataset: joins
+  tag: "0.0.0"
   end: 15000000
 
 - name: dump_joins
-  dataset: _/joins@0.1.0
+  dataset: _/joins@0.0.0
   end: 15000000
 
 - name: query_join_blocks_txs

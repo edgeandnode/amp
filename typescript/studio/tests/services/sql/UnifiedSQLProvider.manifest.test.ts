@@ -43,8 +43,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should initialize with a valid manifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "example",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           blocks: {
@@ -85,8 +83,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should initialize with manifest containing multiple tables", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "multi",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           table1: {
@@ -141,8 +137,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should handle manifest with complex Arrow types", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "complex",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           events: {
@@ -184,8 +178,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should merge raw sources and manifest tables for initialization", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "custom",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           processed: {
@@ -222,8 +214,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should handle empty manifest tables", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "empty",
-        version: "1.0.0",
         dependencies: {},
         tables: {},
         functions: {},
@@ -252,8 +242,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should get validator instance with manifest", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "test",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           users: {
@@ -292,8 +280,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should validate queries with manifest tables", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "test",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           users: {
@@ -350,8 +336,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should validate with validation level off", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "test",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           data: {
@@ -388,8 +372,6 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
     test("should validate SELECT * FROM manifest table queries", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "example",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           blocks: {

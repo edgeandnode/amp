@@ -1,7 +1,5 @@
 {
-  "name": "register_test_dataset",
   "network": "mainnet",
-  "version": "1.0.0",
   "kind": "manifest",
   "dependencies": {
     "eth_firehose": "_/eth_firehose@0.0.0"

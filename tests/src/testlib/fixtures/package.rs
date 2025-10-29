@@ -48,8 +48,14 @@ impl DatasetPackage {
     /// Register the dataset using amp register command.
     ///
     /// Runs `pnpm amp register` in the dataset directory using the provided CLI.
+    /// Optionally accepts a version tag (semantic version or "dev").
     #[tracing::instrument(skip_all, err)]
-    pub async fn register(&self, cli: &AmpCli) -> Result<(), BoxError> {
-        cli.register(&self.path, self.config.as_deref()).await
+    pub async fn register(
+        &self,
+        cli: &AmpCli,
+        tag: impl Into<Option<&str>>,
+    ) -> Result<(), BoxError> {
+        cli.register(&self.path, tag.into(), self.config.as_deref())
+            .await
     }
 }

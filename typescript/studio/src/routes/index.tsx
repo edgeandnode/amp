@@ -45,7 +45,8 @@ function HomePage() {
                 >
                   <path d="M5.555 17.776l8-16 .894.448-8 16-.894-.448z" />
                 </svg>
-                <p className="text-white text-16">{data.name}</p>
+                {/* TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately. */}
+                <p className="text-white text-16">{("name" in data ? data.name : "unknown") as string}</p>
               </>
             ) :
             null}
