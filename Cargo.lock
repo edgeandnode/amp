@@ -922,14 +922,9 @@ dependencies = [
  "controller",
  "dataset-store",
  "datasets-common",
- "datasets-derived",
  "dump",
- "eth-beacon-datasets",
- "evm-rpc-datasets",
- "firehose-datasets",
  "metadata-db",
  "monitoring",
- "serde_json",
  "server",
  "snmalloc-rs",
  "static_assertions",
@@ -1648,7 +1643,6 @@ dependencies = [
  "http",
  "jsonwebtoken",
  "lru 0.16.2",
- "mockito",
  "privy-rs",
  "reqwest",
  "serde",
@@ -2403,11 +2397,9 @@ dependencies = [
  "async-trait",
  "axum 0.8.6",
  "backon",
- "bincode 2.0.1",
  "bytes",
  "chrono",
  "datafusion",
- "datafusion-proto",
  "datafusion-tracing",
  "datasets-common",
  "datasets-derived",
@@ -3510,33 +3502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datafusion-proto"
-version = "50.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7df9f606892e6af45763d94d210634eec69b9bb6ced5353381682ff090028a3"
-dependencies = [
- "arrow",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "datafusion-proto-common",
- "object_store",
- "prost 0.13.5",
-]
-
-[[package]]
-name = "datafusion-proto-common"
-version = "50.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4b14f288ca4ef77743d9672cafecf3adfffff0b9b04af9af79ecbeaaf736901"
-dependencies = [
- "arrow",
- "datafusion-common",
- "prost 0.13.5",
-]
-
-[[package]]
 name = "datafusion-pruning"
 version = "50.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3616,7 +3581,6 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "async-stream",
- "backon",
  "common",
  "datafusion",
  "datasets-common",
@@ -5837,7 +5801,6 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
- "metadata-db",
  "pgtemp",
  "serde",
  "serde_json",
