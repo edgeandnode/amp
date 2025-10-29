@@ -327,30 +327,21 @@ where
         .map_err(Into::into)
 }
 
-/// Delete all jobs that are in terminal states
+/// Delete all jobs that match the specified status or statuses
 ///
-/// This function deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
+/// This function deletes all jobs that are in one of the specified statuses.
 /// Returns the number of jobs that were deleted.
 #[tracing::instrument(skip(exe), err)]
-pub async fn delete_all_terminal<'c, E>(exe: E) -> Result<usize, Error>
+pub async fn delete_all_by_status<'c, E, const N: usize>(
+    exe: E,
+    statuses: [JobStatus; N],
+) -> Result<usize, Error>
 where
     E: Executor<'c>,
 {
-    sql::delete_by_statuses(exe, JobStatus::terminal_statuses())
+    sql::delete_by_status(exe, statuses)
         .await
         .map_err(Into::into)
-}
-
-/// Delete all jobs that match the specified status
-///
-/// This function deletes all jobs that are in the specified status.
-/// Returns the number of jobs that were deleted.
-#[tracing::instrument(skip(exe), err)]
-pub async fn delete_all_by_status<'c, E>(exe: E, status: JobStatus) -> Result<usize, Error>
-where
-    E: Executor<'c>,
-{
-    sql::delete_by_status(exe, status).await.map_err(Into::into)
 }
 
 /// Error type for conditional job status updates

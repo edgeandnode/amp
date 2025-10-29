@@ -38,7 +38,6 @@ pub struct QueryParams {
 ///
 /// ## Error Codes
 /// - `INVALID_QUERY_PARAM`: Invalid or missing status parameter
-/// - `DELETE_TERMINAL_JOBS_ERROR`: Failed to delete terminal jobs from scheduler (database error)
 /// - `DELETE_JOBS_BY_STATUS_ERROR`: Failed to delete jobs by status from scheduler (database error)
 ///
 /// ## Behavior
@@ -99,22 +98,22 @@ pub async fn handler(
     let deleted_count = match query.status {
         JobStatusFilter::Terminal => ctx
             .scheduler
-            .delete_terminal_jobs()
+            .delete_jobs_by_status(JobStatus::terminal_statuses())
             .await
-            .map_err(Error::DeleteTerminalJobs),
+            .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Completed => ctx
             .scheduler
-            .delete_jobs_by_status(JobStatus::Completed)
+            .delete_jobs_by_status([JobStatus::Completed])
             .await
             .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Stopped => ctx
             .scheduler
-            .delete_jobs_by_status(JobStatus::Stopped)
+            .delete_jobs_by_status([JobStatus::Stopped])
             .await
             .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Error => ctx
             .scheduler
-            .delete_jobs_by_status(JobStatus::Failed)
+            .delete_jobs_by_status([JobStatus::Failed])
             .await
             .map_err(Error::DeleteJobsByStatus),
     }?;
@@ -194,15 +193,6 @@ pub enum Error {
         err: QueryRejection,
     },
 
-    /// Failed to delete terminal jobs from scheduler
-    ///
-    /// This occurs when:
-    /// - Database connection fails or is lost during bulk deletion
-    /// - Bulk delete operation encounters an internal database error
-    /// - Connection pool is exhausted or unavailable
-    #[error("failed to delete terminal jobs")]
-    DeleteTerminalJobs(#[source] scheduler::DeleteTerminalJobsError),
-
     /// Failed to delete jobs by status from scheduler
     ///
     /// This occurs when:
@@ -217,7 +207,6 @@ impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidQueryParam { .. } => "INVALID_QUERY_PARAM",
-            Error::DeleteTerminalJobs(_) => "DELETE_TERMINAL_JOBS_ERROR",
             Error::DeleteJobsByStatus(_) => "DELETE_JOBS_BY_STATUS_ERROR",
         }
     }
@@ -225,7 +214,6 @@ impl IntoErrorResponse for Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Error::InvalidQueryParam { .. } => StatusCode::BAD_REQUEST,
-            Error::DeleteTerminalJobs(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DeleteJobsByStatus(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

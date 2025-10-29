@@ -169,25 +169,16 @@ impl Scheduler {
             .map_err(DeleteJobError)
     }
 
-    /// Delete all jobs matching a specific status
+    /// Delete all jobs matching the specified status or statuses
     ///
     /// Returns the number of jobs deleted.
-    pub async fn delete_jobs_by_status(
+    pub async fn delete_jobs_by_status<const N: usize>(
         &self,
-        status: JobStatus,
+        statuses: [JobStatus; N],
     ) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, status)
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, statuses)
             .await
             .map_err(DeleteJobsByStatusError)
-    }
-
-    /// Delete all jobs in terminal states (Completed, Stopped, Failed)
-    ///
-    /// Returns the number of jobs deleted.
-    pub async fn delete_terminal_jobs(&self) -> Result<usize, DeleteTerminalJobsError> {
-        metadata_db::jobs::delete_all_terminal(&self.metadata_db)
-            .await
-            .map_err(DeleteTerminalJobsError)
     }
 }
 
@@ -324,13 +315,3 @@ pub struct DeleteJobError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct DeleteJobsByStatusError(#[source] pub metadata_db::Error);
-
-/// Error when deleting terminal jobs from the metadata database
-///
-/// This occurs when:
-/// - Database connection fails or is lost
-/// - Bulk delete operation encounters an error
-/// - Connection pool is exhausted
-#[derive(Debug, thiserror::Error)]
-#[error("metadata database error")]
-pub struct DeleteTerminalJobsError(#[source] pub metadata_db::Error);

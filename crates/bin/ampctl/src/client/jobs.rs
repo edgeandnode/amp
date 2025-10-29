@@ -379,9 +379,6 @@ impl<'a> JobsClient<'a> {
                     "INVALID_QUERY_PARAM" => Err(DeleteByStatusError::InvalidQueryParam(
                         error_response.into(),
                     )),
-                    "DELETE_TERMINAL_JOBS_ERROR" => Err(
-                        DeleteByStatusError::DeleteTerminalJobsError(error_response.into()),
-                    ),
                     "DELETE_JOBS_BY_STATUS_ERROR" => Err(
                         DeleteByStatusError::DeleteJobsByStatusError(error_response.into()),
                     ),
@@ -732,15 +729,6 @@ pub enum DeleteByStatusError {
     /// - Status parameter is malformed
     #[error("invalid query parameter")]
     InvalidQueryParam(#[source] ApiError),
-
-    /// Failed to delete terminal jobs from scheduler (500, DELETE_TERMINAL_JOBS_ERROR)
-    ///
-    /// This occurs when:
-    /// - Database connection fails or is lost during bulk deletion
-    /// - Bulk delete operation encounters an internal database error
-    /// - Connection pool is exhausted or unavailable
-    #[error("failed to delete terminal jobs")]
-    DeleteTerminalJobsError(#[source] ApiError),
 
     /// Failed to delete jobs by status from scheduler (500, DELETE_JOBS_BY_STATUS_ERROR)
     ///

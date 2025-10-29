@@ -216,29 +216,11 @@ where
     Ok(result.rows_affected() == 1)
 }
 
-/// Delete all jobs that match the specified status
-///
-/// This function deletes all jobs that are in the specified status.
-/// Returns the number of jobs that were deleted.
-pub async fn delete_by_status<'c, E>(exe: E, status: JobStatus) -> Result<usize, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        DELETE FROM jobs
-        WHERE status = $1
-    "#};
-
-    let result = sqlx::query(query).bind(status).execute(exe).await?;
-
-    Ok(result.rows_affected() as usize)
-}
-
 /// Delete all jobs that match any of the specified statuses
 ///
 /// This function deletes all jobs that are in one of the specified statuses.
 /// Returns the number of jobs that were deleted.
-pub async fn delete_by_statuses<'c, E, const N: usize>(
+pub async fn delete_by_status<'c, E, const N: usize>(
     exe: E,
     statuses: [JobStatus; N],
 ) -> Result<usize, sqlx::Error>

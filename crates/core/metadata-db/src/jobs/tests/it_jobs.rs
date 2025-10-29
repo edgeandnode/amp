@@ -582,7 +582,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     .expect("Failed to insert job 3");
 
     //* When
-    let deleted_count = jobs::sql::delete_by_status(&mut *conn, JobStatus::Completed)
+    let deleted_count = jobs::sql::delete_by_status(&mut *conn, [JobStatus::Completed])
         .await
         .expect("Failed to delete jobs");
 
@@ -665,7 +665,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     .expect("Failed to insert job 4");
 
     //* When
-    let deleted_count = jobs::sql::delete_by_statuses(
+    let deleted_count = jobs::sql::delete_by_status(
         &mut *conn,
         [JobStatus::Completed, JobStatus::Failed, JobStatus::Stopped],
     )
