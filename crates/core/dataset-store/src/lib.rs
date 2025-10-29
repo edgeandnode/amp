@@ -91,10 +91,61 @@ impl DatasetStore {
             dataset_cache: Default::default(),
         })
     }
+}
 
-    /// Get a reference to the providers configuration store
-    pub fn providers(&self) -> &ProviderConfigsStore {
-        &self.provider_configs_store
+// Provider configuration  management APIs
+impl DatasetStore {
+    /// Load provider configurations from disk and initialize the cache.
+    ///
+    /// Overwrites existing cache contents. Invalid configuration files are logged and skipped.
+    pub async fn load_providers_into_cache(&self) {
+        self.provider_configs_store.load_into_cache().await
+    }
+
+    /// Get all provider configurations, using cache if available
+    ///
+    /// Returns a read guard that dereferences to the cached `BTreeMap<String, ProviderConfig>`.
+    /// This provides efficient access to all provider configurations without cloning.
+    ///
+    /// # Deadlock Warning
+    ///
+    /// The returned guard holds a read lock on the internal cache. Holding this guard
+    /// for extended periods can cause deadlocks with operations that require write access
+    /// (such as `register_provider` and `delete_provider`). Extract the needed data
+    /// immediately and drop the guard as soon as possible.
+    #[must_use]
+    pub async fn get_all_providers(
+        &self,
+    ) -> impl std::ops::Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
+        self.provider_configs_store.get_all().await
+    }
+
+    /// Get a provider configuration by name, using cache if available
+    pub async fn get_provider_by_name(&self, name: &str) -> Option<ProviderConfig> {
+        self.provider_configs_store.get_by_name(name).await
+    }
+
+    /// Register a new provider configuration in both cache and store
+    ///
+    /// If a provider configuration with the same name already exists, returns a conflict error.
+    pub async fn register_provider(
+        &self,
+        provider: ProviderConfig,
+    ) -> Result<(), providers::RegisterError> {
+        self.provider_configs_store.register(provider).await
+    }
+
+    /// Delete a provider configuration by name from both the store and cache
+    ///
+    /// This operation fails if the provider configuration file does not exist in the store,
+    /// ensuring consistent delete behavior across different object store implementations.
+    ///
+    /// # Cache Management
+    /// - If file not found: removes stale cache entry and returns `DeleteError::NotFound`
+    /// - If other store errors: preserves cache (file may still exist) and propagates error
+    /// - If deletion succeeds: removes from both store and cache
+    pub async fn delete_provider(&self, name: &str) -> Result<(), providers::DeleteError> {
+        self.provider_configs_store.delete(name).await
     }
 }
 

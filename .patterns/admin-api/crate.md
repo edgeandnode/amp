@@ -323,32 +323,6 @@ pub async fn handler() -> Result<(), Error> {
 }
 ```
 
-#### 🏪 Store-Backed Resources (`DatasetStore`)
-
-🚨 **MANDATORY PATTERN**: For resources managed through specialized stores (providers):
-
-```rust
-// Store-backed resource handler pattern
-pub async fn handler() -> Result<Json<ResourceInfo>, Error> {
-    // Access through store getter method
-    let resource = ctx.store
-        .providers()  // Get store reference
-        .get_by_name(&name)
-        .await;
-
-    // Convert and handle not found
-    match resource {
-        Some(config) => Ok(Json(ResourceInfo::new(name, config))),
-        None => Err(Error::NotFound { name }),
-    }
-}
-```
-
-📌 **Key differences:**
-
-- **Database resources**: Use direct async database queries, support pagination, have typed IDs
-- **Store resources**: Use store abstraction methods, may not support pagination, often use string identifiers
-
 ## 🚨 Error Handling Patterns
 
 ### 1. 💥 Error Enum Definition

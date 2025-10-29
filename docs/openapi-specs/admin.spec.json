@@ -1501,7 +1501,7 @@
           "providers"
         ],
         "summary": "Handler for the `DELETE /providers/{name}` endpoint",
-        "description": "Deletes a specific provider configuration by its name from the dataset store.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to delete\n\n## Response\n- **204 No Content**: Provider successfully deleted\n- **400 Bad Request**: Invalid provider name format\n- **404 Not Found**: Provider with the given name does not exist\n- **500 Internal Server Error**: Store error occurred during deletion\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `PROVIDER_NOT_FOUND`: No provider exists with the given name\n- `STORE_ERROR`: Failed to delete provider configuration from store\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Attempts to delete the provider configuration from both store and cache\n- Returns appropriate HTTP status codes and error messages\n\n## Safety Notes\n- Deletion removes both the configuration file from storage and the cached entry\n- Once deleted, the provider configuration cannot be recovered\n- Any datasets using this provider may fail until a new provider is configured",
+        "description": "Deletes a specific provider configuration by its name from the dataset store.\n\nThis operation is idempotent - deleting a non-existent provider returns success.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to delete\n\n## Response\n- **204 No Content**: Provider successfully deleted (or did not exist)\n- **400 Bad Request**: Invalid provider name format\n- **500 Internal Server Error**: Store error occurred during deletion\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `STORE_ERROR`: Failed to delete provider configuration from store\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Attempts to delete the provider configuration from both store and cache\n- Returns 204 even if the provider does not exist (idempotent behavior)\n\n## Safety Notes\n- Deletion removes both the configuration file from storage and the cached entry\n- Once deleted, the provider configuration cannot be recovered\n- Any datasets using this provider may fail until a new provider is configured",
         "operationId": "providers_delete",
         "parameters": [
           {
@@ -1516,20 +1516,10 @@
         ],
         "responses": {
           "204": {
-            "description": "Provider successfully deleted"
+            "description": "Provider successfully deleted (or did not exist)"
           },
           "400": {
             "description": "Invalid provider name",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Provider not found",
             "content": {
               "application/json": {
                 "schema": {
