@@ -20,16 +20,14 @@
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use datasets_common::hash::Hash;
 use object_store::path::Path as ObjectStorePath;
-use url::Url;
 
-use crate::client::Client;
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest register` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Path or URL to the manifest file (local path, file://, s3://, gs://, or az://)
     #[arg(value_name = "PATH", required = true, value_parser = clap::value_parser!(ManifestFilePath))]
@@ -44,10 +42,10 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url))]
 pub async fn run(
     Args {
-        admin_url,
+        global,
         manifest_file,
     }: Args,
 ) -> Result<(), Error> {
@@ -58,7 +56,7 @@ pub async fn run(
 
     let manifest_str = load_manifest(&manifest_file).await?;
 
-    let hash = register_manifest(&admin_url, &manifest_str).await?;
+    let hash = register_manifest(&global, &manifest_str).await?;
 
     crate::success!("Manifest registered successfully");
     crate::info!("Manifest hash: {}", hash);
@@ -106,10 +104,10 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 /// Creates a client and calls the `/manifests` endpoint with the manifest JSON content.
 /// Returns the computed content-addressable hash.
 #[tracing::instrument(skip_all)]
-pub async fn register_manifest(admin_url: &Url, manifest_str: &str) -> Result<Hash, Error> {
+pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Result<Hash, Error> {
     tracing::debug!("Creating admin API client");
 
-    let client = Client::new(admin_url.clone());
+    let client = global.build_client()?;
     let manifests_client = client.manifests();
 
     tracing::debug!("Sending registration request");
@@ -139,6 +137,13 @@ pub enum Error {
     ManifestReadError {
         path: String,
         source: common::store::StoreError,
+    },
+
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// Error from the manifest registration API client

@@ -11,16 +11,14 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::hash::Hash;
-use url::Url;
 
-use crate::client::Client;
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest inspect` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Manifest content hash to retrieve
     #[arg(value_name = "HASH", required = true, value_parser = clap::value_parser!(Hash))]
@@ -35,11 +33,11 @@ pub struct Args {
 ///
 /// Returns [`Error`] for invalid hash, manifest not found (404),
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %hash))]
-pub async fn run(Args { admin_url, hash }: Args) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %hash))]
+pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving manifest from admin API");
 
-    let manifest_json = get_manifest(&admin_url, &hash).await?;
+    let manifest_json = get_manifest(&global, &hash).await?;
 
     // Pretty-print the manifest JSON to stdout
     println!("{}", manifest_json);
@@ -51,10 +49,11 @@ pub async fn run(Args { admin_url, hash }: Args) -> Result<(), Error> {
 ///
 /// GETs from `/manifests/{hash}` endpoint and returns the raw manifest JSON.
 #[tracing::instrument(skip_all)]
-async fn get_manifest(admin_url: &Url, hash: &Hash) -> Result<String, Error> {
+async fn get_manifest(global: &GlobalArgs, hash: &Hash) -> Result<String, Error> {
     tracing::debug!("Creating client and retrieving manifest");
 
-    let client = Client::new(admin_url.clone());
+    let client = global.build_client()?;
+
     let manifest_value = client
         .manifests()
         .get(hash)
@@ -84,6 +83,13 @@ pub enum Error {
     /// Manifest not found
     #[error("manifest not found: {hash}")]
     ManifestNotFound { hash: String },
+
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
+    },
 
     /// Client error from ManifestsClient
     #[error("client error")]

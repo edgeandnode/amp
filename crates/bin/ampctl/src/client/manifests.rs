@@ -13,28 +13,28 @@ use super::{
 ///
 /// POST `/manifests`
 fn manifest_register() -> &'static str {
-    "/manifests"
+    "manifests"
 }
 
 /// Build URL path for getting a manifest by hash.
 ///
 /// GET `/manifests/{hash}`
 fn manifest_get_by_id(hash: &Hash) -> String {
-    format!("/manifests/{hash}")
+    format!("manifests/{hash}")
 }
 
 /// Build URL path for deleting a manifest by hash.
 ///
 /// DELETE `/manifests/{hash}`
 fn manifest_delete_by_id(hash: &Hash) -> String {
-    format!("/manifests/{hash}")
+    format!("manifests/{hash}")
 }
 
 /// Build URL path for pruning orphaned manifests.
 ///
 /// DELETE `/manifests`
 fn manifest_prune() -> &'static str {
-    "/manifests"
+    "manifests"
 }
 
 /// Client for manifest-related API operations.

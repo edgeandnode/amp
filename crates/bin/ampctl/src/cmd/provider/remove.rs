@@ -12,16 +12,13 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use url::Url;
-
-use crate::client::{Client, providers::DeleteError};
+use crate::{args::GlobalArgs, client::providers::DeleteError};
 
 /// Command-line arguments for the `provider rm` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Provider name to delete
     #[arg(value_name = "NAME", required = true)]
@@ -36,11 +33,11 @@ pub struct Args {
 ///
 /// Returns [`Error`] for invalid name, provider not found (404),
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %name))]
-pub async fn run(Args { admin_url, name }: Args) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %name))]
+pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting provider from admin API");
 
-    delete_provider(&admin_url, &name).await?;
+    delete_provider(&global, &name).await?;
 
     crate::success!("Provider deleted successfully");
 
@@ -51,10 +48,10 @@ pub async fn run(Args { admin_url, name }: Args) -> Result<(), Error> {
 ///
 /// DELETEs to `/providers/{name}` endpoint using the API client.
 #[tracing::instrument(skip_all)]
-async fn delete_provider(admin_url: &Url, name: &str) -> Result<(), Error> {
+async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
     tracing::debug!("Creating API client");
 
-    let client = Client::new(admin_url.clone());
+    let client = global.build_client()?;
 
     client
         .providers()
@@ -83,6 +80,13 @@ async fn delete_provider(admin_url: &Url, name: &str) -> Result<(), Error> {
 /// Errors for provider removal operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
+    },
+
     /// Invalid provider name
     #[error("invalid provider name: [{error_code}] {message}")]
     InvalidName { error_code: String, message: String },

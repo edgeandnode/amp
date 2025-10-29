@@ -10,20 +10,18 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use url::Url;
 use worker::JobId;
 
-use crate::client::{self, Client};
+use crate::{args::GlobalArgs, client};
 
 /// Command-line arguments for the `jobs stop` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
     /// The job ID to stop
     pub id: JobId,
-
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
 }
 
 /// Stop a job by requesting it to stop via the admin API.
@@ -31,9 +29,9 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for API errors (400/404/409/500) or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, job_id = %id))]
-pub async fn run(Args { id, admin_url }: Args) -> Result<(), Error> {
-    let client = Client::new(admin_url.clone());
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, job_id = %id))]
+pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
+    let client = global.build_client()?;
 
     tracing::debug!("Stopping job via admin API");
 
@@ -53,6 +51,13 @@ pub async fn run(Args { id, admin_url }: Args) -> Result<(), Error> {
 /// Errors for job stop operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
+    },
+
     /// Job not found
     ///
     /// This occurs when the job ID is valid but no job

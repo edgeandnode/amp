@@ -17,14 +17,14 @@
 
 use datasets_common::reference::Reference;
 use dump::EndBlock;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `dep-dataset` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// The dataset reference in format: namespace/name@version
     ///
@@ -63,10 +63,10 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for invalid paths/URLs, API errors (400/404/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %dataset_ref))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
 pub async fn run(
     Args {
-        admin_url,
+        global,
         dataset_ref,
         end_block,
         parallelism,
@@ -79,7 +79,7 @@ pub async fn run(
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(&admin_url, &dataset_ref, end_block, parallelism).await?;
+    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism).await?;
 
     crate::success!("Dataset deployed successfully");
     crate::info!("Job ID: {}", job_id);
@@ -93,12 +93,12 @@ pub async fn run(
 /// and returns the job ID.
 #[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
 async fn deploy_dataset(
-    admin_url: &Url,
+    global: &GlobalArgs,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
 ) -> Result<worker::JobId, Error> {
-    let client = crate::client::Client::new(admin_url.clone());
+    let client = global.build_client()?;
     let job_id = client
         .datasets()
         .deploy(dataset_ref, end_block, parallelism)
@@ -111,6 +111,13 @@ async fn deploy_dataset(
 /// Errors for dataset deployment operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
+    },
+
     /// Deployment error from the client
     #[error("deployment failed")]
     Deploy {

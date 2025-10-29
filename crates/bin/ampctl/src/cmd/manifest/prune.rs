@@ -13,16 +13,13 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use url::Url;
-
-use crate::client::{Client, manifests::PruneError};
+use crate::{args::GlobalArgs, client::manifests::PruneError};
 
 /// Command-line arguments for the `manifest prune` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 }
 
 /// Prune all orphaned manifests via the admin API.
@@ -32,11 +29,11 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for API errors (400/500) or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url))]
-pub async fn run(Args { admin_url }: Args) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url))]
+pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Pruning orphaned manifests via admin API");
 
-    let deleted_count = prune_manifests(&admin_url).await?;
+    let deleted_count = prune_manifests(&global).await?;
 
     crate::success!("Pruned {} orphaned manifest(s)", deleted_count);
 
@@ -47,8 +44,8 @@ pub async fn run(Args { admin_url }: Args) -> Result<(), Error> {
 ///
 /// DELETEs to `/manifests` endpoint using the admin API client.
 #[tracing::instrument(skip_all)]
-async fn prune_manifests(admin_url: &Url) -> Result<usize, Error> {
-    let client = Client::new(admin_url.clone());
+async fn prune_manifests(global: &GlobalArgs) -> Result<usize, Error> {
+    let client = global.build_client()?;
 
     let response = match client.manifests().prune().await {
         Ok(response) => response,
@@ -67,6 +64,13 @@ async fn prune_manifests(admin_url: &Url) -> Result<usize, Error> {
 /// Errors for manifest pruning operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
+    },
+
     /// Failed to list orphaned manifests from the database
     ///
     /// This occurs when:
