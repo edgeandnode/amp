@@ -47,18 +47,6 @@ enum Commands {
     #[command(after_help = include_str!("cmd/reg_manifest__after_help.md"))]
     RegManifest(cmd::reg_manifest::Args),
 
-    /// Register a provider configuration with the engine admin interface
-    ///
-    /// Loads a provider configuration from local or remote storage and registers it
-    /// with the Amp engine admin interface. The provider configuration defines
-    /// connection details for external data sources (EVM RPC endpoints, Firehose, etc.).
-    ///
-    /// Supports local filesystem and object storage (s3://, gs://, az://, file://).
-    /// The engine admin interface validates the provider configuration and makes it
-    /// available for use by datasets.
-    #[command(after_help = include_str!("cmd/reg_provider__after_help.md"))]
-    RegProvider(cmd::reg_provider::Args),
-
     /// Deploy a dataset to start syncing blockchain data
     ///
     /// Deploys a dataset version by scheduling a data extraction job via the
@@ -87,7 +75,6 @@ async fn run() -> anyhow::Result<()> {
     match cli.command {
         Commands::GenManifest(args) => cmd::gen_manifest::run(args).await?,
         Commands::RegManifest(args) => cmd::reg_manifest::run(args).await?,
-        Commands::RegProvider(args) => cmd::reg_provider::run(args).await?,
         Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
         Commands::Manifest(command) => cmd::manifest::run(command).await?,
         Commands::Provider(command) => cmd::provider::run(command).await?,

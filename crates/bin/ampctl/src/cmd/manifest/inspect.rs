@@ -13,6 +13,8 @@
 use datasets_common::hash::Hash;
 use url::Url;
 
+use crate::client::Client;
+
 /// Command-line arguments for the `manifest inspect` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -50,126 +52,50 @@ pub async fn run(Args { admin_url, hash }: Args) -> Result<(), Error> {
 /// GETs from `/manifests/{hash}` endpoint and returns the raw manifest JSON.
 #[tracing::instrument(skip_all)]
 async fn get_manifest(admin_url: &Url, hash: &Hash) -> Result<String, Error> {
-    let url = admin_url
-        .join(&format!("manifests/{}", hash))
-        .map_err(|err| {
-            tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-            Error::InvalidAdminUrl {
-                url: admin_url.to_string(),
-                source: err,
-            }
-        })?;
+    tracing::debug!("Creating client and retrieving manifest");
 
-    tracing::debug!("Sending GET request");
+    let client = Client::new(admin_url.clone());
+    let manifest_value = client
+        .manifests()
+        .get(hash)
+        .await
+        .map_err(|err| Error::ClientError { source: err })?;
 
-    let client = reqwest::Client::new();
-    let response = client.get(url.as_str()).send().await.map_err(|err| {
-        tracing::error!(error = %err, "Network error during API request");
-        Error::NetworkError {
-            url: url.to_string(),
-            source: err,
+    // Check if the manifest was found
+    let manifest = manifest_value.ok_or_else(|| {
+        tracing::error!(%hash, "Manifest not found");
+        Error::ManifestNotFound {
+            hash: hash.to_string(),
         }
     })?;
 
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
+    // Pretty-print the manifest JSON
+    let pretty_json = serde_json::to_string_pretty(&manifest).map_err(|err| {
+        tracing::error!(error = %err, "Failed to pretty-print manifest JSON");
+        Error::JsonFormattingError { source: err }
+    })?;
 
-    match status.as_u16() {
-        200 => {
-            let manifest_response = response.json::<ManifestResponse>().await.map_err(|err| {
-                tracing::error!(error = %err, "Failed to parse manifest response from API");
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse response: {}", err),
-                }
-            })?;
-
-            // Pretty-print the manifest JSON
-            let pretty_json =
-                serde_json::to_string_pretty(&manifest_response.manifest).map_err(|err| {
-                    tracing::error!(error = %err, "Failed to pretty-print manifest JSON");
-                    Error::JsonFormattingError { source: err }
-                })?;
-
-            Ok(pretty_json)
-        }
-        400 | 404 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
-    }
-}
-
-/// Response body for the GET /manifests/{hash} endpoint (200 success).
-#[derive(Debug, serde::Deserialize)]
-struct ManifestResponse {
-    #[serde(flatten)]
-    manifest: serde_json::Value,
-}
-
-/// Error response from the admin API (400/404/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+    Ok(pretty_json)
 }
 
 /// Errors for manifest inspection operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Manifest not found
+    #[error("manifest not found: {hash}")]
+    ManifestNotFound { hash: String },
+
+    /// Client error from ManifestsClient
+    #[error("client error")]
+    ClientError {
+        #[source]
+        source: crate::client::manifests::GetError,
     },
-
-    /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
-    },
-
-    /// Network or connection error
-    #[error("network error connecting to {url}")]
-    NetworkError { url: String, source: reqwest::Error },
-
-    /// Unexpected response from API
-    #[error("unexpected response (status {status}): {message}")]
-    UnexpectedResponse { status: u16, message: String },
 
     /// Failed to format JSON for display
     #[error("failed to format manifest JSON")]
-    JsonFormattingError { source: serde_json::Error },
+    JsonFormattingError {
+        #[source]
+        source: serde_json::Error,
+    },
 }
