@@ -160,9 +160,11 @@ impl From<String> for NodeIdOwned {
     }
 }
 
-impl<'a> From<&'a NodeIdOwned> for NodeId<'a> {
-    fn from(id: &'a NodeIdOwned) -> Self {
-        // SAFETY: Source already upholds invariants; conversion maintains them.
-        NodeId::from_ref_unchecked(id.as_str())
+impl<'a> From<&'a NodeId<'a>> for NodeId<'a> {
+    fn from(value: &'a NodeId<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input ID.
+        // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
+        // SAFETY: The input ID already upholds invariants, so the referenced data is valid.
+        NodeId::from_ref_unchecked(value.as_ref())
     }
 }

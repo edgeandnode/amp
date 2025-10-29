@@ -9,7 +9,7 @@ use worker::JobId;
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
-    scheduler::StopJobError,
+    scheduler,
 };
 
 /// Handler for the `PUT /jobs/{id}/stop` endpoint
@@ -29,8 +29,7 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_JOB_ID`: The provided ID is not a valid job identifier
 /// - `JOB_NOT_FOUND`: No job exists with the given ID
-/// - `GET_JOB_DB_ERROR`: Database error while fetching job information
-/// - `STOP_JOB_DB_ERROR`: Database error during stop operation execution
+/// - `STOP_JOB_ERROR`: Database error during stop operation execution
 /// - `UNEXPECTED_STATE_CONFLICT`: Internal state machine error (indicates a bug)
 ///
 /// ## Idempotent Behavior
@@ -44,7 +43,7 @@ use crate::{
 /// This handler provides idempotent job stopping with the following characteristics:
 /// - Jobs already in terminal states (Stopped, Completed, Failed) return success (idempotent)
 /// - Only running/scheduled jobs transition to stop-requested state
-/// - The scheduler handles atomic status updates and worker notifications
+/// - Job lookup and stop request are performed atomically within a single transaction
 /// - Database layer validates state transitions and prevents race conditions
 ///
 /// ## State Transitions
@@ -59,9 +58,8 @@ use crate::{
 ///
 /// The handler:
 /// - Validates and extracts the job ID from the URL path
-/// - Retrieves current job status to validate it exists
+/// - Delegates to scheduler for atomic stop operation (job lookup + stop + worker notification)
 /// - Returns success if job is already in terminal state (idempotent)
-/// - Delegates to scheduler for atomic stop operation with worker notification
 /// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
@@ -94,51 +92,19 @@ pub async fn handler(
         }
     };
 
-    // Get current job status to validate it exists before attempting stop
-    let job = ctx.metadata_db.get_job(&id).await.map_err(|err| {
-        tracing::error!(
-            error=?err,
-            job_id=%id,
-            "Database error while fetching job for stop operation"
-        );
-        Error::GetJobDbError { id, source: err }
-    })?;
-
-    let job = match job {
-        Some(job) => {
-            tracing::debug!(
-                job_id=%id,
-                status=%job.status,
-                node_id=%job.node_id,
-                "Job found, proceeding with stop operation"
-            );
-            job
-        }
-        None => {
-            tracing::debug!(job_id=%id, "Job not found");
-            return Err(Error::NotFound { id }.into());
-        }
-    };
-
-    // Delegate to scheduler for atomic stop operation
-    // The database layer handles validation
-    match ctx.scheduler.stop_job(&id, &job.node_id.into()).await {
-        Ok(()) => {
-            tracing::info!(job_id=%id, "Job stop request processed successfully");
-            Ok(StatusCode::OK)
-        }
-        Err(err) => match err {
-            StopJobError::JobNotFound => {
-                // Job was deleted between our get and stop calls
-                tracing::warn!(job_id=%id, "Job not found during stop operation (race condition)");
+    // Attempt to stop the job - this operation is atomic and includes job lookup
+    if let Err(err) = ctx.scheduler.stop_job(&id).await {
+        return match err {
+            scheduler::StopJobError::JobNotFound => {
+                tracing::debug!(job_id=%id, "Job not found");
                 Err(Error::NotFound { id }.into())
             }
-            StopJobError::JobAlreadyTerminated { status } => {
+            scheduler::StopJobError::JobAlreadyTerminated { status } => {
                 // Idempotent behavior: job is already in terminal state
                 tracing::debug!(job_id=%id, status=%status, "Job already in terminal state, returning success (idempotent)");
                 Ok(StatusCode::OK)
             }
-            StopJobError::StateConflict { current_status } => {
+            scheduler::StopJobError::StateConflict { current_status } => {
                 // Unexpected state conflict - this shouldn't happen with current state machine
                 tracing::error!(
                     job_id=%id,
@@ -151,16 +117,19 @@ pub async fn handler(
                 }
                 .into())
             }
-            StopJobError::MetadataDb(metadata_err) => {
-                tracing::error!(error=?metadata_err, job_id=%id, "Metadata database error during stop operation");
-                Err(Error::StopJobDbError {
-                    id,
-                    source: metadata_err,
-                }
-                .into())
+            scheduler::StopJobError::BeginTransaction(_)
+            | scheduler::StopJobError::GetJob(_)
+            | scheduler::StopJobError::UpdateJobStatus(_)
+            | scheduler::StopJobError::CommitTransaction(_)
+            | scheduler::StopJobError::SendNotification(_) => {
+                tracing::error!(error=?err, job_id=%id, "Database error during stop operation");
+                Err(Error::StopJob { id, source: err }.into())
             }
-        },
+        };
     }
+
+    tracing::info!(job_id=%id, "Job stop request processed successfully");
+    Ok(StatusCode::OK)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -169,68 +138,28 @@ pub enum Error {
     ///
     /// This occurs when the ID cannot be parsed as a valid JobId.
     #[error("invalid job ID: {err}")]
-    InvalidId {
-        /// The rejection details from Axum's path extractor
-        err: PathRejection,
-    },
+    InvalidId { err: PathRejection },
 
     /// Job not found
     ///
     /// This occurs when the job ID is valid but no job
     /// record exists with that ID in the metadata database.
-    ///
-    /// Note: This can also occur as a race condition when a job is deleted
-    /// between the initial get operation and the stop operation.
     #[error("job '{id}' not found")]
-    NotFound {
-        /// The job ID that was not found
-        id: JobId,
-    },
-
-    /// Database error while fetching job information
-    ///
-    /// This error occurs specifically during the initial job lookup operation
-    /// before attempting to stop the job.
-    ///
-    /// Common scenarios:
-    /// - Database connection failures
-    /// - Connection pool exhaustion
-    /// - Query timeout
-    /// - Transient network issues
-    ///
-    /// Debugging hints:
-    /// - Check database connectivity
-    /// - Verify connection pool settings
-    /// - Monitor database performance metrics
-    #[error("database error while fetching job '{id}': {source}")]
-    GetJobDbError {
-        /// The job ID that was being fetched
-        id: JobId,
-        /// The underlying database error
-        source: metadata_db::Error,
-    },
+    NotFound { id: JobId },
 
     /// Database error during stop operation
     ///
     /// This error occurs when the scheduler encounters a database error
-    /// while executing the stop operation (state transition, worker notification, etc.).
+    /// while executing the atomic stop operation (job lookup, state transition, or worker notification).
     ///
-    /// Common scenarios:
-    /// - Transaction conflicts or deadlocks
-    /// - Connection lost during multi-step operation
-    /// - Database constraint violations
-    /// - Worker notification database write failures
-    ///
-    /// Debugging hints:
-    /// - Check for concurrent job modifications
-    /// - Review database transaction logs
-    /// - Verify worker notification system health
-    #[error("database error during stop operation for job '{id}': {source}")]
-    StopJobDbError {
-        /// The job ID being stopped
+    /// This occurs when:
+    /// - Database connection fails or is lost during the transaction
+    /// - Transaction conflicts or deadlocks occur
+    /// - Database constraint violations are encountered
+    #[error("failed to stop job '{id}'")]
+    StopJob {
         id: JobId,
-        /// The underlying database error
-        source: metadata_db::Error,
+        source: scheduler::StopJobError,
     },
 
     /// Unexpected state conflict during stop operation
@@ -239,17 +168,12 @@ pub enum Error {
     /// It should not occur under normal operation and indicates a bug that
     /// requires investigation.
     ///
-    /// Common scenarios:
+    /// This occurs when:
     /// - State machine has invalid transition rules
-    /// - Concurrent state modifications without proper locking
-    /// - Database state corruption
+    /// - Concurrent state modifications occur without proper locking
+    /// - Database state corruption is detected
     #[error("unexpected state conflict for job '{id}': current state is '{current_status}'")]
-    UnexpectedStateConflict {
-        /// The job ID that experienced the conflict
-        id: JobId,
-        /// The current status that caused the conflict
-        current_status: String,
-    },
+    UnexpectedStateConflict { id: JobId, current_status: String },
 }
 
 impl IntoErrorResponse for Error {
@@ -257,8 +181,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId { .. } => "INVALID_JOB_ID",
             Error::NotFound { .. } => "JOB_NOT_FOUND",
-            Error::GetJobDbError { .. } => "GET_JOB_DB_ERROR",
-            Error::StopJobDbError { .. } => "STOP_JOB_DB_ERROR",
+            Error::StopJob { .. } => "STOP_JOB_ERROR",
             Error::UnexpectedStateConflict { .. } => "UNEXPECTED_STATE_CONFLICT",
         }
     }
@@ -267,8 +190,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
-            Error::GetJobDbError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::StopJobDbError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::StopJob { .. } => StatusCode::INTERNAL_SERVER_ERROR,
 
             // Internal server error for unexpected state conflicts (indicates a bug)
             Error::UnexpectedStateConflict { .. } => StatusCode::INTERNAL_SERVER_ERROR,
