@@ -9,15 +9,10 @@ pub fn provider(url: String, trace_ratio: f64, compression: Option<String>) -> R
         .with_attribute(opentelemetry::KeyValue::new("service.name", "tracing"))
         .build();
 
-    // Set compression via environment variable - default to "none" if not already set
-    let compression_value = match compression.as_deref() {
-        Some("gzip") => "gzip",
-        Some("none") => "none",
-        _ => "none", // Default to "none" if not specified
-    };
-
-    unsafe {
-        std::env::set_var("OTLP_TRACES_COMPRESSION", compression_value);
+    if matches!(compression.as_deref(), Some("gzip")) {
+        tracing::warn!(
+            "requested gzip compression for traces; programmatic compression is not supported in this version. set OTLP_TRACES_COMPRESSION=gzip instead"
+        );
     }
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()

@@ -20,15 +20,10 @@ pub fn start(
     export_interval: Option<Duration>,
     compression: Option<String>,
 ) -> Result {
-    // Set compression via environment variable - default to "none" if not already set
-    let compression_value = match compression.as_deref() {
-        Some("gzip") => "gzip",
-        Some("none") => "none",
-        _ => "none", // Default to "none" if not specified
-    };
-
-    unsafe {
-        std::env::set_var("OTLP_METRICS_COMPRESSION", compression_value);
+    if matches!(compression.as_deref(), Some("gzip")) {
+        tracing::warn!(
+            "requested gzip compression for metrics; programmatic compression is not supported in this version. set OTLP_METRICS_COMPRESSION=gzip instead"
+        );
     }
 
     let exporter = opentelemetry_otlp::MetricExporter::builder()
@@ -36,6 +31,7 @@ pub fn start(
         .with_protocol(Protocol::HttpBinary)
         .with_endpoint(url)
         .build()?;
+
     // If not set, use the default periodic exporter value.
     let export_interval = export_interval.unwrap_or(DEFAULT_METRICS_EXPORT_INTERVAL);
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
