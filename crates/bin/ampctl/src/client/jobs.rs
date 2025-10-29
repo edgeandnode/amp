@@ -13,35 +13,35 @@ use super::{
 ///
 /// GET `/jobs`
 fn jobs_list() -> &'static str {
-    "/jobs"
+    "jobs"
 }
 
 /// Build URL path for getting a job by ID.
 ///
 /// GET `/jobs/{id}`
 fn job_get_by_id(id: &JobId) -> String {
-    format!("/jobs/{id}")
+    format!("jobs/{id}")
 }
 
 /// Build URL path for stopping a job.
 ///
 /// PUT `/jobs/{id}/stop`
 fn job_stop(id: &JobId) -> String {
-    format!("/jobs/{id}/stop")
+    format!("jobs/{id}/stop")
 }
 
 /// Build URL path for deleting a job by ID.
 ///
 /// DELETE `/jobs/{id}`
 fn job_delete_by_id(id: &JobId) -> String {
-    format!("/jobs/{id}")
+    format!("jobs/{id}")
 }
 
 /// Build URL path for deleting jobs by status filter.
 ///
 /// DELETE `/jobs`
 fn jobs_delete() -> &'static str {
-    "/jobs"
+    "jobs"
 }
 
 /// Client for jobs-related API operations.
@@ -411,7 +411,9 @@ impl<'a> JobsClient<'a> {
         limit: Option<usize>,
         last_job_id: Option<JobId>,
     ) -> Result<JobsResponse, ListError> {
+        tracing::warn!(base_url = %self.client.base_url());
         let mut url = self.client.base_url().join(jobs_list()).expect("valid URL");
+        tracing::warn!(%url);
 
         // Add query parameters
         {

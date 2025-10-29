@@ -11,28 +11,28 @@ use super::{
 ///
 /// POST `/providers`
 fn provider_create() -> &'static str {
-    "/providers"
+    "providers"
 }
 
 /// Build URL path for getting a provider by name.
 ///
 /// GET `/providers/{name}`
 fn provider_get_by_id(name: &str) -> String {
-    format!("/providers/{name}", name = urlencoding::encode(name))
+    format!("providers/{name}", name = urlencoding::encode(name))
 }
 
 /// Build URL path for listing all providers.
 ///
 /// GET `/providers`
 fn provider_get_all() -> &'static str {
-    "/providers"
+    "providers"
 }
 
 /// Build URL path for deleting a provider by name.
 ///
 /// DELETE `/providers/{name}`
 fn provider_delete_by_id(name: &str) -> String {
-    format!("/providers/{name}", name = urlencoding::encode(name))
+    format!("providers/{name}", name = urlencoding::encode(name))
 }
 
 /// Client for provider-related API operations.

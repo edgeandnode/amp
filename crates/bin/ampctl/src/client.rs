@@ -38,7 +38,12 @@ impl Client {
     /// Create a new client with the given base URL and no authentication.
     ///
     /// For clients with authentication or custom configuration, use [`build`].
-    pub fn new(base_url: Url) -> Self {
+    pub fn new(mut base_url: Url) -> Self {
+        // Ensure that no path segments are dropped when joining on this URL.
+        if !base_url.path().ends_with('/') {
+            base_url = format!("{base_url}/").parse().unwrap();
+        }
+
         Self {
             http: reqwest::Client::new(),
             base_url,
@@ -88,7 +93,12 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     /// Create a new builder with the required base URL.
-    pub fn new(base_url: Url) -> Self {
+    pub fn new(mut base_url: Url) -> Self {
+        // Ensure that no path segments are dropped when joining on this URL.
+        if !base_url.path().ends_with('/') {
+            base_url = format!("{base_url}/").parse().unwrap();
+        }
+
         Self {
             base_url,
             bearer_token: None,

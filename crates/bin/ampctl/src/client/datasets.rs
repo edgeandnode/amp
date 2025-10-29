@@ -15,14 +15,14 @@ use super::{
 ///
 /// POST `/datasets`
 fn dataset_register() -> &'static str {
-    "/datasets"
+    "datasets"
 }
 
 /// Build URL path for deploying a dataset version.
 ///
 /// POST `/datasets/{namespace}/{name}/versions/{version}/deploy`
 fn dataset_deploy(namespace: &Namespace, name: &Name, version: &Revision) -> String {
-    format!("/datasets/{namespace}/{name}/versions/{version}/deploy")
+    format!("datasets/{namespace}/{name}/versions/{version}/deploy")
 }
 
 /// Client for dataset-related API operations.
