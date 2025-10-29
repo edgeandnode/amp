@@ -33,11 +33,6 @@ const datasetRevision = HttpApiSchema.param("revision", Schema.String)
 const jobId = HttpApiSchema.param("jobId", Model.JobIdParam)
 
 /**
- * The location ID parameter (GET /locations/{locationId}, DELETE /locations/{locationId}).
- */
-const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
-
-/**
  * The register dataset endpoint (POST /datasets).
  */
 const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
@@ -212,80 +207,6 @@ const getJobById = HttpApiEndpoint.get("getJobById")`/jobs/${jobId}`
 export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.MetadataDbError
 
 /**
- * The get locations endpoint (GET /locations).
- */
-const getLocations = HttpApiEndpoint.get("getLocations")`/locations`
-  .addError(Error.InvalidQueryParameters)
-  .addError(Error.LimitTooLarge)
-  .addError(Error.LimitInvalid)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Model.LocationsResponse)
-  .setUrlParams(
-    Schema.Struct({
-      limit: Schema.optional(Schema.NumberFromString),
-      lastLocationId: Schema.optional(Model.LocationIdParam).pipe(Schema.fromKey("last_location_id")),
-    }),
-  )
-
-/**
- * Error type for the `getLocations` endpoint.
- */
-export type GetLocationsError =
-  | Error.InvalidQueryParameters
-  | Error.LimitTooLarge
-  | Error.LimitInvalid
-  | Error.MetadataDbError
-
-/**
- * The get location by ID endpoint (GET /locations/{locationId}).
- */
-const getLocationById = HttpApiEndpoint.get("getLocationById")`/locations/${locationId}`
-  .addError(Error.InvalidLocationId)
-  .addError(Error.LocationNotFound)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Model.LocationInfo)
-
-/**
- * Error type for the `getLocationById` endpoint.
- *
- * - InvalidLocationId: The provided ID is not a valid location identifier.
- * - LocationNotFound: No location exists with the given ID.
- * - MetadataDbError: Internal database error occurred.
- */
-export type GetLocationByIdError = Error.InvalidLocationId | Error.LocationNotFound | Error.MetadataDbError
-
-/**
- * The delete location by ID endpoint (DELETE /locations/{locationId}).
- */
-const deleteLocationById = HttpApiEndpoint.del("deleteLocationById")`/locations/${locationId}`
-  .addError(Error.InvalidLocationId)
-  .addError(Error.InvalidQueryParameters)
-  .addError(Error.LocationNotFound)
-  .addError(Error.MetadataDbError)
-  .addSuccess(Schema.Void, { status: 204 })
-  .setUrlParams(
-    Schema.Struct({
-      force: Schema.optional(Schema.BooleanFromString),
-    }),
-  )
-
-/**
- * Error type for the `deleteLocationById` endpoint.
- *
- * - InvalidLocationId: The provided ID is not a valid location identifier.
- * - InvalidQueryParameters: Invalid query parameters.
- * - LocationNotFound: No location exists with the given ID.
- * - MetadataDbError: Internal database error occurred.
- *
- * Note: LocationConflict error (409) exists in the API but is not yet defined in the TypeScript error types.
- */
-export type DeleteLocationByIdError =
-  | Error.InvalidLocationId
-  | Error.InvalidQueryParameters
-  | Error.LocationNotFound
-  | Error.MetadataDbError
-
-/**
  * The output schema endpoint (POST /schema).
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
@@ -329,15 +250,6 @@ export class JobGroup extends HttpApiGroup.make("job")
 {}
 
 /**
- * The api group for the location endpoints.
- */
-export class LocationGroup extends HttpApiGroup.make("location")
-  .add(getLocations)
-  .add(getLocationById)
-  .add(deleteLocationById)
-{}
-
-/**
  * The api group for the schema endpoints.
  */
 export class SchemaGroup extends HttpApiGroup.make("schema")
@@ -350,7 +262,6 @@ export class SchemaGroup extends HttpApiGroup.make("schema")
 export class Api extends HttpApi.make("admin")
   .add(DatasetGroup)
   .add(JobGroup)
-  .add(LocationGroup)
   .add(SchemaGroup)
 {}
 
@@ -475,40 +386,6 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   readonly getJobById: (
     jobId: number,
   ) => Effect.Effect<Model.JobInfo, HttpClientError.HttpClientError | GetJobByIdError>
-
-  /**
-   * Get all locations with pagination.
-   *
-   * @param options The pagination options.
-   * @return The paginated locations response.
-   */
-  readonly getLocations: (options?: {
-    limit?: number | undefined
-    lastLocationId?: number | undefined
-  }) => Effect.Effect<Model.LocationsResponse, HttpClientError.HttpClientError | GetLocationsError>
-
-  /**
-   * Get a location by ID.
-   *
-   * @param locationId The ID of the location to get.
-   * @return The location information.
-   */
-  readonly getLocationById: (
-    locationId: number,
-  ) => Effect.Effect<Model.LocationInfo, HttpClientError.HttpClientError | GetLocationByIdError>
-
-  /**
-   * Delete a location by ID.
-   *
-   * @param locationId The ID of the location to delete.
-   * @param options Optional parameters including force flag.
-   */
-  readonly deleteLocationById: (
-    locationId: number,
-    options?: {
-      force?: boolean | undefined
-    },
-  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteLocationByIdError>
 
   /**
    * Gets the schema of a dataset.
@@ -669,61 +546,6 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getLocations = Effect.fn("getLocations")(function*(options?: {
-    limit?: number | undefined
-    lastLocationId?: number | undefined
-  }) {
-    const result = yield* client.location.getLocations({
-      urlParams: {
-        limit: options?.limit,
-        lastLocationId: options?.lastLocationId,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const getLocationById = Effect.fn("getLocationById")(function*(locationId: number) {
-    const result = yield* client.location.getLocationById({
-      path: {
-        locationId,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-
-    return result
-  })
-
-  const deleteLocationById = Effect.fn("deleteLocationById")(function*(
-    locationId: number,
-    options?: {
-      force?: boolean | undefined
-    },
-  ) {
-    yield* client.location.deleteLocationById({
-      path: {
-        locationId,
-      },
-      urlParams: {
-        force: options?.force,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
-  })
-
   const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string, options?: GetSchemaOptions) {
     const request = client.schema.getOutputSchema({
       payload: {
@@ -750,9 +572,6 @@ export const make = Effect.fn(function*(url: string) {
     deployDataset,
     getDatasetManifest,
     getJobById,
-    getLocations,
-    getLocationById,
-    deleteLocationById,
     getOutputSchema,
   }
 })

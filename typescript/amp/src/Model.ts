@@ -317,20 +317,6 @@ export const JobIdParam = Schema.NumberFromString.pipe(
   }),
 )
 
-export const LocationId = Schema.Number.pipe(
-  Schema.annotations({
-    title: "LocationId",
-    description: "unique identifier for a location",
-  }),
-)
-
-export const LocationIdParam = Schema.NumberFromString.pipe(
-  Schema.annotations({
-    title: "LocationId",
-    description: "unique identifier for a location",
-  }),
-)
-
 export class JobInfo extends Schema.Class<JobInfo>("JobInfo")({
   id: JobId,
   createdAt: Schema.DateTimeUtc.pipe(Schema.propertySignature, Schema.fromKey("created_at")),
@@ -338,21 +324,6 @@ export class JobInfo extends Schema.Class<JobInfo>("JobInfo")({
   nodeId: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("node_id")),
   status: JobStatus,
   descriptor: Schema.Any,
-}) {}
-
-export class LocationInfo extends Schema.Class<LocationInfo>("LocationInfo")({
-  id: LocationId,
-  dataset: Schema.String,
-  datasetVersion: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("dataset_version")),
-  table: Schema.String,
-  url: Schema.String,
-  active: Schema.Boolean,
-  writer: Schema.optional(JobId),
-}) {}
-
-export class LocationsResponse extends Schema.Class<LocationsResponse>("LocationsResponse")({
-  locations: Schema.Array(LocationInfo),
-  nextCursor: Schema.optional(LocationId).pipe(Schema.fromKey("next_cursor")),
 }) {}
 
 export class BlockRange extends Schema.Class<BlockRange>("BlockRange")({
