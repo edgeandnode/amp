@@ -24,7 +24,7 @@ use std::{
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
-pub use datafusion::{arrow, parquet};
+pub use datafusion::{arrow, error::DataFusionError, parquet, scalar::ScalarValue};
 use datafusion::{
     arrow::{
         array::{ArrayRef, AsArray as _, RecordBatch},

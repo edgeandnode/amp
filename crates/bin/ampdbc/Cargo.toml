@@ -1,0 +1,44 @@
+[package]
+name = "ampdbc"
+description = "Database connector for the ampdbc syncing engine."
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[lib]
+name = "ampdbc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ampdbc"
+path = "src/main.rs"
+
+[dependencies]
+adbc_core = "0.20.0"
+adbc_driver_manager = "0.20.0"
+adbc_snowflake = { version = "0.20.0", default-features = false, features = ["env"] }
+amp-client.path = "../../client/amp-client"
+arrow-flight.workspace = true
+common.path = "../../core/common"
+datafusion-expr.workspace = true
+datafusion-sql.workspace = true
+datasets-common.path = "../../core/datasets-common"
+dataset-store.path = "../../core/dataset-store"
+dump.path = "../../core/dump"
+futures.workspace = true
+itertools.workspace = true
+metadata-db.path = "../../core/metadata-db"
+paste = "1.0.15"
+phf = { version = "0.13.1", features = ["macros"] }
+serde.workspace = true
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "sqlite", "migrate", "macros", "chrono", "mysql"] }
+termion = "4.0.5"
+tokio = { workspace = true, features = ["signal"] }
+tokio-stream.workspace = true
+tokio-util = "0.7.12"
+toml.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

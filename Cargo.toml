@@ -4,6 +4,7 @@ members = [
     "crates/auth/http",
     "crates/bin/ampctl",
     "crates/bin/ampd",
+    "crates/bin/ampdbc",
     "crates/bin/ampsync",
     "crates/bin/ampup",
     "crates/client/amp-client",
@@ -118,6 +119,8 @@ uuid = { version = "1.11.0", features = ["v7"] }
 # Datafusion and Arrow crates
 arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
 datafusion = { version = "50", features = ["serde"] }
+datafusion-expr = { version = "50" }
+datafusion-sql = { version = "50" }
 datafusion-tracing = { version = "50" }
 datafusion-proto = { version = "50" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
