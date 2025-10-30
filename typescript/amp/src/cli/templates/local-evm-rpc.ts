@@ -25,7 +25,7 @@ const event = (signature: string) => {
   return \`
     SELECT block_hash, tx_hash, block_num, timestamp, address,
            evm_decode_log(topic1, topic2, topic3, data, '\${signature}') as event
-    FROM anvil.logs
+    FROM anvil_rpc.logs
     WHERE topic0 = evm_topic('\${signature}')
   \`
 }
@@ -38,7 +38,7 @@ export default defineDataset(() => ({
   version: "${answers.datasetVersion || "0.1.0"}",
   network: "anvil",
   dependencies: {
-    anvil: "_/anvil@0.1.0",
+    anvil_rpc: "_/anvil_rpc@0.1.0",
   },
   tables: {
     counts: {
@@ -78,9 +78,21 @@ This template sets up everything you need to learn Amp's data extraction flow us
 
 ### Prerequisites
 
-- [Foundry](https://book.getfoundry.sh/getting-started/installation) - For deploying contracts
-- [Anvil](https://book.getfoundry.sh/anvil/) - Local Ethereum node (comes with Foundry)
-- Node.js 18+ - For running Amp CLI
+**Required:**
+- **[Amp Daemon (\`ampd\`)](https://ampup.sh)** - Core extraction and query engine:
+  \`\`\`bash
+  curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
+  \`\`\`
+- **[Foundry](https://book.getfoundry.sh/getting-started/installation)** - For Anvil testnet and smart contracts:
+  \`\`\`bash
+  curl -L https://foundry.paradigm.xyz | bash && foundryup
+  \`\`\`
+
+**Optional (Better Developer Experience):**
+- **Node.js 18+** - For TypeScript CLI with hot-reloading (\`amp dev\`, \`amp query\`)
+
+**NOT Required:**
+- PostgreSQL (temporary database used automatically in dev mode)
 
 ### 1. Start Anvil
 
@@ -98,7 +110,7 @@ If you want to deploy the included Counter contract:
 
 \`\`\`bash
 cd contracts
-forge script script/Deploy.s.sol \
+forge script script/Counter.s.sol \
   --broadcast \
   --rpc-url http://localhost:8545 \
   --sender 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 \
@@ -112,53 +124,104 @@ This deploys the Counter contract and generates some test events (3 Count events
 Start the Amp development server with hot-reloading:
 
 \`\`\`bash
-amp dev
+cd ..  # Go back to project root (where amp.toml is)
+
+# Start ampd in development mode (single-node: controller + server + worker combined)
+AMP_CONFIG=amp.toml ampd dev
+\`\`\`
+
+This single command starts **everything you need**:
+- **Admin API** (port 1610) - Job management and control
+- **Query Servers** - Arrow Flight (port 1602) and JSON Lines (port 1603)
+- **Embedded Worker** - Data extraction from Anvil
+- **Temporary PostgreSQL** - Metadata storage (no setup required!)
+
+Leave \`ampd dev\` running and continue to the next step.
+
+### 5. Register and Deploy the Dataset
+
+In a **new terminal**, register the anvil dataset with the Admin API and deploy it to start extraction:
+
+\`\`\`bash
+# Register the anvil_rpc dataset
+curl -X POST http://localhost:1610/datasets \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"dataset_name\\": \\"_/anvil_rpc\\", \\"version\\": \\"0.1.0\\", \\"manifest\\": $(cat manifests/anvil_rpc.json | jq -c .)}"
+
+# Deploy the dataset to trigger data extraction
+curl -X POST http://localhost:1610/datasets/_/anvil_rpc/versions/0.1.0/deploy
 \`\`\`
 
 This will:
-- Start extracting data from Anvil
-- Enable hot-reloading when you modify \`amp.config.ts\`
-- Expose query interfaces (Arrow Flight on 1602, JSON Lines on 1603, Admin API on 1610)
+- Register the Anvil RPC dataset manifest with ampd
+- Start extracting blocks, transactions, and logs from Anvil
+- Store data as Parquet files in the \`data/\` directory
+- Make data queryable via SQL once extraction begins
 
-### 4. Query Your Data
+**Note:** Requires \`jq\` for JSON formatting. Install with \`brew install jq\` on macOS or \`apt-get install jq\` on Linux.
 
-Query your dataset using the Amp CLI:
+### 6. Query Your Data
 
+In a **new terminal**, query your blockchain data:
+
+**Option A: Simple HTTP queries (no additional tools needed)**
 \`\`\`bash
-# See all count events
-amp query "SELECT * FROM ${answers.datasetName}.counts LIMIT 10"
+# Query raw anvil_rpc logs
+curl -X POST http://localhost:1603 --data "SELECT * FROM anvil_rpc.logs LIMIT 10"
 
-# See all transfer events
-amp query "SELECT * FROM ${answers.datasetName}.transfers LIMIT 10"
+# Query raw blocks
+curl -X POST http://localhost:1603 --data "SELECT block_num, timestamp, hash FROM anvil_rpc.blocks LIMIT 10"
 
-# Query the raw anvil logs
-amp query "SELECT * FROM anvil.logs LIMIT 10"
+# Query raw transactions
+curl -X POST http://localhost:1603 --data "SELECT * FROM anvil_rpc.transactions LIMIT 10"
 \`\`\`
 
-Or open the Amp Studio in your browser for an interactive query playground:
-
+**Option B: TypeScript CLI (better formatting, if Node.js installed)**
 \`\`\`bash
-amp studio
+# Query raw anvil_rpc logs
+npx @edgeandnode/amp query "SELECT * FROM anvil_rpc.logs LIMIT 10"
+
+# Query decoded count events (requires amp dev running for TypeScript dataset)
+npx @edgeandnode/amp query "SELECT * FROM ${answers.datasetName}.counts LIMIT 10"
+
+# Query decoded transfer events
+npx @edgeandnode/amp query "SELECT * FROM ${answers.datasetName}.transfers LIMIT 10"
+\`\`\`
+
+**Or if developing Amp locally:**
+\`\`\`bash
+bun /path/to/typescript/amp/src/cli/bun.ts query "SELECT * FROM anvil_rpc.logs LIMIT 10"
 \`\`\`
 
 ## Project structure
 
 \`\`\`
 .
-├── amp.config.ts          # Dataset configuration (TypeScript)
+├── amp.config.ts          # TypeScript dataset configuration (optional, for amp dev)
 │                          # Defines your dataset: ${answers.datasetName}@${answers.datasetVersion || "0.1.0"}
+│
+├── amp.toml               # Main Amp configuration (required for ampd)
+│                          # Points to manifests/, providers/, and data/ directories
+│
+├── manifests/             # Dataset definitions (JSON manifests for ampd)
+│   └── anvil_rpc.json     # Anvil EVM RPC dataset definition
+│                          # Defines schemas for blocks, logs, and transactions tables
+│
+├── providers/             # Provider configurations (connection settings)
+│   └── anvil.toml         # Anvil RPC endpoint at http://localhost:8545
+│
+├── data/                  # Parquet file storage (created automatically)
+│   └── .gitkeep           # Ensures directory exists in git
 │
 ├── contracts/             # Sample Foundry project
 │   ├── src/
 │   │   └── Counter.sol    # Sample contract with Count + Transfer events
 │   ├── script/
-│   │   └── Deploy.s.sol   # Deployment script
+│   │   └── Counter.s.sol  # Deployment script
 │   └── foundry.toml       # Foundry configuration
 │
 ├── README.md              # This file
-└── .gitignore            # Git ignore rules
-
-Note: The \`data/\` directory will be created automatically when you run \`amp dev\`
+└── .gitignore             # Git ignore rules
 \`\`\`
 
 ## Pre-configured tables
@@ -178,7 +241,7 @@ These are SQL view definitions, not extracted data yet. Data extraction happens 
 ### Dependencies
 
 Your dataset depends on:
-- **\`anvil\`** (_/anvil@0.1.0) - Provides raw blockchain data (blocks, transactions, logs)
+- **\`anvil_rpc\`** (_/anvil_rpc@0.1.0) - Provides raw blockchain data (blocks, transactions, logs) extracted from Anvil RPC
 
 ## Learn more
 
@@ -244,7 +307,7 @@ anvil
 
 **No data appearing?**
 1. Make sure Anvil is running
-2. Deploy contracts to generate events: \`cd contracts && forge script script/Deploy.s.sol --broadcast --rpc-url http://localhost:8545\`
+2. Deploy contracts to generate events: \`cd contracts && forge script script/Counter.s.sol --broadcast --rpc-url http://localhost:8545\`
 3. Check logs: \`amp dev --logs debug\`
 
 **Contract deployment failed?**
@@ -254,14 +317,21 @@ anvil
 
 **Want to start fresh?**
 \`\`\`bash
-# Stop amp dev (Ctrl+C)
+# Stop ampd dev (Ctrl+C)
 # Stop Anvil (Ctrl+C)
 # Delete data directory
 rm -rf data/
 # Restart Anvil
 anvil
-# Restart amp dev
-amp dev
+# Restart ampd dev
+AMP_CONFIG=amp.toml ampd dev
+\`\`\`
+
+**\`ampd\` not found?**
+Make sure you installed it via ampup and it's in your PATH:
+\`\`\`bash
+curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
+# Then restart your terminal or source your profile
 \`\`\`
 
 ## Next steps
@@ -320,7 +390,7 @@ contract Counter {
 }
 `,
 
-    "contracts/script/Deploy.s.sol": `// SPDX-License-Identifier: MIT
+    "contracts/script/Counter.s.sol": `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {Script} from "forge-std/Script.sol";
@@ -349,6 +419,8 @@ contract Deploy is Script {
 
     ".gitignore": `# Amp
 data/
+manifests/
+providers/
 
 # Foundry
 cache/
@@ -383,6 +455,123 @@ bun.lockb
 # OS
 .DS_Store
 `,
+
+    "amp.toml": `# Amp configuration for local development with Anvil
+# This config is used by ampd (the Rust daemon)
+
+# Where extracted parquet files are stored
+data_dir = "data"
+
+# Directory containing provider configurations
+providers_dir = "providers"
+
+# Directory containing dataset manifests
+# Note: Manifests here are NOT auto-loaded. You must register datasets via the Admin API.
+# See README for registration commands.
+dataset_defs_dir = "manifests"
+
+# Optional: Temporary PostgreSQL will be used automatically in dev mode
+# No need to configure metadata_db_url for local development
+`,
+
+    "providers/anvil.toml": `# Anvil local testnet provider configuration
+kind = "evm-rpc"
+network = "anvil"
+url = "http://localhost:8545"
+`,
+
+    "manifests/anvil_rpc.json": `{
+  "kind": "evm-rpc",
+  "network": "anvil",
+  "start_block": 0,
+  "finalized_blocks_only": false,
+  "tables": {
+    "blocks": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            { "name": "block_num", "type": "UInt64", "nullable": false },
+            { "name": "timestamp", "type": { "Timestamp": ["Nanosecond", "+00:00"] }, "nullable": false },
+            { "name": "hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "parent_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "ommers_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "miner", "type": { "FixedSizeBinary": 20 }, "nullable": false },
+            { "name": "state_root", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "transactions_root", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "receipt_root", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "logs_bloom", "type": "Binary", "nullable": false },
+            { "name": "difficulty", "type": { "Decimal128": [38, 0] }, "nullable": false },
+            { "name": "gas_limit", "type": "UInt64", "nullable": false },
+            { "name": "gas_used", "type": "UInt64", "nullable": false },
+            { "name": "extra_data", "type": "Binary", "nullable": false },
+            { "name": "mix_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "nonce", "type": "UInt64", "nullable": false },
+            { "name": "base_fee_per_gas", "type": { "Decimal128": [38, 0] }, "nullable": true },
+            { "name": "withdrawals_root", "type": { "FixedSizeBinary": 32 }, "nullable": true },
+            { "name": "blob_gas_used", "type": "UInt64", "nullable": true },
+            { "name": "excess_blob_gas", "type": "UInt64", "nullable": true },
+            { "name": "parent_beacon_root", "type": { "FixedSizeBinary": 32 }, "nullable": true }
+          ]
+        }
+      },
+      "network": "anvil"
+    },
+    "logs": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            { "name": "block_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "block_num", "type": "UInt64", "nullable": false },
+            { "name": "timestamp", "type": { "Timestamp": ["Nanosecond", "+00:00"] }, "nullable": false },
+            { "name": "tx_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "tx_index", "type": "UInt32", "nullable": false },
+            { "name": "log_index", "type": "UInt32", "nullable": false },
+            { "name": "address", "type": { "FixedSizeBinary": 20 }, "nullable": false },
+            { "name": "topic0", "type": { "FixedSizeBinary": 32 }, "nullable": true },
+            { "name": "topic1", "type": { "FixedSizeBinary": 32 }, "nullable": true },
+            { "name": "topic2", "type": { "FixedSizeBinary": 32 }, "nullable": true },
+            { "name": "topic3", "type": { "FixedSizeBinary": 32 }, "nullable": true },
+            { "name": "data", "type": "Binary", "nullable": false }
+          ]
+        }
+      },
+      "network": "anvil"
+    },
+    "transactions": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            { "name": "block_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "block_num", "type": "UInt64", "nullable": false },
+            { "name": "timestamp", "type": { "Timestamp": ["Nanosecond", "+00:00"] }, "nullable": false },
+            { "name": "tx_index", "type": "UInt32", "nullable": false },
+            { "name": "tx_hash", "type": { "FixedSizeBinary": 32 }, "nullable": false },
+            { "name": "to", "type": { "FixedSizeBinary": 20 }, "nullable": true },
+            { "name": "nonce", "type": "UInt64", "nullable": false },
+            { "name": "gas_price", "type": { "Decimal128": [38, 0] }, "nullable": true },
+            { "name": "gas_limit", "type": "UInt64", "nullable": false },
+            { "name": "value", "type": { "Decimal128": [38, 0] }, "nullable": false },
+            { "name": "input", "type": "Binary", "nullable": false },
+            { "name": "v", "type": "Binary", "nullable": false },
+            { "name": "r", "type": "Binary", "nullable": false },
+            { "name": "s", "type": "Binary", "nullable": false },
+            { "name": "gas_used", "type": "UInt64", "nullable": false },
+            { "name": "type", "type": "Int32", "nullable": false },
+            { "name": "max_fee_per_gas", "type": { "Decimal128": [38, 0] }, "nullable": true },
+            { "name": "max_priority_fee_per_gas", "type": { "Decimal128": [38, 0] }, "nullable": true },
+            { "name": "max_fee_per_blob_gas", "type": { "Decimal128": [38, 0] }, "nullable": true },
+            { "name": "from", "type": { "FixedSizeBinary": 20 }, "nullable": false },
+            { "name": "status", "type": "Boolean", "nullable": false }
+          ]
+        }
+      },
+      "network": "anvil"
+    }
+  }
+}
+`,
+
+    "data/.gitkeep": "",
   },
   postInstall: (projectPath: string) =>
     Effect.gen(function*() {
