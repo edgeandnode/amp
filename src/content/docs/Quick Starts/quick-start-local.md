@@ -14,7 +14,7 @@ git clone <repository-url>
 cd <repository-name>`
 ```
 
-2. PostgreSQL databaseSetup
+2. PostgreSQL database setup
 
 You need this database to store metadata.  
 The easiest way to set this up is by using **Docker**.
