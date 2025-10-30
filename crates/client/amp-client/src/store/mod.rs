@@ -1,57 +1,41 @@
 //! State persistence for durable streaming
 //!
 //! This module provides the `StateStore` trait for pluggable state persistence,
-//! enabling crash recovery and checkpoint-based resumption.
+//! enabling crash recovery and watermark-based resumption.
 
 mod memory;
 
-use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
 use common::metadata::segments::BlockRange;
 pub use memory::InMemoryStateStore;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, state::CompressedCommit, stream::WatermarkCheckpoint};
+use crate::{
+    error::Error,
+    transactional::{Commit, TransactionId},
+};
 
 /// Persisted state for stream resumption and crash recovery.
 ///
-/// Contains everything needed to resume a stream from a previous checkpoint:
-/// - Watermark checkpoint (ranges + sequence at last safe point)
-/// - Block ranges from most recent event (for reorg detection within connection)
-/// - Consumed batches buffer (for computing invalidated sequences on reorg)
-/// - Monotonic sequence counter (for unique batch identification)
+/// Contains everything needed to resume a stream:
+/// - `buffer`: Watermarks within retention window (oldest to newest)
+/// - `next`: Monotonic transaction ID counter for uniqueness
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StreamState {
-    /// Last committed watermark checkpoint.
-    ///
-    /// Contains both the block ranges and the highest sequence number at the time
-    /// of the watermark. This represents the last safe checkpoint where all prior
-    /// data has been committed and can be used for crash recovery.
-    pub watermark: Option<WatermarkCheckpoint>,
+pub struct StateSnapshot {
+    /// Watermarks buffer for reorg recovery (oldest to newest)
+    pub buffer: VecDeque<(TransactionId, Vec<BlockRange>)>,
 
-    /// Consumed batches buffer for computing invalidated sequences on reorg.
-    ///
-    /// Maps sequence number -> block ranges for that batch.
-    /// Pruned on watermark based on retention window to bound memory usage.
-    ///
-    /// Used to compute which sequences are invalidated when a reorg is detected:
-    /// Walk back through buffer to find all sequences that covered the reorg'd blocks.
-    pub buffer: BTreeMap<u64, Vec<BlockRange>>,
-
-    /// Next sequence number to assign.
-    ///
-    /// Monotonically increasing counter for assigning unique sequence numbers to batches.
-    /// Never decreases, never resets. Persisted across restarts to ensure uniqueness.
-    pub next: u64,
+    /// Next transaction ID to assign (persisted for uniqueness guarantee)
+    pub next: TransactionId,
 }
 
 /// Trait for pluggable state persistence.
 ///
 /// Implementors provide durable storage for stream state, enabling:
 /// - Crash recovery by resuming from last watermark
-/// - Persistent watermark checkpoints with sequence tracking
-/// - Batch buffering for reorg sequence computation
-/// - Monotonic sequence counter persistence
+/// - Watermark buffering for reorg transaction id range computation
+/// - Monotonic transaction id counter persistence
 /// - Rewind detection on reconnection
 ///
 /// # Atomic Commits
@@ -60,21 +44,26 @@ pub struct StreamState {
 /// that each event's state changes (which may involve multiple fields) are either
 /// fully applied or not applied at all, preventing partial state corruption.
 ///
-/// # Checkpoint-Based Resumption with Rewind
+/// # Watermark-Based Resumption with Rewind
 ///
-/// On reconnection, the stream checks if there were uncommitted batches:
-/// - If `next_sequence > watermark.sequence + 1`: Uncommitted batches exist
-/// - Emit `Rewind` event with invalidated sequence range
-/// - Consumer deletes data with those sequences
-/// - Resume from watermark with fresh sequences
+/// On reconnection, the stream checks if we need to rewind to the previous watermark.
+/// If `next` is greater than the watermark transaction id, we need to rewind. In this
+/// case, we emit an `Undo` event with the invalidated transaction id range. The stream
+/// then resumes from the watermark with fresh transaction ids.
 ///
-/// # Batch Buffering for Reorg Handling
+/// # Watermark Buffering for Reorg Handling
 ///
-/// The `consumed_batches` buffer enables computing which sequences are invalidated
-/// when a reorg is detected. On reorg at block N, walk back through buffer to find
-/// all batches that covered blocks >= N, emit their sequences as invalidated.
+/// The buffer stores only watermark events (data events are not buffered). This enables
+/// computing which transaction ids are invalidated when a reorg is detected.
 ///
-/// Buffer is pruned on watermark based on retention window (e.g., keep last 10,000 blocks).
+/// On reorg at block N, we walk backwards through watermarks to find the last good
+/// watermark before the reorg point. All transaction IDs after that watermark (including
+/// both watermarks and data events) are invalidated. An `Undo` event is emitted with
+/// `cause` set to `Reorg` and the invalidation range.
+///
+/// The buffer is pruned when watermarks arrive, removing watermarks outside the retention
+/// window (e.g., keep only watermarks covering the last 128 blocks). Data events are never
+/// buffered, so they don't contribute to memory usage.
 #[async_trait::async_trait]
 pub trait StateStore: Send + Sync {
     /// Persist the next transaction id.
@@ -84,21 +73,21 @@ pub trait StateStore: Send + Sync {
     ///
     /// # Arguments
     /// - `next`: The new value of the next transaction id to persist
-    async fn advance(&mut self, next: u64) -> Result<(), Error>;
+    async fn advance(&mut self, next: TransactionId) -> Result<(), Error>;
 
     /// Persist a compressed commit.
     ///
-    /// Called by StateManager after a sequence of commits has been compressed into a single atomic update.
-    /// This ensures that all state changes are applied atomically.
+    /// Called by StateManager after a sequence of commits has been compressed into a single
+    /// atomic update. This ensures that all state changes are applied atomically.
     ///
     /// # Arguments
     /// - `commit`: The compressed commit to persist
-    async fn commit(&mut self, commit: CompressedCommit) -> Result<(), Error>;
+    async fn commit(&mut self, commit: Commit) -> Result<(), Error>;
 
     /// Load initial state from persistent storage (called once on startup for rehydration).
     ///
     /// This method is called exactly once when creating a `StateManager` to load
     /// the persisted state into memory. After initialization, all state access is via
     /// the in-memory copy in `StateManager`, not via this method.
-    async fn load(&self) -> Result<StreamState, Error>;
+    async fn load(&self) -> Result<StateSnapshot, Error>;
 }

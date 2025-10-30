@@ -159,18 +159,3 @@ impl FlightStreamState {
         Ok(Some(DecodedRecordBatch { data, metadata }))
     }
 }
-
-#[cfg(test)]
-mod test {
-    use futures::{StreamExt as _, stream};
-    use tonic::Status;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn empty_stream() {
-        let empty_stream = stream::empty::<Result<FlightData, Status>>();
-        let mut decoder = FlightDataDecoder::new(empty_stream);
-        assert!(decoder.next().await.is_none());
-    }
-}

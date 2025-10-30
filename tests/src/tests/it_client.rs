@@ -29,29 +29,16 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
 
     let handle: JoinHandle<Vec<ControlMessage>> = tokio::spawn(async move {
         let mut control_messages: Vec<ControlMessage> = Default::default();
-        let mut stream = client
-            .stream(query)
-            .with_state_store(amp_client::InMemoryStateStore::new())
-            .await
-            .expect("Failed to create stream");
+        let mut stream = client.stream(query).await.expect("Failed to create stream");
         while let Some(result) = stream.next().await {
-            let (event, commit) = result.expect("Failed to get event from stream");
+            let event = result.expect("Failed to get event from stream");
             match event {
-                amp_client::Event::Data { .. } => {
-                    commit.await.expect("Failed to commit data");
-                }
-                amp_client::Event::Watermark { ranges, .. } => {
+                amp_client::ProtocolMessage::Data { .. } => {}
+                amp_client::ProtocolMessage::Watermark { ranges, .. } => {
                     control_messages.push(ControlMessage::Batch(ranges[0].numbers.clone()));
-                    commit.await.expect("Failed to commit watermark");
                 }
-                amp_client::Event::Reorg { .. } => {
-                    // For the test, we just track that a reorg happened at block 2
-                    control_messages.push(ControlMessage::Reorg(2..=2));
-                    commit.await.expect("Failed to commit reorg");
-                }
-                amp_client::Event::Rewind { .. } => {
-                    // Rewind indicates sequence mismatch - just commit and continue
-                    commit.await.expect("Failed to commit rewind");
+                amp_client::ProtocolMessage::Reorg { invalidation, .. } => {
+                    control_messages.push(ControlMessage::Reorg(invalidation[0].numbers.clone()));
                 }
             };
             if let Some(ControlMessage::Batch(numbers)) = control_messages.last()
@@ -78,7 +65,7 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
             ControlMessage::Batch(0..=0),
             ControlMessage::Batch(1..=1),
             ControlMessage::Batch(2..=2),
-            ControlMessage::Reorg(2..=2),
+            ControlMessage::Reorg(2..=3),
             ControlMessage::Batch(2..=3),
         ],
     );

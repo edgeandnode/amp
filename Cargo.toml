@@ -4,6 +4,7 @@ members = [
     "crates/auth/http",
     "crates/bin/ampctl",
     "crates/bin/ampd",
+    "crates/bin/ampsync",
     "crates/bin/ampup",
     "crates/client/amp-client",
     "crates/client/amp-debezium-client",

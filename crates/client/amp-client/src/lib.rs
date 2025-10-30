@@ -4,48 +4,82 @@
 //!
 //! # Quick Start
 //!
+//! ## Simple Query
+//!
 //! ```rust,ignore
-//! use amp_client::{AmpClient, Event};
+//! use amp_client::AmpClient;
 //! use futures::StreamExt;
 //!
 //! // Connect to server
-//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+//! let mut client = AmpClient::from_endpoint("http://localhost:1602").await?;
 //!
-//! // Simple query
+//! // Execute non-streaming query
 //! let mut result = client.query("SELECT * FROM eth.blocks LIMIT 10").await?;
 //! while let Some(batch) = result.next().await {
 //!     // Process batch
 //! }
+//! ```
 //!
-//! // Streaming query with reorg detection
-//! let mut stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+//! ## Protocol Stream (Stateless Reorg Detection)
+//!
+//! ```rust,ignore
+//! use amp_client::{AmpClient, ProtocolMessage};
+//! use futures::StreamExt;
+//!
+//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+//!
+//! // Create protocol stream (default - stateless reorg detection)
+//! let mut stream = client
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .await?;
+//!
+//! while let Some(msg) = stream.next().await {
+//!     match msg? {
+//!         ProtocolMessage::Data { batch, ranges } => {
+//!             // Process new data
+//!             println!("Received batch covering blocks: {:?}", ranges);
+//!         }
+//!         ProtocolMessage::Reorg { previous, incoming, invalidation } => {
+//!             // Handle reorg (invalidate data in reorg'd ranges)
+//!             println!("Reorg detected! Invalidation: {:?}", invalidation);
+//!         }
+//!         ProtocolMessage::Watermark { ranges } => {
+//!             // Watermark (ranges complete)
+//!             println!("Watermark reached: {:?}", ranges);
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! ## Transactional Stream (Stateful with Exactly-Once Semantics)
+//!
+//! ```rust,ignore
+//! use amp_client::{AmpClient, InMemoryStateStore, TransactionEvent};
+//! use futures::StreamExt;
+//!
+//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+//!
+//! // Create transactional stream with state persistence
+//! let mut stream = client
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .transactional(InMemoryStateStore::new(), 128)
+//!     .await?;
 //!
 //! while let Some(result) = stream.next().await {
 //!     let (event, commit) = result?;
+//!
 //!     match event {
-//!         Event::Data { batch, id, ranges, .. } => {
-//!             // Process data
+//!         TransactionEvent::Data { batch, id, .. } => {
+//!             // Process and save data with transaction id
 //!             save_data(id, batch).await?;
 //!             commit.await?;
 //!         }
-//!         Event::Reorg { invalidation, .. } => {
-//!             // Handle reorg
-//!             rollback_ids(invalidation).await?;
+//!         TransactionEvent::Undo { invalidate, .. } => {
+//!             // Rollback invalidated transaction ids (reorg or rewind)
+//!             delete_data(invalidate).await?;
 //!             commit.await?;
 //!         }
-//!         Event::Rewind { invalidation, .. } => {
-//!             // Handle rewind
-//!             rollback_ids(invalidation).await?;
-//!             commit.await?;
-//!         }
-//!         Event::Watermark { id, ranges, cutoff, .. } => {
-//!             // Handle watermark
-//!             save_checkpoint(id, ranges).await?;
-//!             if let Some(cutoff) = cutoff {
-//!                 prune_old_data(cutoff).await?;
-//!             }
-//!             commit.await?;
-//!         }
+//!         _ => {}
 //!     }
 //! }
 //! ```
@@ -53,13 +87,17 @@
 mod client;
 mod decode;
 mod error;
-mod state;
 pub mod store;
-mod stream;
+mod transactional;
 
-pub use client::{AmpClient, BatchStream, Metadata, RawStream, ResponseBatch};
+pub use client::{
+    AmpClient, BatchStream, InvalidationRange, Metadata, ProtocolMessage, ProtocolStream,
+    RawStream, ResponseBatch, StreamBuilder,
+};
 pub use common::metadata::segments::BlockRange;
 pub use error::Error;
-pub use state::CommitHandle;
-pub use store::{InMemoryStateStore, StateStore, StreamState};
-pub use stream::{Event, Stream, StreamBuilder, WatermarkCheckpoint};
+pub use store::{InMemoryStateStore, StateSnapshot, StateStore};
+pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
+
+#[cfg(test)]
+mod tests;

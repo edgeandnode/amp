@@ -1,4 +1,4 @@
-use amp_client::{AmpClient, Event};
+use amp_client::{AmpClient, InMemoryStateStore, TransactionEvent};
 use async_stream::try_stream;
 use common::arrow::{array::RecordBatch, json::LineDelimitedWriter};
 use futures::{StreamExt, stream::BoxStream};
@@ -111,14 +111,19 @@ impl DebeziumClient {
         mut self,
         query: &str,
     ) -> Result<BoxStream<'static, Result<Vec<DebeziumRecord>>>> {
-        let mut stream = self.client.stream(query).await?;
+        // TODO: Use a custom state store and generally refactor this all to allow for more flexibility
+        let mut stream = self
+            .client
+            .stream(query)
+            .transactional(InMemoryStateStore::new(), 128)
+            .await?;
 
         let stream = try_stream! {
             while let Some(result) = stream.next().await {
                 let (event, commit) = result?;
 
                 match event {
-                    Event::Data { batch, id, .. } => {
+                    TransactionEvent::Data { batch, id, .. } => {
                         self.store.append(batch.clone(), id).await?;
                         let records: Vec<DebeziumRecord> = batch_to_json_array(&batch)?
                             .into_iter()
@@ -132,33 +137,29 @@ impl DebeziumClient {
                         commit.await?;
                         yield records;
                     }
-                    Event::Watermark { cutoff, .. } => {
-                        if let Some(cutoff) = cutoff {
-                            self.store.prune(cutoff).await?;
+                    TransactionEvent::Watermark { prune, .. } => {
+                        if let Some(range) = prune {
+                            self.store.prune(*range.end()).await?;
                         }
                         commit.await?;
                     }
-                    Event::Reorg { invalidation, .. } | Event::Rewind { invalidation, .. } => {
-                        let records = if let Some(range) = invalidation {
-                            let retracted = self.store.retract(range).await?;
-                            retracted
-                                .into_iter()
-                                .map(|batch| {
-                                    batch_to_json_array(&batch).map(|rows| {
-                                        rows.into_iter().map(|row| DebeziumRecord {
-                                            before: Some(row),
-                                            after: None,
-                                            op: DebeziumOp::Delete,
-                                        })
+                    TransactionEvent::Undo { invalidate, .. } => {
+                        let retracted = self.store.retract(invalidate).await?;
+                        let records = retracted
+                            .into_iter()
+                            .map(|batch| {
+                                batch_to_json_array(&batch).map(|rows| {
+                                    rows.into_iter().map(|row| DebeziumRecord {
+                                        before: Some(row),
+                                        after: None,
+                                        op: DebeziumOp::Delete,
                                     })
                                 })
-                                .collect::<Result<Vec<_>>>()?
-                                .into_iter()
-                                .flatten()
-                                .collect()
-                        } else {
-                            Vec::new()
-                        };
+                            })
+                            .collect::<Result<Vec<_>>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect();
 
                         commit.await?;
                         yield records;

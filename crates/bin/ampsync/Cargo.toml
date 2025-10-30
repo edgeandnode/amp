@@ -1,0 +1,59 @@
+[package]
+name = "ampsync"
+description = "Syncing engine that listens to the stream changes from the amp-client streaming layer to store changes in a configured database."
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[lib]
+name = "ampsync"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ampsync"
+path = "src/main.rs"
+
+[features]
+# Default features (enabled by default)
+default = ["snmalloc"]
+# Enable snmalloc memory allocator for improved performance
+snmalloc = ["dep:snmalloc-rs"]
+
+[dependencies]
+admin-api = { path = "../../services/admin-api" }
+alloy.workspace = true
+amp-client = { path = "../../client/amp-client" }
+anyhow.workspace = true
+arrow-array = { version = "56", default-features = false }
+arrow-schema = { version = "56" }
+arrow-to-postgres = { path = "../../arrow-to-postgres" }
+backon.workspace = true
+bytes = "1.10.1"
+clap.workspace = true
+common = { path = "../../core/common" }
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+datafusion.workspace = true
+datasets-common = { path = "../../core/datasets-common" }
+datasets-derived = { path = "../../core/datasets-derived" }
+futures.workspace = true
+lazy_static = "1.5.0"
+monitoring = { path = "../../core/monitoring" }
+phf = { version = "0.13.1", features = ["macros"] }
+reqwest.workspace = true
+snmalloc-rs = { version = "0.3.8", optional = true }
+sqlx = { version = "0.8.6", features = [
+    "runtime-tokio",
+    "postgres",
+    "migrate",
+    "macros",
+    "chrono",
+] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tokio-util = "0.7.12"
+tracing.workspace = true
+
+[dev-dependencies]
+alloy.workspace = true
+mockito = "1.7.0"
+pgtemp = "0.6.0"

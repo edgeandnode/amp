@@ -14,6 +14,15 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("state store error: {0}")]
     Store(String),
+    /// Protocol invariant violation (validation at stream boundary)
+    #[error("protocol invariant violation: {0}")]
+    ProtocolInvariantViolation(String),
+    /// Partial reorg detected (reorg point inside watermark range).
+    #[error("partial reorg")]
+    PartialReorg,
+    /// Unrecoverable reorg (all buffered watermarks affected)
+    #[error("unrecoverable reorg")]
+    UnrecoverableReorg,
 }
 
 impl From<tonic::Status> for Error {
@@ -21,26 +30,3 @@ impl From<tonic::Status> for Error {
         Self::from(Box::new(value))
     }
 }
-
-impl Error {
-    /// Check if this error is retryable (transient issues that may resolve).
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            // Network/connection failures are retryable
-            Error::Transport(_) => true,
-            // Retry transient gRPC errors
-            Error::Status(status) => {
-                matches!(
-                    status.code(),
-                    tonic::Code::Unavailable | tonic::Code::Internal | tonic::Code::Unknown
-                )
-            }
-            // Protocol violations and data errors are not retryable
-            Error::Server(_) | Error::Arrow(_) | Error::Json(_) | Error::Store(_) => false,
-        }
-    }
-}
-
-/// Result type alias for amp-client operations.
-#[allow(dead_code)]
-pub type Result<T> = std::result::Result<T, Error>;

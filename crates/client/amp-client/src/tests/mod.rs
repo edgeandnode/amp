@@ -1,0 +1,8 @@
+//! Tests for the streaming client
+
+#[macro_use]
+mod utils;
+
+mod it_blockchain_reorg_test;
+mod it_happy_path_test;
+mod it_rewind_and_crash_recovery_test;

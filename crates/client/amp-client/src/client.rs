@@ -1,20 +1,24 @@
 //! AmpClient implementation
 
 use std::{
+    future::{Future, IntoFuture},
+    ops::RangeInclusive,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
+use async_stream::try_stream;
 use common::{
+    BlockNum,
     arrow::array::RecordBatch,
     metadata::segments::{BlockRange, ResumeWatermark},
 };
-use futures::Stream as FuturesStream;
+use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::{Streaming, transport::Endpoint};
 
-use crate::{decode, error::Error, stream::StreamBuilder};
+use crate::{decode, error::Error, store::StateStore, transactional::TransactionalStreamBuilder};
 
 /// Metadata attached to each batch from the server.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -67,6 +71,130 @@ impl FuturesStream for RawStream {
     }
 }
 
+/// Protocol messages emitted by the stateless protocol stream.
+#[derive(Debug, Clone)]
+pub enum ProtocolMessage {
+    /// New data to process.
+    Data {
+        /// Data batch
+        batch: RecordBatch,
+        /// Block ranges covered by the data batch
+        ranges: Vec<BlockRange>,
+    },
+
+    /// Reorg detected.
+    Reorg {
+        /// Previous block ranges before the reorg
+        previous: Vec<BlockRange>,
+        /// New block ranges after the reorg
+        incoming: Vec<BlockRange>,
+        /// Invalidation ranges for the reorg
+        invalidation: Vec<InvalidationRange>,
+    },
+
+    /// Watermark (ranges completed).
+    Watermark {
+        /// Block ranges confirmed complete at this watermark
+        ranges: Vec<BlockRange>,
+    },
+}
+
+/// Interprets raw response batches into protocol messages.
+///
+/// Detects reorgs by comparing incoming block ranges against previous ranges.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+///
+/// while let Some(msg) = stream.next().await {
+///     match msg? {
+///         ProtocolMessage::Data { batch, ranges } => {
+///             // Process new data
+///         }
+///         ProtocolMessage::Reorg { previous, incoming, invalidation } => {
+///             // Handle reorg
+///         }
+///         ProtocolMessage::Watermark { ranges } => {
+///             // Watermark (ranges completed)
+///         }
+///     }
+/// }
+/// ```
+pub struct ProtocolStream {
+    stream: BoxStream<'static, Result<ProtocolMessage, Error>>,
+}
+
+impl ProtocolStream {
+    /// Create a new protocol stream from a stream of response batches.
+    ///
+    /// # Arguments
+    /// - `responses`: Stream of response batches from the server
+    /// - `previous`: Initial previous ranges (from last watermark on resume, empty on first connect)
+    pub fn new(
+        mut responses: BoxStream<'static, Result<ResponseBatch, Error>>,
+        previous: Vec<BlockRange>,
+    ) -> Self {
+        let stream = try_stream! {
+            let mut previous = previous;
+
+            while let Some(response) = responses.next().await {
+                let batch = response?;
+
+                // TODO: Validate protocol invariants here
+                // - Check no duplicate networks
+                // - Check network stability (no networks appeared/disappeared)
+                // - Check consecutiveness (except post-reorg)
+                // - Check post-reorg ranges match expected
+
+                let invalidation: Vec<InvalidationRange> = batch.metadata.ranges.iter().filter_map(|i| {
+                    let p = previous.iter().find(|p| p.network == i.network)?;
+                    if (i != p) && (i.start() <= p.end()) {
+                        return Some(InvalidationRange {
+                            network: i.network.clone(),
+                            numbers: i.start()..=BlockNum::max(i.end(), p.end()),
+                        });
+                    }
+                    None
+                }).collect();
+
+                if !invalidation.is_empty() {
+                    yield ProtocolMessage::Reorg {
+                        previous: previous.clone(),
+                        incoming: batch.metadata.ranges.clone(),
+                        invalidation,
+                    };
+                }
+
+                if batch.metadata.ranges_complete {
+                    yield ProtocolMessage::Watermark {
+                        ranges: batch.metadata.ranges.clone(),
+                    };
+                } else {
+                    yield ProtocolMessage::Data {
+                        batch: batch.data,
+                        ranges: batch.metadata.ranges.clone(),
+                    };
+                }
+
+                previous = batch.metadata.ranges;
+            }
+        }
+        .boxed();
+
+        Self { stream }
+    }
+}
+
+impl FuturesStream for ProtocolStream {
+    type Item = Result<ProtocolMessage, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.stream).poll_next(cx)
+    }
+}
+
 /// Arrow Flight client for connecting to amp server.
 #[derive(Clone)]
 pub struct AmpClient {
@@ -104,33 +232,30 @@ impl AmpClient {
         Self { client }
     }
 
-    /// Start building a streaming query with reorg detection and automatic retry.
+    /// Start building a streaming query.
     ///
-    /// Returns a `StreamBuilder` that can be awaited directly or configured with:
-    /// - Initial state (watermark + ranges for resumption)
-    /// - Retry policy for connection failures
+    /// Returns a `StreamBuilder` that can be awaited directly for a `ProtocolStream`,
+    /// or configured with `.raw()` or `.transactional(store, retention)`.
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// let mut stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+    /// // Protocol stream (default - stateless reorg detection)
+    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
     ///
-    /// while let Some(event) = stream.next().await {
-    ///     match event? {
-    ///         StreamEvent::Data { batch, ranges } => {
-    ///             // Process data
-    ///         }
-    ///         StreamEvent::Watermark { watermark, ranges } => {
-    ///             // Save checkpoint
-    ///         }
-    ///         StreamEvent::Rewind { invalidate, ranges } => {
-    ///             // Handle invalidation
-    ///         }
-    ///     }
-    /// }
+    /// // Raw stream (response batches)
+    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").raw().await?;
+    ///
+    /// // Transactional stream (stateful with commits)
+    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    ///     .transactional(store, 128)
+    ///     .await?;
     /// ```
     pub fn stream(&self, sql: impl Into<String>) -> StreamBuilder {
-        StreamBuilder::new(self.clone(), sql)
+        StreamBuilder {
+            client: self.clone(),
+            sql: sql.into(),
+        }
     }
 
     /// Execute a SQL query and return a stream of results.
@@ -195,5 +320,85 @@ impl AmpClient {
         let decoder = decode::FlightDataDecoder::new(flight_data);
 
         Ok(RawStream { decoder })
+    }
+}
+
+/// Builder for creating streaming queries.
+///
+/// Default: awaiting directly returns a `ProtocolStream` (stateless reorg detection).
+pub struct StreamBuilder {
+    client: AmpClient,
+    sql: String,
+}
+
+impl StreamBuilder {
+    /// Create a raw stream returning response batches.
+    pub fn raw(self) -> RawStreamBuilder {
+        RawStreamBuilder {
+            client: self.client,
+            sql: self.sql,
+        }
+    }
+
+    /// Create a transactional stream with state persistence.
+    pub fn transactional(
+        self,
+        store: impl StateStore + 'static,
+        retention: BlockNum,
+    ) -> TransactionalStreamBuilder {
+        TransactionalStreamBuilder::new(self.client, self.sql, Box::new(store), retention)
+    }
+}
+
+impl IntoFuture for StreamBuilder {
+    type Output = Result<ProtocolStream, Error>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        Box::pin(async move {
+            // Get raw response stream
+            let raw = self.client.request(&self.sql, None).await?.boxed();
+
+            // Create protocol stream (with reorg detection)
+            Ok(ProtocolStream::new(raw, Vec::new()))
+        })
+    }
+}
+
+/// Builder for raw streams.
+pub struct RawStreamBuilder {
+    client: AmpClient,
+    sql: String,
+}
+
+impl IntoFuture for RawStreamBuilder {
+    type Output = Result<RawStream, Error>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        Box::pin(async move { self.client.request(&self.sql, None).await })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidationRange {
+    pub network: String,
+    pub numbers: RangeInclusive<BlockNum>,
+}
+
+impl InvalidationRange {
+    /// Return true if the given range overlaps with block numbers on the same network.
+    pub fn invalidates(&self, range: &BlockRange) -> bool {
+        (self.network == range.network)
+            && !(*self.numbers.end() < range.start() || range.end() < *self.numbers.start())
+    }
+}
+
+impl From<BlockRange> for InvalidationRange {
+    fn from(value: BlockRange) -> Self {
+        Self {
+            network: value.network,
+            numbers: value.numbers,
+        }
     }
 }

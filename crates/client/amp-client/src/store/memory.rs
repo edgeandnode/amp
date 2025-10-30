@@ -1,40 +1,35 @@
 //! In-memory state store implementation (not crash-safe)
 
-use std::sync::Arc;
-
-use tokio::sync::RwLock;
-
-use super::{StateStore, StreamState};
-use crate::{error::Error, state::CompressedCommit};
+use super::{StateSnapshot, StateStore};
+use crate::{
+    error::Error,
+    transactional::{Commit, TransactionId},
+};
 
 /// In-memory implementation of StateStore (not crash-safe).
 ///
-/// Stores stream state in process memory using an Arc<RwLock<StreamState>>.
 /// State is lost on process restart, so this is suitable for:
 /// - Development and testing
 /// - Scenarios where crash recovery is not required
 /// - As a fallback when no durable store is configured
 ///
-/// For production deployments requiring crash recovery, use a persistent
-/// implementation like SQLite or LMDB.
-///
 /// # Example
 /// ```rust,ignore
 /// let store = InMemoryStateStore::new();
 /// let stream = client.stream("SELECT * FROM eth.logs")
-///     .with_state_store(store)
+///     .transactional(store, 128)
 ///     .await?;
 /// ```
 #[derive(Debug, Clone)]
 pub struct InMemoryStateStore {
-    state: Arc<RwLock<StreamState>>,
+    state: StateSnapshot,
 }
 
 impl InMemoryStateStore {
     /// Create a new in-memory state store.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(StreamState::default())),
+            state: StateSnapshot::default(),
         }
     }
 }
@@ -47,26 +42,36 @@ impl Default for InMemoryStateStore {
 
 #[async_trait::async_trait]
 impl StateStore for InMemoryStateStore {
-    async fn advance(&mut self, next: u64) -> Result<(), Error> {
-        let mut state = self.state.write().await;
-        state.next = next;
+    async fn advance(&mut self, next: TransactionId) -> Result<(), Error> {
+        self.state.next = next;
         Ok(())
     }
 
-    async fn commit(&mut self, commit: CompressedCommit) -> Result<(), Error> {
-        let mut state = self.state.write().await;
-        state
-            .buffer
-            .retain(|id, _| !commit.delete.iter().any(|range| range.contains(id)));
-        state.buffer.extend(commit.insert);
-        if let Some(watermark) = commit.watermark {
-            state.watermark = Some(watermark);
+    async fn commit(&mut self, commit: Commit) -> Result<(), Error> {
+        // Remove pruned and invalidated watermarks
+        self.state.buffer.retain(|(id, _)| {
+            let invalidated = commit
+                .invalidate
+                .as_ref()
+                .map(|r| r.contains(id))
+                .unwrap_or(false);
+            let pruned = commit
+                .prune
+                .as_ref()
+                .map(|r| r.contains(id))
+                .unwrap_or(false);
+            !invalidated && !pruned
+        });
+
+        // Add new watermarks
+        for (id, ranges) in commit.insert {
+            self.state.buffer.push_back((id, ranges));
         }
+
         Ok(())
     }
 
-    async fn load(&self) -> Result<StreamState, Error> {
-        let state = self.state.read().await;
-        Ok(state.clone())
+    async fn load(&self) -> Result<StateSnapshot, Error> {
+        Ok(self.state.clone())
     }
 }
