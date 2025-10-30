@@ -37,7 +37,7 @@ describe("amp init command", () => {
   describe("local-evm-rpc template", () => {
     it("should have the correct template metadata", () => {
       expect(localEvmRpc.name).toBe("local-evm-rpc")
-      expect(localEvmRpc.description).toBe("Local development with Anvil")
+      expect(localEvmRpc.description).toBe("Local development with Anvil and sample data")
       expect(localEvmRpc.files).toBeDefined()
     })
 
@@ -57,7 +57,7 @@ describe("amp init command", () => {
       expect(content).toContain("network: \"anvil\"")
     })
 
-    it("should generate README-local-evm-rpc.md with project name", () => {
+    it("should generate README.md with project name", () => {
       const answers: TemplateAnswers = {
         datasetName: "my_dataset",
         datasetVersion: "1.0.0",
@@ -65,21 +65,21 @@ describe("amp init command", () => {
         network: "anvil",
       }
 
-      const readmeFile = localEvmRpc.files["README-local-evm-rpc.md"]
+      const readmeFile = localEvmRpc.files["README.md"]
       const content = resolveTemplateFile(readmeFile, answers)
 
       expect(content).toContain("# My Cool Project")
-      expect(content).toContain("**Dataset**: `my_dataset` (version `1.0.0`)")
-      expect(content).toContain("**Network**: Anvil local testnet")
+      expect(content).toContain("Quick Start")
+      expect(content).toContain("500 events")
     })
 
     it("should include all required files", () => {
       const requiredFiles = [
         "amp.config.ts",
-        "README-local-evm-rpc.md",
+        "README.md",
         "contracts/foundry.toml",
-        "contracts/src/Counter.sol",
-        "contracts/script/Deploy.s.sol",
+        "contracts/src/EventEmitter.sol",
+        "contracts/script/EventEmitter.s.sol",
         "contracts/remappings.txt",
         ".gitignore",
       ]
@@ -97,13 +97,13 @@ describe("amp init command", () => {
         network: "anvil",
       }
 
-      const counterFile = localEvmRpc.files["contracts/src/Counter.sol"]
-      const content = resolveTemplateFile(counterFile, answers)
+      const eventEmitterFile = localEvmRpc.files["contracts/src/EventEmitter.sol"]
+      const content = resolveTemplateFile(eventEmitterFile, answers)
 
       expect(content).toContain("pragma solidity")
-      expect(content).toContain("contract Counter")
-      expect(content).toContain("event Count(uint256 count)")
-      expect(content).toContain("event Transfer(address indexed from, address indexed to, uint256 value)")
+      expect(content).toContain("contract EventEmitter")
+      expect(content).toContain("event DataEmitted")
+      expect(content).toContain("function emitBatch")
     })
   })
 
