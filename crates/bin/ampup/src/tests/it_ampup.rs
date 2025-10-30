@@ -206,7 +206,7 @@ async fn install_specific_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
     // Install a specific version (use a known release)
-    let version = "v0.0.14";
+    let version = "v0.0.21";
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
         DEFAULT_REPO_PRIVATE.to_string(),
@@ -232,7 +232,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
 
     let temp = TempInstallDir::new()?;
 
-    let version = "v0.0.14";
+    let version = "v0.0.21";
 
     // Install once
     crate::commands::install::run(
