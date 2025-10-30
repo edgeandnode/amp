@@ -8,12 +8,18 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.36.0",
-    "astro": "^5.14.4"
+    "@astrojs/starlight": "^0.36.1",
+    "astro": "^5.15.1"
   },
   "packageManager": "pnpm@10.18.2+sha512.9fb969fa749b3ade6035e0f109f0b8a60b5d08a1a87fdf72e337da90dcc93336e2280ca4e44f2358a649b83c17959e9993e777c2080879f3801e6f0d999ad3dd",
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "astro-eslint-parser": "^1.2.2",
+    "eslint": "^9.38.0",
+    "eslint-plugin-astro": "^1.4.0",
+    "prettier": "^3.6.2",
     "tailwindcss": "^4.1.14"
   }
 }
