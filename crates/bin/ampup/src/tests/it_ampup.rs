@@ -5,11 +5,7 @@ use fs_err as fs;
 use tempfile::TempDir;
 
 use super::fixtures::{MockBinary, TempInstallDir};
-use crate::{DEFAULT_REPO, DEFAULT_REPO_PRIVATE};
-
-fn github_token_required() -> Option<String> {
-    env::var("GITHUB_TOKEN").ok()
-}
+use crate::DEFAULT_REPO;
 
 #[tokio::test]
 async fn init_creates_directory_structure() -> Result<()> {
@@ -173,15 +169,13 @@ async fn uninstall_fails_for_non_existent_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_latest_version() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
 
     // Install latest version
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         None,
         None,
         None,
@@ -201,16 +195,14 @@ async fn install_latest_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_specific_version() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
 
     // Install a specific version (use a known release)
     let version = "v0.0.21";
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -228,17 +220,14 @@ async fn install_specific_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_already_installed_version_switches_to_it() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
-
     let version = "v0.0.21";
 
     // Install once
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token.clone(),
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -248,8 +237,8 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
     // Install again - should just switch to it
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -258,25 +247,6 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
 
     let current = fs::read_to_string(temp.current_version_file())?;
     assert_eq!(current.trim(), version);
-
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore] // Ignored until repository is public
-async fn install_without_github_token() -> Result<()> {
-    let temp = TempInstallDir::new()?;
-
-    // This should work once the repo is public
-    crate::commands::install::run(
-        Some(temp.path().to_path_buf()),
-        DEFAULT_REPO.to_string(),
-        None, // No GitHub token
-        None,
-        None,
-        None,
-    )
-    .await?;
 
     Ok(())
 }
@@ -337,7 +307,7 @@ async fn build_from_local_path_with_custom_name() -> Result<()> {
     let custom_name = "my-custom-build";
     let result = crate::commands::build::run(
         Some(temp.path().to_path_buf()),
-        Some(DEFAULT_REPO_PRIVATE.to_string()),
+        None, // repo
         Some(fake_repo.path().to_path_buf()),
         None, // branch
         None, // commit
