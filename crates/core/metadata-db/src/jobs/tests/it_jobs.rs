@@ -3,7 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    WorkerNodeId,
+    WorkerInfo, WorkerNodeId,
     db::Connection,
     jobs::{self, JobStatus},
     workers,
@@ -21,7 +21,8 @@ async fn register_job_creates_with_scheduled_status() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -62,11 +63,13 @@ async fn get_jobs_for_node_filters_by_node_id() {
         .expect("Failed to run migrations");
 
     let worker_id_main = WorkerNodeId::from_ref_unchecked("test-worker-main");
-    workers::register(&mut *conn, worker_id_main.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id_main.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker 1");
     let worker_id_other = WorkerNodeId::from_ref_unchecked("test-worker-other");
-    workers::register(&mut *conn, worker_id_other.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id_other.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker 2");
 
@@ -144,7 +147,8 @@ async fn get_jobs_for_node_filters_by_status() {
     db.run_migrations().await.expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-active-ids");
-    workers::register(&mut *db, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *db, worker_id.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -252,7 +256,8 @@ async fn get_job_by_id_returns_job() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-get");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -293,7 +298,8 @@ async fn get_job_includes_timestamps() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-details");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -357,7 +363,8 @@ async fn list_jobs_first_page_respects_limit() {
     let mut job_ids = Vec::new();
     for i in 0..5 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-{}", i));
-        workers::register(&mut *conn, worker_id.clone())
+        let worker_info = WorkerInfo::default(); // {}
+        workers::register(&mut *conn, worker_id.clone(), worker_info)
             .await
             .expect("Failed to register worker");
 
@@ -407,7 +414,8 @@ async fn list_jobs_next_page_uses_cursor() {
     let mut all_job_ids = Vec::new();
     for i in 0..10 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-page-{}", i));
-        workers::register(&mut *conn, worker_id.clone())
+        let worker_info = WorkerInfo::default(); // {}
+        workers::register(&mut *conn, worker_id.clone(), worker_info)
             .await
             .expect("Failed to register worker");
 
@@ -467,7 +475,8 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-delete");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -505,7 +514,8 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-no-delete");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -548,7 +558,8 @@ async fn delete_by_status_deletes_all_matching_jobs() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-bulk-delete");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -623,7 +634,8 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
         .expect("Failed to run migrations");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi-delete");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 

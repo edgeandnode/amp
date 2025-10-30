@@ -146,20 +146,6 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for NodeIdOwned {
     }
 }
 
-impl<'a> From<&'a str> for NodeId<'a> {
-    fn from(s: &'a str) -> Self {
-        // SAFETY: Internal use within metadata-db where caller ensures invariants are upheld.
-        NodeId::from_ref_unchecked(s)
-    }
-}
-
-impl From<String> for NodeIdOwned {
-    fn from(s: String) -> Self {
-        // SAFETY: Internal use within metadata-db where caller ensures invariants are upheld.
-        NodeId::from_owned_unchecked(s)
-    }
-}
-
 impl<'a> From<&'a NodeId<'a>> for NodeId<'a> {
     fn from(value: &'a NodeId<'a>) -> Self {
         // Create a borrowed Cow variant pointing to the data inside the input ID.

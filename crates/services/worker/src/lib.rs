@@ -10,6 +10,7 @@
 
 mod db;
 mod error;
+mod info;
 mod jobs;
 mod node_id;
 mod worker;
@@ -20,6 +21,7 @@ pub use self::{
         JobCreationError, JobResultError, MainLoopError, NotificationError, NotificationSetupError,
         ReconcileError, RegistrationError, SpawnJobError, StartActionError,
     },
+    info::WorkerInfo,
     jobs::{
         Action as JobNotifAction, Descriptor as JobDescriptor, JobId, JobIdFromStrError,
         JobIdI64ConvError, JobIdU64Error, JobStatus, Notification as JobNotification,

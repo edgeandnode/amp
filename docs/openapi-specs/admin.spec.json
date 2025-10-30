@@ -2331,10 +2331,10 @@
         "description": "Worker information returned by the API",
         "required": [
           "node_id",
-          "last_heartbeat"
+          "heartbeat_at"
         ],
         "properties": {
-          "last_heartbeat": {
+          "heartbeat_at": {
             "type": "string",
             "description": "Last heartbeat timestamp in ISO 8601 RFC3339 format"
           },

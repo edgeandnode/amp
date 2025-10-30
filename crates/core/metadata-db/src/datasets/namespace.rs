@@ -74,11 +74,11 @@ impl<'a> Namespace<'a> {
 }
 
 impl<'a> From<&'a Namespace<'a>> for Namespace<'a> {
-    fn from(namespace: &'a Namespace<'a>) -> Self {
-        // Create a borrowed Cow variant pointing to the data inside the input namespace.
+    fn from(value: &'a Namespace<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input Namespace.
         // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
-        // SAFETY: The input namespace already upholds invariants, so the referenced data is valid.
-        Namespace::from_ref_unchecked(namespace.as_ref())
+        // SAFETY: The input Namespace already upholds invariants, so the referenced data is valid.
+        Namespace::from_ref_unchecked(value.as_ref())
     }
 }
 

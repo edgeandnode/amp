@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use pgtemp::PgTempDB;
 
-use crate::{MetadataDb, WorkerNodeId};
+use crate::{MetadataDb, WorkerInfo, WorkerNodeId};
 
 #[tokio::test]
 async fn register_worker() {
@@ -17,10 +17,11 @@ async fn register_worker() {
             .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
+    let worker_info = WorkerInfo::default(); // {}
 
     //* When
     metadata_db
-        .register_worker(&worker_id)
+        .register_worker(&worker_id, worker_info)
         .await
         .expect("Failed to register the worker");
 
@@ -51,8 +52,9 @@ async fn detect_inactive_worker() {
 
     // Pre-register a worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
+    let worker_info = WorkerInfo::default(); // {}
     metadata_db
-        .register_worker(&worker_id)
+        .register_worker(&worker_id, worker_info)
         .await
         .expect("Failed to pre-register the worker");
 

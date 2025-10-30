@@ -74,11 +74,11 @@ impl<'a> Path<'a> {
 }
 
 impl<'a> From<&'a Path<'a>> for Path<'a> {
-    fn from(path: &'a Path<'a>) -> Self {
-        // Create a borrowed Cow variant pointing to the data inside the input path.
+    fn from(value: &'a Path<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input Path.
         // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
-        // SAFETY: The input path already upholds invariants, so the referenced data is valid.
-        Path::from_ref_unchecked(path.as_ref())
+        // SAFETY: The input Path already upholds invariants, so the referenced data is valid.
+        Path::from_ref_unchecked(value.as_ref())
     }
 }
 

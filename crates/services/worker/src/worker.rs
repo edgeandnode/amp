@@ -16,13 +16,14 @@ use self::job_set::{JobSet, JoinError as JobSetJoinError};
 use crate::{
     AbortJobError, BootstrapError, Error, HeartbeatSetupError, HeartbeatTaskError, JobId,
     JobResultError, MainLoopError, NodeId, NotificationError, NotificationSetupError,
-    ReconcileError, RegistrationError, SpawnJobError, StartActionError,
+    ReconcileError, RegistrationError, SpawnJobError, StartActionError, WorkerInfo,
     db::{JobMeta, JobStatus, MetadataDbRetryExt as _},
     jobs::{Action, Job, Notification},
 };
 
 pub struct Worker {
     node_id: NodeId,
+    worker_info: WorkerInfo,
     reconcile_interval: Interval,
 
     meta: MetadataDb,
@@ -65,8 +66,17 @@ impl Worker {
             .as_ref()
             .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m)));
 
+        // Create worker info with build information
+        let worker_info = WorkerInfo {
+            version: Some(config.build_info.version.clone()),
+            commit_sha: Some(config.build_info.commit_sha.clone()),
+            commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
+            build_date: Some(config.build_info.build_date.clone()),
+        };
+
         Self {
             node_id,
+            worker_info,
             reconcile_interval,
             meta: metadata_db.clone(),
             job_ctx: Ctx {
@@ -91,7 +101,7 @@ impl Worker {
         // Register the worker in the Metadata DB. and update the latest heartbeat timestamp.
         // Retry on failure
         self.meta
-            .register_worker_with_retry(&self.node_id)
+            .register_worker_with_retry(&self.node_id, &self.worker_info)
             .await
             .map_err(|err| Error::Registration(RegistrationError(err)))?;
 
