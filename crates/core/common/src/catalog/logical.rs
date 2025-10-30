@@ -31,9 +31,13 @@ impl Dataset {
     }
 
     pub fn resolved_tables(self: &Arc<Self>) -> impl Iterator<Item = ResolvedTable> + '_ {
-        self.tables
-            .iter()
-            .map(move |table| ResolvedTable::new(table.clone(), self.clone()).unwrap())
+        self.tables.iter().map(move |table| {
+            ResolvedTable::new(
+                table.clone(),
+                self.clone(),
+                TableReference::partial(self.name.to_string(), table.name().to_string()),
+            )
+        })
     }
 
     /// Returns the JS functions defined in this dataset.
@@ -59,13 +63,6 @@ impl Dataset {
     pub fn dataset_version(&self) -> Option<String> {
         self.version.as_ref().map(|v| v.to_string())
     }
-
-    pub fn to_identifier(&self) -> String {
-        match &self.version {
-            Some(v) => format!("{}__{}", self.name, v.to_underscore_version()),
-            None => self.name.to_string(),
-        }
-    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
@@ -78,15 +75,21 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn new(name: String, schema: SchemaRef, network: String, sorted_by: Vec<String>) -> Self {
+    pub fn new(
+        name: String,
+        schema: SchemaRef,
+        network: String,
+        sorted_by: Vec<String>,
+    ) -> Result<Self, BoxError> {
+        validate_name(&name)?;
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
         sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
-        Self {
+        Ok(Self {
             name,
             schema,
             network,
             sorted_by,
-        }
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -122,16 +125,12 @@ impl fmt::Display for ResolvedTable {
 }
 
 impl ResolvedTable {
-    /// Errors if the table name is invalid.
-    pub fn new(table: Table, dataset: Arc<Dataset>) -> Result<Self, BoxError> {
-        validate_name(table.name())?;
-
-        let table_ref = TableReference::partial(dataset.name.to_string(), table.name().to_string());
-        Ok(Self {
+    pub fn new(table: Table, dataset: Arc<Dataset>, table_ref: TableReference) -> Self {
+        Self {
             table,
             dataset,
             table_ref,
-        })
+        }
     }
 
     pub fn table(&self) -> &Table {
@@ -148,11 +147,6 @@ impl ResolvedTable {
 
     pub fn table_ref(&self) -> &TableReference {
         &self.table_ref
-    }
-
-    pub fn update_table_ref(&mut self, table_ref: TableReference) -> &mut Self {
-        self.table_ref = table_ref;
-        self
     }
 
     /// Bare table name

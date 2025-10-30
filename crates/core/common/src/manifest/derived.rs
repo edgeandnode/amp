@@ -52,13 +52,14 @@ pub fn dataset(
     };
 
     // Convert manifest tables into logical tables
-    let unsorted_tables = manifest
+    let unsorted_tables: Result<Vec<_>, _> = manifest
         .tables
         .into_iter()
         .map(|(name, table)| {
             LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
         })
         .collect();
+    let unsorted_tables = unsorted_tables?;
     let tables = sort_tables_by_dependencies(name.as_ref(), unsorted_tables, &queries)?;
 
     // Convert manifest functions into logical functions

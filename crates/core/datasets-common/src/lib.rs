@@ -8,6 +8,7 @@ pub mod hash;
 pub mod manifest;
 pub mod name;
 pub mod namespace;
+pub mod partial_reference;
 pub mod reference;
 pub mod revision;
 pub mod version;
