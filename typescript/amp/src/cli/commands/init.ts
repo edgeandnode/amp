@@ -165,7 +165,7 @@ const initializeProject = (
     )
 
     if (configExists) {
-      yield* Effect.fail(
+      return yield* Effect.fail(
         new TemplateError({
           message:
             `amp.config.ts already exists in this directory. Remove it or run amp init in a different directory.`,
@@ -184,19 +184,19 @@ const initializeProject = (
       network: "anvil",
     }
 
-    yield* Console.log(`\n🎨 Initializing Amp project with template: ${template.name}`)
-    yield* Console.log(`📁 Target directory: ${targetPath}\n`)
+    yield* Console.log(`\nInitializing Amp project with template: ${template.name}`)
+    yield* Console.log(`Target directory: ${targetPath}\n`)
 
     // Write files
     yield* writeTemplateFiles(template, answers, targetPath)
 
     // Run post-install hook if present
     if (template.postInstall) {
-      yield* Console.log("\n⚙️  Running post-install...")
+      yield* Console.log("\nRunning post-install")
       yield* template.postInstall(targetPath)
     }
 
-    yield* Console.log(`\n🎉 Project initialized successfully!\n`)
+    yield* Console.log(`\nProject initialized successfully\n`)
     yield* Console.log(`Next steps:`)
     yield* Console.log(`  1. anvil (in another terminal)`)
     yield* Console.log(`  2. amp dev`)

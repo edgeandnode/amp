@@ -66,7 +66,7 @@ Local Amp development with Anvil blockchain testnet.
 
 This template sets up everything you need to learn Amp's data extraction flow using a local blockchain.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -96,7 +96,7 @@ cd ..
 
 This deploys the Counter contract and generates some test events (3 Count events + 2 Transfer events).
 
-### 3. Start Amp Development Server
+### 3. Start Amp development server
 
 Start the Amp development server with hot-reloading:
 
@@ -130,7 +130,7 @@ Or open the Amp Studio in your browser for an interactive query playground:
 amp studio
 \`\`\`
 
-## 📁 Project Structure
+## Project structure
 
 \`\`\`
 .
@@ -150,7 +150,7 @@ amp studio
 Note: The \`data/\` directory will be created automatically when you run \`amp dev\`
 \`\`\`
 
-## 🔧 Pre-configured Tables
+## Pre-configured tables
 
 Your \`amp.config.ts\` defines two SQL views that will extract and decode event data once you run \`amp dev\`:
 
@@ -169,7 +169,7 @@ These are SQL view definitions, not extracted data yet. Data extraction happens 
 Your dataset depends on:
 - **\`anvil\`** (_/anvil@0.1.0) - Provides raw blockchain data (blocks, transactions, logs)
 
-## 📚 Learn More
+## Learn more
 
 ### Amp Documentation
 
@@ -218,7 +218,7 @@ Edit \`amp.config.ts\` to:
 
 Changes are automatically detected when running \`amp dev\`!
 
-## 🆘 Troubleshooting
+## Troubleshooting
 
 **Anvil not running?**
 \`\`\`bash
@@ -253,7 +253,7 @@ anvil
 amp dev
 \`\`\`
 
-## 🎉 Next Steps
+## Next steps
 
 1. **Deploy your own contracts** - Add contracts to \`contracts/src/\`
 2. **Extract your events** - Update \`amp.config.ts\` with your event signatures
@@ -262,8 +262,6 @@ amp dev
 5. **Move to testnet/mainnet** - When ready, switch from Anvil to real networks
 
 ---
-
-Happy building! 🚀
 
 For more information, see the [Amp documentation](https://github.com/edgeandnode/amp).
 `,
