@@ -1,6 +1,4 @@
 {
-  "name": "base_rpc",
-  "version": "0.0.0",
   "kind": "evm-rpc",
   "network": "base",
   "start_block": 33411770,

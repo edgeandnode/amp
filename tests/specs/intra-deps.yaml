@@ -3,10 +3,11 @@
 
 - name: register_intra_deps
   dataset: intra_deps
+  tag: "0.0.0"
   end: 15000000
 
 - name: dump_intra_deps
-  dataset: _/intra_deps@0.1.0
+  dataset: _/intra_deps@0.0.0
   end: 15000000
   config: amp.config.ts
 

@@ -159,8 +159,9 @@ export class UnifiedSQLProvider implements ISQLProvider {
       // This will merge the new manifest with existing sources
       this.initializeProviders()
 
+      // TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback for logging.
       this.logDebug("Manifest updated", {
-        manifestName: newManifest?.name,
+        manifestName: newManifest && "name" in newManifest ? newManifest.name : "unknown",
         tableCount: newManifest ? Object.keys(newManifest.tables).length : 0,
       })
     } catch (error) {

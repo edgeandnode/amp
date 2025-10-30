@@ -3,7 +3,6 @@ import { defineDataset } from "@edgeandnode/amp"
 export default defineDataset(() => ({
   name: "sql_over_anvil_2",
   network: "anvil",
-  version: "0.0.0",
   dependencies: {
     anvil_rpc: "_/anvil_rpc@0.0.0",
   },

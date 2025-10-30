@@ -3,7 +3,6 @@ import { defineDataset } from "@edgeandnode/amp"
 export default defineDataset(() => ({
   name: "intra_deps",
   network: "mainnet",
-  version: "0.1.0",
   dependencies: {
     eth_firehose: "_/eth_firehose@0.0.0",
   },

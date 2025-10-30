@@ -35,7 +35,7 @@ async fn sql_dataset_input_batch_size() {
     test.dump_dataset("_/eth_rpc@0.0.0", end, 1, None).await;
 
     // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
-    test.dump_dataset("_/sql_stream_ds@0.1.0", end, 1, Some(1))
+    test.dump_dataset("_/sql_stream_ds@0.0.0", end, 1, Some(1))
         .await;
 
     // 4. Get catalog and count files
@@ -111,7 +111,7 @@ impl TestCtx {
         let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("amp.config.ts"));
         let cli = ctx.new_amp_cli();
         sql_stream_ds
-            .register(&cli)
+            .register(&cli, "0.0.0")
             .await
             .expect("Failed to register sql_stream_ds dataset");
 

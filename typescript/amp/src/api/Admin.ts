@@ -8,6 +8,7 @@ import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
@@ -15,7 +16,7 @@ import * as Error from "./Error.ts"
 /**
  * The dataset namespace parameter.
  */
-const datasetNamespace = HttpApiSchema.param("namespace", Schema.String)
+const datasetNamespace = HttpApiSchema.param("namespace", Model.DatasetNamespace)
 
 /**
  * The dataset name parameter.
@@ -47,7 +48,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
     Schema.Struct({
       namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
       name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
-      version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
+      version: Schema.optional(Schema.String).pipe(Schema.fromKey("version")),
       manifest: Schema.parseJson(Model.DatasetManifest),
     }),
   )
@@ -300,14 +301,14 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    *
    * @param namespace The namespace of the dataset to register.
    * @param name The name of the dataset to register.
-   * @param version The version of the dataset to register.
+   * @param version Optional version of the dataset to register. If omitted, only the "dev" tag is updated.
    * @param manifest The dataset manifest to register.
    * @return Whether the registration was successful.
    */
   readonly registerDataset: (
-    namespace: string,
-    name: string,
-    version: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    version: Option.Option<Model.DatasetVersion>,
     manifest: Model.DatasetManifest,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
@@ -326,8 +327,8 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @return The list of all dataset versions.
    */
   readonly getDatasetVersions: (
-    namespace: string,
-    name: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
   ) => Effect.Effect<Model.DatasetVersionsResponse, HttpClientError.HttpClientError | GetDatasetVersionsError>
 
   /**
@@ -339,9 +340,9 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @return The dataset version information.
    */
   readonly getDatasetVersion: (
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
   ) => Effect.Effect<Model.DatasetVersionInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
 
   /**
@@ -354,9 +355,9 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @return The deployment response with job ID.
    */
   readonly deployDataset: (
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
     options?: {
       endBlock?: string | null | undefined
       parallelism?: number | undefined
@@ -372,9 +373,9 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @return The dataset manifest.
    */
   readonly getDatasetManifest: (
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
   ) => Effect.Effect<any, HttpClientError.HttpClientError | GetDatasetManifestError>
 
   /**
@@ -412,12 +413,17 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const registerDataset = Effect.fn("registerDataset")(
-    function*(namespace: string, name: string, version: string, manifest: Model.DatasetManifest) {
+    function*(
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+      version: Option.Option<Model.DatasetVersion>,
+      manifest: Model.DatasetManifest,
+    ) {
       const request = client.dataset.registerDataset({
         payload: {
           namespace,
           name,
-          version,
+          version: Option.getOrUndefined(version),
           manifest,
         },
       })
@@ -433,7 +439,10 @@ export const make = Effect.fn(function*(url: string) {
     },
   )
 
-  const getDatasetVersions = Effect.fn("getDatasetVersions")(function*(namespace: string, name: string) {
+  const getDatasetVersions = Effect.fn("getDatasetVersions")(function*(
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+  ) {
     const result = yield* client.dataset.getDatasetVersions({
       path: {
         namespace,
@@ -450,9 +459,9 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const getDatasetVersion = Effect.fn("getDatasetVersion")(function*(
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
   ) {
     const result = yield* client.dataset.getDatasetVersion({
       path: {
@@ -471,9 +480,9 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const deployDataset = Effect.fn("deployDataset")(function*(
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
     options?: {
       endBlock?: string | null | undefined
       parallelism?: number | undefined
@@ -500,9 +509,9 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const getDatasetManifest = Effect.fn("getDatasetManifest")(function*(
-    namespace: string,
-    name: string,
-    revision: string,
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
   ) {
     const result = yield* client.dataset.getDatasetManifest({
       path: {

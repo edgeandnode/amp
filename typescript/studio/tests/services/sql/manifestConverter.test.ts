@@ -12,8 +12,6 @@ describe("manifestConverter", () => {
     it("should convert a simple manifest with one table", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "example",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           blocks: {
@@ -36,7 +34,7 @@ describe("manifestConverter", () => {
 
       expect(result).toHaveLength(1)
       expect(result[0]).toEqual({
-        source: "example.blocks",
+        source: "unknown.blocks",
         network: "mainnet",
         columns: [
           { name: "block_number", datatype: "NUMERIC(20, 0)", nullable: false },
@@ -48,8 +46,6 @@ describe("manifestConverter", () => {
     it("should convert a manifest with multiple tables", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "example",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           blocks: {
@@ -80,15 +76,13 @@ describe("manifestConverter", () => {
       const result = convertManifestToMetadata(manifest)
 
       expect(result).toHaveLength(2)
-      expect(result[0]?.source).toBe("example.blocks")
-      expect(result[1]?.source).toBe("example.transactions")
+      expect(result[0]?.source).toBe("unknown.blocks")
+      expect(result[1]?.source).toBe("unknown.transactions")
     })
 
     it("should handle nullable and non-nullable columns", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "test",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           data: {
@@ -118,8 +112,6 @@ describe("manifestConverter", () => {
     it("should handle complex Arrow types", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "complex",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           events: {
@@ -151,8 +143,6 @@ describe("manifestConverter", () => {
     it("should handle empty tables object", () => {
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "empty",
-        version: "1.0.0",
         dependencies: {},
         tables: {},
         functions: {},
@@ -278,8 +268,6 @@ describe("manifestConverter", () => {
       // Step 1: Create a realistic manifest
       const manifest: DatasetManifest = {
         kind: "manifest",
-        name: "uniswap",
-        version: "1.0.0",
         dependencies: {},
         tables: {
           swaps: {
@@ -326,7 +314,7 @@ describe("manifestConverter", () => {
       expect(unified[0]?.columns).toHaveLength(2)
 
       // Check manifest source
-      expect(unified[1]?.source).toBe("uniswap.swaps")
+      expect(unified[1]?.source).toBe("unknown.swaps")
       expect(unified[1]?.network).toBe("mainnet")
       expect(unified[1]?.columns).toHaveLength(5)
       expect(unified[1]?.columns[0]?.name).toBe("block_number")
