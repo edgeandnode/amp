@@ -3,7 +3,7 @@
 use sqlx::{Executor, Postgres};
 
 use super::{
-    hash::Hash,
+    hash::{Hash, HashOwned},
     path::{Path, PathOwned},
 };
 
@@ -77,4 +77,24 @@ where
         .bind(hash)
         .fetch_optional(exe)
         .await
+}
+
+/// List all orphaned manifests (manifests with no dataset links)
+///
+/// Returns a vector of manifest hashes for all manifests in `manifest_files`
+/// that have no corresponding entries in `dataset_manifests`.
+pub(crate) async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<HashOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    // NOT EXISTS short-circuits on first match, avoiding full join materialization
+    let query = indoc::indoc! {r#"
+        SELECT hash
+        FROM manifest_files mf
+        WHERE NOT EXISTS (
+            SELECT 1 FROM dataset_manifests dm WHERE dm.hash = mf.hash
+        )
+    "#};
+
+    sqlx::query_scalar(query).fetch_all(exe).await
 }

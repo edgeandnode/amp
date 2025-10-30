@@ -10,121 +10,338 @@ use sqlx::types::{
 
 mod job_id;
 mod job_status;
-mod pagination;
+pub(crate) mod sql;
 
-pub use self::{
-    job_id::JobId,
-    job_status::JobStatus,
-    pagination::{list_first_page, list_next_page},
-};
+pub use self::{job_id::JobId, job_status::JobStatus};
 use crate::{
     datasets::{DatasetName, DatasetVersion},
-    workers::{NodeId, NodeIdOwned},
+    db::Executor,
+    error::Error,
+    locations::{self, LocationId},
+    workers::{NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned},
 };
 
-/// Insert a new job into the queue
+/// Schedules a job on the given worker
 ///
-/// The job will be assigned to the given worker node with the specified status.
-pub async fn insert<'c, E>(
-    exe: E,
-    node_id: NodeId<'_>,
-    descriptor: &str,
-    status: JobStatus,
-) -> Result<JobId, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        INSERT INTO jobs (node_id, descriptor, status, created_at, updated_at)
-        VALUES ($1, $2::jsonb, $3, (timezone('UTC', now())), (timezone('UTC', now())))
-        RETURNING id
-    "#};
-    let res = sqlx::query_scalar(query)
-        .bind(&node_id)
-        .bind(descriptor)
-        .bind(status)
-        .fetch_one(exe)
-        .await?;
-    Ok(res)
+/// The job will only be scheduled if the locations are successfully locked.
+///
+/// This function performs in a single transaction:
+///
+///  1. Registers the job in the workers job queue
+///  2. Locks the locations
+///
+/// If any of these steps fail, the transaction is rolled back.
+///
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful job scheduling if worker notification
+/// is required.
+// TODO: Move to Admin API layer (scheduler)
+#[tracing::instrument(skip(db), err)]
+pub async fn schedule(
+    db: &crate::MetadataDb,
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+    job_desc: &str,
+    locations: &[LocationId],
+) -> Result<JobId, Error> {
+    // Use a transaction, such that the job will only be scheduled if the locations are
+    // successfully locked.
+    let mut tx = db.begin_txn().await?;
+
+    // Register the job in the workers job queue
+    let job_id = register(&mut tx, node_id.into(), job_desc).await?;
+
+    // Lock the locations for this job by assigning the job ID as the writer
+    locations::assign_job_writer(&mut tx, locations, job_id).await?;
+
+    tx.commit().await?;
+
+    Ok(job_id)
 }
 
-/// Insert a new job into the queue with the default status
+/// Register a job in the queue with the default status (Scheduled)
 ///
-/// The job will be assigned to the given worker node with the default status (Scheduled).
-#[inline]
-pub async fn insert_with_default_status<'c, E>(
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful job registration if worker notification
+/// is required.
+#[tracing::instrument(skip(exe), err)]
+pub async fn register<'c, E>(
     exe: E,
-    node_id: NodeId<'_>,
-    descriptor: &str,
-) -> Result<JobId, sqlx::Error>
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+    job_desc: &str,
+) -> Result<JobId, Error>
 where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+    E: Executor<'c>,
 {
-    insert(exe, node_id, descriptor, JobStatus::default()).await
-}
-
-/// Update the status of a job with multiple possible expected original states
-///
-/// This function will only update the job status if the job exists and currently has
-/// one of the expected original statuses. If the job doesn't exist, returns `UpdateJobStatusError::NotFound`.
-/// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
-pub async fn update_status_if_any_state<'c, E>(
-    exe: E,
-    id: JobId,
-    expected_statuses: &[JobStatus],
-    new_status: JobStatus,
-) -> Result<(), JobStatusUpdateError>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    /// Internal structure to hold the result of the update operation
-    #[derive(Debug, sqlx::FromRow)]
-    struct UpdateResult {
-        updated_id: Option<JobId>,
-        original_status: Option<JobStatus>,
-    }
-
-    let query = indoc::indoc! {r#"
-        WITH target_job AS (
-            SELECT id, status
-            FROM jobs
-            WHERE id = $1
-        ),
-        target_job_update AS (
-            UPDATE jobs
-            SET status = $3, updated_at = timezone('UTC', now())
-            WHERE id = $1 AND status = ANY($2)
-            RETURNING id
-        )
-        SELECT
-            target_job_update.id AS updated_id,
-            target_job.status AS original_status
-        FROM target_job
-        LEFT JOIN target_job_update ON target_job.id = target_job_update.id
-    "#};
-
-    let result: Option<UpdateResult> = sqlx::query_as(query)
-        .bind(id)
-        .bind(expected_statuses)
-        .bind(new_status)
-        .fetch_optional(exe)
+    sql::insert_with_default_status(exe, node_id.into(), job_desc)
         .await
-        .map_err(JobStatusUpdateError::Database)?;
+        .map_err(Into::into)
+}
 
-    match result {
-        Some(UpdateResult {
-            updated_id: Some(_),
+/// Update job status to StopRequested
+///
+/// This function will only update the job status if it's currently in a valid state
+/// to be stopped (Scheduled or Running). If the job is already stopping, this is
+/// considered success (idempotent behavior). If the job is in a terminal state
+/// (Stopped, Completed, Failed), this returns a conflict error.
+///
+/// Returns an error if the job doesn't exist, is in a terminal state, or if there's a database error.
+///
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful status update if worker notification
+/// is required.
+#[tracing::instrument(skip(exe), err)]
+pub async fn request_stop<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    // Try to update job status
+    match sql::update_status_if_any_state(
+        exe,
+        job_id.into(),
+        &[JobStatus::Running, JobStatus::Scheduled],
+        JobStatus::StopRequested,
+    )
+    .await
+    {
+        Ok(()) => Ok(()),
+        // Check if the job is already stopping (idempotent behavior)
+        Err(JobStatusUpdateError::StateConflict {
+            actual: JobStatus::StopRequested | JobStatus::Stopping,
             ..
         }) => Ok(()),
-        Some(UpdateResult {
-            updated_id: None,
-            original_status: Some(status),
-        }) => Err(JobStatusUpdateError::StateConflict {
-            expected: expected_statuses.to_vec(),
-            actual: status,
-        }),
-        _ => Err(JobStatusUpdateError::NotFound),
+        Err(err) => Err(err.into()),
     }
+}
+
+/// List jobs with cursor-based pagination support
+///
+/// Uses cursor-based pagination where `last_job_id` is the ID of the last job
+/// from the previous page. For the first page, pass `None` for `last_job_id`.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list<'c, E>(
+    exe: E,
+    limit: i64,
+    last_job_id: Option<impl Into<JobId> + std::fmt::Debug>,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    match last_job_id {
+        None => sql::list_first_page(exe, limit).await,
+        Some(id) => sql::list_next_page(exe, limit, id.into()).await,
+    }
+    .map_err(Into::into)
+}
+
+/// Given a worker node ID, return all the scheduled jobs
+///
+/// A job is considered scheduled if it's in one of the following non-terminal states:
+/// - [`JobStatus::Scheduled`]
+/// - [`JobStatus::Running`]
+///
+/// This function is used to fetch all the jobs that the worker should be running after a restart.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_scheduled<'c, E>(
+    exe: E,
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_by_node_id_and_statuses(
+        exe,
+        node_id.into(),
+        [JobStatus::Scheduled, JobStatus::Running],
+    )
+    .await
+    .map_err(Into::into)
+}
+
+/// Given a worker node ID, return all the active jobs
+///
+/// A job is considered active if it's in one of the following non-terminal states:
+/// - [`JobStatus::Scheduled`]
+/// - [`JobStatus::Running`]
+/// - [`JobStatus::StopRequested`]
+///
+/// When connection issues cause the job notification channel to miss notifications, a job reconciliation routine
+/// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
+/// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_active<'c, E>(
+    exe: E,
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_by_node_id_and_statuses(
+        exe,
+        node_id.into(),
+        [
+            JobStatus::Scheduled,
+            JobStatus::Running,
+            JobStatus::StopRequested,
+        ],
+    )
+    .await
+    .map_err(Into::into)
+}
+
+/// Returns the job with the given ID
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_by_id<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<Option<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_by_id(exe, id.into()).await.map_err(Into::into)
+}
+
+/// Get jobs for a given dataset
+///
+/// Returns all jobs that write to locations belonging to the specified dataset.
+/// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
+/// If `version` is `None`, all versions of the dataset are included.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_by_dataset<'c, E>(
+    exe: E,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+    dataset_version: Option<impl Into<DatasetVersion<'_>> + std::fmt::Debug>,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_jobs_by_dataset(exe, dataset_name.into(), dataset_version.map(Into::into))
+        .await
+        .map_err(Into::into)
+}
+
+/// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
+///
+/// This provides idempotent behavior - if the job is already running, completed, or failed,
+/// the appropriate error will be returned indicating the state conflict.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_running<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Scheduled], JobStatus::Running)
+        .await
+        .map_err(Into::into)
+}
+
+/// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
+///
+/// This is typically used by workers to acknowledge a stop request.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_stopping<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::StopRequested],
+        JobStatus::Stopping,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+/// Conditionally marks a job as `STOPPED` only if it's currently `STOPPING`
+///
+/// This provides proper state transition from stopping to stopped.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_stopped<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Stopping], JobStatus::Stopped)
+        .await
+        .map_err(Into::into)
+}
+
+/// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
+///
+/// This ensures jobs can only be completed from a running state.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_completed<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Running], JobStatus::Completed)
+        .await
+        .map_err(Into::into)
+}
+
+/// Conditionally marks a job as `FAILED` from either `RUNNING` or `SCHEDULED` states
+///
+/// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_failed<'c, E>(exe: E, id: impl Into<JobId> + std::fmt::Debug) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::Scheduled, JobStatus::Running],
+        JobStatus::Failed,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+/// Delete a job by ID if it's in a terminal state
+///
+/// This function will only delete the job if it exists and is in a terminal state
+/// (Completed, Stopped, or Failed). Returns true if a job was deleted, false otherwise.
+#[tracing::instrument(skip(exe), err)]
+pub async fn delete_if_terminal<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<bool, Error>
+where
+    E: Executor<'c>,
+{
+    sql::delete_by_id_and_statuses(exe, id.into(), JobStatus::terminal_statuses())
+        .await
+        .map_err(Into::into)
+}
+
+/// Delete all jobs that match the specified status or statuses
+///
+/// This function deletes all jobs that are in one of the specified statuses.
+/// Returns the number of jobs that were deleted.
+#[tracing::instrument(skip(exe), err)]
+pub async fn delete_all_by_status<'c, E, const N: usize>(
+    exe: E,
+    statuses: [JobStatus; N],
+) -> Result<usize, Error>
+where
+    E: Executor<'c>,
+{
+    sql::delete_by_status(exe, statuses)
+        .await
+        .map_err(Into::into)
 }
 
 /// Error type for conditional job status updates
@@ -143,148 +360,6 @@ pub enum JobStatusUpdateError {
     Database(#[from] sqlx::Error),
 }
 
-/// Get a job by its ID
-pub async fn get_by_id<'c, E>(exe: E, id: JobId) -> Result<Option<Job>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT id, node_id, status, descriptor, created_at, updated_at
-        FROM jobs
-        WHERE id = $1
-    "#};
-    let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
-    Ok(res)
-}
-
-/// Get jobs for a given worker node with any of the specified statuses
-pub async fn get_by_node_id_and_statuses<'c, E, const N: usize>(
-    exe: E,
-    node_id: NodeId<'_>,
-    statuses: [JobStatus; N],
-) -> Result<Vec<Job>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
-        FROM jobs
-        WHERE node_id = $1 AND status = ANY($2)
-        ORDER BY id ASC
-    "#};
-    let res = sqlx::query_as(query)
-        .bind(node_id)
-        .bind(statuses)
-        .fetch_all(exe)
-        .await?;
-    Ok(res)
-}
-
-/// Get jobs for a given dataset
-///
-/// Returns all jobs that write to locations belonging to the specified dataset.
-/// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
-/// If `version` is `None`, all versions of the dataset are included.
-pub async fn get_jobs_by_dataset<'c, E>(
-    exe: E,
-    dataset: DatasetName<'_>,
-    version: Option<DatasetVersion<'_>>,
-) -> Result<Vec<Job>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT DISTINCT
-            j.id,
-            j.node_id,
-            j.status,
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        INNER JOIN locations l ON j.id = l.writer
-        WHERE l.dataset = $1 AND l.dataset_version = $2
-        ORDER BY j.id ASC
-    "#};
-    let res = sqlx::query_as(query)
-        .bind(dataset)
-        .bind(version.map(|v| v.to_string()).unwrap_or_default())
-        .fetch_all(exe)
-        .await?;
-    Ok(res)
-}
-
-/// Delete a job by ID if it matches any of the specified statuses
-///
-/// This function will only delete the job if it exists and is in one of the specified statuses.
-/// Returns true if a job was deleted, false otherwise.
-pub async fn delete_by_id_and_statuses<'c, E, const N: usize>(
-    exe: E,
-    id: JobId,
-    statuses: [JobStatus; N],
-) -> Result<bool, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        DELETE FROM jobs 
-        WHERE id = $1 AND status = ANY($2)
-    "#};
-
-    let result = sqlx::query(query)
-        .bind(id)
-        .bind(statuses)
-        .execute(exe)
-        .await?;
-
-    Ok(result.rows_affected() == 1)
-}
-
-/// Delete all jobs that match the specified status
-///
-/// This function deletes all jobs that are in the specified status.
-/// Returns the number of jobs that were deleted.
-pub async fn delete_by_status<'c, E>(exe: E, status: JobStatus) -> Result<usize, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        DELETE FROM jobs 
-        WHERE status = $1
-    "#};
-
-    let result = sqlx::query(query).bind(status).execute(exe).await?;
-
-    Ok(result.rows_affected() as usize)
-}
-
-/// Delete all jobs that match any of the specified statuses
-///
-/// This function deletes all jobs that are in one of the specified statuses.
-/// Returns the number of jobs that were deleted.
-pub async fn delete_by_statuses<'c, E, const N: usize>(
-    exe: E,
-    statuses: [JobStatus; N],
-) -> Result<usize, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        DELETE FROM jobs 
-        WHERE status = ANY($1)
-    "#};
-
-    let result = sqlx::query(query).bind(statuses).execute(exe).await?;
-
-    Ok(result.rows_affected() as usize)
-}
-
 /// Represents a job with its metadata and associated node.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Job {
@@ -292,7 +367,7 @@ pub struct Job {
     pub id: JobId,
 
     /// ID of the worker node this job is scheduled for
-    pub node_id: NodeIdOwned,
+    pub node_id: WorkerNodeIdOwned,
 
     /// Current status of the job
     pub status: JobStatus,

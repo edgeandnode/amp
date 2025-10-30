@@ -510,7 +510,7 @@ impl<'a> GitRepo<'a> {
     }
 }
 
-/// Build and install the ampd binary
+/// Build and install the ampd and ampctl binaries
 fn build_and_install(
     version_manager: &VersionManager,
     repo_path: &Path,
@@ -519,9 +519,9 @@ fn build_and_install(
 ) -> Result<()> {
     check_command_exists("cargo")?;
 
-    ui::info!("Building ampd");
+    ui::info!("Building ampd and ampctl");
 
-    let mut args = vec!["build", "--release", "-p", "ampd"];
+    let mut args = vec!["build", "--release", "-p", "ampd", "-p", "ampctl"];
 
     let jobs_str;
     if let Some(j) = jobs {
@@ -539,12 +539,20 @@ fn build_and_install(
         return Err(BuildError::CargoBuildFailed.into());
     }
 
-    // Find the built binary
-    let binary_source = repo_path.join("target/release/ampd");
+    // Find the built binaries
+    let ampd_source = repo_path.join("target/release/ampd");
+    let ampctl_source = repo_path.join("target/release/ampctl");
 
-    if !binary_source.exists() {
+    if !ampd_source.exists() {
         return Err(BuildError::BinaryNotFound {
-            path: binary_source.clone(),
+            path: ampd_source.clone(),
+        }
+        .into());
+    }
+
+    if !ampctl_source.exists() {
+        return Err(BuildError::BinaryNotFound {
+            path: ampctl_source.clone(),
         }
         .into());
     }
@@ -555,27 +563,44 @@ fn build_and_install(
     let version_dir = config.versions_dir.join(version_label);
     fs::create_dir_all(&version_dir).context("Failed to create version directory")?;
 
-    let binary_dest = version_dir.join("ampd");
+    // Copy ampd binary
+    let ampd_dest = version_dir.join("ampd");
+    fs::copy(&ampd_source, &ampd_dest).context("Failed to copy ampd binary")?;
 
-    // Copy the binary
-    fs::copy(&binary_source, &binary_dest).context("Failed to copy binary")?;
-
-    // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&binary_dest)
-            .context("Failed to get binary metadata")?
+        let mut perms = fs::metadata(&ampd_dest)
+            .context("Failed to get ampd metadata")?
             .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&binary_dest, perms).context("Failed to set executable permissions")?;
+        fs::set_permissions(&ampd_dest, perms)
+            .context("Failed to set executable permissions on ampd")?;
+    }
+
+    // Copy ampctl binary
+    let ampctl_dest = version_dir.join("ampctl");
+    fs::copy(&ampctl_source, &ampctl_dest).context("Failed to copy ampctl binary")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&ampctl_dest)
+            .context("Failed to get ampctl metadata")?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&ampctl_dest, perms)
+            .context("Failed to set executable permissions on ampctl")?;
     }
 
     // Activate this version
     version_manager.activate(version_label)?;
 
-    ui::success!("Built and installed ampd {}", ui::version(version_label));
-    ui::detail!("Run 'ampd --version' to verify installation");
+    ui::success!(
+        "Built and installed ampd and ampctl {}",
+        ui::version(version_label)
+    );
+    ui::detail!("Run 'ampd --version' and 'ampctl --version' to verify installation");
 
     Ok(())
 }

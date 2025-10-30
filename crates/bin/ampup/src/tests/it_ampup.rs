@@ -5,11 +5,7 @@ use fs_err as fs;
 use tempfile::TempDir;
 
 use super::fixtures::{MockBinary, TempInstallDir};
-use crate::{DEFAULT_REPO, DEFAULT_REPO_PRIVATE};
-
-fn github_token_required() -> Option<String> {
-    env::var("GITHUB_TOKEN").ok()
-}
+use crate::DEFAULT_REPO;
 
 #[tokio::test]
 async fn init_creates_directory_structure() -> Result<()> {
@@ -173,15 +169,13 @@ async fn uninstall_fails_for_non_existent_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_latest_version() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
 
     // Install latest version
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         None,
         None,
         None,
@@ -201,16 +195,14 @@ async fn install_latest_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_specific_version() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
 
     // Install a specific version (use a known release)
-    let version = "v0.0.14";
+    let version = "v0.0.21";
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -228,17 +220,14 @@ async fn install_specific_version() -> Result<()> {
 
 #[tokio::test]
 async fn install_already_installed_version_switches_to_it() -> Result<()> {
-    let github_token = github_token_required();
-
     let temp = TempInstallDir::new()?;
-
-    let version = "v0.0.14";
+    let version = "v0.0.21";
 
     // Install once
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token.clone(),
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -248,8 +237,8 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
     // Install again - should just switch to it
     crate::commands::install::run(
         Some(temp.path().to_path_buf()),
-        DEFAULT_REPO_PRIVATE.to_string(),
-        github_token,
+        DEFAULT_REPO.to_string(),
+        None,
         Some(version.to_string()),
         None,
         None,
@@ -263,25 +252,6 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore] // Ignored until repository is public
-async fn install_without_github_token() -> Result<()> {
-    let temp = TempInstallDir::new()?;
-
-    // This should work once the repo is public
-    crate::commands::install::run(
-        Some(temp.path().to_path_buf()),
-        DEFAULT_REPO.to_string(),
-        None, // No GitHub token
-        None,
-        None,
-        None,
-    )
-    .await?;
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn build_from_local_path_with_custom_name() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
@@ -290,16 +260,28 @@ async fn build_from_local_path_with_custom_name() -> Result<()> {
     let target_dir = fake_repo.path().join("target/release");
     fs::create_dir_all(&target_dir)?;
 
-    // Create a mock ampd binary
-    let mock_binary = target_dir.join("ampd");
-    fs::write(&mock_binary, "#!/bin/sh\necho 'ampd test-version'")?;
+    // Create mock ampd binary
+    let mock_ampd = target_dir.join("ampd");
+    fs::write(&mock_ampd, "#!/bin/sh\necho 'ampd test-version'")?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&mock_binary)?.permissions();
+        let mut perms = fs::metadata(&mock_ampd)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&mock_binary, perms)?;
+        fs::set_permissions(&mock_ampd, perms)?;
+    }
+
+    // Create mock ampctl binary
+    let mock_ampctl = target_dir.join("ampctl");
+    fs::write(&mock_ampctl, "#!/bin/sh\necho 'ampctl test-version'")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&mock_ampctl)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&mock_ampctl, perms)?;
     }
 
     // Mock cargo by creating a fake cargo script
@@ -325,7 +307,7 @@ async fn build_from_local_path_with_custom_name() -> Result<()> {
     let custom_name = "my-custom-build";
     let result = crate::commands::build::run(
         Some(temp.path().to_path_buf()),
-        Some(DEFAULT_REPO_PRIVATE.to_string()),
+        None, // repo
         Some(fake_repo.path().to_path_buf()),
         None, // branch
         None, // commit

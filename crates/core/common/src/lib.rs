@@ -37,9 +37,7 @@ pub use foyer::Cache;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
 use metadata_db::FileId;
-pub use planning_context::{
-    DetachedLogicalPlan, PlanningContext, RemotePlan, remote_plan_from_bytes,
-};
+pub use planning_context::{DetachedLogicalPlan, PlanningContext};
 pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
 pub use store::Store;

@@ -47,8 +47,7 @@ async fn schedule_job_and_receive_notification() {
 
     //* When
     // Schedule the job
-    let job_id = metadata_db
-        .schedule_job(&worker_id, &job_desc_str, &[])
+    let job_id = crate::jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
         .await
         .expect("Failed to schedule job");
 
@@ -80,8 +79,7 @@ async fn schedule_job_and_receive_notification() {
     assert_eq!(received_notification.action, "START");
 
     // Verify the job was actually registered
-    let job = metadata_db
-        .get_job(job_id)
+    let job = crate::jobs::get_by_id(&metadata_db, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");

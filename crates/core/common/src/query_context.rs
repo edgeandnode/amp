@@ -7,9 +7,8 @@ use arrow::{array::ArrayRef, compute::concat_batches};
 use axum::response::IntoResponse;
 use datafusion::{
     self,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::{MemorySchemaProvider, TableProvider},
-    common::not_impl_err,
+    arrow::array::RecordBatch,
+    catalog::MemorySchemaProvider,
     error::DataFusionError,
     execution::{
         SendableRecordBatchStream, SessionStateBuilder,
@@ -17,7 +16,7 @@ use datafusion::{
         context::{SQLOptions, SessionContext},
         runtime_env::RuntimeEnv,
     },
-    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
+    logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
     parquet::file::metadata::ParquetMetaData,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
@@ -25,12 +24,11 @@ use datafusion::{
     scalar::ScalarValue,
     sql::{TableReference, parser},
 };
-use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
 use foyer::Cache;
-use futures::{FutureExt as _, TryStreamExt, stream};
+use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{FileId, TableId};
 use regex::Regex;
@@ -57,12 +55,6 @@ pub fn default_catalog_name() -> ScalarValue {
 pub enum Error {
     #[error("invalid plan: {0}")]
     InvalidPlan(DataFusionError),
-
-    #[error("plan encoding error: {0}")]
-    PlanEncodingError(DataFusionError),
-
-    #[error("plan decoding error: {0}")]
-    PlanDecodingError(DataFusionError),
 
     #[error("planning error: {0}")]
     PlanningError(DataFusionError),
@@ -94,9 +86,6 @@ impl IntoResponse for Error {
             Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::TableNotFoundError(_) => axum::http::StatusCode::NOT_FOUND,
-            Error::PlanEncodingError(_) | Error::PlanDecodingError(_) => {
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            }
             Error::DatasetError(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::ConfigError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::PlanningError(_) => axum::http::StatusCode::BAD_REQUEST,
@@ -108,8 +97,6 @@ impl IntoResponse for Error {
             "error_code": match self {
                 Error::SqlParseError(_) => "SQL_PARSE_ERROR",
                 Error::InvalidPlan(_) => "INVALID_PLAN",
-                Error::PlanEncodingError(_) => "PLAN_ENCODING_ERROR",
-                Error::PlanDecodingError(_) => "PLAN_DECODING_ERROR",
                 Error::DatasetError(_) => "DATASET_ERROR",
                 Error::ConfigError(_) => "CONFIG_ERROR",
                 Error::PlanningError(_) => "PLANNING_ERROR",
@@ -494,47 +481,6 @@ fn print_physical_plan(plan: &dyn ExecutionPlan) -> String {
         .to_string()
         .replace('\n', "\\n");
     sanitize_parquet_paths(&plan_str)
-}
-
-#[derive(Debug)]
-pub struct TableProviderCodec;
-
-impl LogicalExtensionCodec for TableProviderCodec {
-    fn try_decode(
-        &self,
-        _buf: &[u8],
-        _inputs: &[LogicalPlan],
-        _ctx: &SessionContext,
-    ) -> Result<Extension, DataFusionError> {
-        not_impl_err!("No extension codec provided")
-    }
-
-    fn try_encode(&self, _node: &Extension, _buf: &mut Vec<u8>) -> Result<(), DataFusionError> {
-        not_impl_err!("No extension codec provided")
-    }
-
-    fn try_decode_table_provider(
-        &self,
-        _buf: &[u8],
-        table_ref: &TableReference,
-        _schema: SchemaRef,
-        ctx: &SessionContext,
-    ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
-        // Unwrap: We use the default catalog and schema providers which are not async.
-        ctx.table_provider(table_ref.clone())
-            .now_or_never()
-            .unwrap()
-    }
-
-    fn try_encode_table_provider(
-        &self,
-        _table_ref: &TableReference,
-        _node: Arc<dyn TableProvider>,
-        _buf: &mut Vec<u8>,
-    ) -> Result<(), DataFusionError> {
-        // No-op, the only thing we need for table scans is the table name.
-        Ok(())
-    }
 }
 
 /// Creates an instrumentation rule that captures metrics and provides previews of data during execution.

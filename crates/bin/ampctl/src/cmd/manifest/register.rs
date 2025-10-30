@@ -2,7 +2,7 @@
 //!
 //! Registers a manifest with content-addressable storage through the admin API by:
 //! 1. Loading manifest JSON from local or remote storage
-//! 2. POSTing to admin API `/manifests` endpoint
+//! 2. POSTing to admin API `/manifests` endpoint via the ManifestsClient
 //! 3. Receiving and displaying the computed manifest hash
 //!
 //! # Supported Storage
@@ -20,14 +20,14 @@
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use datasets_common::hash::Hash;
 use object_store::path::Path as ObjectStorePath;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest register` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Path or URL to the manifest file (local path, file://, s3://, gs://, or az://)
     #[arg(value_name = "PATH", required = true, value_parser = clap::value_parser!(ManifestFilePath))]
@@ -42,10 +42,10 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url))]
 pub async fn run(
     Args {
-        admin_url,
+        global,
         manifest_file,
     }: Args,
 ) -> Result<(), Error> {
@@ -56,7 +56,7 @@ pub async fn run(
 
     let manifest_str = load_manifest(&manifest_file).await?;
 
-    let hash = register_manifest(&admin_url, &manifest_str).await?;
+    let hash = register_manifest(&global, &manifest_str).await?;
 
     crate::success!("Manifest registered successfully");
     crate::info!("Manifest hash: {}", hash);
@@ -99,107 +99,23 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
     })
 }
 
-/// Register the manifest with the admin API.
+/// Register the manifest with the admin API using the ManifestsClient.
 ///
-/// POSTs to `/manifests` endpoint with the manifest JSON content.
+/// Creates a client and calls the `/manifests` endpoint with the manifest JSON content.
 /// Returns the computed content-addressable hash.
 #[tracing::instrument(skip_all)]
-pub async fn register_manifest(admin_url: &Url, manifest_str: &str) -> Result<Hash, Error> {
-    let url = admin_url.join("manifests").map_err(|err| {
-        tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-        Error::InvalidAdminUrl {
-            url: admin_url.to_string(),
-            source: err,
-        }
-    })?;
+pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Result<Hash, Error> {
+    tracing::debug!("Creating admin API client");
+
+    let client = global.build_client()?;
+    let manifests_client = client.manifests();
 
     tracing::debug!("Sending registration request");
 
-    // Parse manifest JSON to send as JSON value
-    let manifest_json: serde_json::Value = serde_json::from_str(manifest_str).map_err(|err| {
-        tracing::error!(error = %err, "Failed to parse manifest JSON");
-        Error::InvalidManifestJson { source: err }
-    })?;
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(url.as_str())
-        .json(&manifest_json)
-        .send()
+    manifests_client
+        .register(manifest_str)
         .await
-        .map_err(|err| {
-            tracing::error!(error = %err, "Network error during API request");
-            Error::NetworkError {
-                url: url.to_string(),
-                source: err,
-            }
-        })?;
-
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
-
-    match status.as_u16() {
-        201 => {
-            let register_response =
-                response
-                    .json::<RegisterManifestResponse>()
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(error = %err, "Failed to parse success response from API");
-                        Error::UnexpectedResponse {
-                            status: status.as_u16(),
-                            message: format!("Failed to parse response: {}", err),
-                        }
-                    })?;
-            Ok(register_response.hash)
-        }
-        400 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
-    }
-}
-
-/// Response body for the POST /manifests endpoint (201 success).
-#[derive(Debug, serde::Deserialize)]
-struct RegisterManifestResponse {
-    hash: Hash,
-}
-
-/// Error response from the admin API (400/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+        .map_err(Error::from)
 }
 
 /// Errors for manifest registration operations.
@@ -223,32 +139,19 @@ pub enum Error {
         source: common::store::StoreError,
     },
 
-    /// Invalid manifest JSON content
-    #[error("invalid manifest JSON")]
-    InvalidManifestJson { source: serde_json::Error },
-
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
-    /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
+    /// Error from the manifest registration API client
+    #[error("manifest registration failed")]
+    RegisterError {
+        #[from]
+        source: crate::client::manifests::RegisterError,
     },
-
-    /// Network or connection error
-    #[error("network error connecting to {url}")]
-    NetworkError { url: String, source: reqwest::Error },
-
-    /// Unexpected response from API
-    #[error("unexpected response (status {status}): {message}")]
-    UnexpectedResponse { status: u16, message: String },
 }
 
 /// Manifest file path supporting local and remote storage.

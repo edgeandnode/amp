@@ -23,7 +23,7 @@ async fn register_new_dataset_with_manifest_succeeds() {
     let register_request = RegisterRequest {
         namespace: namespace.clone(),
         name: name.clone(),
-        version: version.clone(),
+        version: Some(version.clone()),
         manifest,
     };
 
@@ -142,7 +142,7 @@ async fn register_with_missing_dependency_fails() {
     let register_request = RegisterRequest {
         namespace: namespace.clone(),
         name: name.clone(),
-        version: version.clone(),
+        version: Some(version.clone()),
         manifest,
     };
 
@@ -189,7 +189,7 @@ async fn register_existing_dataset_is_idempotent() {
     let register_request = RegisterRequest {
         namespace: namespace.clone(),
         name: name.clone(),
-        version: version.clone(),
+        version: Some(version.clone()),
         manifest,
     };
 
@@ -217,7 +217,7 @@ async fn register_with_invalid_manifest_json_fails() {
     let register_request = RegisterRequest {
         namespace: "_".parse().expect("valid namespace"),
         name: "register_test_dataset".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
+        version: Some("1.0.0".parse().expect("valid version")),
         manifest: "this is not valid json".parse().expect("non-empty string"),
     };
 
@@ -274,7 +274,7 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
         let register_request = RegisterRequest {
             namespace: namespace.clone(),
             name: name.clone(),
-            version: version.clone(),
+            version: Some(version.clone()),
             manifest: manifest_json.parse().expect("Valid JSON"),
         };
 
@@ -344,7 +344,7 @@ impl TestCtx {
         let request = RegisterRequest {
             namespace,
             name,
-            version,
+            version: Some(version),
             manifest,
         };
 

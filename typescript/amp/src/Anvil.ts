@@ -20,14 +20,11 @@ import * as Model from "./Model.ts"
 import anvilManifest from "../test/fixtures/anvil_rpc.json" with { type: "json" }
 
 /**
- * The anvil dataset.
- *
- * Note: We use decodeSync to validate the JSON structure matches the DatasetEvmRpc schema.
- * The type assertion is needed because JSON imports don't preserve literal types.
+ * The anvil dataset
  */
-export const dataset = Schema.decodeSync(Model.DatasetEvmRpc)(anvilManifest as any)
+export const dataset = Schema.decodeUnknownSync(Model.DatasetEvmRpc)(anvilManifest)
 
-// NODE: This is not a secret prviate key, it's one of the test keys from anvil's default mnemonic.
+// NOTE: This is not a secret private key, it's one of the test keys from anvil's default mnemonic.
 const DEFAULT_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 /**
@@ -57,6 +54,7 @@ export class AnvilError extends Schema.TaggedError<AnvilError>("AnvilError")("An
  * Runs a script on the anvil instance.
  *
  * @param script - The script to run.
+ * @param options - Optional configuration for the script execution.
  * @returns An effect that completes when the script exits.
  */
 export const script = (script: string, options: ScriptOptions = {}) =>

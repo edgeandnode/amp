@@ -972,14 +972,9 @@ dependencies = [
  "controller",
  "dataset-store",
  "datasets-common",
- "datasets-derived",
  "dump",
- "eth-beacon-datasets",
- "evm-rpc-datasets",
- "firehose-datasets",
  "metadata-db",
  "monitoring",
- "serde_json",
  "server",
  "snmalloc-rs",
  "static_assertions",
@@ -1483,7 +1478,7 @@ dependencies = [
  "futures",
  "once_cell",
  "paste",
- "prost 0.13.3",
+ "prost 0.13.5",
  "prost-types",
  "tonic 0.13.1",
 ]
@@ -1731,7 +1726,6 @@ dependencies = [
  "http",
  "jsonwebtoken",
  "lru 0.16.2",
- "mockito",
  "privy-rs",
  "reqwest",
  "serde",
@@ -2486,11 +2480,9 @@ dependencies = [
  "async-trait",
  "axum 0.8.6",
  "backon",
- "bincode 2.0.1",
  "bytes",
  "chrono",
  "datafusion",
- "datafusion-proto",
  "datafusion-tracing",
  "datasets-common",
  "datasets-derived",
@@ -2560,7 +2552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8030735ecb0d128428b64cd379809817e620a40e5001c54465b99ec5feec2857"
 dependencies = [
  "futures-core",
- "prost 0.13.3",
+ "prost 0.13.5",
  "prost-types",
  "tonic 0.12.3",
  "tracing-core",
@@ -2579,7 +2571,7 @@ dependencies = [
  "hdrhistogram",
  "humantime",
  "hyper-util",
- "prost 0.13.3",
+ "prost 0.13.5",
  "prost-types",
  "serde",
  "serde_json",
@@ -3593,33 +3585,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datafusion-proto"
-version = "50.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7df9f606892e6af45763d94d210634eec69b9bb6ced5353381682ff090028a3"
-dependencies = [
- "arrow",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "datafusion-proto-common",
- "object_store",
- "prost 0.13.3",
-]
-
-[[package]]
-name = "datafusion-proto-common"
-version = "50.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4b14f288ca4ef77743d9672cafecf3adfffff0b9b04af9af79ecbeaaf736901"
-dependencies = [
- "arrow",
- "datafusion-common",
- "prost 0.13.3",
-]
-
-[[package]]
 name = "datafusion-pruning"
 version = "50.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3699,7 +3664,6 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "async-stream",
- "backon",
  "common",
  "datafusion",
  "datasets-common",
@@ -4320,7 +4284,7 @@ dependencies = [
  "futures",
  "hex",
  "monitoring",
- "prost 0.13.3",
+ "prost 0.13.5",
  "prost-build",
  "schemars 1.0.4",
  "serde",
@@ -5921,7 +5885,6 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
- "metadata-db",
  "pgtemp",
  "serde",
  "serde_json",
@@ -7146,11 +7109,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.3"
-source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork-0.13.3#38d1ee0d94d1ee343eeca4949dec07062a0129dc"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
- "prost-derive 0.13.3",
+ "prost-derive 0.13.5",
 ]
 
 [[package]]
@@ -7177,7 +7141,7 @@ dependencies = [
  "once_cell",
  "petgraph 0.6.5",
  "prettyplease",
- "prost 0.13.3",
+ "prost 0.13.5",
  "prost-types",
  "regex",
  "syn 2.0.108",
@@ -7186,11 +7150,12 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.13.3"
-source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork-0.13.3#38d1ee0d94d1ee343eeca4949dec07062a0129dc"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.108",
@@ -7215,7 +7180,7 @@ version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4759aa0d3a6232fb8dbdb97b61de2c20047c68aca932c7ed76da9d788508d670"
 dependencies = [
- "prost 0.13.3",
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -8182,6 +8147,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum 0.8.6",
+ "bincode 2.0.1",
  "bytes",
  "common",
  "datafusion",
@@ -8190,7 +8156,7 @@ dependencies = [
  "futures",
  "metadata-db",
  "monitoring",
- "prost 0.13.3",
+ "prost 0.13.5",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
@@ -9228,7 +9194,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.3",
+ "prost 0.13.5",
  "socket2 0.5.10",
  "tokio",
  "tokio-stream",
@@ -9258,7 +9224,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.3",
+ "prost 0.13.5",
  "rustls-native-certs",
  "socket2 0.5.10",
  "tokio",

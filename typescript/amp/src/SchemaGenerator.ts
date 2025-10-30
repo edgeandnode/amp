@@ -31,6 +31,14 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Amp/Sche
     const fromManifest = (manifest: Model.DatasetManifest) => {
       const output: Array<string> = []
       output.push(`import { Schema } from "effect";\n`)
+
+      // Only derived datasets have tables with schemas we can generate
+      if (manifest.kind !== "manifest") {
+        throw new Error(
+          `Schema generation only supported for derived datasets (kind: "manifest"), got kind: "${manifest.kind}"`,
+        )
+      }
+
       for (const [name, table] of Object.entries(manifest.tables)) {
         output.push(`\n${fromTable(table.schema, String.capitalize(String.snakeToCamel(name)))}`)
       }

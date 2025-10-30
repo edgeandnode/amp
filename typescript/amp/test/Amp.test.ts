@@ -31,17 +31,31 @@ Testing.layer((it) => {
       const admin = yield* Admin.Admin
 
       // Register and dump the root dataset.
-      yield* admin.registerDataset("_", "anvil", "0.1.0", Anvil.dataset)
-      const job = yield* admin.deployDataset("_", "anvil", "0.1.0", {
-        endBlock: "5",
-      })
+      const namespace = "_"
+      const name = "anvil"
+      const version = "0.1.0"
+
+      yield* admin.registerDataset(
+        namespace,
+        name,
+        Option.some(version),
+        Anvil.dataset,
+      )
+      const job = yield* admin.deployDataset(
+        namespace,
+        name,
+        version,
+        {
+          endBlock: "5",
+        },
+      )
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", "anvil", "dev")
+      const response = yield* admin.getDatasetVersion(namespace, name, "dev")
       assertInstanceOf(response, Model.DatasetVersionInfo)
-      deepStrictEqual(response.name, "anvil")
+      deepStrictEqual(response.name, name)
     }),
   )
 
@@ -85,17 +99,35 @@ Testing.layer((it) => {
       const fixtures = yield* Fixtures.Fixtures
 
       // Register and dump the example manifest.
-      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.registerDataset("_", "example", "0.1.0", dataset)
+      const namespace = Model.DEFAULT_NAMESPACE
+      const name = "example"
+      const version = "0.1.0"
 
-      const job = yield* admin.deployDataset("_", "example", "0.1.0", {
-        endBlock: "5",
-      })
+      const dataset = yield* fixtures.load("manifest.json", Model.DatasetDerived)
+      yield* admin.registerDataset(
+        namespace,
+        name,
+        Option.some(version),
+        dataset,
+      )
+
+      const job = yield* admin.deployDataset(
+        namespace,
+        name,
+        version,
+        {
+          endBlock: "5",
+        },
+      )
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion("_", "example", "dev")
+      const response = yield* admin.getDatasetVersion(
+        namespace,
+        name,
+        "dev",
+      )
       assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, "example")
     }),
@@ -156,32 +188,6 @@ Testing.layer((it) => {
       const expected = new Errors.JobNotFound({
         message: "job '999999' not found",
         code: "JOB_NOT_FOUND",
-      })
-      assertFailure(result, Cause.fail(expected))
-    }),
-  )
-
-  it.effect(
-    "handles location not found error",
-    Effect.fn(function*() {
-      const admin = yield* Admin.Admin
-      const result = yield* admin.getLocationById(999999).pipe(Effect.exit)
-      const expected = new Errors.LocationNotFound({
-        message: "location '999999' not found",
-        code: "LOCATION_NOT_FOUND",
-      })
-      assertFailure(result, Cause.fail(expected))
-    }),
-  )
-
-  it.effect(
-    "handles pagination limit validation",
-    Effect.fn(function*() {
-      const admin = yield* Admin.Admin
-      const result = yield* admin.getJobs({ limit: 0 }).pipe(Effect.exit)
-      const expected = new Errors.LimitInvalid({
-        message: "limit must be greater than 0",
-        code: "LIMIT_INVALID",
       })
       assertFailure(result, Cause.fail(expected))
     }),

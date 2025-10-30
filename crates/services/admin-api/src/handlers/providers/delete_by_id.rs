@@ -15,24 +15,24 @@ use crate::{
 ///
 /// Deletes a specific provider configuration by its name from the dataset store.
 ///
+/// This operation is idempotent - deleting a non-existent provider returns success.
+///
 /// ## Path Parameters
 /// - `name`: The unique name/identifier of the provider to delete
 ///
 /// ## Response
-/// - **204 No Content**: Provider successfully deleted
+/// - **204 No Content**: Provider successfully deleted (or did not exist)
 /// - **400 Bad Request**: Invalid provider name format
-/// - **404 Not Found**: Provider with the given name does not exist
 /// - **500 Internal Server Error**: Store error occurred during deletion
 ///
 /// ## Error Codes
 /// - `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed
-/// - `PROVIDER_NOT_FOUND`: No provider exists with the given name
 /// - `STORE_ERROR`: Failed to delete provider configuration from store
 ///
 /// This handler:
 /// - Validates and extracts the provider name from the URL path
 /// - Attempts to delete the provider configuration from both store and cache
-/// - Returns appropriate HTTP status codes and error messages
+/// - Returns 204 even if the provider does not exist (idempotent behavior)
 ///
 /// ## Safety Notes
 /// - Deletion removes both the configuration file from storage and the cached entry
@@ -50,9 +50,8 @@ use crate::{
             ("name" = String, Path, description = "Provider name")
         ),
         responses(
-            (status = 204, description = "Provider successfully deleted"),
+            (status = 204, description = "Provider successfully deleted (or did not exist)"),
             (status = 400, description = "Invalid provider name", body = crate::handlers::error::ErrorResponse),
-            (status = 404, description = "Provider not found", body = crate::handlers::error::ErrorResponse),
             (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
@@ -69,33 +68,32 @@ pub async fn handler(
         }
     };
 
-    ctx.dataset_store
-        .providers()
-        .delete(&name)
-        .await
-        .map_err(|err| match err {
-            DeleteError::NotFound { name } => {
-                tracing::debug!(
-                    provider_name = %name,
-                    "provider not found for deletion"
-                );
-                Error::NotFound { name }
-            }
-            other => {
-                tracing::error!(
-                    provider_name = %name,
-                    error = %other,
-                    "failed to delete provider"
-                );
-                Error::StoreError(other)
-            }
-        })?;
-
-    tracing::info!(
-        provider_name = %name,
-        "successfully deleted provider configuration"
-    );
-    Ok(StatusCode::NO_CONTENT)
+    match ctx.dataset_store.delete_provider(&name).await {
+        Ok(()) => {
+            tracing::info!(
+                provider_name = %name,
+                "successfully deleted provider configuration"
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(DeleteError::NotFound {
+            name: not_found_name,
+        }) => {
+            tracing::debug!(
+                provider_name = %not_found_name,
+                "provider not found for deletion, treating as success (idempotent)"
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(other) => {
+            tracing::error!(
+                provider_name = %name,
+                error = %other,
+                "failed to delete provider"
+            );
+            Err(Error::StoreError(other).into())
+        }
+    }
 }
 
 /// Errors that can occur during provider deletion

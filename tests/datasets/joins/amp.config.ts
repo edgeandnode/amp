@@ -3,7 +3,6 @@ import { defineDataset } from "@edgeandnode/amp"
 export default defineDataset(() => ({
   name: "joins",
   network: "mainnet",
-  version: "0.1.0",
   dependencies: {
     eth_rpc: "_/eth_rpc@0.0.0",
   },

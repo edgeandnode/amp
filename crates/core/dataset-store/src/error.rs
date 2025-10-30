@@ -1,6 +1,7 @@
 use common::BoxError;
 use datasets_common::{
     name::{Name, NameError},
+    partial_reference::PartialReferenceError,
     version::Version,
 };
 
@@ -516,23 +517,22 @@ pub enum ExtractDatasetFromTableRefsError {
     #[error("Found unqualified table '{table}', all tables must be qualified with a dataset name")]
     UnqualifiedTable { table: String },
 
-    /// The dataset name extracted from the table reference is invalid.
+    /// Failed to parse the dataset reference from the table schema.
     ///
-    /// This occurs when the schema portion of the table reference contains an invalid
-    /// dataset name according to the dataset naming rules.
-    #[error("Found invalid dataset name '{name}' in dataset schema '{schema}': {source}")]
-    InvalidDatasetName {
-        name: String,
+    /// This occurs when the schema portion contains an invalid reference format.
+    /// Expected format: `namespace/name@version` or `namespace/name`
+    #[error("Failed to parse dataset reference '{schema}': {source}")]
+    ReferenceParse {
         schema: String,
         #[source]
-        source: NameError,
+        source: PartialReferenceError,
     },
 
     /// The version string in the dataset schema is invalid.
     ///
-    /// Version strings must follow the format `x_y_z` where x, y, and z are integers.
+    /// This occurs when the revision is not a semantic version (e.g., hash, latest, dev).
     #[error(
-        "Found invalid version '{version}' in dataset schema '{schema}', version must be in the form 'x_y_z' where x, y, z are integers"
+        "Invalid version '{version}' in dataset schema '{schema}', only semantic versions are supported"
     )]
     InvalidVersion { version: String, schema: String },
 }
@@ -555,23 +555,21 @@ pub enum ExtractDatasetFromFunctionNamesError {
     )]
     InvalidFunctionFormat { function: String },
 
-    /// The dataset name extracted from the function qualifier is invalid.
+    /// Failed to parse the dataset reference from the function qualifier.
     ///
-    /// This occurs when the qualifier portion of the function name contains an invalid
-    /// dataset name according to the dataset naming rules.
-    #[error("Found invalid dataset name '{name}' in function dataset name '{function}': {source}")]
-    InvalidDatasetName {
-        name: String,
+    /// This occurs when the qualifier portion contains an invalid reference format.
+    /// Expected format: `namespace/name@version` or `namespace/name`
+    #[error("Failed to parse dataset reference from function '{function}': {source}")]
+    ReferenceParse {
         function: String,
-        #[source]
-        source: NameError,
+        source: PartialReferenceError,
     },
 
     /// The version string in the function qualifier is invalid.
     ///
-    /// Version strings must follow the format `x_y_z` where x, y, and z are integers.
+    /// This occurs when the revision is not a semantic version (e.g., hash, latest, dev).
     #[error(
-        "Found invalid version '{version}' in function dataset name '{function}', version must be in the form 'x_y_z' where x, y, z are integers"
+        "Invalid version '{version}' in function '{function}', only semantic versions are supported"
     )]
     InvalidVersion { version: String, function: String },
 }
@@ -722,6 +720,16 @@ pub struct ListAllDatasetsError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to delete version tag from metadata database")]
 pub struct DeleteVersionTagError(#[source] pub metadata_db::Error);
+
+/// Error when listing orphaned manifests
+///
+/// This error type is used by `DatasetStore::list_orphaned_manifests()`.
+///
+/// This occurs when failing to query orphaned manifests from the metadata database,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list orphaned manifests from metadata database")]
+pub struct ListOrphanedManifestsError(#[source] pub metadata_db::Error);
 
 /// Errors that occur when listing datasets that use a specific manifest
 ///

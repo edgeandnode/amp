@@ -19,11 +19,8 @@ import * as Utils from "../Utils.ts"
 import { auth } from "./commands/auth/index.ts"
 import { build } from "./commands/build.ts"
 import { codegen } from "./commands/codegen.ts"
-import { datasets } from "./commands/datasets.ts"
+import { deploy } from "./commands/deploy.ts"
 import { dev } from "./commands/dev.ts"
-import { dump } from "./commands/dump.ts"
-import { jobs } from "./commands/jobs.ts"
-import { locations } from "./commands/locations.ts"
 import { proxy } from "./commands/proxy.ts"
 import { query } from "./commands/query.ts"
 import { register } from "./commands/register.ts"
@@ -40,7 +37,7 @@ const amp = Command.make("amp", {
   },
 }).pipe(
   Command.withDescription("The Amp Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, datasets, dump, jobs, locations, query, proxy, register, studio, auth]),
+  Command.withSubcommands([build, dev, codegen, deploy, query, proxy, register, studio, auth]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 

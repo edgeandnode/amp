@@ -17,15 +17,14 @@
 
 use datasets_common::reference::Reference;
 use dump::EndBlock;
-use url::Url;
-use worker::JobId;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `dep-dataset` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// The dataset reference in format: namespace/name@version
     ///
@@ -64,10 +63,10 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for invalid paths/URLs, API errors (400/404/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %dataset_ref))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
 pub async fn run(
     Args {
-        admin_url,
+        global,
         dataset_ref,
         end_block,
         parallelism,
@@ -80,7 +79,7 @@ pub async fn run(
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(&admin_url, &dataset_ref, end_block, parallelism).await?;
+    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism).await?;
 
     crate::success!("Dataset deployed successfully");
     crate::info!("Job ID: {}", job_id);
@@ -94,148 +93,35 @@ pub async fn run(
 /// and returns the job ID.
 #[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
 async fn deploy_dataset(
-    admin_url: &Url,
+    global: &GlobalArgs,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
-) -> Result<JobId, Error> {
-    let namespace = dataset_ref.namespace();
-    let name = dataset_ref.name();
-    let version = dataset_ref.revision();
-
-    // Build URL for versioned deploy endpoint
-    let url = admin_url
-        .join(&format!(
-            "datasets/{}/{}/versions/{}/deploy",
-            namespace, name, version
-        ))
-        .map_err(|err| {
-            tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-            Error::InvalidAdminUrl {
-                url: admin_url.to_string(),
-                source: err,
-            }
-        })?;
-
-    tracing::debug!("Sending deployment request");
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(url.as_str())
-        .json(&DeployRequest {
-            end_block,
-            parallelism,
-        })
-        .send()
+) -> Result<worker::JobId, Error> {
+    let client = global.build_client()?;
+    let job_id = client
+        .datasets()
+        .deploy(dataset_ref, end_block, parallelism)
         .await
-        .map_err(|err| {
-            tracing::error!(error = %err, "Network error during API request");
-            Error::NetworkError {
-                url: url.to_string(),
-                source: err,
-            }
-        })?;
+        .map_err(|source| Error::Deploy { source })?;
 
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
-
-    match status.as_u16() {
-        200 | 202 => {
-            let deploy_response = response.json::<DeployResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse success response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse response: {}", err),
-                }
-            })?;
-
-            tracing::info!(job_id = %deploy_response.job_id, "Dataset deployment job scheduled");
-            Ok(deploy_response.job_id)
-        }
-        400 | 404 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
-    }
-}
-
-/// Request body for the POST /datasets/{namespace}/{name}/versions/{version}/deploy endpoint.
-#[derive(Debug, serde::Serialize)]
-struct DeployRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    end_block: Option<EndBlock>,
-    parallelism: u16,
-}
-
-/// Response from the deploy endpoint.
-#[derive(Debug, serde::Deserialize)]
-struct DeployResponse {
-    job_id: JobId,
-}
-
-/// Error response from the admin API (400/404/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+    Ok(job_id)
 }
 
 /// Errors for dataset deployment operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
-    /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
+    /// Deployment error from the client
+    #[error("deployment failed")]
+    Deploy {
+        #[source]
+        source: crate::client::datasets::DeployError,
     },
-
-    /// Network or connection error
-    #[error("network error connecting to {url}")]
-    NetworkError { url: String, source: reqwest::Error },
-
-    /// Unexpected response from API
-    #[error("unexpected response (status {status}): {message}")]
-    UnexpectedResponse { status: u16, message: String },
 }

@@ -11,6 +11,7 @@ use super::job_info::JobInfo;
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
+    scheduler,
 };
 
 /// Handler for the `GET /jobs/{id}` endpoint
@@ -29,12 +30,7 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_JOB_ID`: The provided ID is not a valid job identifier
 /// - `JOB_NOT_FOUND`: No job exists with the given ID
-/// - `METADATA_DB_ERROR`: Internal database error occurred
-///
-/// This handler:
-/// - Validates and extracts the job ID from the URL path
-/// - Queries the metadata database for the job with full details
-/// - Returns appropriate HTTP status codes and error messages
+/// - `GET_JOB_ERROR`: Failed to retrieve job from scheduler (database error)
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -66,12 +62,12 @@ pub async fn handler(
         }
     };
 
-    match ctx.metadata_db.get_job(&id).await {
+    match ctx.scheduler.get_job(&id).await {
         Ok(Some(job)) => Ok(Json(job.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {
             tracing::debug!(error=?err, job_id=?id, "failed to get job");
-            Err(Error::MetadataDbError(err).into())
+            Err(Error::GetJob(err).into())
         }
     }
 }
@@ -85,29 +81,36 @@ pub async fn handler(
 pub enum Error {
     /// The job ID in the URL path is invalid
     ///
-    /// This occurs when the ID cannot be parsed as a valid JobId.
+    /// This occurs when:
+    /// - The ID cannot be parsed as a valid integer
+    /// - The path parameter is missing or malformed
+    /// - The ID format does not match the expected JobId type
     #[error("invalid job ID: {err}")]
     InvalidId {
         /// The rejection details from Axum's path extractor
         err: PathRejection,
     },
 
-    /// The requested job was not found in the database
+    /// The requested job was not found
     ///
-    /// This occurs when the job ID is valid but no job
-    /// record exists with that ID in the metadata database.
+    /// This occurs when:
+    /// - No job exists with the specified ID in the database
+    /// - The job was deleted after the request was made
+    /// - The job ID refers to a nonexistent record
     #[error("job '{id}' not found")]
     NotFound {
         /// The job ID that was not found
         id: JobId,
     },
 
-    /// An error occurred while querying the metadata database
+    /// Failed to retrieve job from scheduler
     ///
-    /// This covers database connection issues, query failures,
-    /// and other internal database errors.
-    #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    /// This occurs when:
+    /// - Database connection fails or is lost during the query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to get job")]
+    GetJob(#[source] scheduler::GetJobError),
 }
 
 impl IntoErrorResponse for Error {
@@ -115,7 +118,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId { .. } => "INVALID_JOB_ID",
             Error::NotFound { .. } => "JOB_NOT_FOUND",
-            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+            Error::GetJob(_) => "GET_JOB_ERROR",
         }
     }
 
@@ -123,7 +126,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
-            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetJob(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

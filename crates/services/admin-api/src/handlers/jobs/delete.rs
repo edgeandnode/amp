@@ -10,6 +10,7 @@ use metadata_db::JobStatus;
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
+    scheduler,
 };
 
 /// Query parameters for the delete jobs endpoint
@@ -37,7 +38,7 @@ pub struct QueryParams {
 ///
 /// ## Error Codes
 /// - `INVALID_QUERY_PARAM`: Invalid or missing status parameter
-/// - `METADATA_DB_ERROR`: Internal database error occurred
+/// - `DELETE_JOBS_BY_STATUS_ERROR`: Failed to delete jobs by status from scheduler (database error)
 ///
 /// ## Behavior
 /// This handler provides bulk job cleanup with the following characteristics:
@@ -95,29 +96,33 @@ pub async fn handler(
     };
 
     let deleted_count = match query.status {
-        JobStatusFilter::Terminal => ctx.metadata_db.delete_all_terminal_jobs().await,
-        JobStatusFilter::Completed => {
-            ctx.metadata_db
-                .delete_all_jobs_by_status(JobStatus::Completed)
-                .await
-        }
-        JobStatusFilter::Stopped => {
-            ctx.metadata_db
-                .delete_all_jobs_by_status(JobStatus::Stopped)
-                .await
-        }
-        JobStatusFilter::Error => {
-            ctx.metadata_db
-                .delete_all_jobs_by_status(JobStatus::Failed)
-                .await
-        }
-    }
-    .map_err(|err| {
-        tracing::error!(status_filter=%query.status, error=?err, "failed to delete jobs");
-        Error::MetadataDbError(err)
-    })?;
+        JobStatusFilter::Terminal => ctx
+            .scheduler
+            .delete_jobs_by_status(JobStatus::terminal_statuses())
+            .await
+            .map_err(Error::DeleteJobsByStatus),
+        JobStatusFilter::Completed => ctx
+            .scheduler
+            .delete_jobs_by_status([JobStatus::Completed])
+            .await
+            .map_err(Error::DeleteJobsByStatus),
+        JobStatusFilter::Stopped => ctx
+            .scheduler
+            .delete_jobs_by_status([JobStatus::Stopped])
+            .await
+            .map_err(Error::DeleteJobsByStatus),
+        JobStatusFilter::Error => ctx
+            .scheduler
+            .delete_jobs_by_status([JobStatus::Failed])
+            .await
+            .map_err(Error::DeleteJobsByStatus),
+    }?;
 
-    tracing::info!(status_filter=%query.status, deleted_count, "successfully deleted jobs");
+    if deleted_count > 0 {
+        tracing::info!(status_filter=%query.status, deleted_count, "successfully deleted jobs");
+    } else {
+        tracing::debug!(status_filter=%query.status, "no jobs to delete");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -177,29 +182,39 @@ impl<'de> serde::Deserialize<'de> for JobStatusFilter {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Invalid query parameters
+    ///
+    /// This occurs when:
+    /// - The status parameter is missing from the query string
+    /// - The status parameter has an invalid value (not terminal/completed/stopped/error)
+    /// - Query string syntax is malformed
     #[error("invalid query parameters: {err}")]
     InvalidQueryParam {
         /// The rejection details from Axum's query extractor
         err: QueryRejection,
     },
 
-    /// Metadata DB error
-    #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    /// Failed to delete jobs by status from scheduler
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during bulk deletion
+    /// - Status-filtered delete operation encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to delete jobs by status")]
+    DeleteJobsByStatus(#[source] scheduler::DeleteJobsByStatusError),
 }
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidQueryParam { .. } => "INVALID_QUERY_PARAM",
-            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+            Error::DeleteJobsByStatus(_) => "DELETE_JOBS_BY_STATUS_ERROR",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
             Error::InvalidQueryParam { .. } => StatusCode::BAD_REQUEST,
-            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DeleteJobsByStatus(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

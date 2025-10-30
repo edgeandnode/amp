@@ -45,7 +45,7 @@
           "datasets"
         ],
         "summary": "Handler for the `POST /datasets` endpoint",
-        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{namespace}/{name}/versions/latest/deploy` - for latest version\n- `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Version of the dataset to register (must be valid version string)\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `DEPENDENCY_VALIDATION_ERROR`: SQL queries are invalid or reference undeclared dependencies\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `STORE_ERROR`: Failed to load or access dataset store\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Eth Beacon dataset** (kind=\"eth-beacon\"): Registers a raw dataset that extracts Ethereum Beacon Chain data\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves two steps:\n1. **Register manifest**: Stores the manifest file in hash-based storage and creates a metadata database entry\n2. **Tag version**: Associates the version identifier with the manifest hash (upsert operation)\n\nThis two-step approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage from version management\n\nThe tag operation is idempotent:\n- If the version tag doesn't exist, it is created\n- If the version tag exists with the same manifest hash, the operation succeeds (no changes)\n- If the version tag exists with a different manifest hash, it is updated to point to the new hash\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Stores the manifest and upserts the version tag in the server's local registry\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - Schedule data extraction",
+        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{namespace}/{name}/versions/latest/deploy` - for latest version\n- `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Optional version of the dataset to register. If omitted, only the \"dev\" tag is updated.\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `DEPENDENCY_VALIDATION_ERROR`: SQL queries are invalid or reference undeclared dependencies\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `STORE_ERROR`: Failed to load or access dataset store\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Eth Beacon dataset** (kind=\"eth-beacon\"): Registers a raw dataset that extracts Ethereum Beacon Chain data\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves one or two steps depending on whether a version is provided:\n1. **Register manifest**: Stores the manifest file in hash-based storage, creates a metadata database entry,\n   and automatically updates the \"dev\" tag to point to this manifest\n2. **Tag version** (optional): If a version is provided, associates the version identifier with the manifest hash (upsert operation)\n\nThis approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage from version management\n- Development workflow: register without version to only update \"dev\" tag\n- Release workflow: register with version to create semantic version tags\n\nThe tag operation is idempotent:\n- If the version tag doesn't exist, it is created\n- If the version tag exists with the same manifest hash, the operation succeeds (no changes)\n- If the version tag exists with a different manifest hash, it is updated to point to the new hash\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Stores the manifest and upserts the version tag in the server's local registry\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - Schedule data extraction",
         "operationId": "datasets_register",
         "requestBody": {
           "content": {
@@ -578,7 +578,7 @@
           "jobs"
         ],
         "summary": "Handler for the `GET /jobs` endpoint",
-        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Accepts query parameters for pagination (limit, last_job_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list jobs with pagination\n- Returns a structured response with jobs and next cursor",
+        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)\n- `LIMIT_INVALID`: Limit is zero\n- `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)",
         "operationId": "jobs_list",
         "parameters": [
           {
@@ -639,7 +639,7 @@
           "jobs"
         ],
         "summary": "Handler for the `DELETE /jobs?status=<filter>` endpoint",
-        "description": "Deletes jobs based on status filter. Supports deleting jobs by various status criteria.\n\n## Query Parameters\n- `status=terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)\n- `status=completed`: Delete all completed jobs\n- `status=stopped`: Delete all stopped jobs\n- `status=error`: Delete all failed jobs\n\n## Response\n- **204 No Content**: Operation completed successfully\n- **400 Bad Request**: Invalid or missing status query parameter\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_QUERY_PARAM`: Invalid or missing status parameter\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides bulk job cleanup with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) are deleted\n- Non-terminal jobs are completely protected from deletion\n- Database layer ensures atomic bulk deletion\n- Safe to call even when no terminal jobs exist\n\n## Terminal States\nJobs are deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (never deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state\n\n## Usage\nThis endpoint is typically used for:\n- Periodic cleanup of completed jobs\n- Administrative maintenance\n- Freeing up database storage",
+        "description": "Deletes jobs based on status filter. Supports deleting jobs by various status criteria.\n\n## Query Parameters\n- `status=terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)\n- `status=completed`: Delete all completed jobs\n- `status=stopped`: Delete all stopped jobs\n- `status=error`: Delete all failed jobs\n\n## Response\n- **204 No Content**: Operation completed successfully\n- **400 Bad Request**: Invalid or missing status query parameter\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_QUERY_PARAM`: Invalid or missing status parameter\n- `DELETE_JOBS_BY_STATUS_ERROR`: Failed to delete jobs by status from scheduler (database error)\n\n## Behavior\nThis handler provides bulk job cleanup with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) are deleted\n- Non-terminal jobs are completely protected from deletion\n- Database layer ensures atomic bulk deletion\n- Safe to call even when no terminal jobs exist\n\n## Terminal States\nJobs are deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (never deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state\n\n## Usage\nThis endpoint is typically used for:\n- Periodic cleanup of completed jobs\n- Administrative maintenance\n- Freeing up database storage",
         "operationId": "jobs_delete_many",
         "parameters": [
           {
@@ -685,7 +685,7 @@
           "jobs"
         ],
         "summary": "Handler for the `GET /jobs/{id}` endpoint",
-        "description": "Retrieves and returns a specific job by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the job to retrieve (must be a valid JobId)\n\n## Response\n- **200 OK**: Returns the job information as JSON\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the job ID from the URL path\n- Queries the metadata database for the job with full details\n- Returns appropriate HTTP status codes and error messages",
+        "description": "Retrieves and returns a specific job by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the job to retrieve (must be a valid JobId)\n\n## Response\n- **200 OK**: Returns the job information as JSON\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler (database error)",
         "operationId": "jobs_get",
         "parameters": [
           {
@@ -746,7 +746,7 @@
           "jobs"
         ],
         "summary": "Handler for the `DELETE /jobs/{id}` endpoint",
-        "description": "Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).\nThis is a safe operation that only removes finalized jobs from the system.\n\n## Path Parameters\n- `id`: The unique identifier of the job to delete (must be a valid JobId)\n\n## Response\n- **204 No Content**: Job was successfully deleted\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job exists but is not in a terminal state\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides safe job deletion with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) can be deleted\n- Non-terminal jobs are protected from accidental deletion\n- Clear error messages distinguish between non-existent jobs and non-terminal jobs\n- Database layer ensures atomic deletion\n\n## Terminal States\nJobs can only be deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (cannot be deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state",
+        "description": "Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).\nThis is a safe, idempotent operation that only removes finalized jobs from the system.\n\n## Path Parameters\n- `id`: The unique identifier of the job to delete (must be a valid JobId)\n\n## Response\n- **204 No Content**: Job was successfully deleted or does not exist (idempotent)\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)\n- **500 Internal Server Error**: Database error occurred\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_CONFLICT`: Job exists but is not in a terminal state\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler (database error)\n- `DELETE_JOB_ERROR`: Failed to delete job from scheduler (database error)\n\n## Idempotent Behavior\nThis handler is idempotent - deleting a non-existent job returns 204 (success).\nThis allows clients to safely retry deletions without worrying about 404 errors.\n\n## Behavior\nThis handler provides safe job deletion with the following characteristics:\n- Only jobs in terminal states (Completed, Stopped, Failed) can be deleted\n- Non-terminal jobs are protected from accidental deletion\n- Non-existent jobs return success (idempotent behavior)\n- Database layer ensures atomic deletion\n\n## Terminal States\nJobs can only be deleted when in these states:\n- Completed → Safe to delete\n- Stopped → Safe to delete\n- Failed → Safe to delete\n\nProtected states (cannot be deleted):\n- Scheduled → Job is waiting to run\n- Running → Job is actively executing\n- StopRequested → Job is being stopped\n- Stopping → Job is in process of stopping\n- Unknown → Invalid state",
         "operationId": "jobs_delete",
         "parameters": [
           {
@@ -762,20 +762,10 @@
         ],
         "responses": {
           "204": {
-            "description": "Job deleted successfully"
+            "description": "Job deleted successfully or does not exist (idempotent)"
           },
           "400": {
             "description": "Invalid job ID",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Job not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -813,7 +803,7 @@
           "jobs"
         ],
         "summary": "Handler for the `PUT /jobs/{id}/stop` endpoint",
-        "description": "Stops a running job using the specified job ID. This is an idempotent\noperation that handles job termination requests safely.\n\n## Path Parameters\n- `id`: The unique identifier of the job to stop (must be a valid JobId)\n\n## Response\n- **200 OK**: Job stop request processed successfully\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **409 Conflict**: Job cannot be stopped from current state (already terminal or invalid transition)\n- **500 Internal Server Error**: Database connection or scheduler error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `JOB_CONFLICT`: Job is in a state that cannot be stopped (terminal or invalid transition)\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis handler provides idempotent job stopping with the following characteristics:\n- Jobs already in terminal states return conflict error\n- Only running/scheduled jobs can be transitioned to stop-requested\n- The scheduler handles atomic status updates and worker notifications\n- Database layer validates state transitions and prevents race conditions\n\n## State Transitions\nValid stop transitions:\n- Scheduled → StopRequested\n- Running → StopRequested\n\nInvalid transitions (return conflict):\n- Completed → (no change)\n- Failed → (no change)\n- Stopped → (no change)\n- Unknown → (no change)\n\nThe handler:\n- Validates and extracts the job ID from the URL path\n- Retrieves current job status to validate it exists\n- Delegates to scheduler for atomic stop operation with worker notification\n- Returns appropriate HTTP status codes and error messages",
+        "description": "Stops a running job using the specified job ID. This is an idempotent\noperation that handles job termination requests safely.\n\n## Path Parameters\n- `id`: The unique identifier of the job to stop (must be a valid JobId)\n\n## Response\n- **200 OK**: Job stop request processed successfully, or job already in terminal state (idempotent)\n- **400 Bad Request**: Invalid job ID format (not parseable as JobId)\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or scheduler error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `STOP_JOB_ERROR`: Database error during stop operation execution\n- `UNEXPECTED_STATE_CONFLICT`: Internal state machine error (indicates a bug)\n\n## Idempotent Behavior\nThis handler is idempotent - stopping a job that's already in a terminal state returns success (200).\nThis allows clients to safely retry stop requests without worrying about conflict errors.\n\nThe desired outcome of a stop request is that the job is not running. If the job is already\nstopped, completed, or failed, this outcome is achieved, so we return success.\n\n## Behavior\nThis handler provides idempotent job stopping with the following characteristics:\n- Jobs already in terminal states (Stopped, Completed, Failed) return success (idempotent)\n- Only running/scheduled jobs transition to stop-requested state\n- Job lookup and stop request are performed atomically within a single transaction\n- Database layer validates state transitions and prevents race conditions\n\n## State Transitions\nValid stop transitions:\n- Scheduled → StopRequested (200 OK)\n- Running → StopRequested (200 OK)\n\nAlready terminal (idempotent - return success):\n- Stopped → no change (200 OK)\n- Completed → no change (200 OK)\n- Failed → no change (200 OK)\n\nThe handler:\n- Validates and extracts the job ID from the URL path\n- Delegates to scheduler for atomic stop operation (job lookup + stop + worker notification)\n- Returns success if job is already in terminal state (idempotent)\n- Returns appropriate HTTP status codes and error messages",
         "operationId": "jobs_stop",
         "parameters": [
           {
@@ -829,7 +819,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Job stop request processed successfully"
+            "description": "Job stop request processed successfully, or job already in terminal state (idempotent)"
           },
           "400": {
             "description": "Invalid job ID",
@@ -843,16 +833,6 @@
           },
           "404": {
             "description": "Job not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Job cannot be stopped from current state",
             "content": {
               "application/json": {
                 "schema": {
@@ -1162,6 +1142,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `DELETE /manifests` endpoint",
+        "description": "Deletes all orphaned manifests (manifests with no dataset links).\nThis is a bulk cleanup operation for removing unused manifests and reclaiming storage space.\n\n## Response\n- **200 OK**: Returns JSON with count of deleted manifests\n- **500 Internal Server Error**: Database error\n\n## Error Codes\n- `LIST_ORPHANED_MANIFESTS_ERROR`: Failed to list orphaned manifests\n\n## Pruning Process\nThis handler:\n1. Queries the metadata database for all manifests not linked to any datasets\n2. Deletes each orphaned manifest concurrently from both object store and metadata database\n3. Logs individual deletion failures but continues processing remaining manifests\n4. Returns the count of successfully deleted manifests\n\nIndividual manifest deletion failures are logged as warnings but don't fail the entire operation,\nallowing partial cleanup even if some manifests cannot be removed.\nThe operation is idempotent - safe to call repeatedly.",
+        "operationId": "manifests_prune",
+        "responses": {
+          "200": {
+            "description": "Orphaned manifests pruned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PruneResponse"
                 }
               }
             }
@@ -1501,7 +1511,7 @@
           "providers"
         ],
         "summary": "Handler for the `DELETE /providers/{name}` endpoint",
-        "description": "Deletes a specific provider configuration by its name from the dataset store.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to delete\n\n## Response\n- **204 No Content**: Provider successfully deleted\n- **400 Bad Request**: Invalid provider name format\n- **404 Not Found**: Provider with the given name does not exist\n- **500 Internal Server Error**: Store error occurred during deletion\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `PROVIDER_NOT_FOUND`: No provider exists with the given name\n- `STORE_ERROR`: Failed to delete provider configuration from store\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Attempts to delete the provider configuration from both store and cache\n- Returns appropriate HTTP status codes and error messages\n\n## Safety Notes\n- Deletion removes both the configuration file from storage and the cached entry\n- Once deleted, the provider configuration cannot be recovered\n- Any datasets using this provider may fail until a new provider is configured",
+        "description": "Deletes a specific provider configuration by its name from the dataset store.\n\nThis operation is idempotent - deleting a non-existent provider returns success.\n\n## Path Parameters\n- `name`: The unique name/identifier of the provider to delete\n\n## Response\n- **204 No Content**: Provider successfully deleted (or did not exist)\n- **400 Bad Request**: Invalid provider name format\n- **500 Internal Server Error**: Store error occurred during deletion\n\n## Error Codes\n- `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed\n- `STORE_ERROR`: Failed to delete provider configuration from store\n\nThis handler:\n- Validates and extracts the provider name from the URL path\n- Attempts to delete the provider configuration from both store and cache\n- Returns 204 even if the provider does not exist (idempotent behavior)\n\n## Safety Notes\n- Deletion removes both the configuration file from storage and the cached entry\n- Once deleted, the provider configuration cannot be recovered\n- Any datasets using this provider may fail until a new provider is configured",
         "operationId": "providers_delete",
         "parameters": [
           {
@@ -1516,20 +1526,10 @@
         ],
         "responses": {
           "204": {
-            "description": "Provider successfully deleted"
+            "description": "Provider successfully deleted (or did not exist)"
           },
           "400": {
             "description": "Invalid provider name",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Provider not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2182,6 +2182,20 @@
           }
         }
       },
+      "PruneResponse": {
+        "type": "object",
+        "description": "Response payload for manifest pruning operation\n\nContains the count of successfully deleted orphaned manifests.",
+        "required": [
+          "deleted_count"
+        ],
+        "properties": {
+          "deleted_count": {
+            "type": "integer",
+            "description": "Number of orphaned manifests successfully deleted",
+            "minimum": 0
+          }
+        }
+      },
       "RegisterManifestResponse": {
         "type": "object",
         "description": "Response payload for manifest registration\n\nContains the computed hash of the registered manifest.",
@@ -2201,7 +2215,6 @@
         "required": [
           "namespace",
           "name",
-          "version",
           "manifest"
         ],
         "properties": {
@@ -2219,7 +2232,7 @@
           },
           "version": {
             "type": "string",
-            "description": "Version of the dataset to register using semantic versioning (e.g., \"1.0.0\")"
+            "description": "Optional version of the dataset to register using semantic versioning (e.g., \"1.0.0\").\nIf omitted, only the \"dev\" tag is updated. If provided, both \"dev\" and the semantic version tag are created/updated."
           }
         }
       },

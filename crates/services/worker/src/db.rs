@@ -153,7 +153,7 @@ impl MetadataDbRetryExt for MetadataDb {
         &self,
         node_id: &NodeId,
     ) -> Result<Vec<JobMeta>, MetadataDbError> {
-        (|| self.get_scheduled_jobs(node_id))
+        (|| metadata_db::jobs::get_scheduled(self, node_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -171,7 +171,7 @@ impl MetadataDbRetryExt for MetadataDb {
         &self,
         node_id: NodeId,
     ) -> Result<Vec<JobMeta>, MetadataDbError> {
-        (|| self.get_active_jobs(node_id.clone()))
+        (|| metadata_db::jobs::get_active(self, node_id.clone()))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -186,7 +186,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn get_job_with_retry(&self, job_id: &JobId) -> Result<Option<JobMeta>, MetadataDbError> {
-        (|| self.get_job(job_id))
+        (|| metadata_db::jobs::get_by_id(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -201,7 +201,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn mark_job_running_with_retry(&self, job_id: &JobId) -> Result<(), MetadataDbError> {
-        (|| self.mark_job_running(job_id))
+        (|| metadata_db::jobs::mark_running(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -216,7 +216,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn mark_job_stopping_with_retry(&self, job_id: &JobId) -> Result<(), MetadataDbError> {
-        (|| self.mark_job_stopping(job_id))
+        (|| metadata_db::jobs::mark_stopping(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -231,7 +231,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn mark_job_stopped_with_retry(&self, job_id: &JobId) -> Result<(), MetadataDbError> {
-        (|| self.mark_job_stopped(job_id))
+        (|| metadata_db::jobs::mark_stopped(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -246,7 +246,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn mark_job_completed_with_retry(&self, job_id: &JobId) -> Result<(), MetadataDbError> {
-        (|| self.mark_job_completed(job_id))
+        (|| metadata_db::jobs::mark_completed(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -261,7 +261,7 @@ impl MetadataDbRetryExt for MetadataDb {
     }
 
     async fn mark_job_failed_with_retry(&self, job_id: &JobId) -> Result<(), MetadataDbError> {
-        (|| self.mark_job_failed(job_id))
+        (|| metadata_db::jobs::mark_failed(self, job_id))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {

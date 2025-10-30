@@ -1,5 +1,6 @@
 - name: register_basic_function
   dataset: basic_function
+  tag: "0.0.0"
 
 - name: query_basic_function
   query: SELECT basic_function.testString()

@@ -16,6 +16,9 @@ pub struct Step {
     pub dataset: String,
     /// Optional configuration file path for the deployment.
     pub config: Option<String>,
+    /// Optional version tag for the dataset registration
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 impl Step {
@@ -24,10 +27,14 @@ impl Step {
     /// Creates a dataset package with the specified deploy path and optional
     /// configuration, then uses the amp CLI to install and register it.
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
-        tracing::debug!("Registering dataset '{}'", self.dataset);
+        tracing::debug!(
+            "Registering dataset '{}' (tag: {:?})",
+            self.dataset,
+            self.tag
+        );
 
         let dataset_package = DatasetPackage::new(&self.dataset, self.config.as_deref());
         let cli = ctx.new_amp_cli();
-        dataset_package.register(&cli).await
+        dataset_package.register(&cli, self.tag.as_deref()).await
     }
 }

@@ -13,14 +13,14 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::hash::Hash;
-use url::Url;
+
+use crate::{args::GlobalArgs, client::manifests::DeleteError};
 
 /// Command-line arguments for the `manifest rm` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// Manifest content hash to delete
     #[arg(value_name = "HASH", required = true, value_parser = clap::value_parser!(Hash))]
@@ -35,11 +35,11 @@ pub struct Args {
 ///
 /// Returns [`Error`] for invalid hash, manifest is linked to datasets (409),
 /// API errors (400/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %hash))]
-pub async fn run(Args { admin_url, hash }: Args) -> Result<(), Error> {
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %hash))]
+pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting manifest from admin API");
 
-    delete_manifest(&admin_url, &hash).await?;
+    delete_manifest(&global, &hash).await?;
 
     crate::success!("Manifest deleted successfully");
 
@@ -48,98 +48,64 @@ pub async fn run(Args { admin_url, hash }: Args) -> Result<(), Error> {
 
 /// Delete the manifest from the admin API.
 ///
-/// DELETEs to `/manifests/{hash}` endpoint.
+/// DELETEs to `/manifests/{hash}` endpoint using the admin API client.
 #[tracing::instrument(skip_all)]
-async fn delete_manifest(admin_url: &Url, hash: &Hash) -> Result<(), Error> {
-    let url = admin_url
-        .join(&format!("manifests/{}", hash))
-        .map_err(|err| {
-            tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-            Error::InvalidAdminUrl {
-                url: admin_url.to_string(),
-                source: err,
+async fn delete_manifest(global: &GlobalArgs, hash: &Hash) -> Result<(), Error> {
+    let client = global.build_client()?;
+
+    client
+        .manifests()
+        .delete(hash)
+        .await
+        .map_err(|err| match err {
+            DeleteError::InvalidHash(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::ManifestLinked(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::TransactionBeginError(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::CheckLinksError(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::MetadataDbDeleteError(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::ObjectStoreDeleteError(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::TransactionCommitError(source) => Error::ApiError {
+                error_code: source.error_code,
+                message: source.error_message,
+            },
+            DeleteError::Network { url, source } => Error::NetworkError { url, source },
+            DeleteError::UnexpectedResponse { status, message } => {
+                Error::UnexpectedResponse { status, message }
             }
-        })?;
-
-    tracing::debug!("Sending DELETE request");
-
-    let client = reqwest::Client::new();
-    let response = client.delete(url.as_str()).send().await.map_err(|err| {
-        tracing::error!(error = %err, "Network error during API request");
-        Error::NetworkError {
-            url: url.to_string(),
-            source: err,
-        }
-    })?;
-
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
-
-    match status.as_u16() {
-        204 => {
-            tracing::info!("Manifest deleted successfully");
-            Ok(())
-        }
-        400 | 409 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
-    }
-}
-
-/// Error response from the admin API (400/409/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+        })
 }
 
 /// Errors for manifest removal operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
     /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
-    },
+    #[error("API error: [{error_code}] {message}")]
+    ApiError { error_code: String, message: String },
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

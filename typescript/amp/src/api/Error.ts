@@ -265,30 +265,6 @@ export class JobNotFound extends Schema.Class<JobNotFound>("JobNotFound")(
 }
 
 /**
- * LocationNotFound - The requested location does not exist.
- *
- * Causes:
- * - Location ID does not exist in the system
- * - Location has been deleted
- * - Location has been marked as inactive
- *
- * Applies to:
- * - GET /locations/{id} - When location ID doesn't exist
- * - DELETE /locations/{id} - When attempting to delete non-existent location
- */
-export class LocationNotFound extends Schema.Class<LocationNotFound>("LocationNotFound")(
-  {
-    code: Schema.Literal("LOCATION_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 404,
-  },
-) {
-  readonly _tag = "LocationNotFound" as const
-}
-
-/**
  * InvalidQueryParameters - The query parameters are invalid or malformed.
  *
  * Causes:
@@ -459,80 +435,6 @@ export class InvalidJobId extends Schema.Class<InvalidJobId>("InvalidJobId")(
   },
 ) {
   readonly _tag = "InvalidJobId" as const
-}
-
-/**
- * InvalidLocationId - The provided location ID is malformed or invalid.
- *
- * Causes:
- * - Location ID contains invalid characters
- * - Location ID format does not match expected pattern
- * - Empty or null location ID
- * - Location ID is not a valid integer
- *
- * Applies to:
- * - GET /locations/{id} - When ID format is invalid
- * - DELETE /locations/{id} - When ID format is invalid
- */
-export class InvalidLocationId extends Schema.Class<InvalidLocationId>("InvalidLocationId")(
-  {
-    code: Schema.Literal("INVALID_LOCATION_ID").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 400,
-  },
-) {
-  readonly _tag = "InvalidLocationId" as const
-}
-
-/**
- * JobConflict - Job is in a state that conflicts with the requested operation.
- *
- * Causes:
- * - Attempting to delete a job that is not in terminal state
- * - Attempting to stop a job that is already in terminal state
- * - Invalid state transitions for job operations
- *
- * Applies to:
- * - DELETE /jobs/{id} - When job is not in terminal state
- * - PUT /jobs/{id}/stop - When job cannot be stopped from current state
- */
-export class JobConflict extends Schema.Class<JobConflict>("JobConflict")(
-  {
-    code: Schema.Literal("JOB_CONFLICT").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 409,
-  },
-) {
-  readonly _tag = "JobConflict" as const
-}
-
-/**
- * InvalidQueryParam - The query parameters are invalid or malformed.
- *
- * Causes:
- * - Invalid query parameter values
- * - Missing required query parameters
- * - Query parameter validation failures
- * - Unsupported parameter combinations
- *
- * Applies to:
- * - DELETE /jobs - Invalid status parameter
- * - Any endpoint with query parameter validation
- */
-export class InvalidQueryParam extends Schema.Class<InvalidQueryParam>("InvalidQueryParam")(
-  {
-    code: Schema.Literal("INVALID_QUERY_PARAM").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 400,
-  },
-) {
-  readonly _tag = "InvalidQueryParam" as const
 }
 
 /**

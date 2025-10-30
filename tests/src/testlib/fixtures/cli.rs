@@ -1,7 +1,7 @@
 //! amp CLI fixture for executing dataset commands.
 //!
 //! This fixture provides a convenient interface for executing amp CLI commands
-//! such as `build`, `register`, and `dump` in test environments. It handles the command
+//! such as `build`, `register`, and `deploy` in test environments. It handles the command
 //! execution, environment variable setup, and error handling.
 
 use std::{
@@ -14,7 +14,7 @@ use common::BoxError;
 /// amp CLI fixture for executing dataset commands.
 ///
 /// This fixture wraps the amp CLI and provides convenient methods for
-/// building, registering, and dumping datasets in test environments. It automatically
+/// building, registering, and deploying datasets in test environments. It automatically
 /// handles the environment variable setup and command execution.
 #[derive(Clone, Debug)]
 pub struct AmpCli {
@@ -61,61 +61,93 @@ impl AmpCli {
     /// Register a dataset using amp register command.
     ///
     /// Runs `pnpm amp register` in the specified dataset directory.
-    /// Optionally accepts a config file parameter.
+    /// Optionally accepts a version tag (semantic version or "dev") and a config file parameter.
+    /// If no tag is provided or if tag is "dev", registers without a version tag (bumps dev tag).
     #[tracing::instrument(skip_all, err)]
     pub async fn register(
         &self,
         dataset_path: &Path,
+        tag: impl Into<Option<&str>>,
         config: Option<&str>,
     ) -> Result<(), BoxError> {
+        let tag = tag.into();
         tracing::debug!(
-            "Running 'amp register' in `{}` with config: {:?}",
+            "Running 'amp register' in `{}` with tag: {:?}, config: {:?}",
             dataset_path.to_string_lossy(),
+            tag,
             config
         );
 
         let mut args = vec!["amp", "register"];
+
+        // Add optional config (options must come before positional arguments)
         if let Some(config) = config {
             args.push("--config");
             args.push(config);
         }
 
+        // Add optional tag (positional argument must come last)
+        if let Some(tag_str) = tag {
+            args.push(tag_str);
+        }
+
         run_amp_command(&self.admin_url, dataset_path, &args, "register dataset").await
     }
 
-    /// Dump a dataset using amp dump command.
+    /// Deploy a dataset version using amp deploy command.
     ///
-    /// Runs `pnpm amp dump` with the specified dataset name and optional end block.
+    /// Runs `pnpm amp deploy` with an optional dataset reference (namespace/name@revision),
+    /// optional end block, and optional parallelism level. If no reference is provided,
+    /// the command uses the dataset from the config file with a "dev" tag.
     /// Optionally accepts a config file parameter.
     #[tracing::instrument(skip_all, err)]
-    pub async fn dump(
+    pub async fn deploy(
         &self,
         path: &Path,
-        dataset: &str,
+        reference: Option<&str>,
         end_block: Option<u64>,
+        parallelism: Option<u64>,
         config: Option<&str>,
     ) -> Result<(), BoxError> {
         tracing::debug!(
-            "Running 'amp dump' in `{}` for dataset {} with end block: {:?} and config: {:?}",
+            "Running 'amp deploy' in `{}` with reference: {:?}, end block: {:?}, parallelism: {:?}, config: {:?}",
             path.to_string_lossy(),
-            dataset,
+            reference,
             end_block,
+            parallelism,
             config
         );
 
-        let mut args = vec!["amp", "dump", dataset];
+        let mut args = vec!["amp", "deploy"];
+
+        // Add optional dataset reference (positional argument)
+        if let Some(ref_str) = reference {
+            args.push(ref_str);
+        }
+
+        // Add optional end block
         let end_block_str;
         if let Some(end) = end_block {
             args.push("--end-block");
             end_block_str = end.to_string();
             args.push(&end_block_str);
         }
+
+        // Add optional parallelism
+        let parallelism_str;
+        if let Some(jobs) = parallelism {
+            args.push("--parallelism");
+            parallelism_str = jobs.to_string();
+            args.push(&parallelism_str);
+        }
+
+        // Add optional config
         if let Some(config) = config {
             args.push("--config");
             args.push(config);
         }
 
-        run_amp_command(&self.admin_url, path, &args, "dump dataset").await
+        run_amp_command(&self.admin_url, path, &args, "deploy dataset").await
     }
 }
 

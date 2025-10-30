@@ -122,11 +122,10 @@ datafusion = { version = "50", features = ["serde"] }
 datafusion-expr = { version = "50" }
 datafusion-sql = { version = "50" }
 datafusion-tracing = { version = "50" }
-datafusion-proto = { version = "50" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
-prost = "=0.13.3"
+prost = "0.13.3"
 prost-build = "0.13.3"
 tonic = { version = "0.13", features = [
     "transport",
@@ -134,15 +133,3 @@ tonic = { version = "0.13", features = [
     "tls-native-roots",
 ] }
 tonic-build = "0.13"
-
-# Prost fork
-#
-# The only change in our fork is to bump the recursion limit from 100 to 1000, to allow deserializing
-# larger queries serialized with datafusion-proto. This is preferable to using the
-# `no-recursion-limit` feature, for two reasons:
-# 1. It's more secure, as it still prevents stack overflow attacks, just with a larger limit.
-# 2. `no-recursion-limit` did not work, in our testing it worked on macos but not on linux.
-#
-# Something like https://github.com/tokio-rs/prost/pull/785 would enable us to remove this fork.
-[patch.crates-io]
-prost = { git = "https://github.com/edgeandnode/prost", branch = "nozzle-fork-0.13.3" }

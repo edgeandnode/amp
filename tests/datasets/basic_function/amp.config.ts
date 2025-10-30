@@ -3,7 +3,6 @@ import { defineDataset } from "@edgeandnode/amp"
 export default defineDataset((ctx) => ({
   name: "basic_function",
   network: "mainnet",
-  version: "0.1.0",
   dependencies: {
     mainnet: "_/mainnet@0.0.0",
   },

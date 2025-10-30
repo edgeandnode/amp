@@ -1,3 +1,4 @@
+import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as Console from "effect/Console"
@@ -7,17 +8,15 @@ import * as Option from "effect/Option"
 import * as Admin from "../../api/Admin.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as SchemaGenerator from "../../SchemaGenerator.ts"
-import { adminUrl, configFile, manifestFile } from "../common.ts"
+import { adminUrl, configFile } from "../common.ts"
 
 export const codegen = Command.make("codegen", {
   args: {
-    query: Options.text("query").pipe(
-      Options.withAlias("q"),
-      Options.withDescription("The query to generate code for"),
-      Options.optional,
+    query: Args.text({ name: "query" }).pipe(
+      Args.withDescription("The query to generate code for"),
+      Args.optional,
     ),
     configFile: configFile.pipe(Options.optional),
-    manifestFile: manifestFile.pipe(Options.optional),
     adminUrl,
   },
 }).pipe(
@@ -34,15 +33,10 @@ export const codegen = Command.make("codegen", {
       yield* Console.log(generator.fromManifest(context.manifest))
     }),
   ),
-  Command.provide(({ args }) =>
-    Option.match(args.query, {
+  Command.provide(({ args }) => {
+    return Option.match(args.query, {
       onSome: () => Layer.empty,
-      onNone: () =>
-        ManifestContext.layerFromFile({
-          metadata: Option.none(),
-          manifest: args.manifestFile,
-          config: args.configFile,
-        }),
+      onNone: () => ManifestContext.layerFromConfigFile(args.configFile),
     }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Admin.layer(`${args.adminUrl}`)))
-  ),
+  }),
 )

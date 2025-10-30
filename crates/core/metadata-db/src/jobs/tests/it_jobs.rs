@@ -34,12 +34,13 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-        .await
-        .expect("Failed to schedule job");
+    let job_id =
+        jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to schedule job");
 
     //* Then
-    let job = jobs::get_by_id(&mut *conn, job_id)
+    let job = jobs::sql::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -72,7 +73,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     // Register jobs
     let job_desc1 = serde_json::json!({ "job": 1 });
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
-    let job_id1 = jobs::insert(
+    let job_id1 = jobs::sql::insert(
         &mut *conn,
         worker_id_main.clone(),
         &job_desc_str1,
@@ -83,7 +84,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
 
     let job_desc2 = serde_json::json!({ "job": 2 });
     let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
-    let job_id2 = jobs::insert(
+    let job_id2 = jobs::sql::insert(
         &mut *conn,
         worker_id_main.clone(),
         &job_desc_str2,
@@ -95,7 +96,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     // Register a job for a different worker to ensure it's not retrieved
     let job_desc_other = serde_json::json!({ "job": "other" });
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
-    let job_id_other = jobs::insert(
+    let job_id_other = jobs::sql::insert(
         &mut *conn,
         worker_id_other.clone(),
         &job_desc_str_other,
@@ -105,7 +106,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     .expect("Failed to register job for other worker");
 
     //* When
-    let jobs_list = jobs::get_by_node_id_and_statuses(
+    let jobs_list = jobs::sql::get_by_node_id_and_statuses(
         &mut *conn,
         worker_id_main.clone(),
         [JobStatus::Scheduled],
@@ -151,7 +152,7 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Active jobs
-    let job_id_scheduled = jobs::insert(
+    let job_id_scheduled = jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -160,7 +161,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register job_id_scheduled");
 
-    let job_id_running = jobs::insert(
+    let job_id_running = jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -170,7 +171,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .expect("Failed to register job_id_running");
 
     // Terminal state jobs (should not be retrieved)
-    jobs::insert(
+    jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -179,7 +180,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register completed job");
 
-    jobs::insert(
+    jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -188,7 +189,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register failed job");
 
-    let job_id_stop_requested = jobs::insert(
+    let job_id_stop_requested = jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -197,7 +198,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register job_id_stop_requested");
 
-    jobs::insert(
+    jobs::sql::insert(
         &mut *db,
         worker_id.clone(),
         &job_desc_str,
@@ -207,7 +208,7 @@ async fn get_jobs_for_node_filters_by_status() {
     .expect("Failed to register stopped job");
 
     //* When
-    let active_jobs = jobs::get_by_node_id_and_statuses(
+    let active_jobs = jobs::sql::get_by_node_id_and_statuses(
         &mut *db,
         worker_id.clone(),
         [
@@ -262,12 +263,13 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-        .await
-        .expect("Failed to register job");
+    let job_id =
+        jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to register job");
 
     //* When
-    let job = jobs::get_by_id(&mut *conn, job_id)
+    let job = jobs::sql::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -301,12 +303,13 @@ async fn get_job_includes_timestamps() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-        .await
-        .expect("Failed to register job");
+    let job_id =
+        jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to register job");
 
     //* When
-    let job = jobs::get_by_id(&mut *conn, job_id)
+    let job = jobs::sql::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -331,7 +334,7 @@ async fn list_jobs_first_page_when_empty() {
         .expect("Failed to run migrations");
 
     //* When
-    let jobs = jobs::list_first_page(&mut *conn, 10)
+    let jobs = jobs::sql::list_first_page(&mut *conn, 10)
         .await
         .expect("Failed to list jobs");
 
@@ -364,9 +367,10 @@ async fn list_jobs_first_page_respects_limit() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to register job");
+        let job_id =
+            jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+                .await
+                .expect("Failed to register job");
         job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -374,7 +378,7 @@ async fn list_jobs_first_page_respects_limit() {
     }
 
     //* When
-    let jobs = jobs::list_first_page(&mut *conn, 3)
+    let jobs = jobs::sql::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list jobs");
 
@@ -413,9 +417,10 @@ async fn list_jobs_next_page_uses_cursor() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to register job");
+        let job_id =
+            jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+                .await
+                .expect("Failed to register job");
         all_job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -423,7 +428,7 @@ async fn list_jobs_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = jobs::list_first_page(&mut *conn, 3)
+    let first_page = jobs::sql::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -432,7 +437,7 @@ async fn list_jobs_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = jobs::list_next_page(&mut *conn, 3, cursor)
+    let second_page = jobs::sql::list_next_page(&mut *conn, 3, cursor)
         .await
         .expect("Failed to list second page");
 
@@ -469,19 +474,20 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
-        .await
-        .expect("Failed to insert job");
+    let job_id =
+        jobs::sql::insert_with_default_status(&mut *conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to insert job");
 
     //* When
-    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
+    let deleted = jobs::sql::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
         .await
         .expect("Failed to delete job");
 
     //* Then
     assert!(deleted);
 
-    let job = jobs::get_by_id(&mut *conn, job_id)
+    let job = jobs::sql::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to query job");
     assert!(job.is_none());
@@ -506,7 +512,7 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::insert(
+    let job_id = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -516,14 +522,14 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
     .expect("Failed to insert job");
 
     //* When
-    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
+    let deleted = jobs::sql::delete_by_id_and_statuses(&mut *conn, job_id, [JobStatus::Scheduled])
         .await
         .expect("Failed to delete job");
 
     //* Then
     assert!(!deleted);
 
-    let job = jobs::get_by_id(&mut *conn, job_id)
+    let job = jobs::sql::get_by_id(&mut *conn, job_id)
         .await
         .expect("Failed to query job")
         .expect("Job should still exist");
@@ -550,7 +556,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create 3 jobs, 2 will be Completed, 1 will be Running
-    let job_id1 = jobs::insert(
+    let job_id1 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -558,7 +564,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     )
     .await
     .expect("Failed to insert job 1");
-    let job_id2 = jobs::insert(
+    let job_id2 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -566,7 +572,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     )
     .await
     .expect("Failed to insert job 2");
-    let job_id3 = jobs::insert(
+    let job_id3 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -576,7 +582,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     .expect("Failed to insert job 3");
 
     //* When
-    let deleted_count = jobs::delete_by_status(&mut *conn, JobStatus::Completed)
+    let deleted_count = jobs::sql::delete_by_status(&mut *conn, [JobStatus::Completed])
         .await
         .expect("Failed to delete jobs");
 
@@ -585,20 +591,20 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 
     // Verify the Completed jobs are gone
     assert!(
-        jobs::get_by_id(&mut *conn, job_id1)
+        jobs::sql::get_by_id(&mut *conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, job_id2)
+        jobs::sql::get_by_id(&mut *conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::get_by_id(&mut *conn, job_id3)
+    let running_job = jobs::sql::get_by_id(&mut *conn, job_id3)
         .await
         .expect("Failed to query job 3")
         .expect("Running job should still exist");
@@ -625,7 +631,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create 4 jobs with different statuses
-    let job_id1 = jobs::insert(
+    let job_id1 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -633,7 +639,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     )
     .await
     .expect("Failed to insert job 1");
-    let job_id2 = jobs::insert(
+    let job_id2 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -641,7 +647,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     )
     .await
     .expect("Failed to insert job 2");
-    let job_id3 = jobs::insert(
+    let job_id3 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -649,7 +655,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     )
     .await
     .expect("Failed to insert job 3");
-    let job_id4 = jobs::insert(
+    let job_id4 = jobs::sql::insert(
         &mut *conn,
         worker_id.clone(),
         &job_desc_str,
@@ -659,7 +665,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     .expect("Failed to insert job 4");
 
     //* When
-    let deleted_count = jobs::delete_by_statuses(
+    let deleted_count = jobs::sql::delete_by_status(
         &mut *conn,
         [JobStatus::Completed, JobStatus::Failed, JobStatus::Stopped],
     )
@@ -671,26 +677,26 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 
     // Verify terminal jobs are gone
     assert!(
-        jobs::get_by_id(&mut *conn, job_id1)
+        jobs::sql::get_by_id(&mut *conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, job_id2)
+        jobs::sql::get_by_id(&mut *conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
     assert!(
-        jobs::get_by_id(&mut *conn, job_id3)
+        jobs::sql::get_by_id(&mut *conn, job_id3)
             .await
             .expect("Failed to query job 3")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::get_by_id(&mut *conn, job_id4)
+    let running_job = jobs::sql::get_by_id(&mut *conn, job_id4)
         .await
         .expect("Failed to query job 4")
         .expect("Running job should still exist");

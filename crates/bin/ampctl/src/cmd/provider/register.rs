@@ -20,14 +20,14 @@
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use object_store::path::Path as ObjectStorePath;
-use url::Url;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `provider register` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The URL of the engine admin interface
-    #[arg(long, env = "AMP_ADMIN_URL", default_value = "http://localhost:1610", value_parser = clap::value_parser!(Url))]
-    pub admin_url: Url,
+    #[command(flatten)]
+    pub global: GlobalArgs,
 
     /// The name of the provider configuration
     ///
@@ -48,10 +48,10 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// TOML parse errors, API errors (400/409/500), or network failures.
-#[tracing::instrument(skip_all, fields(%admin_url, %provider_name))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %provider_name))]
 pub async fn run(
     Args {
-        admin_url,
+        global,
         provider_name,
         provider_file,
     }: Args,
@@ -64,7 +64,7 @@ pub async fn run(
 
     let provider_toml = load_provider(&provider_file).await?;
 
-    register_provider(&admin_url, &provider_name, &provider_toml).await?;
+    register_provider(&global, &provider_name, &provider_toml).await?;
 
     crate::success!("Provider registered successfully");
 
@@ -111,18 +111,10 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
 /// Parses TOML content, converts to JSON, and POSTs to `/providers` endpoint.
 #[tracing::instrument(skip_all)]
 async fn register_provider(
-    admin_url: &Url,
+    global: &GlobalArgs,
     provider_name: &str,
     provider_toml: &str,
 ) -> Result<(), Error> {
-    let url = admin_url.join("providers").map_err(|err| {
-        tracing::error!(admin_url = %admin_url, error = %err, "Invalid admin URL");
-        Error::InvalidAdminUrl {
-            url: admin_url.to_string(),
-            source: err,
-        }
-    })?;
-
     // Parse TOML content
     let toml_value: toml::Value = toml::from_str(provider_toml).map_err(|err| {
         tracing::error!(error = %err, "Failed to parse provider TOML");
@@ -135,85 +127,24 @@ async fn register_provider(
         Error::TomlToJsonConversion { source: err }
     })?;
 
-    // Ensure the provider name is set correctly
-    let mut json_obj = json_value
-        .as_object()
-        .ok_or_else(|| {
-            tracing::error!("Provider TOML must be a table/object at the root level");
-            Error::InvalidProviderStructure {
-                message: "Provider TOML must be a table/object at the root level".to_string(),
-            }
-        })?
-        .clone();
-
-    // Override the name field with the provided provider_name
-    json_obj.insert(
-        "name".to_string(),
-        serde_json::Value::String(provider_name.to_string()),
-    );
-
-    tracing::debug!("Sending registration request");
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(url.as_str())
-        .json(&json_obj)
-        .send()
-        .await
-        .map_err(|err| {
-            tracing::error!(error = %err, "Network error during API request");
-            Error::NetworkError {
-                url: url.to_string(),
-                source: err,
-            }
-        })?;
-
-    let status = response.status();
-    tracing::debug!(status = %status, "Received API response");
-
-    match status.as_u16() {
-        201 => Ok(()),
-        400 | 409 | 500 => {
-            let error_response = response.json::<ErrorResponse>().await.map_err(|err| {
-                tracing::error!(
-                    status = %status,
-                    error = %err,
-                    "Failed to parse error response from API"
-                );
-                Error::UnexpectedResponse {
-                    status: status.as_u16(),
-                    message: format!("Failed to parse error response: {}", err),
-                }
-            })?;
-
-            tracing::error!(
-                status = %status,
-                error_code = %error_response.error_code,
-                error_message = %error_response.error_message,
-                "API returned error response"
-            );
-
-            Err(Error::ApiError {
-                status: status.as_u16(),
-                error_code: error_response.error_code,
-                message: error_response.error_message,
-            })
-        }
-        _ => {
-            tracing::error!(status = %status, "Unexpected status code from API");
-            Err(Error::UnexpectedResponse {
-                status: status.as_u16(),
-                message: format!("Unexpected status code: {}", status),
-            })
-        }
+    // Validate that the JSON is an object
+    if !json_value.is_object() {
+        tracing::error!("Provider TOML must be a table/object at the root level");
+        return Err(Error::InvalidProviderStructure {
+            message: "Provider TOML must be a table/object at the root level".to_string(),
+        });
     }
-}
 
-/// Error response from the admin API (400/409/500 status codes).
-#[derive(Debug, serde::Deserialize)]
-struct ErrorResponse {
-    error_code: String,
-    error_message: String,
+    // Create client and register provider
+    let client = global.build_client()?;
+
+    client
+        .providers()
+        .register(provider_name, &json_value)
+        .await
+        .map_err(Error::from)?;
+
+    Ok(())
 }
 
 /// Errors for provider registration operations.
@@ -249,28 +180,19 @@ pub enum Error {
     #[error("invalid provider structure: {message}")]
     InvalidProviderStructure { message: String },
 
-    /// Invalid admin URL
-    #[error("invalid admin URL '{url}'")]
-    InvalidAdminUrl {
-        url: String,
-        source: url::ParseError,
+    /// Failed to build client
+    #[error("failed to build admin API client")]
+    ClientBuildError {
+        #[from]
+        source: crate::args::BuildClientError,
     },
 
-    /// API returned an error response
-    #[error("API error ({status}): [{error_code}] {message}")]
-    ApiError {
-        status: u16,
-        error_code: String,
-        message: String,
+    /// Error from the provider client
+    #[error("provider registration failed")]
+    ClientError {
+        #[from]
+        source: crate::client::providers::RegisterError,
     },
-
-    /// Network or connection error
-    #[error("network error connecting to {url}")]
-    NetworkError { url: String, source: reqwest::Error },
-
-    /// Unexpected response from API
-    #[error("unexpected response (status {status}): {message}")]
-    UnexpectedResponse { status: u16, message: String },
 }
 
 /// Provider file path supporting local and remote storage.
