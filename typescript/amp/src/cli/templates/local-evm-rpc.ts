@@ -53,7 +53,7 @@ export default defineDataset(() => ({
 }))
 `,
 
-    "README-local-evm-rpc.md": (answers: TemplateAnswers) =>
+    "README.md": (answers: TemplateAnswers) =>
       `# ${answers.projectName || answers.datasetName}
 
 Local Amp development with Anvil blockchain testnet.

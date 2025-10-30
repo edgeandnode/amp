@@ -197,10 +197,7 @@ const initializeProject = (
     }
 
     yield* Console.log(`\nProject initialized successfully\n`)
-    yield* Console.log(`Next steps:`)
-    yield* Console.log(`  1. anvil (in another terminal)`)
-    yield* Console.log(`  2. amp dev`)
-    yield* Console.log(`\nFor more information, see README-local-evm-rpc.md\n`)
+    yield* Console.log(`See README.md for next steps\n`)
   })
 
 /**
