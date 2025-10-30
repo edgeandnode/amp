@@ -345,10 +345,21 @@ data/
 cache/
 out/
 broadcast/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
 
-# Node
-node_modules/
-dist/
+# Rust
+target/
+
+# Node (nested workspaces)
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+# Bun
+bun.lockb
 
 # Environment
 .env
