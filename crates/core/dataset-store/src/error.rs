@@ -562,7 +562,6 @@ pub enum ExtractDatasetFromFunctionNamesError {
     #[error("Failed to parse dataset reference from function '{function}': {source}")]
     ReferenceParse {
         function: String,
-        #[source]
         source: PartialReferenceError,
     },
 

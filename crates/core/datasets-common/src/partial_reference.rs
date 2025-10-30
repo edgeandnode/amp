@@ -51,7 +51,7 @@ impl PartialReference {
         }
     }
 
-    /// Try to convert to a complete Reference by providing defaults for missing components.
+    /// Convert to a complete Reference by providing defaults for missing components.
     pub fn into_reference(
         self,
         default_namespace: Namespace,
@@ -122,15 +122,15 @@ impl std::str::FromStr for PartialReference {
 pub enum PartialReferenceError {
     /// The namespace component is invalid
     #[error("invalid namespace in partial reference: {0}")]
-    InvalidNamespace(NamespaceError),
+    InvalidNamespace(#[source] NamespaceError),
 
     /// The name component is invalid
     #[error("invalid name in partial reference: {0}")]
-    InvalidName(NameError),
+    InvalidName(#[source] NameError),
 
     /// The revision component is invalid
     #[error("invalid revision in partial reference: {0}")]
-    InvalidRevision(RevisionParseError),
+    InvalidRevision(#[source] RevisionParseError),
 }
 
 #[cfg(test)]
