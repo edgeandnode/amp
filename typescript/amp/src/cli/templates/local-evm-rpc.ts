@@ -1,4 +1,12 @@
+import * as Console from "effect/Console"
+import * as Effect from "effect/Effect"
+import { exec as nodeExec } from "node:child_process"
+import * as path from "node:path"
+import { promisify } from "node:util"
 import type { Template, TemplateAnswers } from "./Template.ts"
+import { TemplateError } from "./Template.ts"
+
+const exec = promisify(nodeExec)
 
 /**
  * Local EVM RPC template for Anvil-based development
@@ -373,4 +381,28 @@ bun.lockb
 .DS_Store
 `,
   },
+  postInstall: (projectPath: string) =>
+    Effect.gen(function*() {
+      const cwd = path.join(projectPath, "contracts")
+
+      const run = (cmd: string, errMsg: string) =>
+        Effect.tryPromise({
+          try: () => exec(cmd, { cwd }),
+          catch: (cause) => new TemplateError({ message: errMsg, cause }),
+        })
+
+      yield* Console.log("\nInstalling Foundry dependencies (forge-std)")
+      yield* run(
+        "forge install foundry-rs/forge-std@v1.9.6",
+        "Failed to install Foundry dependencies. You can do this manually:\n  cd contracts && forge install foundry-rs/forge-std@v1.9.6",
+      )
+
+      yield* Console.log("Building contracts")
+      yield* run(
+        "forge build",
+        "Failed to build Foundry contracts. You can do this manually:\n  cd contracts && forge build",
+      )
+
+      yield* Console.log("Foundry setup complete\n")
+    }),
 }
