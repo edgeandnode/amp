@@ -396,8 +396,8 @@ bun.lockb
 
       yield* Console.log("\nInstalling Foundry dependencies (forge-std)")
       yield* run(
-        "forge install foundry-rs/forge-std@v1.9.6",
-        "Failed to install Foundry dependencies. You can do this manually:\n  cd contracts && forge install foundry-rs/forge-std@v1.9.6",
+        "forge install foundry-rs/forge-std@v1.9.6 --no-commit --no-git",
+        "Failed to install Foundry dependencies. You can do this manually:\n  cd contracts && forge install foundry-rs/forge-std@v1.9.6 --no-commit --no-git",
       )
 
       yield* Console.log("Building contracts")
