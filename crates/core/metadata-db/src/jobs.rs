@@ -18,7 +18,7 @@ use crate::{
     db::Executor,
     error::Error,
     locations::{self, LocationId},
-    workers::{NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned},
+    workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
 
 /// Schedules a job on the given worker

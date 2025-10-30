@@ -2,7 +2,7 @@
 
 use pgtemp::PgTempDB;
 
-use crate::{JobStatus, MetadataDb, WorkerInfo, WorkerNodeId, jobs};
+use crate::{JobStatus, MetadataDb, WorkerInfo, WorkerNodeId, jobs, workers};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {
@@ -17,8 +17,7 @@ async fn schedule_and_retrieve_job() {
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     let worker_info = WorkerInfo::default(); // {}
-    metadata_db
-        .register_worker(&worker_id, worker_info)
+    workers::register(&metadata_db, &worker_id, worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -62,8 +61,7 @@ async fn pagination_traverses_all_jobs_ordered() {
     let total_jobs = 7;
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");
     let worker_info = WorkerInfo::default(); // {}
-    metadata_db
-        .register_worker(&worker_id, worker_info)
+    workers::register(&metadata_db, &worker_id, worker_info)
         .await
         .expect("Failed to register worker");
 

@@ -9,7 +9,7 @@ use tokio::time::{Duration, timeout};
 use crate::{
     db::Connection,
     jobs::JobId,
-    workers::{NodeId, events},
+    workers::{WorkerNodeId, events},
 };
 
 /// Test payload for job notifications (without node_id as it's in the wrapper)
@@ -30,7 +30,7 @@ async fn send_and_receive_start_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref_unchecked("test-worker-notify");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-notify");
     let job_id = JobId::from_i64_unchecked(1i64);
 
     // Create listener for this specific worker
@@ -44,7 +44,7 @@ async fn send_and_receive_start_notification() {
         job_id,
         action: "START".to_string(),
     };
-    events::notify(&mut *conn, worker_id.to_owned(), &payload)
+    events::notify(&mut conn, worker_id.to_owned(), &payload)
         .await
         .expect("Failed to send notification");
 
@@ -70,7 +70,7 @@ async fn send_and_receive_stop_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref_unchecked("test-worker-stop");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-stop");
     let job_id = JobId::from_i64_unchecked(2i64);
 
     let listener = events::listen_url(&temp_db.connection_uri(), worker_id.to_owned())
@@ -83,7 +83,7 @@ async fn send_and_receive_stop_notification() {
         job_id,
         action: "STOP".to_string(),
     };
-    events::notify(&mut *conn, worker_id.to_owned(), &payload)
+    events::notify(&mut conn, worker_id.to_owned(), &payload)
         .await
         .expect("Failed to send notification");
 
@@ -109,7 +109,7 @@ async fn multiple_listeners_receive_same_notification() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref_unchecked("test-worker-multi");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi");
     let job_id = JobId::from_i64_unchecked(4i64);
 
     // Create multiple listeners both listening for the same worker
@@ -128,7 +128,7 @@ async fn multiple_listeners_receive_same_notification() {
         job_id,
         action: "START".to_string(),
     };
-    events::notify(&mut *conn, worker_id.to_owned(), &payload)
+    events::notify(&mut conn, worker_id.to_owned(), &payload)
         .await
         .expect("Failed to send notification");
 
@@ -163,7 +163,7 @@ async fn listener_stream_yields_notifications() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref_unchecked("test-worker-stream");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-stream");
     let job_id1 = JobId::from_i64_unchecked(5i64);
     let job_id2 = JobId::from_i64_unchecked(6i64);
 
@@ -182,10 +182,10 @@ async fn listener_stream_yields_notifications() {
         action: "STOP".to_string(),
     };
 
-    events::notify(&mut *conn, worker_id.to_owned(), &payload1)
+    events::notify(&mut conn, worker_id.to_owned(), &payload1)
         .await
         .expect("Failed to send notification 1");
-    events::notify(&mut *conn, worker_id.to_owned(), &payload2)
+    events::notify(&mut conn, worker_id.to_owned(), &payload2)
         .await
         .expect("Failed to send notification 2");
 
@@ -220,7 +220,7 @@ async fn notification_not_received_before_listen() {
         .await
         .expect("Failed to run migrations");
 
-    let worker_id = NodeId::from_ref_unchecked("test-worker-timing");
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-timing");
     let job_id = JobId::from_i64_unchecked(7i64);
 
     //* When - Send notification BEFORE creating listener
@@ -228,7 +228,7 @@ async fn notification_not_received_before_listen() {
         job_id,
         action: "START".to_string(),
     };
-    events::notify(&mut *conn, worker_id.to_owned(), &payload)
+    events::notify(&mut conn, worker_id.to_owned(), &payload)
         .await
         .expect("Failed to send notification");
 

@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
 use worker::{JobDescriptor, JobId, JobNotification};
+
+/// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
+/// schedule new jobs only on active workers.
+pub const DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct Scheduler {
@@ -54,7 +58,8 @@ impl Scheduler {
         //
         // The worker node should then receive the notification and start the dump run.
 
-        let candidates = self.metadata_db.active_workers().await?;
+        let candidates =
+            metadata_db::workers::list_active(&self.metadata_db, DEAD_WORKER_INTERVAL).await?;
         let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
             return Err(ScheduleJobError::NoAvailableWorkers);
         };
@@ -83,9 +88,13 @@ impl Scheduler {
                 .map(Into::into)?;
 
         // Notify the worker about the new job
-        self.metadata_db
-            .send_job_notification(node_id, &JobNotification::start(job_id))
-            .await?;
+        // TODO: Include into the transaction
+        metadata_db::workers::send_job_notif(
+            &self.metadata_db,
+            node_id,
+            &JobNotification::start(job_id),
+        )
+        .await?;
 
         Ok(job_id)
     }
@@ -129,15 +138,13 @@ impl Scheduler {
                 other => StopJobError::UpdateJobStatus(other),
             })?;
 
-        // Commit the transaction
-        tx.commit().await.map_err(StopJobError::CommitTransaction)?;
-
-        // Notify the worker about the stop request
-        // TODO: Include into the transaction
-        self.metadata_db
-            .send_job_notification(job.node_id, &JobNotification::stop(*job_id))
+        // Notify the worker about the stop request (within the transaction)
+        metadata_db::workers::send_job_notif(&mut tx, job.node_id, &JobNotification::stop(*job_id))
             .await
             .map_err(StopJobError::SendNotification)?;
+
+        // Commit the transaction
+        tx.commit().await.map_err(StopJobError::CommitTransaction)?;
 
         Ok(())
     }

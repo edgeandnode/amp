@@ -106,7 +106,7 @@ impl MetadataDbRetryExt for MetadataDb {
         node_id: &NodeId,
         info: &WorkerInfo,
     ) -> Result<(), MetadataDbError> {
-        (|| self.register_worker(node_id, info))
+        (|| metadata_db::workers::register(self, node_id, info))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -125,7 +125,7 @@ impl MetadataDbRetryExt for MetadataDb {
         node_id: NodeId,
     ) -> Result<BoxFuture<'static, Result<(), MetadataDbError>>, MetadataDbError> {
         let node_id_str = node_id.to_string();
-        (move || self.worker_heartbeat_loop(node_id.clone()))
+        (move || metadata_db::workers::heartbeat_loop(self, node_id.clone()))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -143,18 +143,22 @@ impl MetadataDbRetryExt for MetadataDb {
         &self,
         node_id: &NodeId,
     ) -> Result<NotifListener, MetadataDbError> {
-        (|| self.listen_for_job_notifications(node_id))
-            .retry(retry_policy())
-            .when(MetadataDbError::is_connection_error)
-            .notify(|err, dur| {
-                tracing::warn!(
-                    node_id = %node_id,
-                    error = %err,
-                    "Failed to establish connection to listen for job notifications. Retrying in {:.1}s",
-                    dur.as_secs_f32()
-                );
-            })
-            .await
+        let node_id = node_id.to_owned();
+        (|| async {
+            metadata_db::workers::listen_for_job_notif(self, node_id.clone())
+                .await
+        })
+        .retry(retry_policy())
+        .when(MetadataDbError::is_connection_error)
+        .notify(|err, dur| {
+            tracing::warn!(
+                node_id = %node_id,
+                error = %err,
+                "Failed to establish connection to listen for job notifications. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
     }
 
     async fn get_scheduled_jobs_with_retry(
