@@ -395,9 +395,15 @@ bun.lockb
         })
 
       yield* Console.log("\nInstalling Foundry dependencies (forge-std)")
+      // Ensure lib directory exists
       yield* run(
-        "forge install foundry-rs/forge-std@v1.9.6 --no-commit --no-git",
-        "Failed to install Foundry dependencies. You can do this manually:\n  cd contracts && forge install foundry-rs/forge-std@v1.9.6 --no-commit --no-git",
+        "mkdir -p lib",
+        "Failed to create contracts/lib directory.",
+      )
+      // Clone forge-std directly to avoid submodule setup issues
+      yield* run(
+        "git clone --depth 1 --branch v1.9.6 https://github.com/foundry-rs/forge-std.git lib/forge-std",
+        "Failed to clone forge-std. You can do this manually:\n  cd contracts && mkdir -p lib && git clone --depth 1 --branch v1.9.6 https://github.com/foundry-rs/forge-std.git lib/forge-std",
       )
 
       yield* Console.log("Building contracts")
