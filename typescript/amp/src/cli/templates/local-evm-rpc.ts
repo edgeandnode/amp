@@ -98,8 +98,11 @@ If you want to deploy the included Counter contract:
 
 \`\`\`bash
 cd contracts
-forge script script/Deploy.s.sol --broadcast --rpc-url http://localhost:8545
-cd ..
+forge script script/Deploy.s.sol \
+  --broadcast \
+  --rpc-url http://localhost:8545 \
+  --sender 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 \`\`\`
 
 This deploys the Counter contract and generates some test events (3 Count events + 2 Transfer events).
