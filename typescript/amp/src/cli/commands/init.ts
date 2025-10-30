@@ -21,6 +21,17 @@ const TEMPLATES: Record<string, Template> = {
 /**
  * Interactive prompts for dataset configuration
  */
+const templatePrompt = Prompt.select({
+  message: "Select a template to get started:",
+  choices: [
+    {
+      title: "Local EVM RPC - Learn Amp with Anvil",
+      description: "Local blockchain with 500 sample events. No external dependencies.",
+      value: "local-evm-rpc",
+    },
+  ],
+})
+
 const datasetNamePrompt = Prompt.text({
   message: "Dataset name:",
   default: "my_dataset",
@@ -251,12 +262,16 @@ export const init = Command.make("init", {
       }
 
       // Interactive mode - prompt for all values
+      const templateChoice = yield* templatePrompt
       const datasetNameAnswer = yield* datasetNamePrompt
       const datasetVersionAnswer = yield* datasetVersionPrompt
       const projectNameAnswer = yield* projectNamePrompt
 
       // Add spacing before initialization output
       yield* Console.log("")
+
+      // Verify template exists (should always pass with select prompt, but be defensive)
+      yield* getTemplate(templateChoice)
 
       yield* initializeProject(datasetNameAnswer, datasetVersionAnswer, projectNameAnswer)
     })
