@@ -92,7 +92,7 @@ impl VersionManager {
         self.config.version_binary_path(version).exists()
     }
 
-    /// Activate a specific version by creating symlink and updating version file
+    /// Activate a specific version by creating symlinks and updating version file
     pub fn activate(&self, version: &str) -> Result<()> {
         let version_dir = self.config.versions_dir.join(version);
         if !version_dir.exists() {
@@ -102,23 +102,37 @@ impl VersionManager {
             .into());
         }
 
-        let binary_path = self.config.version_binary_path(version);
-        if !binary_path.exists() {
+        let ampd_binary_path = self.config.version_binary_path(version);
+        if !ampd_binary_path.exists() {
             return Err(VersionError::BinaryNotFound {
                 version: version.to_string(),
             }
             .into());
         }
 
-        let active_path = self.config.active_binary_path();
-
-        // Remove existing symlink if it exists
-        if active_path.exists() || active_path.is_symlink() {
-            fs::remove_file(&active_path).context("Failed to remove existing symlink")?;
+        let ampctl_binary_path = self.config.version_ampctl_path(version);
+        if !ampctl_binary_path.exists() {
+            return Err(VersionError::BinaryNotFound {
+                version: version.to_string(),
+            }
+            .into());
         }
 
-        // Create new symlink
-        symlink(&binary_path, &active_path).context("Failed to create symlink")?;
+        // Handle ampd symlink
+        let ampd_active_path = self.config.active_binary_path();
+        if ampd_active_path.exists() || ampd_active_path.is_symlink() {
+            fs::remove_file(&ampd_active_path).context("Failed to remove existing ampd symlink")?;
+        }
+        symlink(&ampd_binary_path, &ampd_active_path).context("Failed to create ampd symlink")?;
+
+        // Handle ampctl symlink
+        let ampctl_active_path = self.config.active_ampctl_path();
+        if ampctl_active_path.exists() || ampctl_active_path.is_symlink() {
+            fs::remove_file(&ampctl_active_path)
+                .context("Failed to remove existing ampctl symlink")?;
+        }
+        symlink(&ampctl_binary_path, &ampctl_active_path)
+            .context("Failed to create ampctl symlink")?;
 
         // Update current version file
         self.config.set_current_version(version)?;
@@ -143,17 +157,23 @@ impl VersionManager {
         // Remove the version directory
         fs::remove_dir_all(&version_dir).context("Failed to remove version directory")?;
 
-        // If this was the current version, clear the current version file and symlink
+        // If this was the current version, clear the current version file and symlinks
         if is_current {
             let current_file = self.config.current_version_file();
             if current_file.exists() {
                 fs::remove_file(&current_file).context("Failed to remove current version file")?;
             }
 
-            // Remove the symlink
-            let active_path = self.config.active_binary_path();
-            if active_path.exists() || active_path.is_symlink() {
-                fs::remove_file(&active_path).context("Failed to remove symlink")?;
+            // Remove the ampd symlink
+            let ampd_active_path = self.config.active_binary_path();
+            if ampd_active_path.exists() || ampd_active_path.is_symlink() {
+                fs::remove_file(&ampd_active_path).context("Failed to remove ampd symlink")?;
+            }
+
+            // Remove the ampctl symlink
+            let ampctl_active_path = self.config.active_ampctl_path();
+            if ampctl_active_path.exists() || ampctl_active_path.is_symlink() {
+                fs::remove_file(&ampctl_active_path).context("Failed to remove ampctl symlink")?;
             }
         }
 

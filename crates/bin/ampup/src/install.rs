@@ -53,7 +53,7 @@ impl Installer {
         }
     }
 
-    /// Install ampd from a GitHub release
+    /// Install ampd and ampctl from a GitHub release
     pub async fn install_from_release(
         &self,
         version: &str,
@@ -62,53 +62,88 @@ impl Installer {
     ) -> Result<()> {
         self.version_manager.config().ensure_dirs()?;
 
-        let artifact = format!("ampd-{}-{}", platform.as_str(), arch.as_str());
-        ui::info!("Downloading {} for {}", ui::version(version), artifact);
+        // Download and install ampd
+        let ampd_artifact = format!("ampd-{}-{}", platform.as_str(), arch.as_str());
+        ui::info!("Downloading {} for {}", ui::version(version), ampd_artifact);
 
-        // Download the binary over HTTPS (TLS provides integrity verification)
-        let binary_data = self
+        let ampd_data = self
             .github
-            .download_release_asset(version, &artifact)
+            .download_release_asset(version, &ampd_artifact)
             .await?;
 
-        if binary_data.is_empty() {
+        if ampd_data.is_empty() {
             return Err(InstallError::EmptyBinary {
                 version: version.to_string(),
             }
             .into());
         }
 
-        ui::detail!("Downloaded {} bytes", binary_data.len());
+        ui::detail!("Downloaded {} bytes for ampd", ampd_data.len());
 
-        // Install the binary
-        self.install_binary(version, &binary_data)?;
+        // Download and install ampctl
+        let ampctl_artifact = format!("ampctl-{}-{}", platform.as_str(), arch.as_str());
+        ui::info!(
+            "Downloading {} for {}",
+            ui::version(version),
+            ampctl_artifact
+        );
+
+        let ampctl_data = self
+            .github
+            .download_release_asset(version, &ampctl_artifact)
+            .await?;
+
+        if ampctl_data.is_empty() {
+            return Err(InstallError::EmptyBinary {
+                version: version.to_string(),
+            }
+            .into());
+        }
+
+        ui::detail!("Downloaded {} bytes for ampctl", ampctl_data.len());
+
+        // Install both binaries
+        self.install_binaries(version, &ampd_data, &ampctl_data)?;
 
         Ok(())
     }
 
-    /// Install the binary to the version directory
-    fn install_binary(&self, version: &str, data: &[u8]) -> Result<()> {
+    /// Install both ampd and ampctl binaries to the version directory
+    fn install_binaries(&self, version: &str, ampd_data: &[u8], ampctl_data: &[u8]) -> Result<()> {
         let config = self.version_manager.config();
 
         // Create version directory
         let version_dir = config.versions_dir.join(version);
         fs::create_dir_all(&version_dir).context("Failed to create version directory")?;
 
-        let binary_path = version_dir.join("ampd");
+        // Install ampd
+        let ampd_path = version_dir.join("ampd");
+        fs::write(&ampd_path, ampd_data).context("Failed to write ampd binary")?;
 
-        // Write binary
-        fs::write(&binary_path, data).context("Failed to write binary")?;
-
-        // Make executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&binary_path)
-                .context("Failed to get binary metadata")?
+            let mut perms = fs::metadata(&ampd_path)
+                .context("Failed to get ampd metadata")?
                 .permissions();
             perms.set_mode(0o755);
-            fs::set_permissions(&binary_path, perms)
-                .context("Failed to set executable permissions")?;
+            fs::set_permissions(&ampd_path, perms)
+                .context("Failed to set executable permissions on ampd")?;
+        }
+
+        // Install ampctl
+        let ampctl_path = version_dir.join("ampctl");
+        fs::write(&ampctl_path, ampctl_data).context("Failed to write ampctl binary")?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&ampctl_path)
+                .context("Failed to get ampctl metadata")?
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&ampctl_path, perms)
+                .context("Failed to set executable permissions on ampctl")?;
         }
 
         // Activate this version using the version manager

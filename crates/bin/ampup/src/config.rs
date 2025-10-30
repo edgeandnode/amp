@@ -83,6 +83,16 @@ impl Config {
         self.bin_dir.join("ampd")
     }
 
+    /// Get the ampctl binary path for a specific version
+    pub fn version_ampctl_path(&self, version: &str) -> PathBuf {
+        self.versions_dir.join(version).join("ampctl")
+    }
+
+    /// Get the active ampctl binary symlink path
+    pub fn active_ampctl_path(&self) -> PathBuf {
+        self.bin_dir.join("ampctl")
+    }
+
     /// Ensure all required directories exist
     pub fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.amp_dir).context("Failed to create amp directory")?;
