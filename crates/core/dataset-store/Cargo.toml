@@ -7,7 +7,6 @@ license-file.workspace = true
 
 [dependencies]
 async-stream.workspace = true
-backon.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }

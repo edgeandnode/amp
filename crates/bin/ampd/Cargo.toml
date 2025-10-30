@@ -20,14 +20,9 @@ console-subscriber = { version = "0.4.1", default-features = false, optional = t
 controller = { path = "../../services/controller" }
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
-datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
-eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
-evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
-firehose-datasets = { path = "../../extractors/firehose" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
-serde_json.workspace = true
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
