@@ -1,6 +1,9 @@
 ---
 title: Quickstart Ampup
 description: Build with Amp with Ampup
+slug: quickstart/ampup
+command: ampup
+category: quickstart
 ---
 
 This quickstart helps you jump start Amp locally
@@ -9,8 +12,10 @@ This quickstart helps you jump start Amp locally
 
 1. Repository Setup
 
-`git clone <repository-url>
+```bash
+git clone <repository-url>
 cd <repository-name>`
+```
 
 2. PostgreSQL database Setup
 

@@ -1,6 +1,9 @@
 ---
 title: Quickstart Locally
 description: Build with Amp locally
+slug: quickstart/locally
+command: docker-compose
+category: quickstart
 ---
 
 This quickstart helps you jump start Amp locally
@@ -9,7 +12,7 @@ This quickstart helps you jump start Amp locally
 
 1. Repository Setup
 
-```
+```bash
 git clone <repository-url>
 cd <repository-name>`
 ```
@@ -39,24 +42,38 @@ docker ps | grep postgres
 
 1.  Navigate to the amp repository
 
-`cd /path/to/amp`
+```bash
+cd /path/to/amp`
+```
 
 2. Build the release binary
 
-`cargo build --release -p ampd`
+```bash
+cargo build --release -p ampd
+```
 
 3. Make it available in our PATH (choose one method):
 
-### Method A: Create a symlink in a directory already in PATH
+### Method A
 
-`sudo ln -sf $(pwd)/target/release/ampd /usr/local/bin/ampd`
+#### Create a symlink in a directory already in PATH
 
-### Method B: Add the target directory to our PATH
+```bash
+sudo ln -sf $(pwd)/target/release/ampd /usr/local/bin/ampd
+```
 
-`export PATH="$(pwd)/target/release:$PATH"`
+### Method B
 
-### Add this to ~/.bashrc, ~/.zshenv, etc. to persist
+- Add the target directory to our PATH
+
+```bash
+export PATH="$(pwd)/target/release:$PATH"
+```
+
+- Add this to ~/.bashrc, ~/.zshenv, etc. to persist
 
 4. Verify installation:
 
-`ampd --version`
+```bash
+ampd --version
+```
