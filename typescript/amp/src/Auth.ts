@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema"
 import * as os from "node:os"
 import * as path from "node:path"
 
-export const AUTH_PLATFORM_URL = new URL("https://platform-auth-ui.vercel.app/")
+export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
 )
