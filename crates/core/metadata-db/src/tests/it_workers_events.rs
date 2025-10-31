@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use pgtemp::PgTempDB;
 
-use crate::{JobId, JobStatus, MetadataDb, WorkerNodeId};
+use crate::{JobId, JobStatus, MetadataDb, WorkerInfo, WorkerNodeId};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct JobNotification {
@@ -23,8 +23,9 @@ async fn schedule_job_and_receive_notification() {
 
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
+    let worker_info = WorkerInfo::default(); // {}
     metadata_db
-        .register_worker(&worker_id)
+        .register_worker(&worker_id, worker_info)
         .await
         .expect("Failed to pre-register the worker");
 

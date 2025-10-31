@@ -130,9 +130,11 @@ async fn main_inner() -> Result<(), BoxError> {
 
     // Log version info
     tracing::info!(
-        "built on {}, git describe {}",
-        env!("VERGEN_BUILD_DATE"),
+        "version {}, commit {} ({}), built on {}",
         env!("VERGEN_GIT_DESCRIBE"),
+        env!("VERGEN_GIT_SHA"),
+        env!("VERGEN_GIT_COMMIT_TIMESTAMP"),
+        env!("VERGEN_BUILD_DATE"),
     );
 
     match command {
@@ -307,6 +309,15 @@ async fn load_config(
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
-    let config = Config::load(config, true, None, allow_temp_db).await?;
+
+    // Gather build info from environment variables set by vergen
+    let build_info = common::config::BuildInfo {
+        version: env!("VERGEN_GIT_DESCRIBE").to_string(),
+        commit_sha: env!("VERGEN_GIT_SHA").to_string(),
+        commit_timestamp: env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
+        build_date: env!("VERGEN_BUILD_DATE").to_string(),
+    };
+
+    let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
     Ok(config)
 }

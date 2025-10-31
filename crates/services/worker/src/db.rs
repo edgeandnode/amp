@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use metadata_db::{Error as MetadataDbError, MetadataDb, WorkerNotifListener as NotifListener};
 pub use metadata_db::{Job as JobMeta, JobStatus};
 
-use crate::{JobId, NodeId};
+use crate::{JobId, NodeId, WorkerInfo};
 
 /// Extension trait for `MetadataDb` that adds retry logic to database operations.
 ///
@@ -20,7 +20,11 @@ pub(crate) trait MetadataDbRetryExt {
     /// Registers a worker in the metadata DB.
     ///
     /// This operation is idempotent. Retries on connection errors.
-    async fn register_worker_with_retry(&self, node_id: &NodeId) -> Result<(), MetadataDbError>;
+    async fn register_worker_with_retry(
+        &self,
+        node_id: &NodeId,
+        info: &WorkerInfo,
+    ) -> Result<(), MetadataDbError>;
 
     /// Establishes a connection to the metadata DB and returns a future that runs the worker
     /// heartbeat loop.
@@ -97,8 +101,12 @@ pub(crate) trait MetadataDbRetryExt {
 }
 
 impl MetadataDbRetryExt for MetadataDb {
-    async fn register_worker_with_retry(&self, node_id: &NodeId) -> Result<(), MetadataDbError> {
-        (|| self.register_worker(node_id))
+    async fn register_worker_with_retry(
+        &self,
+        node_id: &NodeId,
+        info: &WorkerInfo,
+    ) -> Result<(), MetadataDbError> {
+        (|| self.register_worker(node_id, info))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {

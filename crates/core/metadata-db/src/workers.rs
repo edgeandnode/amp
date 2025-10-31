@@ -6,28 +6,40 @@ use sqlx::{
 };
 
 pub mod events;
+mod info;
 mod node_id;
 
-pub use self::node_id::{NodeId, NodeIdOwned};
+pub use self::{
+    info::{WorkerInfo, WorkerInfoOwned},
+    node_id::{NodeId, NodeIdOwned},
+};
 
 /// Registers a worker.
 ///
-/// If the worker already exists, its `last_heartbeat` column is updated.
+/// If the worker already exists, its `heartbeat_at`, `info`, and `registered_at` columns are updated.
+/// The `created_at` column is set only on the initial insert.
 #[tracing::instrument(skip(exe), err)]
-pub async fn register<'c, E>(exe: E, id: NodeId<'_>) -> Result<(), sqlx::Error>
+pub async fn register<'c, E>(
+    exe: E,
+    id: NodeId<'_>,
+    info: WorkerInfo<'_>,
+) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO workers (node_id, last_heartbeat)
-        VALUES ($1, timezone('UTC', now()))
-        ON CONFLICT (node_id) DO UPDATE SET last_heartbeat = timezone('UTC', now())
+        INSERT INTO workers (node_id, info, created_at, registered_at, heartbeat_at)
+        VALUES ($1, $2::jsonb, timezone('UTC', now()), timezone('UTC', now()), timezone('UTC', now()))
+        ON CONFLICT (node_id) DO UPDATE SET
+            info = EXCLUDED.info,
+            registered_at = timezone('UTC', now()),
+            heartbeat_at = timezone('UTC', now())
     "#};
-    sqlx::query(query).bind(id).execute(exe).await?;
+    sqlx::query(query).bind(id).bind(info).execute(exe).await?;
     Ok(())
 }
 
-/// Updates the `last_heartbeat` column for a given worker
+/// Updates the `heartbeat_at` column for a given worker
 #[tracing::instrument(skip(exe), err)]
 pub async fn update_heartbeat<'c, E>(exe: E, id: NodeId<'_>) -> Result<(), sqlx::Error>
 where
@@ -35,7 +47,7 @@ where
 {
     let query = indoc::indoc! {r#"
         UPDATE workers
-        SET last_heartbeat = timezone('UTC', now())
+        SET heartbeat_at = timezone('UTC', now())
         WHERE node_id = $1
     "#};
     sqlx::query(query).bind(id).execute(exe).await?;
@@ -45,14 +57,14 @@ where
 /// Returns a list of all workers.
 ///
 /// Returns all workers in the database with their complete information including
-/// id, node_id, and last_heartbeat timestamp.
+/// node_id, info, created_at, registered_at, and heartbeat_at.
 #[tracing::instrument(skip(exe), err)]
 pub async fn list<'c, E>(exe: E) -> Result<Vec<Worker>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT node_id, last_heartbeat
+        SELECT node_id, info, created_at, registered_at, heartbeat_at
         FROM workers
         ORDER BY id DESC
     "#};
@@ -61,7 +73,7 @@ where
 
 /// Returns a list of active workers.
 ///
-/// A worker is active if its `last_heartbeat` column is within the given active `interval`.
+/// A worker is active if its `heartbeat_at` timestamp is within the given active `interval`.
 #[tracing::instrument(skip(exe), err)]
 pub async fn list_active<'c, E>(exe: E, interval: Duration) -> Result<Vec<NodeIdOwned>, sqlx::Error>
 where
@@ -70,7 +82,7 @@ where
     let query = indoc::indoc! {r#"
         SELECT node_id
         FROM workers
-        WHERE last_heartbeat > timezone('UTC', now()) - $1
+        WHERE heartbeat_at > timezone('UTC', now()) - $1
     "#};
     sqlx::query_scalar(query)
         .bind(interval)
@@ -83,8 +95,14 @@ where
 pub struct Worker {
     /// ID of the worker node
     pub node_id: NodeIdOwned,
+    /// Worker metadata (build info, system info, etc.)
+    pub info: WorkerInfoOwned,
+    /// Timestamp when the worker was first registered
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when the worker was last registered (updated on every re-registration)
+    pub registered_at: DateTime<Utc>,
     /// Last heartbeat timestamp
-    pub last_heartbeat: DateTime<Utc>,
+    pub heartbeat_at: DateTime<Utc>,
 }
 
 /// In-tree integration tests

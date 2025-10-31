@@ -4,7 +4,7 @@ use pgtemp::PgTempDB;
 use url::Url;
 
 use crate::{
-    TableId, WorkerNodeId,
+    TableId, WorkerInfo, WorkerNodeId,
     db::Connection,
     jobs::{self, JobId},
     locations::{self, LocationId},
@@ -403,7 +403,8 @@ async fn get_by_job_id_returns_locations_written_by_job() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -510,7 +511,8 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 

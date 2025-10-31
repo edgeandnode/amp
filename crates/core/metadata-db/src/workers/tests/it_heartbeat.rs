@@ -5,6 +5,7 @@ use std::time::Duration;
 use pgtemp::PgTempDB;
 
 use crate::{
+    WorkerInfo,
     db::Connection,
     workers::{self, NodeId},
 };
@@ -24,9 +25,10 @@ async fn new_worker_is_active_on_registration() {
         .expect("Failed to run migrations");
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-new");
+    let worker_info = WorkerInfo::default(); // {}
 
     //* When
-    workers::register(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -52,9 +54,10 @@ async fn reregistration_updates_heartbeat() {
         .expect("Failed to run migrations");
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-reregister");
+    let worker_info = WorkerInfo::default(); // {}
 
     // Initial registration
-    workers::register(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to initially register worker");
 
@@ -63,7 +66,8 @@ async fn reregistration_updates_heartbeat() {
 
     //* When
     // Re-register the worker (this should update the heartbeat)
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to re-register worker");
 
@@ -92,8 +96,9 @@ async fn heartbeat_update_maintains_activity() {
         .expect("Failed to run migrations");
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-heartbeat");
+    let worker_info = WorkerInfo::default(); // {}
 
-    workers::register(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -130,8 +135,9 @@ async fn worker_is_inactive_after_interval() {
         .expect("Failed to run migrations");
 
     let worker_id = NodeId::from_ref_unchecked("test-worker-inactive");
+    let worker_info = WorkerInfo::default(); // {}
 
-    workers::register(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -228,9 +234,10 @@ async fn registration_conflict_updates_timestamp() {
         .expect("Failed to run migrations");
 
     let worker_id = NodeId::from_ref_unchecked("conflict-worker");
+    let worker_info = WorkerInfo::default(); // {}
 
     // First registration
-    workers::register(&mut *conn, worker_id.clone())
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker initially");
 
@@ -240,7 +247,8 @@ async fn registration_conflict_updates_timestamp() {
 
     //* When
     // Second registration of the same worker ID (triggers ON CONFLICT DO UPDATE)
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut *conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker on conflict");
 

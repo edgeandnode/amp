@@ -73,11 +73,11 @@ impl<'a> Version<'a> {
 }
 
 impl<'a> From<&'a Version<'a>> for Version<'a> {
-    fn from(version: &'a Version<'a>) -> Self {
-        // Create a borrowed Cow variant pointing to the data inside the input version.
+    fn from(value: &'a Version<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input Version.
         // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
-        // SAFETY: The input version already upholds invariants, so the referenced data is valid.
-        Version::from_ref_unchecked(version.as_ref())
+        // SAFETY: The input Version already upholds invariants, so the referenced data is valid.
+        Version::from_ref_unchecked(value.as_ref())
     }
 }
 

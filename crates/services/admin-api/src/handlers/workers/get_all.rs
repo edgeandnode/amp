@@ -101,14 +101,14 @@ pub struct WorkerInfo {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub node_id: NodeId,
     /// Last heartbeat timestamp in ISO 8601 RFC3339 format
-    pub last_heartbeat: String,
+    pub heartbeat_at: String,
 }
 
 impl From<metadata_db::Worker> for WorkerInfo {
     fn from(worker: metadata_db::Worker) -> Self {
         Self {
             node_id: worker.node_id.into(),
-            last_heartbeat: worker.last_heartbeat.to_rfc3339(),
+            heartbeat_at: worker.heartbeat_at.to_rfc3339(),
         }
     }
 }

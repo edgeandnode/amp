@@ -48,7 +48,8 @@ pub use self::{
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     workers::{
-        NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker,
+        NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker, WorkerInfo,
+        WorkerInfoOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
     },
 };
@@ -244,8 +245,12 @@ impl MetadataDb {
     /// Registers a worker in the `workers` table, and updates the latest heartbeat timestamp.
     ///
     /// This operation is idempotent.
-    pub async fn register_worker(&self, node_id: impl Into<WorkerNodeId<'_>>) -> Result<(), Error> {
-        workers::register(&*self.pool, node_id.into()).await?;
+    pub async fn register_worker(
+        &self,
+        node_id: impl Into<WorkerNodeId<'_>>,
+        info: impl Into<WorkerInfo<'_>>,
+    ) -> Result<(), Error> {
+        workers::register(&*self.pool, node_id.into(), info.into()).await?;
         Ok(())
     }
 
@@ -284,7 +289,7 @@ impl MetadataDb {
     /// Returns a list of all workers.
     ///
     /// Returns all workers in the database with their complete information including
-    /// id, node_id, and last_heartbeat timestamp.
+    /// id, node_id, and heartbeat_at timestamp.
     pub async fn list_workers(&self) -> Result<Vec<Worker>, Error> {
         Ok(workers::list(&*self.pool).await?)
     }

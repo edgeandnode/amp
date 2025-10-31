@@ -340,7 +340,7 @@ impl TestCtxBuilder {
 
         // Load the config from our temporary directory
         let config =
-            Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true).await?);
+            Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
         // Create Anvil fixture (if enabled) and capture provider config for later registration
         let (anvil, anvil_provider_config) = match self.anvil_fixture {
