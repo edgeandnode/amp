@@ -157,14 +157,13 @@ const showLoadingSpinner = (message: string) =>
   )
 
 const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(function*() {
-  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
   // Generate PKCE parameters
   const codeVerifier = yield* generateCodeVerifier
   const codeChallenge = yield* generateCodeChallenge(codeVerifier)
 
-  const deviceAuthUrl = new URL("/api/v1/device/authorize", authPlatformUrl)
+  const deviceAuthUrl = new URL("/api/v1/device/authorize", Auth.AUTH_PLATFORM_URL)
 
   const request = yield* HttpClientRequest.post(deviceAuthUrl.toString()).pipe(
     HttpClientRequest.acceptJson,
@@ -205,10 +204,9 @@ const requestDeviceAuthorization = Effect.fn("RequestDeviceAuthorization")(funct
 })
 
 const pollForToken = Effect.fn("PollForDeviceToken")(function*(deviceCode: DeviceCode, codeVerifier: string) {
-  const authPlatformUrl = yield* Auth.AUTH_PLATFORM_URL
   const client = yield* HttpClient.HttpClient
 
-  const tokenUrl = new URL("/api/v1/device/token", authPlatformUrl)
+  const tokenUrl = new URL("/api/v1/device/token", Auth.AUTH_PLATFORM_URL)
   tokenUrl.searchParams.set("device_code", deviceCode)
   tokenUrl.searchParams.set("code_verifier", codeVerifier)
 
