@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
+use datasets_common::{partial_reference::PartialReference, revision::Revision};
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
@@ -59,6 +60,12 @@ impl Scheduler {
             return Err(ScheduleJobError::NoAvailableWorkers);
         };
 
+        let dataset_ref = PartialReference::new(
+            Some(dataset.namespace.clone()),
+            dataset.name.clone(),
+            dataset.version.clone().map(Revision::Version),
+        );
+
         let mut locations = Vec::new();
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table =
@@ -72,8 +79,8 @@ impl Scheduler {
                 };
             locations.push(physical_table.location_id());
         }
-
         let job_desc = serde_json::to_string(&JobDescriptor::Dump {
+            dataset: dataset_ref,
             end_block,
             max_writers,
         })?;

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use common::{BoxError, catalog::physical::PhysicalTable};
+use datasets_common::partial_reference::PartialReference;
 pub use dump::Ctx;
 use dump::{EndBlock, metrics};
 pub use metadata_db::JobStatus;
@@ -22,6 +23,7 @@ pub use self::{
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Descriptor {
     Dump {
+        dataset: PartialReference,
         end_block: EndBlock,
         #[serde(default = "default_max_writers")]
         max_writers: u16,
@@ -73,6 +75,7 @@ impl Job {
 
         match job_desc {
             Descriptor::Dump {
+                dataset: _,
                 end_block,
                 max_writers,
             } => {

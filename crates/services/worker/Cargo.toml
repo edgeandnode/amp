@@ -8,6 +8,7 @@ license-file.workspace = true
 backon.workspace = true
 common = { path = "../../core/common" }
 dataset-store = { path = "../../core/dataset-store" }
+datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }

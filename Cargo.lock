@@ -10304,6 +10304,7 @@ dependencies = [
  "backon",
  "common",
  "dataset-store",
+ "datasets-common",
  "dump",
  "futures",
  "metadata-db",
