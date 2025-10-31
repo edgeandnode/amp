@@ -179,6 +179,29 @@ export const DatasetReadme = Schema.String.pipe(
   }),
 )
 
+export const DatasetDescription = Schema.String.pipe(
+  Schema.annotations({
+    title: "Description",
+    description: "additional description and details about the dataset",
+  }),
+)
+
+export const DatasetKeyword = Schema.String.pipe(
+  Schema.annotations({
+    title: "Keyword",
+    description: "keywords, or traits, about the dataset for discoverability and searching",
+    examples: ["NFT", "Collectibles", "DeFi", "Transfers"],
+  }),
+)
+
+export const DatasetLicense = Schema.String.pipe(
+  Schema.annotations({
+    title: "License",
+    description: "License covering the dataset",
+    examples: ["MIT"],
+  }),
+)
+
 export class FunctionSource extends Schema.Class<FunctionSource>(
   "FunctionSource",
 )({
@@ -201,6 +224,9 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
   name: DatasetName,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
+  description: DatasetDescription.pipe(Schema.optional),
+  keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  license: DatasetLicense.pipe(Schema.optional),
 }) {}
 
 export class DatasetConfig extends Schema.Class<DatasetConfig>(
@@ -211,6 +237,8 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   network: Network,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
+  description: DatasetDescription.pipe(Schema.optional),
+  keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
