@@ -37,6 +37,8 @@ impl Drivers {
                 ingest_upload_concurrency,
                 ingest_copy_concurrency,
                 ingest_target_file_size,
+                auth_type: Default::default(),
+                ddl_safety: Default::default(),
             };
             DriverConfig::new(name, opts)
         });
@@ -110,7 +112,7 @@ impl Drivers {
                 _ => unimplemented!("Mock not implemented for vendor {vendor:?}"),
             }
         } else {
-            let vendor_sample = vec![Snowflake, Postgres, BigQuery];
+            let vendor_sample = [Snowflake, Postgres, BigQuery];
             let vendors = (0..n).map(|i| {
                 let vendor = &vendor_sample[i % vendor_sample.len()];
                 match vendor {
@@ -140,6 +142,8 @@ impl Drivers {
                             ingest_upload_concurrency,
                             ingest_copy_concurrency,
                             ingest_target_file_size,
+                            auth_type: Default::default(),
+                            ddl_safety: Default::default(),
                         };
                         DriverConfig::new(name, opts)
                     }

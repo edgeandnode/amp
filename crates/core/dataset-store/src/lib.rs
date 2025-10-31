@@ -651,6 +651,12 @@ impl DatasetStore {
         );
 
         let Some(dataset) = self.load_dataset(&namespace, &name, &version).await? else {
+            tracing::warn!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                dataset_version = %version,
+                "Dataset not found in store"
+            );
             return Ok(None);
         };
 
@@ -700,9 +706,22 @@ impl DatasetStore {
                     source: Box::new(source),
                 })?
         else {
+            tracing::warn!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                dataset_version = %version,
+                "Dataset version tag not found in metadata database"
+            );
             return Ok(None);
         };
 
+        tracing::debug!(
+            dataset_namespace = %namespace,
+            dataset_name = %name,
+            dataset_version = %version,
+            manifest_hash = %dataset_details.hash,
+            "Found dataset manifest hash in metadata database"
+        );
         // Get the manifest path from metadata database
         let manifest_hash: Hash = dataset_details.hash.into();
         let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, &manifest_hash)
@@ -715,8 +734,23 @@ impl DatasetStore {
             })?
             .map(ManifestPath::from)
         else {
+            tracing::warn!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                dataset_version = %version,
+                manifest_hash = %manifest_hash,
+                "Manifest path not found in metadata database"
+            );
             return Ok(None);
         };
+
+        tracing::debug!(
+            dataset_namespace = %namespace,
+            dataset_name = %name,
+            dataset_version = %version,
+            manifest_hash = %manifest_hash,
+            "Retrieving dataset manifest from store at path: {path:?}"
+        );
 
         // Load the manifest content using the path
         let Some(manifest_content) =
@@ -730,6 +764,13 @@ impl DatasetStore {
                     source: Box::new(err),
                 })?
         else {
+            tracing::warn!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                dataset_version = %version,
+                manifest_hash = %manifest_hash,
+                "Manifest content not found in object store"
+            );
             return Ok(None);
         };
 

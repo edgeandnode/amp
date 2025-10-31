@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use datasets_common::hash::Hash;
+use futures::TryStreamExt;
 use object_store::{ObjectStore, PutPayload, path::Path as ObjectStorePath};
 
 /// Manages dataset manifest configurations with object store operations
@@ -70,10 +71,34 @@ where
     /// `metadata_db::manifests::get_path()` before calling.
     pub async fn get(&self, path: ManifestPath) -> Result<Option<ManifestContent>, GetError> {
         let path: ObjectStorePath = path.into();
+        let stream = self.store.list(None);
+        let objects = stream
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(GetError::ObjectStoreGet)?;
+        let prefix = self.store.to_string();
+
+        tracing::debug!(
+            prefix = %prefix,
+            "Listed {} objects in store",
+            objects.len()
+        );
 
         let get_result = match self.store.get(&path).await {
-            Ok(res) => res,
-            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Ok(res) => {
+                tracing::debug!(
+                    path = %path,
+                    "Manifest found in object store"
+                );
+                res
+            }
+            Err(object_store::Error::NotFound { .. }) => {
+                tracing::debug!(
+                    path = %path,
+                    "Manifest not found in object store"
+                );
+                return Ok(None);
+            }
             Err(err) => return Err(GetError::ObjectStoreGet(err)),
         };
 

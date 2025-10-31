@@ -1,3 +1,5 @@
+use crate::cli::CreateMode;
+
 pub mod error;
 pub mod validation;
 
@@ -15,9 +17,9 @@ impl DDLSafety {
 
         match self {
             // DropIfExists => "DROP TABLE IF EXISTS",
-            IfNotExists => "CREATE TABLE IF NOT EXISTS",
-            OrReplace => "CREATE OR REPLACE TABLE",
-            Unsafe => "CREATE TABLE",
+            IfNotExists => "CREATE TABLE IF NOT EXISTS ",
+            OrReplace => "CREATE OR REPLACE TABLE ",
+            Unsafe => "CREATE TABLE ",
         }
     }
 }
@@ -25,5 +27,15 @@ impl DDLSafety {
 impl Default for DDLSafety {
     fn default() -> Self {
         DDLSafety::IfNotExists
+    }
+}
+
+impl From<CreateMode> for DDLSafety {
+    fn from(create_mode: CreateMode) -> Self {
+        match create_mode {
+            CreateMode::IfNotExists => DDLSafety::IfNotExists,
+            CreateMode::CreateOrReplace => DDLSafety::OrReplace,
+            _ => DDLSafety::Unsafe,
+        }
     }
 }

@@ -1,5 +1,6 @@
 [package]
 name = "ampdbc"
+# build = "build.rs"
 description = "Database connector for the ampdbc syncing engine."
 edition.workspace = true
 version.workspace = true
@@ -16,9 +17,10 @@ path = "src/main.rs"
 [dependencies]
 adbc_core = "0.20.0"
 adbc_driver_manager = "0.20.0"
-adbc_snowflake = { version = "0.20.0", default-features = false, features = ["env"] }
+adbc_snowflake = { version = "0.20.0", default-features = false, features = ["env", "bundled"] }
 amp-client.path = "../../client/amp-client"
 arrow-flight.workspace = true
+clap.workspace = true
 common.path = "../../core/common"
 datafusion-expr.workspace = true
 datafusion-sql.workspace = true
@@ -28,6 +30,7 @@ dump.path = "../../core/dump"
 futures.workspace = true
 itertools.workspace = true
 metadata-db.path = "../../core/metadata-db"
+monitoring.path = "../../core/monitoring"
 paste = "1.0.15"
 phf = { version = "0.13.1", features = ["macros"] }
 serde.workspace = true

@@ -5,7 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Schema, arrow::SchemaRef, schema::TableRef};
+use crate::{Schema, arrow::SchemaRef, cli::AuthType, schema::TableRef, sql::DDLSafety};
 
 #[derive(Debug, Clone, Deserialize, Eq, Serialize)]
 #[serde(tag = "vendor", rename_all = "lowercase")]
@@ -59,7 +59,6 @@ pub enum DriverOpts {
         /// Compute warehouse to use
         warehouse: String,
         /// Optional role to assume after connection
-        #[serde(skip)]
         role: Option<String>,
         /// adbc.snowflake.statement.ingest_writer_concurrency
         #[serde(default)]
@@ -73,6 +72,10 @@ pub enum DriverOpts {
         /// adbc.snowflake.statement.ingest_target_file_size
         #[serde(default)]
         ingest_target_file_size: usize,
+        #[serde(default)]
+        auth_type: AuthType,
+        #[serde(skip)]
+        ddl_safety: DDLSafety,
     },
     Sqlite,
 }
@@ -207,7 +210,9 @@ impl DriverOpts {
         match self {
             BigQuery { .. } => Schema::bigquery(&schema, table_ref, Default::default()),
             Postgres { .. } => Schema::postgres(&schema, table_ref, Default::default()),
-            Snowflake { .. } => Schema::snowflake(&schema, table_ref, Default::default()),
+            Snowflake { ddl_safety, .. } => {
+                Schema::snowflake(&schema, table_ref, Default::default(), *ddl_safety)
+            }
             Sqlite => unimplemented!("build_schema is not implemented for Sqlite"),
         }
     }
@@ -218,7 +223,7 @@ impl DriverOpts {
             BigQuery { catalog, table, .. } => TableRef {
                 database: catalog.to_string(),
                 schema: None,
-                table: table.to_string(),
+                table: table.into(),
             },
             Postgres {
                 database,
@@ -228,7 +233,7 @@ impl DriverOpts {
             } => TableRef {
                 database: database.to_string(),
                 schema: Some(schema.to_string()),
-                table: table.to_string(),
+                table: table.into(),
             },
             Snowflake {
                 database,
@@ -238,7 +243,7 @@ impl DriverOpts {
             } => TableRef {
                 database: database.to_string(),
                 schema: Some(schema.to_string()),
-                table: table.to_string(),
+                table: table.into(),
             },
             _ => unimplemented!("table_ref is not implemented for this driver"),
         }

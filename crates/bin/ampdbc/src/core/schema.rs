@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use crate::{
     ConnectionExt, Error, StatementExt, SupportedVendor,
@@ -14,11 +14,84 @@ pub use crate::{
     sqlite::schema as sqlite,
 };
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct TableName(String);
+
+impl std::fmt::Debug for TableName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+
+impl TableName {
+    pub fn new(name: &str) -> Self {
+        Self(name.to_uppercase())
+    }
+
+    pub fn name(&self) -> String {
+        self.0.clone()
+    }
+}
+
+impl From<&str> for TableName {
+    fn from(s: &str) -> Self {
+        TableName::new(s)
+    }
+}
+
+impl From<&String> for TableName {
+    fn from(s: &String) -> Self {
+        TableName::new(s)
+    }
+}
+
+impl From<String> for TableName {
+    fn from(s: String) -> Self {
+        TableName::new(&s)
+    }
+}
+
+impl FromStr for TableName {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> crate::Result<Self> {
+        Ok(TableName::new(s))
+    }
+}
+
+impl AsRef<str> for TableName {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::ops::Deref for TableName {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TableName {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+
+impl std::fmt::Display for TableName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TableRef {
     pub database: String,
     pub schema: Option<String>,
-    pub table: String,
+    pub table: TableName,
 }
 
 impl TableRef {
@@ -26,19 +99,36 @@ impl TableRef {
         Self {
             database: database.to_string(),
             schema: schema.map(ToString::to_string),
-            table: table.to_string(),
+            table: table.into(),
         }
+    }
+    pub fn name(&self) -> String {
+        self.table.to_string()
     }
 
     pub fn full_name(&self) -> String {
         match &self.schema {
-            Some(schema) => format!("{}.{}.{}", self.database, schema, self.table),
-            None => format!("{}.{}", self.database, self.table),
+            Some(schema) => {
+                let mut full_name = String::new();
+                full_name.push_str(&self.database);
+                full_name.push('.');
+                full_name.push_str(schema);
+                full_name.push('.');
+                full_name.push_str(&self.table);
+                full_name
+            },
+            None => {
+                let mut full_name = String::new();
+                full_name.push_str(&self.database);
+                full_name.push('.');
+                full_name.push_str(&self.table);
+                full_name
+            },
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TableKind {
     Data,
     History,
@@ -79,12 +169,18 @@ impl Schema {
         })
     }
 
-    pub fn snowflake(schema: &SchemaRef, table_ref: TableRef, table_kind: TableKind) -> Self {
+    pub fn snowflake(
+        schema: &SchemaRef,
+        table_ref: TableRef,
+        table_kind: TableKind,
+        ddl_safety: DDLSafety,
+    ) -> Self {
         let schema = Arc::clone(schema);
         Schema::Snowflake(snowflake::Schema {
             schema,
             table_ref,
             table_kind,
+            ddl_safety,
         })
     }
 
@@ -104,6 +200,13 @@ impl Schema {
             Schema::Snowflake(schema) => Arc::clone(&schema.schema),
             Schema::Sqlite(schema) => Arc::clone(&schema.schema),
             _ => Arc::new(ArrowSchema::empty()),
+        }
+    }
+
+    pub fn ddl_safety(&self) -> DDLSafety {
+        match self {
+            Schema::Snowflake(schema) => schema.ddl_safety.clone(),
+            _ => DDLSafety::default(),
         }
     }
 }
@@ -140,7 +243,7 @@ where
             let table_ref = TableRef {
                 database: database.clone(),
                 schema: schema.clone(),
-                table: format!("{}_history", table),
+                table: (table.to_string() + "_history").into(),
             };
             let schema = transfer_history_schema();
 
@@ -160,7 +263,7 @@ where
             let table_ref = TableRef {
                 database: database.clone(),
                 schema: schema.clone(),
-                table: format!("{}_watermark", table),
+                table: (table.to_string() + "_watermark").into(),
             };
             let schema = watermark_schema();
 
@@ -169,7 +272,7 @@ where
     }
 
     fn as_insert_stmt(&self) -> std::result::Result<String, Self::ErrorType>;
-    fn as_table_ddl(&self, ddl_safety: DDLSafety) -> std::result::Result<String, Self::ErrorType>;
+    fn as_table_ddl(&self) -> std::result::Result<String, Self::ErrorType>;
     fn as_truncate_stmt(&self) -> std::result::Result<String, Self::ErrorType> {
         let stmt = format!("TRUNCATE TABLE {};", self.table_ref().full_name());
         Ok(stmt)
@@ -188,12 +291,10 @@ where
     fn prepare_table_ddl_stmt(
         self,
         connection: &mut <Self::Statement as StatementExt>::ConnectionType,
-        ddl_safety: DDLSafety,
     ) -> crate::Result<Self::Statement> {
         let mut stmt: Self::Statement = connection.create_statement().map_err(Error::from)?;
 
-        stmt.prepare_create_table(self, ddl_safety)
-            .map_err(Error::from)?;
+        stmt.prepare_create_table(&self).map_err(Error::from)?;
         Ok(stmt)
     }
 
@@ -217,7 +318,9 @@ impl SchemaExt for Schema {
         match vendor {
             crate::SupportedVendor::BigQuery => Schema::bigquery(&schema, table_ref, table_kind),
             crate::SupportedVendor::Postgres => Schema::postgres(&schema, table_ref, table_kind),
-            crate::SupportedVendor::Snowflake => Schema::snowflake(&schema, table_ref, table_kind),
+            crate::SupportedVendor::Snowflake => {
+                Schema::snowflake(&schema, table_ref, table_kind, Default::default())
+            }
             crate::SupportedVendor::Sqlite => Schema::sqlite(&schema, table_ref, table_kind),
         }
     }
@@ -262,12 +365,12 @@ impl SchemaExt for Schema {
         }
     }
 
-    fn as_table_ddl(&self, ddl_safety: DDLSafety) -> std::result::Result<String, Self::ErrorType> {
+    fn as_table_ddl(&self) -> std::result::Result<String, Self::ErrorType> {
         match self {
-            Schema::BigQuery(schema) => Ok(schema.as_table_ddl(ddl_safety)?),
-            Schema::Postgres(schema) => Ok(schema.as_table_ddl(ddl_safety)?),
-            Schema::Snowflake(schema) => Ok(schema.as_table_ddl(ddl_safety)?),
-            Schema::Sqlite(schema) => Ok(schema.as_table_ddl(ddl_safety)?),
+            Schema::BigQuery(schema) => Ok(schema.as_table_ddl()?),
+            Schema::Postgres(schema) => Ok(schema.as_table_ddl()?),
+            Schema::Snowflake(schema) => Ok(schema.as_table_ddl()?),
+            Schema::Sqlite(schema) => Ok(schema.as_table_ddl()?),
             _ => Ok("".into()),
         }
     }
@@ -324,12 +427,6 @@ impl Default for Schema {
 }
 
 pub fn transfer_history_schema() -> SchemaRef {
-    let primary_key_metadata = HashMap::from([
-        ("primary_key".to_string(), "true".to_string()),
-        ("generated".to_string(), "auto_increment".to_string()),
-        ("unique".to_string(), "true".to_string()),
-    ]);
-
     let field_metadata = HashMap::from([
         ("primary_key".to_string(), "false".to_string()),
         ("generated".to_string(), "false".to_string()),
@@ -344,9 +441,6 @@ pub fn transfer_history_schema() -> SchemaRef {
 
     let fields: Vec<FieldRef> = vec![
         // The unique ID for the record
-        Field::new("id", DataType::Int64, false)
-            .with_metadata(primary_key_metadata)
-            .into(),
         Field::new("transfer_id", DataType::Int64, false)
             .with_metadata(field_metadata.clone())
             .into(),
@@ -378,12 +472,6 @@ pub fn transfer_history_schema() -> SchemaRef {
 }
 
 pub fn watermark_schema() -> SchemaRef {
-    let primary_key_metadata = HashMap::from([
-        ("primary_key".to_string(), "true".to_string()),
-        ("generated".to_string(), "auto_increment".to_string()),
-        ("unique".to_string(), "true".to_string()),
-    ]);
-
     let field_metadata = HashMap::from([
         ("primary_key".to_string(), "false".to_string()),
         ("generated".to_string(), "false".to_string()),
@@ -403,8 +491,8 @@ pub fn watermark_schema() -> SchemaRef {
     ]);
 
     let fields: Vec<FieldRef> = vec![
-        Field::new("id", DataType::Int64, false)
-            .with_metadata(primary_key_metadata)
+        Field::new("transfer_id", DataType::Int64, false)
+            .with_metadata(field_metadata.clone())
             .into(),
         Field::new("network", DataType::Utf8, false)
             .with_metadata(field_metadata.clone())

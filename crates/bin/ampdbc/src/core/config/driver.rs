@@ -7,6 +7,7 @@ use std::{
 use super::container::AtLeastOne;
 use crate::{
     Connection, SupportedVendor,
+    cli::{AuthType, CreateMode},
     config::{
         adbc::DriverOpts,
         container::{HasName, MemoizedHash},
@@ -38,7 +39,7 @@ impl Drivers {
             } => {
                 let database = database.to_string();
                 let schema = Some(schema.to_string());
-                let table = table.to_string();
+                let table = table.to_string().into();
                 TableRef {
                     database,
                     schema,
@@ -53,7 +54,7 @@ impl Drivers {
             } => {
                 let database = database.to_string();
                 let schema = Some(schema.to_string());
-                let table = table.to_string();
+                let table = table.into();
                 TableRef {
                     database,
                     schema,
@@ -204,6 +205,29 @@ impl DriverConfig {
             name,
             opts: config,
             hash,
+        }
+    }
+
+    pub fn update_auth_type(&mut self, auth_type: AuthType) {
+        use DriverOpts::*;
+        match &mut self.opts {
+            Snowflake { auth_type: a, .. } if *a != auth_type => {
+                *a = auth_type;
+                self.update_hash();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn update_create_mode(&mut self, create_mode: CreateMode) {
+        let ddl_safety = create_mode.into();
+        use DriverOpts::*;
+        match &mut self.opts {
+            Snowflake { ddl_safety: d, .. } if *d != ddl_safety => {
+                *d = ddl_safety;
+                self.update_hash();
+            }
+            _ => {}
         }
     }
 

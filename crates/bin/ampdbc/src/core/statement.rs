@@ -8,7 +8,7 @@ use common::arrow::{
     datatypes::Schema as ArrowSchema,
 };
 
-use crate::{ConnectionExt, SchemaExt, connection::Connection, schema::Schema, sql::DDLSafety};
+use crate::{ConnectionExt, SchemaExt, connection::Connection, schema::Schema};
 pub use crate::{
     bigquery::statement as bigquery, postgres::statement as postgres,
     snowflake::statement as snowflake, sqlite::statement as sqlite,
@@ -24,10 +24,9 @@ where
 
     fn prepare_create_table(
         &mut self,
-        schema: Self::SchemaType,
-        ddl_safety: DDLSafety,
+        schema: &Self::SchemaType,
     ) -> std::result::Result<(), <Self::SchemaType as SchemaExt>::ErrorType> {
-        let query = schema.as_table_ddl(ddl_safety)?;
+        let query = schema.as_table_ddl()?;
         self.set_sql_query(query)?;
         Ok(())
     }

@@ -16,22 +16,29 @@ use dataset_store::{
 use driver::{Drivers, serde_vendors};
 use serde::{Deserialize, Serialize};
 
-use crate::{Connection, Error, Result, Schema, SupportedVendor, arrow::Schema as ArrowSchema};
+use crate::{
+    Connection, Error, Result, Schema, SupportedVendor,
+    arrow::Schema as ArrowSchema,
+    cli::{AuthType, CreateMode},
+    config::driver::DriverConfig,
+};
 
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct AmpdbcConfig {
     pub common: CommonConfig,
     pub drivers: Drivers,
 }
 
-impl Config {
+impl AmpdbcConfig {
     pub async fn load(
         config_path: impl Into<std::path::PathBuf>,
         ampdbc_config_path: impl Into<std::path::PathBuf>,
+        auth_type: AuthType,
+        create_mode: crate::cli::CreateMode,
     ) -> Result<Self> {
         let common = CommonConfig::load(config_path, true, None, false).await?;
-        let AmpdbcConfig { drivers } = AmpdbcConfig::load(ampdbc_config_path).await?;
-
+        let AmpdbcConfigFile { drivers } =
+            AmpdbcConfigFile::load(ampdbc_config_path, auth_type, create_mode).await?;
         Ok(Self { common, drivers })
     }
 
@@ -45,11 +52,11 @@ impl Config {
     }
 
     pub fn provider_configs_store(&self) -> ProviderConfigsStore {
-        ProviderConfigsStore::new(self.common.providers_store.object_store())
+        ProviderConfigsStore::new(self.common.providers_store.prefixed_store())
     }
 
     pub fn dataset_manifests_store(&self) -> DatasetManifestsStore {
-        DatasetManifestsStore::new(self.common.manifests_store.object_store())
+        DatasetManifestsStore::new(self.common.manifests_store.prefixed_store())
     }
 
     pub async fn dataset_store(&self) -> Result<Arc<DatasetStore>> {
@@ -73,17 +80,19 @@ impl Config {
     }
 
     pub fn schemas(&self, arrow_schema: &ArrowSchema) -> impl Iterator<Item = Schema> {
-        use SupportedVendor::*;
+        use DriverOpts::*;
         let schema_ref = Arc::from(arrow_schema.clone());
 
-        let vendors = self.drivers.vendors();
         let table_refs = self.drivers.table_refs();
 
-        vendors
+        self.drivers
+            .iter()
             .zip(table_refs)
-            .map(move |(vendor, table_ref)| match vendor {
-                BigQuery => Schema::bigquery(&schema_ref, table_ref, Default::default()),
-                Snowflake => Schema::snowflake(&schema_ref, table_ref, Default::default()),
+            .map(move |(DriverConfig { opts, .. }, table_ref)| match opts {
+                BigQuery { .. } => Schema::bigquery(&schema_ref, table_ref, Default::default()),
+                Snowflake { ddl_safety, .. } => {
+                    Schema::snowflake(&schema_ref, table_ref, Default::default(), *ddl_safety)
+                }
                 _ => unimplemented!(),
             })
     }
@@ -98,18 +107,34 @@ impl Config {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct AmpdbcConfig {
+pub struct AmpdbcConfigFile {
     #[serde(flatten, with = "serde_vendors")]
     pub drivers: Drivers,
 }
 
-impl AmpdbcConfig {
-    pub async fn load(config_path: impl Into<std::path::PathBuf>) -> Result<Self> {
+impl AmpdbcConfigFile {
+    pub async fn load(
+        config_path: impl Into<std::path::PathBuf>,
+        auth_type: AuthType,
+        create_mode: CreateMode,
+    ) -> Result<Self> {
         let config_path = config_path.into();
         let contents = tokio::fs::read_to_string(&config_path)
             .await
             .map_err(Error::io_error(config_path))?;
-        let config: AmpdbcConfig = toml::from_str(&contents)?;
+        let mut config: AmpdbcConfigFile = toml::from_str(&contents)?;
+        config
+            .drivers
+            .iter_mut_by_vendor(SupportedVendor::Snowflake)
+            .for_each(|driver_config| {
+                tracing::debug!(
+                    "Updating Snowflake driver config with auth_type: {:?}, create_mode: {:?}",
+                    auth_type,
+                    create_mode
+                );
+                driver_config.update_auth_type(auth_type);
+                driver_config.update_create_mode(create_mode);
+            });
         Ok(config)
     }
 }

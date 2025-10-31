@@ -1,0 +1,26 @@
+[snowflake_demo]
+vendor = "snowflake"
+account = "TTBCCLZ-PUB64869"
+username = "JOHNSWAN"
+role = "ACCOUNTADMIN"
+warehouse = "COMPUTE_WH"
+database = "AMP_DTCC_BRONZE"
+schema = "PUBLIC"
+table = "transfers"
+ingest_writer_concurrency = 2
+ingest_upload_concurrency = 4
+ingest_copy_concurrency = 2
+ingest_target_file_size = 10
+[snowflake_demo2]
+vendor = "snowflake"
+account = "TTBCCLZ-PUB64869"
+username = "JOHNSWAN"
+role = "ACCOUNTADMIN"
+warehouse = "COMPUTE_WH"
+database = "AMP_DTCC_EXAMPLE"
+schema = "PUBLIC"
+table = "transfers"
+ingest_writer_concurrency = 2
+ingest_upload_concurrency = 4
+ingest_copy_concurrency = 2
+ingest_target_file_size = 10

@@ -6,7 +6,7 @@ use std::{
 use common::arrow::datatypes::Fields;
 
 use crate::{
-    SchemaExt, StatementExt, arrow::{DataType, SchemaRef}, schema::{TableKind, TableRef}, snowflake::{connection::Connection, statement::Statement}, sql::DDLSafety
+    SchemaExt, StatementExt, arrow::{DataType, Field, SchemaRef}, schema::{TableKind, TableRef, transfer_history_schema, watermark_schema}, snowflake::{connection::Connection, statement::Statement}, sql::DDLSafety
 };
 
 #[derive(Clone, Debug)]
@@ -14,6 +14,7 @@ pub struct Schema {
     pub schema: SchemaRef,
     pub table_ref: TableRef,
     pub table_kind: TableKind,
+    pub ddl_safety: DDLSafety,
 }
 
 impl StatementExt for Statement {
@@ -29,12 +30,29 @@ impl SchemaExt for Schema {
             schema,
             table_ref,
             table_kind,
+            ddl_safety: DDLSafety::default(),
         }
     }
 
     fn as_external_types(&self) -> Result<Vec<(String, String)>, Self::ErrorType> {
+
+        // Append the transfer id column if table kind is Data
+        let fields = if self.table_kind == TableKind::Data {
+            let mut fields = self.schema.fields().to_vec();
+            let transfer_id_field = Field::new(
+                "transfer_id",
+                DataType::Utf8,
+                false,
+            );
+            fields.push(transfer_id_field.into());
+            
+            &fields.into()
+        } else {
+            self.schema.fields()
+        };
+
         let (external_types, unsupported_fields): (Vec<(String, String)>, Vec<(String, DataType)>) =
-            self.schema.fields().iter().cloned().fold(
+            fields.iter().cloned().fold(
                 (Vec::new(), Vec::new()),
                 move |(mut external_types, mut unsupported_fields), field| {
                     let arrow_type = field.data_type();
@@ -77,11 +95,13 @@ impl SchemaExt for Schema {
         }
     }
 
-    fn as_table_ddl(&self, ddl_safety: DDLSafety) -> std::result::Result<String, Self::ErrorType> {
+    fn as_table_ddl(&self) -> std::result::Result<String, Self::ErrorType> {
         let mut stmt = String::new();
+        let ddl_safety = self.ddl_safety.clone();
         stmt.push_str(ddl_safety.to_sql_clause());
 
-        stmt.push_str(&self.table_ref.full_name());
+        tracing::debug!("Generating CREATE TABLE DDL for table: {}", self.table_ref.name());
+        stmt.push_str(&self.table_ref.name());
         stmt.push_str(" (");
         let columns = 
             self.as_external_types()?
@@ -92,7 +112,50 @@ impl SchemaExt for Schema {
         stmt.push_str(&columns);
         stmt.push_str(");");
 
+        tracing::debug!("Generated CREATE TABLE DDL: {}", stmt);
         Ok(stmt)
+    }
+
+    fn as_transfer_history(&self) -> Self {
+            let TableRef {
+                database,
+                schema,
+                table,
+            } = self.table_ref();
+            let table_ref = TableRef {
+                database: database.clone(),
+                schema: schema.clone(),
+                table: (table.to_string() + "_history").into(),
+            };
+            let schema = transfer_history_schema();
+
+            Self {
+                schema,
+                table_ref,
+                table_kind: TableKind::History,
+                ddl_safety: self.ddl_safety.clone(),
+            }
+    }
+
+    fn as_watermark(&self) -> Self {
+            let TableRef {
+                database,
+                schema,
+                table,
+            } = self.table_ref();
+            let table_ref = TableRef {
+                database: database.clone(),
+                schema: schema.clone(),
+                table: (table.to_string() + "_watermark").into(),
+            };
+            let schema = watermark_schema();
+
+            Self {
+                schema,
+                table_ref,
+                table_kind: TableKind::Watermark,
+                ddl_safety: self.ddl_safety.clone(),
+            }
     }
     
     fn table_kind(&self) -> &TableKind {
@@ -140,7 +203,7 @@ fn data_insert_statement(table_ref: &TableRef, fields: &Fields) -> String {
     let mut stmt = String::new();
 
     stmt.push_str("INSERT INTO ");
-    stmt.push_str(&table_ref.full_name());
+    stmt.push_str(&table_ref.name());
     
     let (names, placeholders): (Vec<String>, Vec<String>) = fields
     .iter()
@@ -184,17 +247,14 @@ fn data_insert_statement(table_ref: &TableRef, fields: &Fields) -> String {
 /// # Ok::<(), snowflake_adbc::Error>(())
 /// ```
 pub fn arrow_to_snowflake_type(arrow_type: &DataType) -> Result<String, SchemaError> {
-    if arrow_type.is_null() {
-
-    }
     let sf_type = match arrow_type {
         // Integer types
-        DataType::Int8 | DataType::Int16 | DataType::Int32 => "NUMBER(10,0)",
-        DataType::Int64 => "NUMBER",
+        DataType::Int8 | DataType::Int16 | DataType::Int32 => "INTEGER",
+        DataType::Int64 => "INTEGER",
 
         // Unsigned integers - Snowflake doesn't have unsigned types, use NUMBER
-        DataType::UInt8 | DataType::UInt16 | DataType::UInt32 => "NUMBER(10,0)",
-        DataType::UInt64 => "NUMBER",
+        DataType::UInt8 | DataType::UInt16 | DataType::UInt32 => "INTEGER",
+        DataType::UInt64 => "INTEGER",
 
         // Floating point types
         DataType::Float16 | DataType::Float32 => "DOUBLE",

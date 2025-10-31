@@ -4,7 +4,7 @@ use std::{
 };
 
 pub(crate) use crate::arrow::{FieldRef, SchemaRef};
-use crate::{SchemaExt, schema::{TableKind, TableRef}, sql::DDLSafety};
+use crate::{SchemaExt, schema::{TableKind, TableRef}};
 
 #[derive(Clone, Debug)]
 pub struct Schema {
@@ -35,7 +35,7 @@ impl SchemaExt for Schema {
         todo!()
     }
 
-    fn as_table_ddl(&self, _ddl_safety: DDLSafety) -> Result<String, Self::ErrorType> {
+    fn as_table_ddl(&self) -> Result<String, Self::ErrorType> {
         todo!()
     }
 

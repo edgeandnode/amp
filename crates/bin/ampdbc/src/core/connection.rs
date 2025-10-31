@@ -3,14 +3,14 @@ use std::collections::HashSet;
 use adbc_core::{
     Connection as AdbcConnection, Database as AdbcDatabase, Optionable,
     error::Result as AdbcResult,
-    options::{InfoCode, IsolationLevel, ObjectDepth, OptionConnection, OptionValue},
+    options::{InfoCode, ObjectDepth, OptionConnection, OptionValue},
 };
 use common::arrow::{array::RecordBatchReader, datatypes::Schema};
 use tracing::info;
 
 use crate::{
-    DDLSafety, DriverSupport, SchemaExt, Statement, StatementExt, SupportedVendor,
-    config::DriverOpts, error::Result,
+    DriverSupport, SchemaExt, Statement, StatementExt, SupportedVendor, config::DriverOpts,
+    error::Result,
 };
 pub use crate::{
     bigquery::connection as bigquery, postgres::connection as postgres,
@@ -57,12 +57,11 @@ where
 
     fn create_table_ddl_statement(
         &mut self,
-        schema: <Self::Statement as StatementExt>::SchemaType,
-        ddl_safety: DDLSafety,
+        schema: &<Self::Statement as StatementExt>::SchemaType,
     ) -> crate::Result<Self::Statement> {
         let mut stmt: Self::Statement = self.create_statement()?;
 
-        stmt.prepare_create_table(schema, ddl_safety)?;
+        stmt.prepare_create_table(schema)?;
         Ok(stmt)
     }
 }
@@ -281,6 +280,7 @@ impl<'a> TryFrom<&'a mut DriverOpts> for Connection {
                 schema,
                 warehouse,
                 role,
+                auth_type,
                 ..
             } => {
                 use crate::error::snowflake::Error;
@@ -289,8 +289,17 @@ impl<'a> TryFrom<&'a mut DriverOpts> for Connection {
 
                 let mut driver = adbc_snowflake::Driver::try_load().map_err(Error::from)?;
 
-                let builder = if let Some(password) = password.take() {
+                let builder = if auth_type.is_external_browser() {
                     adbc_snowflake::database::Builder::default()
+                        .with_auth_type((*auth_type).into())
+                        .with_database(database.to_string())
+                        .with_account(account.to_string())
+                        .with_username(username.to_string())
+                        .with_schema(schema.to_string())
+                        .with_warehouse(warehouse.to_string())
+                } else if let Some(password) = password.take() {
+                    adbc_snowflake::database::Builder::default()
+                        .with_auth_type((*auth_type).into())
                         .with_account(account.to_string())
                         .with_username(username.to_string())
                         .with_password(password)
@@ -309,12 +318,8 @@ impl<'a> TryFrom<&'a mut DriverOpts> for Connection {
                     builder.build(&mut driver)?
                 };
 
-                let mut conn = database.new_connection().map_err(Error::from)?;
+                let conn = database.new_connection().map_err(Error::from)?;
                 // conn.set_option(OptionConnection::AutoCommit, "false".into())?;
-                conn.set_option(
-                    OptionConnection::IsolationLevel,
-                    IsolationLevel::Snapshot.into(),
-                )?;
 
                 Ok(Self::Snowflake(conn))
             }
@@ -360,6 +365,10 @@ fn prompt_for_password(
 
     let input = stdin.read_passwd(&mut stdout)?.unwrap_or_default();
 
+    // Clear the password prompt line
+    write!(stdout, "\r\x1b[K")?;
+    stdout.flush()?;
+
     if let Some(mut old) = std::mem::replace(password, Some(input.trim().to_string())) {
         let fill = u8::default();
         unsafe {
@@ -367,5 +376,6 @@ fn prompt_for_password(
         }
         old.clear();
     };
+
     Ok(())
 }

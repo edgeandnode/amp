@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![allow(incomplete_features)]
 
+pub mod cli;
 pub mod client;
 pub mod error;
 pub mod metrics;
@@ -12,6 +13,7 @@ mod core {
     pub mod connection;
     pub mod database;
     pub mod driver;
+    pub mod identifier;
     pub mod schema;
     pub mod statement;
 }
@@ -30,10 +32,9 @@ mod drivers {
 pub use common::{BYTES32_TYPE, SPECIAL_BLOCK_NUM};
 
 pub(crate) use crate::drivers::*;
-use crate::sql::DDLSafety;
 pub use crate::{
     core::{
-        config::{self, Config, DriverOpts},
+        config::{self, AmpdbcConfig, DriverOpts},
         connection::{self, Connection, ConnectionExt},
         database::{self, Database},
         driver::{self, Driver},
@@ -51,9 +52,7 @@ pub(crate) mod adbc {
         Statement as AdbcStatement, options,
     };
     pub mod error {
-        pub use adbc_core::error::{
-            Error as AdbcError, Result as AdbcResult,
-        };
+        pub use adbc_core::error::{Error as AdbcError, Result as AdbcResult};
     }
 }
 
@@ -68,7 +67,7 @@ pub(crate) mod arrow {
 
     pub mod datatypes {
         pub use common::arrow::datatypes::{
-            DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit,
+            DataType, Decimal128Type, Field, FieldRef, Schema, SchemaRef, TimeUnit,
         };
     }
 

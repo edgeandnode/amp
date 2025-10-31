@@ -164,7 +164,6 @@ pub(crate) mod sql {
             FROM tags
             WHERE namespace = $1 AND name = $2 AND version = $3
         "#};
-
         let result = sqlx::query_as(query)
             .bind(namespace)
             .bind(name)

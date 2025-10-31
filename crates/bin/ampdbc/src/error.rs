@@ -6,7 +6,10 @@ use std::{
 };
 
 use amp_client::{Error as AmpClientError, InvalidationRange, Metadata};
-use common::{BoxError, DataFusionError, config::ConfigError, metadata::segments::ResumeWatermark};
+use common::{
+    BoxError, DataFusionError, arrow::datatypes::DataType, config::ConfigError,
+    metadata::segments::ResumeWatermark,
+};
 use dataset_store::CatalogForSqlError;
 use tokio::sync::broadcast::error::SendError;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
@@ -101,6 +104,12 @@ impl From<SendError<Arc<ResumeWatermark>>> for Error {
     }
 }
 
+impl From<tokio::task::JoinError> for Error {
+    fn from(error: tokio::task::JoinError) -> Self {
+        Error::Execution(ExecutionError::TaskJoin(error))
+    }
+}
+
 impl From<toml::de::Error> for Error {
     fn from(error: toml::de::Error) -> Self {
         Error::Toml(error)
@@ -164,13 +173,29 @@ impl Error {
     ) -> impl FnMut(AdbcError) -> Self + 'a {
         tracing::error!("{}: rolling back current transaction", message);
         move |e: AdbcError| {
-            let _ = connection.rollback();
+            let _ = connection
+                .rollback()
+                .expect("Failed to rollback transaction");
             Error::Execution(ExecutionError::TransactionRollback(e))
         }
     }
 
     pub fn stream_read(e: ArrowError) -> Self {
         Error::Execution(ExecutionError::StreamRead(e))
+    }
+
+    pub fn type_mismatch(
+        table: String,
+        column: String,
+        expected: DataType,
+        found: DataType,
+    ) -> Self {
+        Error::Execution(ExecutionError::TypeMismatch {
+            table,
+            column,
+            expected,
+            found,
+        })
     }
 
     pub fn io_error(path: PathBuf) -> impl FnMut(std::io::Error) -> Self {
@@ -237,7 +262,14 @@ pub enum ExecutionError {
     ReorgSend(SendError<Arc<[InvalidationRange]>>),
     StreamStart(AmpClientError),
     StreamRead(ArrowError),
+    TaskJoin(tokio::task::JoinError),
     TransactionRollback(AdbcError),
+    TypeMismatch {
+        table: String,
+        column: String,
+        expected: DataType,
+        found: DataType,
+    },
     UnsafeBroadcastStart,
     WatermarkSend(SendError<Arc<ResumeWatermark>>),
 }
@@ -251,11 +283,24 @@ impl Display for ExecutionError {
             ReorgSend(e) => write!(f, "Failed to send reorganization notification: {:?}", e.0),
             StreamStart(e) => write!(f, "Failed to start stream: {}", e),
             StreamRead(e) => write!(f, "Error reading from stream: {}", e),
+            TaskJoin(e) => write!(f, "Pipeline task failed: {}", e),
             TransactionRollback(e) => {
                 write!(
                     f,
                     "Transaction was rolled back due to an error during execution: {}",
                     e
+                )
+            }
+            TypeMismatch {
+                table,
+                column,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Type mismatch in column '{}.{}': expected {}, found {}",
+                    table, column, expected, found
                 )
             }
             UnsafeBroadcastStart => {
@@ -278,7 +323,9 @@ impl StdError for ExecutionError {
             ExecutionError::ReorgSend(e) => Some(e),
             ExecutionError::StreamStart(e) => Some(e),
             ExecutionError::StreamRead(e) => Some(e),
+            ExecutionError::TaskJoin(e) => Some(e),
             ExecutionError::TransactionRollback(e) => e.source(),
+            ExecutionError::TypeMismatch { .. } => None,
             ExecutionError::UnsafeBroadcastStart => None,
             ExecutionError::WatermarkSend(e) => Some(e),
         }
