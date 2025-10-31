@@ -39,10 +39,12 @@ use crate::{
 )]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<WorkersResponse>, ErrorResponse> {
     // Fetch all workers from metadata DB
-    let workers = ctx.metadata_db.list_workers().await.map_err(|err| {
-        tracing::debug!(error=?err, "failed to list workers");
-        Error::MetadataDbError(err)
-    })?;
+    let workers = metadata_db::workers::list(&ctx.metadata_db)
+        .await
+        .map_err(|err| {
+            tracing::debug!(error=?err, "failed to list workers");
+            Error::MetadataDbError(err)
+        })?;
 
     let workers = workers.into_iter().map(Into::into).collect();
 

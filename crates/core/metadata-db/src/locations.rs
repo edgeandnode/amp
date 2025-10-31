@@ -10,7 +10,7 @@ pub use self::{
 use crate::{
     JobStatus, TableId,
     jobs::{Job, JobId},
-    workers::NodeIdOwned,
+    workers::WorkerNodeIdOwned,
 };
 
 pub mod events;
@@ -118,7 +118,7 @@ where
         url: Url,
         active: bool,
         writer_job_id: Option<JobId>,
-        writer_job_node_id: Option<NodeIdOwned>,
+        writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
         writer_job_descriptor: Option<JsonValue>,
         writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,

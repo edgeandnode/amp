@@ -6,7 +6,6 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
-use tokio::time::MissedTickBehavior;
 use tracing::instrument;
 use url::Url;
 
@@ -20,9 +19,9 @@ pub mod manifests;
 pub mod notification_multiplexer;
 #[cfg(feature = "temp-db")]
 pub mod temp;
-mod workers;
+pub mod workers;
 
-use self::db::{ConnPool, Connection};
+use self::db::ConnPool;
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
@@ -48,18 +47,10 @@ pub use self::{
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     workers::{
-        NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned, Worker, WorkerInfo,
-        WorkerInfoOwned,
+        HEARTBEAT_INTERVAL, Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
     },
 };
-
-/// Frequency on which to send a heartbeat.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
-
-/// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
-/// schedule new jobs only on active workers.
-pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Default pool size for the metadata DB.
 pub const DEFAULT_POOL_SIZE: u32 = 10;
@@ -68,11 +59,7 @@ pub const DEFAULT_POOL_SIZE: u32 = 10;
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
     pool: ConnPool,
-    #[cfg(feature = "temp-db")]
     pub(crate) url: Arc<str>,
-    #[cfg(not(feature = "temp-db"))]
-    url: Arc<str>,
-    dead_worker_interval: Duration,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -109,7 +96,6 @@ impl MetadataDb {
         Ok(Self {
             pool,
             url: url.into(),
-            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
         })
     }
 
@@ -151,17 +137,7 @@ impl MetadataDb {
         Ok(Self {
             pool,
             url: url.into(),
-            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
         })
-    }
-
-    /// Configures the "dead worker" interval for the metadata DB instance
-    pub fn with_dead_worker_interval(self, dead_worker_interval: Duration) -> Self {
-        Self {
-            pool: self.pool,
-            url: self.url,
-            dead_worker_interval,
-        }
     }
 
     /// Begins a new database transaction
@@ -239,98 +215,6 @@ impl<'c> sqlx::Executor<'c> for &'c MetadataDb {
 impl<'c> Executor<'c> for &'c MetadataDb {}
 
 impl _priv::Sealed for &MetadataDb {}
-
-/// Worker-related API
-impl MetadataDb {
-    /// Registers a worker in the `workers` table, and updates the latest heartbeat timestamp.
-    ///
-    /// This operation is idempotent.
-    pub async fn register_worker(
-        &self,
-        node_id: impl Into<WorkerNodeId<'_>>,
-        info: impl Into<WorkerInfo<'_>>,
-    ) -> Result<(), Error> {
-        workers::register(&*self.pool, node_id.into(), info.into()).await?;
-        Ok(())
-    }
-
-    /// Establish a dedicated connection to the metadata DB, and return a future that loops
-    /// forever, updating the worker's heartbeat in the dedicated DB connection.
-    ///
-    /// If the initial connection fails, an error is returned.
-    pub async fn worker_heartbeat_loop(
-        &self,
-        node_id: impl Into<WorkerNodeIdOwned>,
-    ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
-        let mut conn = Connection::connect(&self.url).await?;
-
-        let node_id = node_id.into();
-        let fut = async move {
-            let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                workers::update_heartbeat(&mut *conn, node_id.clone()).await?;
-            }
-        };
-
-        Ok(Box::pin(fut))
-    }
-
-    /// Returns a list of active workers.
-    ///
-    /// A worker is active if it has sent a sufficiently recent heartbeat.
-    ///
-    /// The dead worker interval can be configured when instantiating the metadata DB.
-    pub async fn active_workers(&self) -> Result<Vec<WorkerNodeIdOwned>, Error> {
-        Ok(workers::list_active(&*self.pool, self.dead_worker_interval).await?)
-    }
-
-    /// Returns a list of all workers.
-    ///
-    /// Returns all workers in the database with their complete information including
-    /// id, node_id, and heartbeat_at timestamp.
-    pub async fn list_workers(&self) -> Result<Vec<Worker>, Error> {
-        Ok(workers::list(&*self.pool).await?)
-    }
-
-    /// Listen to the worker actions notification channel for job notifications
-    ///
-    /// The listener will only yield notifications targeted to the specified `node_id`.
-    pub async fn listen_for_job_notifications<'a, N>(
-        &self,
-        node_id: N,
-    ) -> Result<WorkerNotifListener, Error>
-    where
-        N: Into<WorkerNodeId<'a>>,
-    {
-        workers::events::listen_url(&self.url, node_id.into().to_owned())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Send a job notification to a worker
-    ///
-    /// This function sends a notification with a custom payload to the specified worker node.
-    /// The payload must implement `serde::Serialize` and will be serialized to JSON.
-    ///
-    /// # Usage
-    ///
-    /// Typically called after successful job state transitions (e.g., after scheduling a job
-    /// or requesting a job stop) to notify the worker of the change.
-    #[instrument(skip(self, payload), err)]
-    pub async fn send_job_notification<T>(
-        &self,
-        node_id: impl Into<WorkerNodeIdOwned> + std::fmt::Debug,
-        payload: &T,
-    ) -> Result<(), Error>
-    where
-        T: serde::Serialize,
-    {
-        workers::events::notify(&*self.pool, node_id.into(), payload).await?;
-        Ok(())
-    }
-}
 
 /// Location-related API
 impl MetadataDb {
