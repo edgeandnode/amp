@@ -93,7 +93,7 @@ pub async fn dump(
             dataset_manifests_store,
         )
     };
-    let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
+    let run_every = run_every_mins.map(|mins| tokio::time::interval(Duration::from_mins(mins)));
 
     let datasets = match ignore_deps {
         true => vec![dataset],
