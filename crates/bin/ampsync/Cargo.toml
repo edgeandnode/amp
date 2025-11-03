@@ -21,6 +21,7 @@ snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 admin-api = { path = "../../services/admin-api" }
+alloy.workspace = true
 amp-client = { path = "../../client/amp-client" }
 anyhow.workspace = true
 arrow-array = { version = "56", default-features = false }

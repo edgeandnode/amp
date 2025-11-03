@@ -5,8 +5,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use amp_client::{ResponseBatchWithReorg, SqlClient};
-use common::metadata::segments::ResumeWatermark;
+use amp_client::{AmpClient, InvalidationRange, ProtocolMessage, ProtocolStream};
+use common::metadata::segments::{BlockRange, ResumeWatermark};
 use futures::StreamExt;
 use tracing::{debug, error, info, warn};
 
@@ -60,7 +60,7 @@ impl StreamTask {
     /// * `shutdown_token` - Token for graceful shutdown signaling
     pub async fn run(
         self,
-        sql_client: &mut SqlClient,
+        sql_client: &mut AmpClient,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: Arc<tokio::sync::Semaphore>,
         shutdown_token: tokio_util::sync::CancellationToken,
@@ -78,8 +78,8 @@ impl StreamTask {
             }
 
             // Query with watermark for hash-verified resumption
-            let result_stream = match sql_client
-                .query(&self.streaming_query, None, self.resume_watermark.as_ref())
+            let raw_stream = match sql_client
+                .request(&self.streaming_query, self.resume_watermark.as_ref())
                 .await
             {
                 Ok(stream) => stream,
@@ -115,7 +115,8 @@ impl StreamTask {
                 }
             };
 
-            let mut reorg_stream = amp_client::with_reorg(result_stream);
+            let mut reorg_stream = ProtocolStream::new(raw_stream.boxed(), Vec::new());
+
             info!(
                 table = %self.table_name,
                 "stream_started"
@@ -187,35 +188,35 @@ impl StreamTask {
     /// Returns true if the stream should reconnect, false if shutdown was requested.
     async fn process_stream<S>(
         &self,
-        reorg_stream: &mut S,
+        protocol_stream: &mut S,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
         shutdown_token: &tokio_util::sync::CancellationToken,
     ) -> bool
     where
-        S: futures::Stream<Item = Result<ResponseBatchWithReorg, amp_client::Error>> + Unpin,
+        S: futures::Stream<Item = Result<ProtocolMessage, amp_client::Error>> + Unpin,
     {
-        while let Some(result) = reorg_stream.next().await {
+        while let Some(result) = protocol_stream.next().await {
             match result {
-                Ok(ResponseBatchWithReorg::Batch { data, metadata }) => {
+                Ok(ProtocolMessage::Data { batch, ranges }) => {
                     if !self
-                        .handle_batch(data, metadata, db_engine, batch_semaphore)
+                        .handle_batch(batch, ranges, db_engine, batch_semaphore)
                         .await
                     {
                         return true; // Error - reconnect
                     }
                 }
-                Ok(ResponseBatchWithReorg::Reorg { invalidation }) => {
+                Ok(ProtocolMessage::Reorg { invalidation, .. }) => {
                     if !self
-                        .handle_reorg(invalidation, db_engine, batch_semaphore)
+                        .handle_reorg(&invalidation, db_engine, batch_semaphore)
                         .await
                     {
                         return true; // Error - reconnect
                     }
                 }
-                Ok(ResponseBatchWithReorg::Watermark(watermark)) => {
+                Ok(ProtocolMessage::Watermark { ranges }) => {
                     if !self
-                        .handle_watermark(watermark, db_engine, batch_semaphore)
+                        .handle_watermark(ranges, db_engine, batch_semaphore)
                         .await
                     {
                         return true; // Error - reconnect
@@ -249,15 +250,15 @@ impl StreamTask {
     /// Returns true on success, false if an error occurred (triggers reconnect).
     async fn handle_batch(
         &self,
-        data: common::arrow::array::RecordBatch,
-        metadata: amp_client::Metadata,
+        batch: common::arrow::array::RecordBatch,
+        ranges: Vec<BlockRange>,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
     ) -> bool {
         info!(
             table = %self.table_name,
-            rows = data.num_rows(),
-            block_ranges = ?metadata.ranges,
+            rows = batch.num_rows(),
+            block_ranges = ?ranges,
             "batch_received"
         );
 
@@ -274,7 +275,7 @@ impl StreamTask {
         };
 
         // Convert nanosecond timestamps to microseconds for PostgreSQL compatibility
-        let converted_batch = match convert_nanosecond_timestamps(data) {
+        let converted_batch = match convert_nanosecond_timestamps(batch) {
             Ok(batch) => batch,
             Err(e) => {
                 error!(
@@ -287,7 +288,7 @@ impl StreamTask {
         };
 
         // Inject system metadata columns (_id, _block_num_start, _block_num_end)
-        let batch_with_metadata = match inject_system_metadata(converted_batch, &metadata.ranges) {
+        let batch_with_metadata = match inject_system_metadata(converted_batch, &ranges) {
             Ok(batch) => batch,
             Err(e) => {
                 error!(
@@ -320,8 +321,7 @@ impl StreamTask {
         );
 
         // Update incremental checkpoint for progress tracking between watermarks
-        if let Some((network, max_block)) =
-            AmpsyncDbEngine::extract_max_block_from_ranges(&metadata.ranges)
+        if let Some((network, max_block)) = AmpsyncDbEngine::extract_max_block_from_ranges(&ranges)
         {
             if let Err(e) = db_engine
                 .update_incremental_checkpoint(&self.table_name, &network, max_block)
@@ -353,7 +353,7 @@ impl StreamTask {
     /// Returns true on success, false if an error occurred (triggers reconnect).
     async fn handle_reorg(
         &self,
-        invalidation: Vec<amp_client::InvalidationRange>,
+        invalidation: &[InvalidationRange],
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
     ) -> bool {
@@ -377,10 +377,7 @@ impl StreamTask {
         };
 
         // Handle reorg by deleting affected rows
-        if let Err(e) = db_engine
-            .handle_reorg(&self.table_name, &invalidation)
-            .await
-        {
+        if let Err(e) = db_engine.handle_reorg(&self.table_name, invalidation).await {
             error!(
                 table = %self.table_name,
                 error = %e,
@@ -391,6 +388,7 @@ impl StreamTask {
 
         info!(
             table = %self.table_name,
+            invalidation_ranges = ?invalidation,
             "reorg_handled"
         );
 
@@ -402,10 +400,13 @@ impl StreamTask {
     /// Returns true on success, false if an error occurred (triggers reconnect).
     async fn handle_watermark(
         &self,
-        watermark: ResumeWatermark,
+        ranges: Vec<BlockRange>,
         db_engine: &AmpsyncDbEngine,
         batch_semaphore: &Arc<tokio::sync::Semaphore>,
     ) -> bool {
+        // Convert block ranges to resume watermark
+        let watermark = ResumeWatermark::from_ranges(&ranges);
+
         info!(
             table = %self.table_name,
             watermark = ?watermark,

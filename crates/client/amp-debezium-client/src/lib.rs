@@ -7,22 +7,19 @@
 //! ## Example
 //!
 //! ```no_run
-//! use amp_client::SqlClient;
+//! use amp_client::AmpClient;
 //! use amp_debezium_client::{DebeziumClient, DebeziumOp};
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create a Debezium client (defaults to InMemoryStore with 64-block reorg window)
-//!     let amp_client = SqlClient::new("http://localhost:1602").await?;
+//!     let amp_client = AmpClient::from_endpoint("http://localhost:1602").await?;
 //!     let client = DebeziumClient::new(amp_client, None);
 //!
 //!     // Execute a streaming query
 //!     let mut stream = client
-//!         .stream(
-//!             "SELECT * FROM eth_rpc.logs WHERE address = '0x...' SETTINGS stream = true",
-//!             None,
-//!         )
+//!         .stream("SELECT * FROM eth_rpc.logs WHERE address = '0x...' SETTINGS stream = true")
 //!         .await?;
 //!
 //!     // Process Debezium CDC events
@@ -107,4 +104,4 @@ pub use error::{Error, Result};
 #[cfg(feature = "lmdb")]
 pub use stores::LmdbStore;
 pub use stores::{InMemoryStore, StateStore};
-pub use types::{DebeziumOp, DebeziumRecord, StoredBatch};
+pub use types::{DebeziumOp, DebeziumRecord};

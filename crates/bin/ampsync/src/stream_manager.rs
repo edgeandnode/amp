@@ -5,7 +5,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use amp_client::SqlClient;
+use amp_client::AmpClient;
 use common::BoxError;
 use tracing::{debug, info, warn};
 
@@ -22,7 +22,7 @@ const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 /// Returns task handles that can be used to await completion during shutdown.
 pub async fn spawn_stream_tasks(
     config: &AmpsyncConfig,
-    sql_client: &SqlClient,
+    sql_client: &AmpClient,
     ampsync_db_engine: &AmpsyncDbEngine,
     shutdown_token: tokio_util::sync::CancellationToken,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, BoxError> {

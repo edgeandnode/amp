@@ -7,7 +7,7 @@ mod stream_task;
 mod sync_engine;
 mod version_polling;
 
-use amp_client::SqlClient;
+use amp_client::AmpClient;
 use clap::Parser as _;
 use common::BoxError;
 use conn::DbConnPool;
@@ -209,7 +209,7 @@ async fn main() -> Result<(), BoxError> {
             .await?;
 
             // Connect to Nozzle server (reused across reloads)
-            let sql_client = SqlClient::new(&config.amp_flight_addr).await?;
+            let sql_client = AmpClient::from_endpoint(&config.amp_flight_addr).await?;
             info!(
                 flight_addr = %config.amp_flight_addr,
                 "nozzle_server_connected"

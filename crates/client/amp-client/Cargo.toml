@@ -5,8 +5,10 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+alloy.workspace = true
 arrow-flight.workspace = true
 async-stream.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
 common = { path = "../../core/common" }
 futures.workspace = true
@@ -15,3 +17,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
+tracing.workspace = true

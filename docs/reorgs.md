@@ -56,10 +56,10 @@ Clients should track block ranges from consecutive batches to handle reorgs. The
 2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch is not equal to the prior range and starts at or before a previous batch's end block, a reorg has occurred.
 3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed. If a start number from the incomming ranges lies in the middle of a previously processed range (`range.start < incomming.start < range.end`), then the client should invalidate all batches associated with the previously processed range and reconnect to the client using a `amp-resume` header (see [Resuming streams](#resuming-streams)) set to a watermark before the start of the incomming ranges such that all record batches after the watermark can be invalidated.
 
-For a reference implementation in Rust, see `amp_client::with_reorg` which automatically wraps query result streams to emit three types of events:
-- `ResponseBatchWithReorg::Batch` - Normal data batches with metadata
-- `ResponseBatchWithReorg::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
-- `ResponseBatchWithReorg::Reorg` - Reorg detection events with invalidation ranges
+For a reference implementation in Rust, see `amp_client::AmpClient::stream` which automatically wraps query result streams to emit three types of events:
+- `ProtocolMessage::Data` - Normal data batches with metadata
+- `ProtocolMessage::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
+- `ProtocolMessage::Reorg` - Reorg detection events with invalidation ranges
 
 #### Resuming Streams
 
