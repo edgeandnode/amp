@@ -4,7 +4,7 @@ use pgtemp::PgTempDB;
 use url::Url;
 
 use crate::{
-    TableId, WorkerNodeId,
+    TableId, WorkerInfo, WorkerNodeId,
     db::Connection,
     jobs::{self, JobId},
     locations::{self, LocationId},
@@ -22,7 +22,7 @@ async fn insert_creates_location_and_returns_id() {
         .await
         .expect("Failed to run migrations");
 
-    let columns: Vec<String> = sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_name = 'locations' ORDER BY column_name").fetch_all(&mut *conn).await.expect("Failed to query schema");
+    let columns: Vec<String> = sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_name = 'locations' ORDER BY column_name").fetch_all(&mut conn).await.expect("Failed to query schema");
     println!("Locations table columns: {:?}", columns);
 
     let table = TableId {
@@ -37,7 +37,7 @@ async fn insert_creates_location_and_returns_id() {
     let active = true;
 
     //* When
-    let location_id = locations::insert(&mut *conn, table, bucket, path, &url, active)
+    let location_id = locations::insert(&mut conn, table, bucket, path, &url, active)
         .await
         .expect("Failed to insert location");
 
@@ -54,7 +54,7 @@ async fn insert_creates_location_and_returns_id() {
         row_path,
         row_url,
         row_active,
-    ) = get_location_by_id(&mut *conn, location_id)
+    ) = get_location_by_id(&mut conn, location_id)
         .await
         .expect("Failed to fetch inserted location");
 
@@ -88,12 +88,12 @@ async fn insert_on_conflict_returns_existing_id() {
         .expect("Failed to parse unique file URL");
 
     // Insert first location
-    let first_id = locations::insert(&mut *conn, table, Some("bucket1"), "/path1", &url, true)
+    let first_id = locations::insert(&mut conn, table, Some("bucket1"), "/path1", &url, true)
         .await
         .expect("Failed to insert first location");
 
     //* When - Try to insert with same URL but different data
-    let second_id = locations::insert(&mut *conn, table, Some("bucket2"), "/path2", &url, false)
+    let second_id = locations::insert(&mut conn, table, Some("bucket2"), "/path2", &url, false)
         .await
         .expect("Failed to insert second location");
 
@@ -119,12 +119,12 @@ async fn url_to_location_id_finds_existing_location() {
     };
     let url = Url::parse("s3://test-bucket/find-me.parquet").expect("Failed to parse find-me URL");
 
-    let expected_id = locations::insert(&mut *conn, table, None, "/find-me.parquet", &url, false)
+    let expected_id = locations::insert(&mut conn, table, None, "/find-me.parquet", &url, false)
         .await
         .expect("Failed to insert location");
 
     //* When
-    let found_id = locations::url_to_id(&mut *conn, &url)
+    let found_id = locations::url_to_id(&mut conn, &url)
         .await
         .expect("Failed to search for location");
 
@@ -147,7 +147,7 @@ async fn url_to_location_id_returns_none_when_not_found() {
         .expect("Failed to parse nonexistent URL");
 
     //* When
-    let found_id = locations::url_to_id(&mut *conn, &url)
+    let found_id = locations::url_to_id(&mut conn, &url)
         .await
         .expect("Failed to search for location");
 
@@ -184,19 +184,19 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 
     // Create active location for target table
     let url1 = Url::parse("s3://bucket/active1.parquet").expect("Failed to parse active1 URL");
-    let active_id1 = locations::insert(&mut *conn, table, None, "/active1.parquet", &url1, true)
+    let active_id1 = locations::insert(&mut conn, table, None, "/active1.parquet", &url1, true)
         .await
         .expect("Failed to insert active location 1");
 
     // Create another active location for different table (still should be returned)
     let url2 = Url::parse("s3://bucket/active2.parquet").expect("Failed to parse active2 URL");
-    let active_id2 = locations::insert(&mut *conn, table2, None, "/active2.parquet", &url2, true)
+    let active_id2 = locations::insert(&mut conn, table2, None, "/active2.parquet", &url2, true)
         .await
         .expect("Failed to insert active location 2");
 
     // Create inactive location for target table (should be filtered out)
     let url3 = Url::parse("s3://bucket/inactive.parquet").expect("Failed to parse inactive URL");
-    locations::insert(&mut *conn, table, None, "/inactive.parquet", &url3, false)
+    locations::insert(&mut conn, table, None, "/inactive.parquet", &url3, false)
         .await
         .expect("Failed to insert inactive location");
 
@@ -204,7 +204,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url4 =
         Url::parse("s3://bucket/other-table.parquet").expect("Failed to parse other-table URL");
     locations::insert(
-        &mut *conn,
+        &mut conn,
         other_table,
         None,
         "/other-table.parquet",
@@ -215,10 +215,10 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     .expect("Failed to insert location for other table");
 
     //* When - Get locations for first table
-    let active_locations1 = locations::get_active_by_table_id(&mut *conn, table)
+    let active_locations1 = locations::get_active_by_table_id(&mut conn, table)
         .await
         .expect("Failed to get active locations for table 1");
-    let active_locations2 = locations::get_active_by_table_id(&mut *conn, table2)
+    let active_locations2 = locations::get_active_by_table_id(&mut conn, table2)
         .await
         .expect("Failed to get active locations for table 2");
 
@@ -274,13 +274,13 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 
     // Create active location for first target table
     let url1 = Url::parse("s3://bucket/target1.parquet").expect("Failed to parse target1 URL");
-    let target_id1 = locations::insert(&mut *conn, table, None, "/target1.parquet", &url1, true)
+    let target_id1 = locations::insert(&mut conn, table, None, "/target1.parquet", &url1, true)
         .await
         .expect("Failed to insert target location 1");
 
     // Create active location for second target table
     let url2 = Url::parse("s3://bucket/target2.parquet").expect("Failed to parse target2 URL");
-    let target_id2 = locations::insert(&mut *conn, table2, None, "/target2.parquet", &url2, true)
+    let target_id2 = locations::insert(&mut conn, table2, None, "/target2.parquet", &url2, true)
         .await
         .expect("Failed to insert target location 2");
 
@@ -288,7 +288,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     let url3 = Url::parse("s3://bucket/already-inactive.parquet")
         .expect("Failed to parse already-inactive URL");
     let inactive_id = locations::insert(
-        &mut *conn,
+        &mut conn,
         table,
         None,
         "/already-inactive.parquet",
@@ -300,27 +300,27 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 
     // Create active location for different table (should remain unchanged)
     let url4 = Url::parse("s3://bucket/other.parquet").expect("Failed to parse other URL");
-    let other_id = locations::insert(&mut *conn, other_table, None, "/other.parquet", &url4, true)
+    let other_id = locations::insert(&mut conn, other_table, None, "/other.parquet", &url4, true)
         .await
         .expect("Failed to insert other table location");
 
     //* When - Mark only the first table inactive
-    locations::mark_inactive_by_table_id(&mut *conn, table)
+    locations::mark_inactive_by_table_id(&mut conn, table)
         .await
         .expect("Failed to mark locations inactive");
 
     //* Then
     // Check that only first target table location is now inactive
-    let target1_active = is_location_active(&mut *conn, target_id1)
+    let target1_active = is_location_active(&mut conn, target_id1)
         .await
         .expect("Failed to check target1 active status");
-    let target2_active = is_location_active(&mut *conn, target_id2)
+    let target2_active = is_location_active(&mut conn, target_id2)
         .await
         .expect("Failed to check target2 active status"); // Different table, should stay active
-    let inactive_still_inactive = is_location_active(&mut *conn, inactive_id)
+    let inactive_still_inactive = is_location_active(&mut conn, inactive_id)
         .await
         .expect("Failed to check inactive location status");
-    let other_still_active = is_location_active(&mut *conn, other_id)
+    let other_still_active = is_location_active(&mut conn, other_id)
         .await
         .expect("Failed to check other location status");
 
@@ -349,21 +349,14 @@ async fn mark_active_by_url_activates_specific_location() {
 
     let url1 =
         Url::parse("s3://bucket/to-activate.parquet").expect("Failed to parse to-activate URL");
-    let target_id = locations::insert(
-        &mut *conn,
-        table,
-        None,
-        "/to-activate.parquet",
-        &url1,
-        false,
-    )
-    .await
-    .expect("Failed to insert location to activate");
+    let target_id = locations::insert(&mut conn, table, None, "/to-activate.parquet", &url1, false)
+        .await
+        .expect("Failed to insert location to activate");
 
     let url2 =
         Url::parse("s3://bucket/stay-inactive.parquet").expect("Failed to parse stay-inactive URL");
     let other_id = locations::insert(
-        &mut *conn,
+        &mut conn,
         table,
         None,
         "/stay-inactive.parquet",
@@ -374,15 +367,15 @@ async fn mark_active_by_url_activates_specific_location() {
     .expect("Failed to insert other location");
 
     //* When
-    locations::mark_active_by_url(&mut *conn, table, &url1)
+    locations::mark_active_by_url(&mut conn, table, &url1)
         .await
         .expect("Failed to mark location active");
 
     //* Then
-    let target_active = is_location_active(&mut *conn, target_id)
+    let target_active = is_location_active(&mut conn, target_id)
         .await
         .expect("Failed to check target location active status");
-    let other_still_inactive = is_location_active(&mut *conn, other_id)
+    let other_still_inactive = is_location_active(&mut conn, other_id)
         .await
         .expect("Failed to check other location active status");
 
@@ -403,14 +396,15 @@ async fn get_by_job_id_returns_locations_written_by_job() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"operation": "dump"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::sql::insert_with_default_status(&mut *conn, worker_id, &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -433,32 +427,20 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     // Create locations and assign them to the job
     let url1 =
         Url::parse("s3://bucket/job-output1.parquet").expect("Failed to parse job-output1 URL");
-    let location_id1 = locations::insert(
-        &mut *conn,
-        table1,
-        None,
-        "/job-output1.parquet",
-        &url1,
-        true,
-    )
-    .await
-    .expect("Failed to insert location 1");
+    let location_id1 =
+        locations::insert(&mut conn, table1, None, "/job-output1.parquet", &url1, true)
+            .await
+            .expect("Failed to insert location 1");
 
     let url2 =
         Url::parse("s3://bucket/job-output2.parquet").expect("Failed to parse job-output2 URL");
-    let location_id2 = locations::insert(
-        &mut *conn,
-        table2,
-        None,
-        "/job-output2.parquet",
-        &url2,
-        true,
-    )
-    .await
-    .expect("Failed to insert location 2");
+    let location_id2 =
+        locations::insert(&mut conn, table2, None, "/job-output2.parquet", &url2, true)
+            .await
+            .expect("Failed to insert location 2");
 
     // Assign locations to job
-    locations::assign_job_writer(&mut *conn, &[location_id1, location_id2], job_id)
+    locations::assign_job_writer(&mut conn, &[location_id1, location_id2], job_id)
         .await
         .expect("Failed to assign job writer");
 
@@ -466,7 +448,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     let url3 =
         Url::parse("s3://bucket/other-output.parquet").expect("Failed to parse other-output URL");
     locations::insert(
-        &mut *conn,
+        &mut conn,
         table3,
         None,
         "/other-output.parquet",
@@ -477,7 +459,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     .expect("Failed to insert unrelated location");
 
     //* When
-    let job_locations = locations::get_by_job_id(&mut *conn, job_id)
+    let job_locations = locations::get_by_job_id(&mut conn, job_id)
         .await
         .expect("Failed to get locations by job ID");
 
@@ -510,14 +492,15 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    workers::register(&mut *conn, worker_id.clone())
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&mut conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"operation": "write"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::sql::insert_with_default_status(&mut *conn, worker_id, &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -529,17 +512,17 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create locations to assign
     let url1 = Url::parse("s3://bucket/assign1.parquet").expect("Failed to parse assign1 URL");
-    let location_id1 = locations::insert(&mut *conn, table, None, "/assign1.parquet", &url1, false)
+    let location_id1 = locations::insert(&mut conn, table, None, "/assign1.parquet", &url1, false)
         .await
         .expect("Failed to insert location 1");
 
     let url2 = Url::parse("s3://bucket/assign2.parquet").expect("Failed to parse assign2 URL");
-    let location_id2 = locations::insert(&mut *conn, table, None, "/assign2.parquet", &url2, false)
+    let location_id2 = locations::insert(&mut conn, table, None, "/assign2.parquet", &url2, false)
         .await
         .expect("Failed to insert location 2");
 
     let url3 = Url::parse("s3://bucket/assign3.parquet").expect("Failed to parse assign3 URL");
-    let location_id3 = locations::insert(&mut *conn, table, None, "/assign3.parquet", &url3, false)
+    let location_id3 = locations::insert(&mut conn, table, None, "/assign3.parquet", &url3, false)
         .await
         .expect("Failed to insert location 3");
 
@@ -547,7 +530,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url4 =
         Url::parse("s3://bucket/not-assigned.parquet").expect("Failed to parse not-assigned URL");
     let unassigned_id = locations::insert(
-        &mut *conn,
+        &mut conn,
         table,
         None,
         "/not-assigned.parquet",
@@ -559,7 +542,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     //* When
     locations::assign_job_writer(
-        &mut *conn,
+        &mut conn,
         &[location_id1, location_id2, location_id3],
         job_id,
     )
@@ -567,16 +550,16 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     .expect("Failed to assign job writer");
 
     //* Then
-    let writer1 = get_writer_by_location_id(&mut *conn, location_id1)
+    let writer1 = get_writer_by_location_id(&mut conn, location_id1)
         .await
         .expect("Failed to get writer for location_id1");
-    let writer2 = get_writer_by_location_id(&mut *conn, location_id2)
+    let writer2 = get_writer_by_location_id(&mut conn, location_id2)
         .await
         .expect("Failed to get writer for location_id2");
-    let writer3 = get_writer_by_location_id(&mut *conn, location_id3)
+    let writer3 = get_writer_by_location_id(&mut conn, location_id3)
         .await
         .expect("Failed to get writer for location_id3");
-    let writer_unassigned = get_writer_by_location_id(&mut *conn, unassigned_id)
+    let writer_unassigned = get_writer_by_location_id(&mut conn, unassigned_id)
         .await
         .expect("Failed to get writer for unassigned location");
 
@@ -605,7 +588,7 @@ async fn get_by_id_returns_existing_location() {
     let url = Url::parse("s3://bucket/get-by-id.parquet").expect("Failed to parse URL");
 
     let inserted_id = locations::insert(
-        &mut *conn,
+        &mut conn,
         table,
         Some("bucket"),
         "/get-by-id.parquet",
@@ -616,7 +599,7 @@ async fn get_by_id_returns_existing_location() {
     .expect("Failed to insert location");
 
     //* When
-    let location = locations::get_by_id_with_details(&mut *conn, inserted_id)
+    let location = locations::get_by_id_with_details(&mut conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
@@ -647,7 +630,7 @@ async fn get_by_id_returns_none_for_nonexistent_location() {
     let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
 
     //* When
-    let location = locations::get_by_id_with_details(&mut *conn, nonexistent_id)
+    let location = locations::get_by_id_with_details(&mut conn, nonexistent_id)
         .await
         .expect("Failed to get location by id");
 

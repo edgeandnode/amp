@@ -5,7 +5,6 @@ import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
 import * as Cause from "effect/Cause"
-import * as Config from "effect/Config"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -14,9 +13,7 @@ import * as Schema from "effect/Schema"
 import * as os from "node:os"
 import * as path from "node:path"
 
-export const AUTH_PLATFORM_URL = Schema.Config("AUTH_PLATFORM_URL", Schema.URL).pipe(
-  Config.withDefault(new URL("https://platform-auth-ui.vercel.app/")),
-)
+export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
 )
@@ -70,8 +67,6 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     const httpClient = yield* HttpClient.HttpClient
     const kv = (yield* KeyValueStore.KeyValueStore).forSchema(AuthStorageSchema)
 
-    const platformAuthUrl = yield* AUTH_PLATFORM_URL
-
     // Helper to extract error description from response body
     const extractErrorDescription = (response: HttpClientResponse.HttpClientResponse) =>
       response.json.pipe(
@@ -98,7 +93,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         refresh_token: refreshToken,
         user_id: userId,
       })
-      const req = HttpClientRequest.post(`${platformAuthUrl}api/v1/auth/refresh`).pipe(
+      const req = HttpClientRequest.post(`${AUTH_PLATFORM_URL}api/v1/auth/refresh`).pipe(
         HttpClientRequest.acceptJson,
         HttpClientRequest.bearerToken(accessToken),
         HttpClientRequest.setHeaders({

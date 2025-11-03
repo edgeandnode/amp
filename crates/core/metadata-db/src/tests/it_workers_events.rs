@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use pgtemp::PgTempDB;
 
-use crate::{JobId, JobStatus, MetadataDb, WorkerNodeId};
+use crate::{JobId, JobStatus, MetadataDb, WorkerInfo, WorkerNodeId, workers};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct JobNotification {
@@ -23,8 +23,8 @@ async fn schedule_job_and_receive_notification() {
 
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
-    metadata_db
-        .register_worker(&worker_id)
+    let worker_info = WorkerInfo::default(); // {}
+    workers::register(&metadata_db, &worker_id, worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -38,8 +38,7 @@ async fn schedule_job_and_receive_notification() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     // Start listening for notifications before scheduling the job
-    let listener = metadata_db
-        .listen_for_job_notifications(&worker_id)
+    let listener = workers::listen_for_job_notif(&metadata_db, worker_id.clone())
         .await
         .expect("Failed to create job notification listener");
 
@@ -52,16 +51,16 @@ async fn schedule_job_and_receive_notification() {
         .expect("Failed to schedule job");
 
     // Send notification to the worker
-    metadata_db
-        .send_job_notification(
-            worker_id.to_owned(),
-            &JobNotification {
-                job_id,
-                action: "START".to_string(),
-            },
-        )
-        .await
-        .expect("Failed to send job notification");
+    workers::send_job_notif(
+        &metadata_db,
+        worker_id.to_owned(),
+        &JobNotification {
+            job_id,
+            action: "START".to_string(),
+        },
+    )
+    .await
+    .expect("Failed to send job notification");
 
     // Receive the notification
     let received_notification = tokio::time::timeout(

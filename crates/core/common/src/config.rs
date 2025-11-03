@@ -43,6 +43,8 @@ pub struct Config {
     pub config_path: PathBuf,
     pub parquet: ParquetConfig,
     pub poll_interval: Duration,
+    /// Build information (version, commit SHA, timestamps)
+    pub build_info: BuildInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +316,30 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
     }
 }
 
+/// Build information populated from vergen at compile time.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BuildInfo {
+    /// Git describe output (e.g. `v0.0.22-15-g8b065bde`)
+    pub version: String,
+    /// Full commit SHA hash (e.g. `8b065bde1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d`)
+    pub commit_sha: String,
+    /// Commit timestamp in ISO 8601 format (e.g. `2025-10-30T11:14:07Z`)
+    pub commit_timestamp: String,
+    /// Build date (e.g. `2025-10-30`)
+    pub build_date: String,
+}
+
+impl Default for BuildInfo {
+    fn default() -> Self {
+        Self {
+            version: "unknown".to_string(),
+            commit_sha: "unknown".to_string(),
+            commit_timestamp: "unknown".to_string(),
+            build_date: "unknown".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     data_dir: String,
@@ -385,6 +411,7 @@ impl Config {
         env_override: bool,
         config_override: Option<Figment>,
         allow_temp_db: bool,
+        build_info: impl Into<Option<BuildInfo>>,
     ) -> Result<Self, ConfigError> {
         let input_path = file.into();
         let config_path = fs::canonicalize(&input_path)
@@ -466,6 +493,7 @@ impl Config {
             addrs,
             config_path,
             poll_interval: config_file.poll_interval_secs.into(),
+            build_info: build_info.into().unwrap_or_default(),
         })
     }
 

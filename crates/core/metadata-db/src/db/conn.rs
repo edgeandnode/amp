@@ -26,7 +26,6 @@ impl Connection {
     ///
     /// Retries up to 20 times when receiving error code 57P03 (database starting up).
     /// Used in test environments with ephemeral PostgreSQL instances.
-    #[cfg(all(test, feature = "temp-db"))]
     #[tracing::instrument(skip_all, err)]
     pub async fn connect_with_retry(url: &str) -> Result<Self, ConnError> {
         use backon::{ExponentialBuilder, Retryable};

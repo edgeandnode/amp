@@ -5,7 +5,7 @@ use sqlx::{Executor, Postgres};
 use super::{Job, JobId, JobStatus, JobStatusUpdateError};
 use crate::{
     datasets::{DatasetName, DatasetVersion},
-    workers::NodeId,
+    workers::WorkerNodeId,
 };
 
 /// Insert a new job into the queue
@@ -13,7 +13,7 @@ use crate::{
 /// The job will be assigned to the given worker node with the specified status.
 pub async fn insert<'c, E>(
     exe: E,
-    node_id: NodeId<'_>,
+    node_id: WorkerNodeId<'_>,
     descriptor: &str,
     status: JobStatus,
 ) -> Result<JobId, sqlx::Error>
@@ -40,7 +40,7 @@ where
 #[inline]
 pub async fn insert_with_default_status<'c, E>(
     exe: E,
-    node_id: NodeId<'_>,
+    node_id: WorkerNodeId<'_>,
     descriptor: &str,
 ) -> Result<JobId, sqlx::Error>
 where
@@ -130,7 +130,7 @@ where
 /// Get jobs for a given worker node with any of the specified statuses
 pub async fn get_by_node_id_and_statuses<'c, E, const N: usize>(
     exe: E,
-    node_id: NodeId<'_>,
+    node_id: WorkerNodeId<'_>,
     statuses: [JobStatus; N],
 ) -> Result<Vec<Job>, sqlx::Error>
 where

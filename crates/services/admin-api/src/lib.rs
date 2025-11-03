@@ -114,6 +114,7 @@ pub async fn serve(
         )
         .route("/schema", post(schema::handler))
         .route("/workers", get(workers::get_all::handler))
+        .route("/workers/{id}", get(workers::get_by_id::handler))
         .with_state(ctx);
 
     // Add OpenTelemetry HTTP metrics middleware if meter is provided
@@ -185,6 +186,7 @@ pub async fn serve(
         handlers::schema::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
+        handlers::workers::get_by_id::handler,
     ),
     components(schemas(
         // Common schemas
@@ -224,6 +226,8 @@ pub async fn serve(
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,
+        handlers::workers::get_by_id::WorkerDetailResponse,
+        handlers::workers::get_by_id::WorkerMetadata,
     )),
     tags(
         (name = "datasets", description = "Dataset management endpoints"),

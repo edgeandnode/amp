@@ -415,9 +415,7 @@ impl<'a> JobsClient<'a> {
         limit: Option<usize>,
         last_job_id: Option<JobId>,
     ) -> Result<JobsResponse, ListError> {
-        tracing::warn!(base_url = %self.client.base_url());
         let mut url = self.client.base_url().join(jobs_list()).expect("valid URL");
-        tracing::warn!(%url);
 
         // Add query parameters
         {

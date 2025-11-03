@@ -73,11 +73,11 @@ impl<'a> Hash<'a> {
 }
 
 impl<'a> From<&'a Hash<'a>> for Hash<'a> {
-    fn from(hash: &'a Hash<'a>) -> Self {
-        // Create a borrowed Cow variant pointing to the data inside the input hash.
+    fn from(value: &'a Hash<'a>) -> Self {
+        // Create a borrowed Cow variant pointing to the data inside the input Hash.
         // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
-        // SAFETY: The input hash already upholds invariants, so the referenced data is valid.
-        Hash::from_ref_unchecked(hash.as_ref())
+        // SAFETY: The input Hash already upholds invariants, so the referenced data is valid.
+        Hash::from_ref_unchecked(value.as_ref())
     }
 }
 

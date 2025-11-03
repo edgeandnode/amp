@@ -1609,7 +1609,7 @@
           "workers"
         ],
         "summary": "Handler for the `GET /workers` endpoint",
-        "description": "Retrieves and returns a list of all workers from the metadata database.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Fetches all workers from the metadata database\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
+        "description": "Retrieves and returns a list of all workers from the metadata database.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_LIST_ERROR`: Failed to retrieve workers list from database\n\nThis handler:\n- Fetches all workers from the metadata database\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
         "operationId": "workers_list",
         "responses": {
           "200": {
@@ -1618,6 +1618,69 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkersResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workers/{id}": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "Handler for the `GET /workers/{id}` endpoint",
+        "description": "Retrieves and returns a specific worker by its node ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique node identifier of the worker to retrieve\n\n## Response\n- **200 OK**: Returns the worker information as JSON with detailed metadata\n- **400 Bad Request**: Invalid node ID format (not parseable as NodeId)\n- **404 Not Found**: Worker with the given node ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier\n- `WORKER_NOT_FOUND`: No worker exists with the given node ID\n- `METADATA_DB_GET_BY_ID_ERROR`: Failed to retrieve worker from database",
+        "operationId": "workers_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Worker node ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved worker information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid worker ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Worker not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2326,27 +2389,139 @@
           }
         }
       },
-      "WorkerInfo": {
+      "WorkerDetailResponse": {
         "type": "object",
-        "description": "Worker information returned by the API",
+        "description": "Detailed worker information returned by the API\n\nContains comprehensive information about a worker node including its identity,\nlifecycle timestamps, and build metadata. This response enables monitoring of\nworker health, version tracking, and operational status.",
         "required": [
           "node_id",
-          "last_heartbeat"
+          "info",
+          "created_at",
+          "registered_at",
+          "heartbeat_at"
         ],
         "properties": {
-          "last_heartbeat": {
+          "created_at": {
             "type": "string",
-            "description": "Last heartbeat timestamp in ISO 8601 RFC3339 format"
+            "format": "date-time",
+            "description": "Timestamp when the worker was first created in the system (RFC3339 format)\n\nThe initial registration time of this worker. This timestamp never changes\nand represents when the worker first appeared in the system.",
+            "examples": [
+              "2025-01-15T14:30:00.123456Z"
+            ]
+          },
+          "heartbeat_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last heartbeat timestamp (RFC3339 format)\n\nThe most recent time this worker sent a heartbeat signal. Workers send\nperiodic heartbeats to indicate they are alive and processing work.\nA stale heartbeat indicates the worker may be down or unreachable.",
+            "examples": [
+              "2025-01-15T17:20:15.456789Z"
+            ]
+          },
+          "info": {
+            "$ref": "#/components/schemas/WorkerMetadata",
+            "description": "Worker metadata including version and build information\n\nContains detailed build and version information for this worker,\nincluding git version, commit details, and build timestamps."
           },
           "node_id": {
             "type": "string",
-            "description": "ID of the worker node"
+            "description": "Unique identifier for the worker node\n\nA persistent identifier that uniquely identifies this worker across registrations\nand heartbeats. Used for tracking and managing individual worker instances.\n\nMust start with a letter and contain only alphanumeric characters, underscores,\nhyphens, and dots.",
+            "examples": [
+              "worker-01h2xcejqtf2nbrexx3vqjhp41",
+              "indexer-node-1",
+              "amp_worker.prod"
+            ],
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_\\-\\.]*$"
+          },
+          "registered_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the worker last registered (RFC3339 format)\n\nUpdated each time a worker re-registers with the system. Workers typically\nre-register on startup or reconnection. Use this to track worker restarts.",
+            "examples": [
+              "2025-01-15T16:45:30.789012Z"
+            ]
+          }
+        }
+      },
+      "WorkerInfo": {
+        "type": "object",
+        "description": "Worker information returned by the API\n\nContains basic identification and liveness information for a worker node.\nThis is a lightweight summary view suitable for list endpoints.",
+        "required": [
+          "node_id",
+          "heartbeat_at"
+        ],
+        "properties": {
+          "heartbeat_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last heartbeat timestamp (RFC3339 format)\n\nThe most recent time this worker sent a heartbeat signal. Workers send\nperiodic heartbeats to indicate they are alive and processing work.\nA stale heartbeat indicates the worker may be down or unreachable.",
+            "examples": [
+              "2025-01-15T17:20:15.456789Z"
+            ]
+          },
+          "node_id": {
+            "type": "string",
+            "description": "Unique identifier for the worker node\n\nA persistent identifier that uniquely identifies this worker across registrations\nand heartbeats. Used for tracking and managing individual worker instances.\n\nMust start with a letter and contain only alphanumeric characters, underscores,\nhyphens, and dots.",
+            "examples": [
+              "worker-01h2xcejqtf2nbrexx3vqjhp41",
+              "indexer-node-1",
+              "amp_worker.prod"
+            ],
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_\\-\\.]*$"
+          }
+        }
+      },
+      "WorkerMetadata": {
+        "type": "object",
+        "description": "Worker metadata containing build and version information\n\nThis struct captures comprehensive build and version details for a worker node,\nenabling tracking of deployed versions and troubleshooting version-specific issues.",
+        "required": [
+          "version",
+          "commit_sha",
+          "commit_timestamp",
+          "build_date"
+        ],
+        "properties": {
+          "build_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Date and time when the worker binary was built (RFC3339 format)\n\nThe timestamp when the build process completed. May differ from commit\ntimestamp, especially for CI/CD builds or local development builds.\n\nReturns \"unknown\" if build date is not available.",
+            "examples": [
+              "2025-01-15T15:45:30Z",
+              "2025-01-15T10:45:30-05:00",
+              "unknown"
+            ]
+          },
+          "commit_sha": {
+            "type": "string",
+            "description": "Full Git commit SHA (40-character hexadecimal)\n\nThe complete SHA-1 hash of the commit from which this worker was built.\nUsed for precise version identification and source code correlation.\n\nReturns \"unknown\" if commit information is not available.",
+            "examples": [
+              "8b065bde9c1a2f3e4d5c6b7a8e9f0a1b2c3d4e5f",
+              "unknown"
+            ]
+          },
+          "commit_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the commit was created (RFC3339 format)\n\nThe date and time when the source code commit was made to the repository.\nHelps correlate worker versions with development timeline.\n\nReturns \"unknown\" if timestamp is not available.",
+            "examples": [
+              "2025-01-15T14:30:00Z",
+              "2025-01-15T09:30:00-05:00",
+              "unknown"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "description": "Version string including git describe output\n\nFormat: `v{major}.{minor}.{patch}[-{commits_since_tag}-g{short_sha}][-dirty]`\n\nThe \"-dirty\" suffix indicates uncommitted changes in the working directory.\nReturns \"unknown\" if version information is not available.",
+            "examples": [
+              "v0.0.22",
+              "v0.0.22-dirty",
+              "v0.0.22-15-g8b065bde",
+              "v0.0.22-15-g8b065bde-dirty",
+              "unknown"
+            ]
           }
         }
       },
       "WorkersResponse": {
         "type": "object",
-        "description": "Collection response for worker listings",
+        "description": "Collection response for worker listings\n\nContains a list of all registered workers in the system with their\nbasic information including node identifiers and last heartbeat times.",
         "required": [
           "workers"
         ],
@@ -2356,7 +2531,7 @@
             "items": {
               "$ref": "#/components/schemas/WorkerInfo"
             },
-            "description": "List of workers"
+            "description": "List of all registered workers\n\nEach worker entry contains the node ID and last heartbeat timestamp.\nWorkers are ordered by their database insertion order."
           }
         }
       }

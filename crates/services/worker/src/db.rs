@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use metadata_db::{Error as MetadataDbError, MetadataDb, WorkerNotifListener as NotifListener};
 pub use metadata_db::{Job as JobMeta, JobStatus};
 
-use crate::{JobId, NodeId};
+use crate::{JobId, NodeId, WorkerInfo};
 
 /// Extension trait for `MetadataDb` that adds retry logic to database operations.
 ///
@@ -20,7 +20,11 @@ pub(crate) trait MetadataDbRetryExt {
     /// Registers a worker in the metadata DB.
     ///
     /// This operation is idempotent. Retries on connection errors.
-    async fn register_worker_with_retry(&self, node_id: &NodeId) -> Result<(), MetadataDbError>;
+    async fn register_worker_with_retry(
+        &self,
+        node_id: &NodeId,
+        info: &WorkerInfo,
+    ) -> Result<(), MetadataDbError>;
 
     /// Establishes a connection to the metadata DB and returns a future that runs the worker
     /// heartbeat loop.
@@ -97,8 +101,12 @@ pub(crate) trait MetadataDbRetryExt {
 }
 
 impl MetadataDbRetryExt for MetadataDb {
-    async fn register_worker_with_retry(&self, node_id: &NodeId) -> Result<(), MetadataDbError> {
-        (|| self.register_worker(node_id))
+    async fn register_worker_with_retry(
+        &self,
+        node_id: &NodeId,
+        info: &WorkerInfo,
+    ) -> Result<(), MetadataDbError> {
+        (|| metadata_db::workers::register(self, node_id, info))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -117,7 +125,7 @@ impl MetadataDbRetryExt for MetadataDb {
         node_id: NodeId,
     ) -> Result<BoxFuture<'static, Result<(), MetadataDbError>>, MetadataDbError> {
         let node_id_str = node_id.to_string();
-        (move || self.worker_heartbeat_loop(node_id.clone()))
+        (move || metadata_db::workers::heartbeat_loop(self, node_id.clone()))
             .retry(retry_policy())
             .when(MetadataDbError::is_connection_error)
             .notify(|err, dur| {
@@ -135,18 +143,22 @@ impl MetadataDbRetryExt for MetadataDb {
         &self,
         node_id: &NodeId,
     ) -> Result<NotifListener, MetadataDbError> {
-        (|| self.listen_for_job_notifications(node_id))
-            .retry(retry_policy())
-            .when(MetadataDbError::is_connection_error)
-            .notify(|err, dur| {
-                tracing::warn!(
-                    node_id = %node_id,
-                    error = %err,
-                    "Failed to establish connection to listen for job notifications. Retrying in {:.1}s",
-                    dur.as_secs_f32()
-                );
-            })
-            .await
+        let node_id = node_id.to_owned();
+        (|| async {
+            metadata_db::workers::listen_for_job_notif(self, node_id.clone())
+                .await
+        })
+        .retry(retry_policy())
+        .when(MetadataDbError::is_connection_error)
+        .notify(|err, dur| {
+            tracing::warn!(
+                node_id = %node_id,
+                error = %err,
+                "Failed to establish connection to listen for job notifications. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
     }
 
     async fn get_scheduled_jobs_with_retry(
