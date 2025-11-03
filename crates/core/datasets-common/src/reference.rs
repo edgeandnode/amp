@@ -52,37 +52,48 @@ use crate::{
         ])
     )
 )]
-pub struct Reference(Namespace, Name, Revision);
+pub struct Reference(FullyQualifiedName, Revision);
 
 impl Reference {
     /// Create a new reference from components.
     pub fn new(namespace: Namespace, name: Name, revision: Revision) -> Self {
-        Self(namespace, name, revision)
+        Self(FullyQualifiedName::new(namespace, name), revision)
     }
 
     /// Access the namespace component.
     pub fn namespace(&self) -> &Namespace {
-        &self.0
+        self.0.namespace()
     }
 
     /// Access the name component.
     pub fn name(&self) -> &Name {
-        &self.1
+        self.0.name()
     }
 
     /// Access the revision component.
     pub fn revision(&self) -> &Revision {
-        &self.2
+        &self.1
     }
 
-    /// Consume the reference and return the fully qualified name (namespace and name without revision).
-    pub fn into_fqn(self) -> FullyQualifiedName {
-        FullyQualifiedName::new(self.0, self.1)
+    /// Get a reference to the fully qualified name (namespace and name without revision).
+    pub fn as_fqn(&self) -> &FullyQualifiedName {
+        &self.0
     }
 
     /// Consume the reference and return the inner components.
     pub fn into_parts(self) -> (Namespace, Name, Revision) {
-        (self.0, self.1, self.2)
+        let (namespace, name) = self.0.into_parts();
+        (namespace, name, self.1)
+    }
+
+    /// Consume the reference and return the fully qualified name (namespace and name without revision).
+    pub fn into_fqn(self) -> FullyQualifiedName {
+        self.0
+    }
+
+    /// Consume the reference and return the fully qualified name and revision.
+    pub fn into_fqn_and_revision(self) -> (FullyQualifiedName, Revision) {
+        (self.0, self.1)
     }
 
     /// Convert this reference to a Package URL (PURL) format.
@@ -95,7 +106,7 @@ impl Reference {
     /// pkg:amp/my_namespace/my_dataset@1.0.0
     /// ```
     pub fn to_purl(&self) -> String {
-        format!("pkg:amp/{}/{}@{}", self.0, self.1, self.2)
+        format!("pkg:amp/{}@{}", self.0, self.1)
     }
 
     /// Parse a Package URL (PURL) into a Reference.
@@ -120,7 +131,7 @@ impl Reference {
 
 impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}@{}", self.0, self.1, self.2)
+        write!(f, "{}@{}", self.0, self.1)
     }
 }
 
@@ -157,7 +168,7 @@ fn parse_reference_parts(s: &str) -> Result<Reference, ReferenceError> {
         .parse()
         .map_err(ReferenceError::InvalidRevision)?;
 
-    Ok(Reference(namespace, name, revision))
+    Ok(Reference::new(namespace, name, revision))
 }
 
 impl serde::Serialize for Reference {

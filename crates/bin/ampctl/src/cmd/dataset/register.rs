@@ -1,20 +1,33 @@
-//! Dataset manifest registration command.
+//! Dataset registration command.
 //!
-//! Registers a dataset manifest with the admin API by:
-//! 1. Loading manifest JSON from local or remote storage
-//! 2. POSTing to admin API `/datasets` endpoint
-//! 3. Handling success (201) or error responses
+//! Registers a dataset by performing the following steps:
+//! 1. Loads manifest JSON from local or remote storage
+//! 2. Stores the manifest in content-addressable storage (identified by its content hash)
+//! 3. Links the manifest hash to the specified dataset (namespace/name)
+//! 4. Tags the dataset revision with a semantic version (if --tag is provided), or updates "dev" by default
 //!
-//! # Supported Storage
+//! # What This Command Does
 //!
-//! - Local: `./manifest.json`, `/tmp/manifest.json`, `file:///tmp/manifest.json`
+//! - **Registers manifest**: Stores the manifest content in the system's content-addressable storage
+//! - **Links to dataset**: Associates the manifest hash with the dataset FQN (namespace/name)
+//! - **Tags version**: Applies a semantic version tag to identify this dataset revision (optional)
+//!
+//! # Supported Storage Backends
+//!
+//! Manifest files can be loaded from:
+//! - Local filesystem: `./manifest.json`, `/path/to/manifest.json`
 //! - S3: `s3://bucket-name/path/manifest.json`
 //! - GCS: `gs://bucket-name/path/manifest.json`
-//! - Azure: `az://container/path/manifest.json`
+//! - Azure Blob: `az://container/path/manifest.json`
+//! - File URL: `file:///path/to/manifest.json`
 //!
-//! # Dataset Reference Format
+//! # Arguments
 //!
-//! Pattern: `namespace/name@version` (e.g., `graph/eth_mainnet@1.0.0`)
+//! - `FQN`: Fully qualified dataset name in format `namespace/name` (e.g., `graph/eth_mainnet`)
+//! - `FILE`: Path or URL to the manifest file
+//! - `--tag` / `-t`: Optional semantic version tag (e.g., `1.0.0`, `2.1.3`)
+//!   - If not specified, only the "dev" tag is updated to point to this revision
+//!   - Cannot use special tags like "latest" or "dev" - these are managed by the system
 //!
 //! # Configuration
 //!
@@ -22,7 +35,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
-use datasets_common::reference::Reference;
+use datasets_common::{fqn::FullyQualifiedName, version::Version};
 use object_store::path::Path as ObjectStorePath;
 
 use crate::args::GlobalArgs;
@@ -33,15 +46,21 @@ pub struct Args {
     #[command(flatten)]
     pub global: GlobalArgs,
 
-    /// The dataset reference in format: namespace/name@version
+    /// The fully qualified dataset name in format: namespace/name
     ///
-    /// Examples: my_namespace/my_dataset@1.0.0, my_namespace/my_dataset@latest
-    #[arg(value_name = "REFERENCE", required = true, value_parser = clap::value_parser!(Reference))]
-    pub dataset_ref: Reference,
+    /// Example: my_namespace/my_dataset
+    #[arg(value_name = "FQN", required = true, value_parser = clap::value_parser!(FullyQualifiedName))]
+    pub fqn: FullyQualifiedName,
 
     /// Path or URL to the manifest file (local path, file://, s3://, gs://, or az://)
     #[arg(value_name = "FILE", required = true, value_parser = clap::value_parser!(ManifestFilePath))]
     pub manifest_file: ManifestFilePath,
+
+    /// Optional semantic version tag for the dataset (e.g., 1.0.0, 2.1.3)
+    /// Must be a valid semantic version - cannot be "latest" or "dev"
+    /// If not specified, only the "dev" tag is updated
+    #[arg(short = 't', long = "tag", value_parser = clap::value_parser!(Version))]
+    pub tag: Option<Version>,
 }
 
 /// Register a dataset manifest with the admin API.
@@ -52,23 +71,25 @@ pub struct Args {
 ///
 /// Returns [`Error`] for file not found, read failures, invalid paths/URLs,
 /// API errors (400/409/500), or network failures.
-#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, fqn = %fqn, tag = ?tag))]
 pub async fn run(
     Args {
         global,
-        dataset_ref,
+        fqn,
         manifest_file,
+        tag,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!(
         manifest_path = %manifest_file,
-        dataset_ref = %dataset_ref,
+        fqn = %fqn,
+        tag = ?tag,
         "Loading and registering manifest"
     );
 
     let manifest_str = load_manifest(&manifest_file).await?;
 
-    register_manifest(&global, &dataset_ref, &manifest_str).await?;
+    register_manifest(&global, &fqn, tag.as_ref(), &manifest_str).await?;
 
     Ok(())
 }
@@ -114,7 +135,8 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 #[tracing::instrument(skip_all)]
 pub async fn register_manifest(
     global: &GlobalArgs,
-    dataset_ref: &Reference,
+    fqn: &FullyQualifiedName,
+    version: Option<&Version>,
     dataset_manifest: &str,
 ) -> Result<(), Error> {
     tracing::debug!("Creating admin API client");
@@ -125,7 +147,7 @@ pub async fn register_manifest(
     tracing::debug!("Sending registration request");
 
     datasets_client
-        .register(dataset_ref, dataset_manifest)
+        .register(fqn, version, dataset_manifest)
         .await
         .map_err(|err| Error::ClientError { source: err })
 }
