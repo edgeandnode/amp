@@ -37,8 +37,9 @@
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use datasets_common::{fqn::FullyQualifiedName, version::Version};
 use object_store::path::Path as ObjectStorePath;
+use serde_json::value::RawValue;
 
-use crate::args::GlobalArgs;
+use crate::{args::GlobalArgs, client::datasets::HashOrManifestJson};
 
 /// Command-line arguments for the `reg-manifest` command.
 #[derive(Debug, clap::Args)]
@@ -89,7 +90,10 @@ pub async fn run(
 
     let manifest_str = load_manifest(&manifest_file).await?;
 
-    register_manifest(&global, &fqn, tag.as_ref(), &manifest_str).await?;
+    let manifest: Box<RawValue> =
+        serde_json::from_str(&manifest_str).map_err(Error::InvalidManifest)?;
+
+    register_manifest(&global, &fqn, tag.as_ref(), manifest).await?;
 
     Ok(())
 }
@@ -137,19 +141,19 @@ pub async fn register_manifest(
     global: &GlobalArgs,
     fqn: &FullyQualifiedName,
     version: Option<&Version>,
-    dataset_manifest: &str,
+    manifest: impl Into<HashOrManifestJson>,
 ) -> Result<(), Error> {
     tracing::debug!("Creating admin API client");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
     let datasets_client = client.datasets();
 
     tracing::debug!("Sending registration request");
 
     datasets_client
-        .register(fqn, version, dataset_manifest)
+        .register(fqn, version, manifest)
         .await
-        .map_err(|err| Error::ClientError { source: err })
+        .map_err(Error::ClientError)
 }
 
 /// Errors for manifest registration operations.
@@ -173,19 +177,17 @@ pub enum Error {
         source: common::store::StoreError,
     },
 
+    /// Invalid manifest format (not valid JSON or hash)
+    #[error("invalid manifest format")]
+    InvalidManifest(#[source] serde_json::Error),
+
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error during registration
     #[error("dataset registration failed")]
-    ClientError {
-        #[source]
-        source: crate::client::datasets::RegisterError,
-    },
+    ClientError(#[source] crate::client::datasets::RegisterError),
 }
 
 /// Manifest file path supporting local and remote storage.

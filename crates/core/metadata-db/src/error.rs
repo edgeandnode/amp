@@ -71,10 +71,10 @@ impl Error {
     ///
     /// The following errors are considered retryable:
     /// - **Connection errors**: Network issues, pool timeouts, TLS errors (checked via `is_connection_error`)
-    /// - **Serialization failures** (PostgreSQL error code `40001`): Occur when two transactions
-    ///   conflict and one needs to be retried. Common with `SELECT FOR UPDATE` and concurrent updates.
-    /// - **Deadlock detected** (PostgreSQL error code `40P01`): Two or more transactions are waiting
-    ///   for each other to release locks. One transaction is aborted and should be retried.
+    /// - **Serialization failures**: Occur when two transactions conflict and one needs to be retried.
+    ///   Common with `SELECT FOR UPDATE` and concurrent updates.
+    /// - **Deadlock detected**: Two or more transactions are waiting for each other to release locks.
+    ///   One transaction is aborted and should be retried.
     ///
     /// These transaction-specific errors are transient and safe to retry from the beginning
     /// of the transaction.
@@ -90,9 +90,23 @@ impl Error {
             Error::DbError(sqlx::Error::Database(err))
                 if err.code().is_some_and(|code| matches!(
                     code.as_ref(),
-                    "40001" | // serialization_failure
-                    "40P01"   // deadlock_detected
+                    pg_error_codes::SERIALIZATION_FAILURE | pg_error_codes::DEADLOCK_DETECTED
                 ))
+        )
+    }
+
+    /// Returns `true` if the error is a foreign key constraint violation.
+    ///
+    /// This occurs when an INSERT or UPDATE operation violates a foreign key constraint,
+    /// typically indicating that a referenced row does not exist.
+    ///
+    /// This is useful for distinguishing "referenced entity not found" errors from
+    /// other database errors, allowing callers to provide more specific error messages.
+    pub fn is_foreign_key_violation(&self) -> bool {
+        matches!(
+            self,
+            Error::DbError(sqlx::Error::Database(err))
+                if matches!(err.kind(), sqlx::error::ErrorKind::ForeignKeyViolation)
         )
     }
 }
@@ -104,4 +118,17 @@ impl From<ConnError> for Error {
             ConnError::MigrationFailed(err) => Error::MigrationError(err),
         }
     }
+}
+
+/// PostgreSQL error codes for transaction-related errors.
+///
+/// For reference: <https://www.postgresql.org/docs/current/errcodes-appendix.html>
+mod pg_error_codes {
+    /// Serialization failure - occurs when two transactions conflict and one needs to be retried.
+    /// Common with `SELECT FOR UPDATE` and concurrent updates.
+    pub const SERIALIZATION_FAILURE: &str = "40001";
+
+    /// Deadlock detected - two or more transactions are waiting for each other to release locks.
+    /// One transaction is aborted and should be retried.
+    pub const DEADLOCK_DETECTED: &str = "40P01";
 }

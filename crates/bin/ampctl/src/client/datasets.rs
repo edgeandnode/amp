@@ -3,10 +3,11 @@
 //! Provides methods for interacting with the `/datasets` endpoints of the admin API.
 
 use datasets_common::{
-    fqn::FullyQualifiedName, name::Name, namespace::Namespace, reference::Reference,
+    fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace, reference::Reference,
     revision::Revision, version::Version,
 };
 use dump::EndBlock;
+use serde_json::value::RawValue;
 use worker::JobId;
 
 use super::{
@@ -101,8 +102,12 @@ impl<'a> DatasetsClient<'a> {
 
     /// Register a dataset manifest.
     ///
-    /// POSTs to `/datasets` endpoint with the dataset FQN, optional version, and manifest content.
+    /// POSTs to `/datasets` endpoint with the dataset FQN, optional version, and manifest input.
     /// If no version is provided, the server will update the "dev" tag.
+    ///
+    /// The `manifest` parameter can be either:
+    /// - A manifest hash (to link to an existing manifest)
+    /// - Full manifest content (to register a new manifest)
     ///
     /// # Errors
     ///
@@ -113,7 +118,7 @@ impl<'a> DatasetsClient<'a> {
         &self,
         fqn: &FullyQualifiedName,
         version: Option<&Version>,
-        manifest: &str,
+        manifest: impl Into<HashOrManifestJson>,
     ) -> Result<(), RegisterError> {
         let url = self
             .client
@@ -127,7 +132,7 @@ impl<'a> DatasetsClient<'a> {
             namespace: fqn.namespace(),
             name: fqn.name(),
             version,
-            manifest,
+            manifest: manifest.into(),
         };
 
         let response = self
@@ -873,8 +878,9 @@ impl<'a> DatasetsClient<'a> {
 struct RegisterRequest<'a> {
     namespace: &'a Namespace,
     name: &'a Name,
+    #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<&'a Version>,
-    manifest: &'a str,
+    manifest: HashOrManifestJson,
 }
 
 /// Request body for POST /datasets/{namespace}/{name}/versions/{version}/deploy endpoint.
@@ -884,6 +890,78 @@ struct DeployRequest {
     end_block: Option<EndBlock>,
     parallelism: u16,
 }
+
+/// Input type for dataset registration manifest parameter.
+///
+/// This enum allows callers to provide either:
+/// - A manifest hash (64-character SHA-256 hex string) to link to an existing manifest
+/// - A full manifest content as raw JSON to register a new manifest
+///
+/// This mirrors the server's `ManifestInput` enum, providing type safety at the client API level.
+#[derive(Debug, Clone)]
+pub enum HashOrManifestJson {
+    /// A reference to an existing manifest by its SHA-256 hash.
+    ///
+    /// The hash must be exactly 64 hexadecimal characters.
+    /// When this variant is used, the manifest must already exist in the system.
+    Hash(Hash),
+
+    /// Full manifest content as raw JSON.
+    ///
+    /// The manifest will be validated, canonicalized, and stored during registration.
+    ManifestJson(Box<RawValue>),
+}
+
+impl serde::Serialize for HashOrManifestJson {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            // Serialize hash as a string
+            HashOrManifestJson::Hash(hash) => hash.serialize(serializer),
+            // Delegate to RawValue's serialize to preserve raw JSON pass-through
+            HashOrManifestJson::ManifestJson(raw) => raw.serialize(serializer),
+        }
+    }
+}
+
+impl From<Hash> for HashOrManifestJson {
+    fn from(value: Hash) -> Self {
+        Self::Hash(value)
+    }
+}
+
+impl From<Box<RawValue>> for HashOrManifestJson {
+    fn from(value: Box<RawValue>) -> Self {
+        Self::ManifestJson(value)
+    }
+}
+
+impl std::str::FromStr for HashOrManifestJson {
+    type Err = HashOrManifestParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Try to parse as Hash first
+        if let Ok(hash) = s.parse::<Hash>() {
+            return Ok(Self::Hash(hash));
+        }
+
+        // If that fails, try as manifest JSON
+        serde_json::from_str::<Box<RawValue>>(s)
+            .map(Into::into)
+            .map_err(HashOrManifestParseError)
+    }
+}
+
+/// Error type for parsing `HashOrManifest` from a string.
+///
+/// This error occurs when the input string cannot be parsed as either:
+/// - A valid manifest hash (64-character hexadecimal string)
+/// - Valid manifest JSON content
+#[derive(Debug, thiserror::Error)]
+#[error("failed to parse manifest input: not a valid hash or JSON manifest")]
+pub struct HashOrManifestParseError(#[source] serde_json::Error);
 
 /// Response from the deploy endpoint.
 #[derive(Debug, serde::Deserialize)]
@@ -953,6 +1031,14 @@ pub enum RegisterError {
     /// - Dataset store connectivity issues
     #[error("store error")]
     StoreError(#[source] ApiError),
+
+    /// Invalid manifest JSON format (client-side parsing error)
+    ///
+    /// This occurs when:
+    /// - The manifest string provided to the client is not valid JSON
+    /// - The manifest cannot be parsed before sending to server
+    #[error("invalid manifest JSON: {0}")]
+    InvalidManifestJson(#[source] serde_json::Error),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
