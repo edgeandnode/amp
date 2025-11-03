@@ -26,18 +26,6 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Commands {
-    /// Register a dataset manifest with the engine admin interface
-    ///
-    /// Loads a dataset manifest from local or remote storage and registers it
-    /// with the Amp engine admin interface. The manifest defines dataset schema,
-    /// source configuration, and transformation logic.
-    ///
-    /// Supports local filesystem and object storage (s3://, gs://, az://, file://).
-    /// The engine admin interface validates the manifest and makes it available
-    /// for use by the Amp infrastructure.
-    #[command(after_help = include_str!("cmd/reg_manifest__after_help.md"))]
-    RegManifest(cmd::reg_manifest::Args),
-
     /// Deploy a dataset to start syncing blockchain data
     ///
     /// Deploys a dataset version by scheduling a data extraction job via the
@@ -66,17 +54,23 @@ enum Commands {
     #[command(alias = "jobs")]
     #[command(long_about = include_str!("cmd/job__long_about.md"))]
     Job(cmd::job::Commands),
+
+    /// Manage datasets
+    #[command(subcommand)]
+    #[command(alias = "datasets")]
+    #[command(long_about = include_str!("cmd/dataset__long_about.md"))]
+    Dataset(cmd::dataset::Commands),
 }
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::RegManifest(args) => cmd::reg_manifest::run(args).await?,
         Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
         Commands::Manifest(command) => cmd::manifest::run(command).await?,
         Commands::Provider(command) => cmd::provider::run(command).await?,
         Commands::Job(command) => cmd::job::run(command).await?,
+        Commands::Dataset(command) => cmd::dataset::run(command).await?,
     }
 
     Ok(())

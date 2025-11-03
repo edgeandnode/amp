@@ -59,9 +59,12 @@ impl Ampctl {
         dataset_ref: &Reference,
         manifest_content: &str,
     ) -> Result<(), BoxError> {
+        let fqn = dataset_ref.as_fqn();
+        let revision = dataset_ref.revision().as_version();
+
         self.client
             .datasets()
-            .register(dataset_ref, manifest_content)
+            .register(fqn, revision, manifest_content)
             .await
             .map_err(Into::into)
     }
