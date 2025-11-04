@@ -362,10 +362,21 @@ impl FlightService for Service {
         return Err(Status::unimplemented("list_flights"));
     }
 
+    #[instrument(skip(self, request), fields(request_id = tracing::field::Empty))]
     async fn get_flight_info(
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        // Create a request ID using the Cloudflare ray-id or generate random hex string if not
+        // present.
+        let request_id = request
+            .metadata()
+            .get("cf-ray")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{:016x}", rand::random::<u64>()));
+        tracing::Span::current().record("request_id", &request_id);
+
         let resume_watermark = request
             .metadata()
             .get("amp-resume")
@@ -382,10 +393,21 @@ impl FlightService for Service {
         return Err(Status::unimplemented("get_schema"));
     }
 
+    #[instrument(skip(self, request), fields(request_id = tracing::field::Empty))]
     async fn do_get(
         &self,
         request: Request<arrow_flight::Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
+        // Create a request ID using the Cloudflare ray-id or generate random hex string if not
+        // present.
+        let request_id = request
+            .metadata()
+            .get("cf-ray")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{:016x}", rand::random::<u64>()));
+        tracing::Span::current().record("request_id", &request_id);
+
         let ticket = request.into_inner();
         let data_stream = self.do_get(ticket).await?;
         Ok(Response::new(data_stream))
