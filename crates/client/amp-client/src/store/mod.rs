@@ -4,6 +4,8 @@
 //! enabling crash recovery and watermark-based resumption.
 
 mod memory;
+#[cfg(feature = "postgres")]
+mod postgres;
 
 #[cfg(feature = "lmdb")]
 mod lmdb;
@@ -14,6 +16,8 @@ use common::metadata::segments::BlockRange;
 #[cfg(feature = "lmdb")]
 pub use lmdb::LmdbStateStore;
 pub use memory::InMemoryStateStore;
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresStateStore;
 use serde::{Deserialize, Serialize};
 
 use crate::{

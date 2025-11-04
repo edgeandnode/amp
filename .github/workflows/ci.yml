@@ -171,10 +171,10 @@ jobs:
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
       - name: Cargo check (release)
-        run: just check-rs --release
+        run: just check-rs --release --all-features
 
       - name: Run clippy (release)
-        run: just clippy --release
+        run: just clippy --release --all-features
 
   typescript:
     name: TypeScript code style & types

@@ -7,6 +7,7 @@ license-file.workspace = true
 [features]
 default = []
 lmdb = ["dep:heed", "dep:bincode"]
+postgres = ["sqlx", "uuid"]
 
 [dependencies]
 alloy.workspace = true
@@ -18,14 +19,25 @@ common = { path = "../../core/common" }
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx = { version = "0.8.3", features = [
+    "runtime-tokio",
+    "postgres",
+    "migrate",
+    "macros",
+    "chrono",
+    "json",
+], optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+uuid = { workspace = true, optional = true }
 
 # Optional dependencies for LMDB backend
 heed = { version = "0.20", optional = true }
 bincode = { workspace = true, optional = true }
 
 [dev-dependencies]
+pgtemp = "0.6.0"
 tempfile.workspace = true
+uuid = { workspace = true, features = ["v4"] }

@@ -98,6 +98,8 @@ pub use common::metadata::segments::BlockRange;
 pub use error::Error;
 #[cfg(feature = "lmdb")]
 pub use store::LmdbStateStore;
+#[cfg(feature = "postgres")]
+pub use store::PostgresStateStore;
 pub use store::{InMemoryStateStore, StateSnapshot, StateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
