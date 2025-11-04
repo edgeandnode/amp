@@ -8,12 +8,11 @@
 //! via `PostgreSQL` LISTEN/NOTIFY, executes assigned dump jobs, updates job status and progress in
 //! the metadata DB, and gracefully recovers jobs after restarts with periodic state reconciliation.
 
-mod db;
 mod error;
 mod info;
 mod jobs;
 mod node_id;
-mod worker;
+pub mod service;
 
 pub use self::{
     error::{
@@ -27,5 +26,4 @@ pub use self::{
         JobIdI64ConvError, JobIdU64Error, JobStatus, Notification as JobNotification,
     },
     node_id::{InvalidIdError, NodeId},
-    worker::Worker,
 };

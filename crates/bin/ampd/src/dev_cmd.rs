@@ -2,7 +2,6 @@ use std::{pin::Pin, sync::Arc};
 
 use common::{BoxError, config::Config};
 use metadata_db::MetadataDb;
-use worker::Worker;
 
 pub async fn run(
     config: Config,
@@ -53,8 +52,7 @@ pub async fn run(
     };
 
     // Create worker future
-    let worker = Worker::new(config, metadata_db, worker_id, meter.clone());
-    let worker_fut = worker.run();
+    let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter.clone());
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;
