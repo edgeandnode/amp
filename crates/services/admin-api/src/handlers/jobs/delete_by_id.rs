@@ -87,7 +87,7 @@ pub async fn handler(
     };
 
     // First, check if the job exists and get its status
-    let job = ctx.scheduler.get_job(&id).await.map_err(|err| {
+    let job = ctx.scheduler.get_job(id).await.map_err(|err| {
         tracing::debug!(job_id=%id, error=?err, "failed to get job");
         Error::GetJob(err)
     })?;
@@ -109,7 +109,7 @@ pub async fn handler(
     }
 
     // Attempt to delete the job
-    let deleted = ctx.scheduler.delete_job(&id).await.map_err(|err| {
+    let deleted = ctx.scheduler.delete_job(id).await.map_err(|err| {
         tracing::error!(job_id=%id, error=?err, "failed to delete job");
         Error::DeleteJob(err)
     })?;

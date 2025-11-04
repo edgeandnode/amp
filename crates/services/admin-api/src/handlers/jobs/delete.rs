@@ -5,7 +5,6 @@ use axum::{
     http::StatusCode,
 };
 use common::BoxError;
-use metadata_db::JobStatus;
 
 use crate::{
     ctx::Ctx,
@@ -98,22 +97,22 @@ pub async fn handler(
     let deleted_count = match query.status {
         JobStatusFilter::Terminal => ctx
             .scheduler
-            .delete_jobs_by_status(JobStatus::terminal_statuses())
+            .delete_jobs_in_terminal_state()
             .await
             .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Completed => ctx
             .scheduler
-            .delete_jobs_by_status([JobStatus::Completed])
+            .delete_completed_jobs()
             .await
             .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Stopped => ctx
             .scheduler
-            .delete_jobs_by_status([JobStatus::Stopped])
+            .delete_stopped_jobs()
             .await
             .map_err(Error::DeleteJobsByStatus),
         JobStatusFilter::Error => ctx
             .scheduler
-            .delete_jobs_by_status([JobStatus::Failed])
+            .delete_failed_jobs()
             .await
             .map_err(Error::DeleteJobsByStatus),
     }?;
