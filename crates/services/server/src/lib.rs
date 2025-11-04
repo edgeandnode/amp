@@ -1,11 +1,16 @@
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
+use axum::{
+    http::StatusCode,
+    routing::get,
+    serve::{Listener as _, ListenerExt as _},
+};
 use common::{BoxError, BoxResult, config::Config, utils::shutdown_signal};
 use futures::{FutureExt, TryFutureExt as _};
 use metadata_db::MetadataDb;
 use tokio::net::TcpListener;
-use tonic::transport::{Server, server::TcpIncoming};
+use tonic::service::Routes;
 
 mod jsonl;
 pub mod metrics;
@@ -31,20 +36,29 @@ pub async fn serve(
 
     // Start Arrow Flight Server if enabled
     let flight_fut = if enable_flight {
-        let listener = TcpListener::bind(config.addrs.flight_addr).await?;
+        let listener = TcpListener::bind(config.addrs.flight_addr)
+            .await?
+            .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
         addrs.flight_addr = listener.local_addr()?;
 
-        Server::builder()
-            .add_service(FlightServiceServer::new(service.clone()))
-            .serve_with_incoming_shutdown(
-                TcpIncoming::from(listener).with_nodelay(Some(true)),
-                shutdown_signal(),
-            )
-            .map_err(|err| {
-                tracing::error!(error=?err, "Flight server error");
-                err.into()
-            })
-            .boxed()
+        let app = axum::Router::new()
+            .route("/healthz", get(|| async { StatusCode::OK }))
+            .merge({
+                let mut grpc_builder = Routes::builder();
+                grpc_builder.add_service(FlightServiceServer::new(service.clone()));
+                grpc_builder.routes().into_axum_router()
+            });
+
+        async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_signal())
+                .await
+                .map_err(|err| {
+                    tracing::error!(error=?err, "Flight server error");
+                    err.into()
+                })
+        }
+        .boxed()
     } else {
         Box::pin(std::future::pending())
     };

@@ -4,6 +4,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use axum::{
     Router,
+    http::StatusCode,
     routing::{get, post, put},
     serve::{Listener as _, ListenerExt as _},
 };
@@ -49,6 +50,7 @@ pub async fn serve(
 
     // Register the routes
     let mut app = Router::new()
+        .route("/healthz", get(|| async { StatusCode::OK }))
         .route(
             "/datasets",
             get(datasets::list_all::handler).post(datasets::register::handler),
