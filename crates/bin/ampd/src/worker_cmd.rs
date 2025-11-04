@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use common::config::Config;
 use metadata_db::MetadataDb;
-use worker::{NodeId, Worker};
+use worker::NodeId;
 
 pub async fn run(
     config: Config,
@@ -12,6 +12,5 @@ pub async fn run(
 ) -> Result<(), worker::Error> {
     let config = Arc::new(config);
 
-    let worker = Worker::new(config, metadata_db, node_id, meter);
-    worker.run().await
+    worker::service::new(node_id, config, metadata_db, meter).await
 }
