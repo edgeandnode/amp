@@ -17,9 +17,9 @@ pub async fn run(
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
         let (addr, fut) =
-            controller::serve(config.addrs.admin_api_addr, config.clone(), meter.as_ref())
+            controller::service::new(config.clone(), meter.as_ref(), config.addrs.admin_api_addr)
                 .await
-                .map_err(Error::ControllerServe)?;
+                .map_err(Error::ServiceInit)?;
 
         tracing::info!("Controller Admin API running at {}", addr);
         Box::pin(fut)
@@ -67,12 +67,12 @@ pub async fn run(
 /// Errors that can occur during dev mode execution.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to start the controller service (Admin API).
+    /// Failed to initialize the controller service (Admin API).
     ///
     /// This occurs during the initialization phase when attempting to bind and
     /// start the Admin API server.
-    #[error("Failed to start controller service: {0}")]
-    ControllerServe(#[source] BoxError),
+    #[error("Failed to initialize controller service: {0}")]
+    ServiceInit(#[source] controller::service::Error),
 
     /// Failed to start the query server (Arrow Flight RPC and/or JSON Lines).
     ///

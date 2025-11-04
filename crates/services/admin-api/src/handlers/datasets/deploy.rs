@@ -184,7 +184,7 @@ pub async fn handler(
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
-        .schedule_dataset_dump(dataset, end_block.into(), parallelism)
+        .schedule_dataset_sync_job(dataset, end_block.into(), parallelism)
         .await
         .map_err(|err| {
             tracing::error!(

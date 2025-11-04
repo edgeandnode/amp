@@ -5,6 +5,7 @@ license-file.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
 dataset-store = { path = "../../core/dataset-store" }
@@ -16,11 +17,7 @@ evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
-monitoring = { path = "../../core/monitoring" }
 object_store.workspace = true
-opentelemetry-instrumentation-tower = { version = "0.17", features = ["axum"] }
-tokio.workspace = true
-tower-http = { workspace = true, features = ["cors"] }
 rand.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }

@@ -18,6 +18,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.6",
  "common",
  "dataset-store",
@@ -29,17 +30,13 @@ dependencies = [
  "firehose-datasets",
  "futures",
  "metadata-db",
- "monitoring",
  "object_store",
- "opentelemetry-instrumentation-tower",
  "rand 0.9.2",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror 2.0.17",
- "tokio",
  "toml 0.8.23",
- "tower-http",
  "tracing",
  "utoipa",
  "worker",
@@ -2580,8 +2577,20 @@ name = "controller"
 version = "0.1.0"
 dependencies = [
  "admin-api",
+ "async-trait",
+ "axum 0.8.6",
  "common",
+ "dataset-store",
+ "dump",
+ "metadata-db",
  "monitoring",
+ "opentelemetry-instrumentation-tower",
+ "rand 0.9.2",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tower-http",
+ "worker",
 ]
 
 [[package]]
