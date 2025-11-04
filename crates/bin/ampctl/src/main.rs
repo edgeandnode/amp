@@ -26,17 +26,6 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Commands {
-    /// Deploy a dataset to start syncing blockchain data
-    ///
-    /// Deploys a dataset version by scheduling a data extraction job via the
-    /// engine admin interface. Once deployed, the dataset begins syncing blockchain
-    /// data from the configured provider and storing it as Parquet files.
-    ///
-    /// The end block can be configured to control when syncing stops:
-    /// continuous (default), latest block, specific block number, or relative to chain tip.
-    #[command(after_help = include_str!("cmd/dep_dataset__after_help.md"))]
-    DepDataset(cmd::dep_dataset::Args),
-
     /// Manage manifests in content-addressable storage
     #[command(subcommand)]
     #[command(alias = "manifests")]
@@ -66,7 +55,6 @@ async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::DepDataset(args) => cmd::dep_dataset::run(args).await?,
         Commands::Manifest(command) => cmd::manifest::run(command).await?,
         Commands::Provider(command) => cmd::provider::run(command).await?,
         Commands::Job(command) => cmd::job::run(command).await?,
