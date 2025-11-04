@@ -138,8 +138,8 @@ impl DebeziumClient {
                         yield records;
                     }
                     TransactionEvent::Watermark { prune, .. } => {
-                        if let Some(range) = prune {
-                            self.store.prune(*range.end()).await?;
+                        if let Some(last_pruned) = prune {
+                            self.store.prune(last_pruned).await?;
                         }
                         commit.await?;
                     }
