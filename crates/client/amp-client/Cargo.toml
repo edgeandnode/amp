@@ -26,3 +26,6 @@ tracing.workspace = true
 # Optional dependencies for LMDB backend
 heed = { version = "0.20", optional = true }
 bincode = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
