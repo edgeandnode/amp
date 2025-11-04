@@ -63,6 +63,10 @@ impl StateStore for SharedStore {
         self.inner.lock().await.commit(commit).await
     }
 
+    async fn truncate(&mut self, up_to: TransactionId) -> Result<(), Error> {
+        self.inner.lock().await.truncate(up_to).await
+    }
+
     async fn load(&self) -> Result<StateSnapshot, Error> {
         self.inner.lock().await.load().await
     }

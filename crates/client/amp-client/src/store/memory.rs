@@ -48,26 +48,22 @@ impl StateStore for InMemoryStateStore {
     }
 
     async fn commit(&mut self, commit: Commit) -> Result<(), Error> {
-        // Remove pruned and invalidated watermarks
-        self.state.buffer.retain(|(id, _)| {
-            let invalidated = commit
-                .invalidate
-                .as_ref()
-                .map(|r| r.contains(id))
-                .unwrap_or(false);
-            let pruned = commit
-                .prune
-                .as_ref()
-                .map(|r| r.contains(id))
-                .unwrap_or(false);
-            !invalidated && !pruned
-        });
+        // Remove pruned watermarks (all IDs <= prune)
+        if let Some(prune) = commit.prune {
+            self.state.buffer.retain(|(id, _)| *id > prune);
+        }
 
         // Add new watermarks
         for (id, ranges) in commit.insert {
             self.state.buffer.push_back((id, ranges));
         }
 
+        Ok(())
+    }
+
+    async fn truncate(&mut self, from: TransactionId) -> Result<(), Error> {
+        // Remove all watermarks with IDs >= from
+        self.state.buffer.retain(|(id, _)| *id < from);
         Ok(())
     }
 

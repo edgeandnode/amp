@@ -78,12 +78,12 @@ pub fn assert_watermark_event(event: &TransactionEvent, expected_id: u64) {
     }
 }
 
-/// Assert that an event is a Watermark event with specific prune range.
+/// Assert that an event is a Watermark event with specific prune value.
 #[track_caller]
 pub fn assert_watermark_event_with_prune(
     event: &TransactionEvent,
     expected_id: u64,
-    expected_prune: Option<RangeInclusive<u64>>,
+    expected_prune: Option<u64>,
 ) {
     match event {
         TransactionEvent::Watermark { id, prune, .. } => {
@@ -94,7 +94,7 @@ pub fn assert_watermark_event_with_prune(
             );
             assert_eq!(
                 *prune, expected_prune,
-                "Expected prune range {:?}, got {:?}",
+                "Expected prune {:?}, got {:?}",
                 expected_prune, prune
             );
         }
