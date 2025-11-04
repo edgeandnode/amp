@@ -96,6 +96,8 @@ pub use client::{
 };
 pub use common::metadata::segments::BlockRange;
 pub use error::Error;
+#[cfg(feature = "lmdb")]
+pub use store::LmdbStateStore;
 pub use store::{InMemoryStateStore, StateSnapshot, StateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
