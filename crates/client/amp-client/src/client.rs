@@ -19,9 +19,10 @@ use serde::Deserialize;
 use tonic::{Streaming, transport::Endpoint};
 
 use crate::{
+    cdc::CdcStreamBuilder,
     decode,
     error::Error,
-    store::StateStore,
+    store::{BatchStore, StateStore},
     transactional::TransactionalStreamBuilder,
     validation::{validate_consecutiveness, validate_networks},
 };
@@ -355,6 +356,43 @@ impl StreamBuilder {
         retention: BlockNum,
     ) -> TransactionalStreamBuilder {
         TransactionalStreamBuilder::new(self.client, self.sql, Box::new(store), retention)
+    }
+
+    /// Create a CDC stream with batch content persistence.
+    ///
+    /// CDC streams store batch content to enable generating Delete events with
+    /// original data for stateless forwarding consumers (Kafka, message queues, etc.).
+    ///
+    /// # Arguments
+    /// - `state_store`: StateStore for watermark persistence
+    /// - `batch_store`: BatchStore for batch persistence
+    /// - `retention`: Retention window in blocks
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use amp_client::{AmpClient, InMemoryStateStore, InMemoryBatchStore};
+    ///
+    /// let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+    /// let state_store = InMemoryStateStore::new();
+    /// let batch_store = InMemoryBatchStore::new();
+    /// let mut stream = client
+    ///     .stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    ///     .cdc(state_store, batch_store, 128)
+    ///     .await?;
+    /// ```
+    pub fn cdc(
+        self,
+        state_store: impl StateStore + 'static,
+        batch_store: impl BatchStore + 'static,
+        retention: BlockNum,
+    ) -> CdcStreamBuilder {
+        CdcStreamBuilder::new(
+            self.client,
+            self.sql,
+            Box::new(state_store),
+            Box::new(batch_store),
+            retention,
+        )
     }
 }
 

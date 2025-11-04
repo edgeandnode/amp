@@ -1,7 +1,4 @@
 //! State persistence for durable streaming
-//!
-//! This module provides the `StateStore` trait for pluggable state persistence,
-//! enabling crash recovery and watermark-based resumption.
 
 mod memory;
 #[cfg(feature = "postgres")]
@@ -10,12 +7,12 @@ mod postgres;
 #[cfg(feature = "lmdb")]
 mod lmdb;
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ops::RangeInclusive};
 
-use common::metadata::segments::BlockRange;
+use common::{arrow::array::RecordBatch, metadata::segments::BlockRange};
 #[cfg(feature = "lmdb")]
 pub use lmdb::LmdbStateStore;
-pub use memory::InMemoryStateStore;
+pub use memory::{InMemoryBatchStore, InMemoryStateStore};
 #[cfg(feature = "postgres")]
 pub use postgres::PostgresStateStore;
 use serde::{Deserialize, Serialize};
@@ -110,4 +107,120 @@ pub trait StateStore: Send + Sync {
     /// the persisted state into memory. After initialization, all state access is via
     /// the in-memory copy in `StateManager`, not via this method.
     async fn load(&self) -> Result<StateSnapshot, Error>;
+}
+
+/// Trait for CDC streams with batch content persistence.
+///
+/// CDC (Change Data Capture) streams require storing the actual batch content to
+/// enable generating Delete events with the original data.
+///
+/// # Persistence Strategy
+///
+/// Batches are stored **before** emitting Insert events. This ensures:
+/// - Delete events always have access to original batch content
+/// - At-least-once delivery semantics are maintained
+/// - Consumer crashes can be recovered via rewind
+///
+/// # Storage Lifecycle
+///
+/// 1. **Append**: Batch stored immediately when received (before advance)
+/// 2. **Load**: Batches loaded during rewind to emit Delete events
+/// 3. **Prune**: Batches cleaned up when retention window expires
+#[async_trait::async_trait]
+pub trait BatchStore: Send + Sync {
+    /// Store a single record batch.
+    ///
+    /// # Arguments
+    /// - `batch`: The RecordBatch to store
+    /// - `id`: Transaction ID for this batch
+    async fn append(&mut self, batch: RecordBatch, id: TransactionId) -> Result<(), Error>;
+
+    /// Load all batch IDs in a transaction ID range (sparse).
+    ///
+    /// This is a lightweight operation that returns only the transaction IDs of batches
+    /// that exist in the range, without loading the actual batch data. This enables
+    /// efficient iteration: load IDs first, then load batches one by one.
+    ///
+    /// # Arguments
+    /// - `range`: Inclusive range of transaction IDs to scan
+    ///
+    /// # Returns
+    /// Vector of transaction IDs for batches that exist in the range.
+    /// May be empty if no batches exist in range.
+    async fn seek(&self, range: RangeInclusive<TransactionId>)
+    -> Result<Vec<TransactionId>, Error>;
+
+    /// Load a single batch by transaction ID.
+    ///
+    /// Returns `None` if no batch exists for this ID (e.g., it was a watermark or undo event).
+    ///
+    /// # Arguments
+    /// - `id`: Transaction ID to load
+    ///
+    /// # Returns
+    /// - `Some(batch)` if the batch exists
+    /// - `None` if no batch for this ID
+    async fn load(&self, id: TransactionId) -> Result<Option<RecordBatch>, Error>;
+
+    /// Prune batches up to cutoff transaction ID (inclusive).
+    ///
+    /// Deletes all batches with IDs in range 0..=cutoff. Must be idempotent -
+    /// calling multiple times with same cutoff is safe.
+    ///
+    /// # Best-Effort
+    ///
+    /// Callers should treat pruning as best-effort cleanup. Failures should be logged
+    /// but not fatal. The system will retry on next watermark or startup.
+    ///
+    /// # Arguments
+    /// - `cutoff`: Last transaction ID to prune (inclusive). All IDs 0..=cutoff are deleted.
+    async fn prune(&mut self, cutoff: TransactionId) -> Result<(), Error>;
+}
+
+/// Serialize a RecordBatch to Arrow IPC format.
+///
+/// Uses Arrow IPC streaming format which includes the schema and is self-contained.
+/// This format is:
+/// - Efficient (binary, columnar)
+/// - Schema-preserving (can deserialize without external schema)
+/// - Standard across Arrow ecosystem
+///
+/// # Example
+/// ```rust,ignore
+/// let bytes = serialize_batch(&batch)?;
+/// store.put(id, &bytes)?;
+/// ```
+pub fn serialize_batch(batch: &RecordBatch) -> Result<Vec<u8>, Error> {
+    use common::arrow::ipc::writer::StreamWriter;
+
+    let mut buf = Vec::new();
+    let mut writer = StreamWriter::try_new(&mut buf, &batch.schema())
+        .map_err(|e| Error::InvalidBatch(format!("Failed to create writer: {}", e)))?;
+    writer
+        .write(batch)
+        .map_err(|e| Error::InvalidBatch(format!("Failed to write batch: {}", e)))?;
+    writer
+        .finish()
+        .map_err(|e| Error::InvalidBatch(format!("Failed to finish writer: {}", e)))?;
+    Ok(buf)
+}
+
+/// Deserialize a RecordBatch from Arrow IPC format.
+///
+/// Reads Arrow IPC streaming format produced by `serialize_batch`.
+///
+/// # Example
+/// ```rust,ignore
+/// let bytes = store.get(id)?;
+/// let batch = deserialize_batch(&bytes)?;
+/// ```
+pub fn deserialize_batch(bytes: &[u8]) -> Result<RecordBatch, Error> {
+    use common::arrow::ipc::reader::StreamReader;
+
+    let mut reader = StreamReader::try_new(bytes, None)
+        .map_err(|e| Error::InvalidBatch(format!("Failed to create reader: {}", e)))?;
+    reader
+        .next()
+        .ok_or_else(|| Error::InvalidBatch("Empty batch stream".to_string()))?
+        .map_err(|e| Error::InvalidBatch(format!("Failed to read batch: {}", e)))
 }

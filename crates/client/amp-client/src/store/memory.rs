@@ -1,6 +1,10 @@
-//! In-memory state store implementation (not crash-safe)
+//! In-memory state and batch store implementations (not crash-safe)
 
-use super::{StateSnapshot, StateStore};
+use std::{collections::BTreeMap, ops::RangeInclusive};
+
+use common::arrow::array::RecordBatch;
+
+use super::{BatchStore, StateSnapshot, StateStore};
 use crate::{
     error::Error,
     transactional::{Commit, TransactionId},
@@ -69,5 +73,63 @@ impl StateStore for InMemoryStateStore {
 
     async fn load(&self) -> Result<StateSnapshot, Error> {
         Ok(self.state.clone())
+    }
+}
+
+/// In-memory implementation of BatchStore (not crash-safe).
+///
+/// Batches are lost on process restart, so this is suitable for:
+/// - Development and testing
+/// - Scenarios where crash recovery is not required
+///
+/// # Example
+/// ```rust,ignore
+/// let batch_store = InMemoryBatchStore::new();
+/// let state_store = InMemoryStateStore::new();
+/// let stream = client.stream("SELECT * FROM eth.logs")
+///     .cdc(state_store, batch_store, 128)
+///     .await?;
+/// ```
+#[derive(Debug, Clone)]
+pub struct InMemoryBatchStore {
+    batches: BTreeMap<TransactionId, RecordBatch>,
+}
+
+impl InMemoryBatchStore {
+    /// Create a new in-memory batch store.
+    pub fn new() -> Self {
+        Self {
+            batches: BTreeMap::new(),
+        }
+    }
+}
+
+impl Default for InMemoryBatchStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl BatchStore for InMemoryBatchStore {
+    async fn append(&mut self, batch: RecordBatch, id: TransactionId) -> Result<(), Error> {
+        self.batches.insert(id, batch);
+        Ok(())
+    }
+
+    async fn seek(
+        &self,
+        range: RangeInclusive<TransactionId>,
+    ) -> Result<Vec<TransactionId>, Error> {
+        Ok(self.batches.range(range).map(|(id, _)| *id).collect())
+    }
+
+    async fn load(&self, id: TransactionId) -> Result<Option<RecordBatch>, Error> {
+        Ok(self.batches.get(&id).cloned())
+    }
+
+    async fn prune(&mut self, cutoff: TransactionId) -> Result<(), Error> {
+        self.batches = self.batches.split_off(&(cutoff + 1));
+        Ok(())
     }
 }

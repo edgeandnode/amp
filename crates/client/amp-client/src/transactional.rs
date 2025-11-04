@@ -147,6 +147,7 @@ impl Commit {
 /// Commits are idempotent. Calling `commit()` multiple times is safe.
 ///
 /// Uncommitted transactions are handled by rewind on restart.
+#[derive(Clone)]
 pub struct CommitHandle {
     actor: StateActor,
     id: TransactionId,

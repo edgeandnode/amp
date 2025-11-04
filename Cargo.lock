@@ -870,24 +870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amp-debezium-client"
-version = "0.1.0"
-dependencies = [
- "amp-client",
- "async-stream",
- "async-trait",
- "bincode 2.0.1",
- "common",
- "futures",
- "heed",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
 name = "ampctl"
 version = "0.1.0"
 dependencies = [
@@ -8727,7 +8709,6 @@ dependencies = [
  "admin-api",
  "alloy",
  "amp-client",
- "amp-debezium-client",
  "ampctl",
  "ampd",
  "arrow-flight",
