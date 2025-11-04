@@ -83,31 +83,6 @@ export class DatasetStoreError extends Schema.Class<DatasetStoreError>("DatasetS
 }
 
 /**
- * DatasetDefStoreError - Failure in dataset definition store operations.
- *
- * Causes:
- * - Failed to read dataset definition files
- * - Invalid dataset definition format
- * - File system access errors
- * - Configuration directory issues
- *
- * Applies to:
- * - POST /datasets - When loading dataset definitions for registration
- * - Any operation that requires reading dataset definition files
- */
-export class DatasetDefStoreError extends Schema.Class<DatasetDefStoreError>("DatasetDefStoreError")(
-  {
-    code: Schema.Literal("DATASET_DEF_STORE_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 500,
-  },
-) {
-  readonly _tag = "DatasetDefStoreError" as const
-}
-
-/**
  * DatasetNotFound - The requested dataset does not exist.
  *
  * Causes:
@@ -341,53 +316,6 @@ export class LimitInvalid extends Schema.Class<LimitInvalid>("LimitInvalid")(
 }
 
 /**
- * DatasetAlreadyExists - The dataset already exists with the provided manifest.
- *
- * Causes:
- * - Attempting to register a dataset that already exists when a manifest is provided
- * - Conflict between existing dataset and new manifest
- *
- * Applies to:
- * - POST /datasets - When dataset exists and manifest is provided
- * - POST /datasets - When dataset exists and manifest is provided
- */
-export class DatasetAlreadyExists extends Schema.Class<DatasetAlreadyExists>("DatasetAlreadyExists")(
-  {
-    code: Schema.Literal("DATASET_ALREADY_EXISTS").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 409,
-  },
-) {
-  readonly _tag = "DatasetAlreadyExists" as const
-}
-
-/**
- * ManifestRequired - Dataset not found and manifest is required but not provided.
- *
- * Causes:
- * - Dataset does not exist in registry
- * - No manifest provided with registration request
- * - Cannot register without dataset definition
- *
- * Applies to:
- * - POST /datasets - When dataset not found and no manifest provided
- * - POST /datasets - When dataset not found and no manifest provided
- */
-export class ManifestRequired extends Schema.Class<ManifestRequired>("ManifestRequired")(
-  {
-    code: Schema.Literal("MANIFEST_REQUIRED").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 400,
-  },
-) {
-  readonly _tag = "ManifestRequired" as const
-}
-
-/**
  * ManifestRegistrationError - Failed to register manifest in the system.
  *
  * Causes:
@@ -409,6 +337,172 @@ export class ManifestRegistrationError extends Schema.Class<ManifestRegistration
   },
 ) {
   readonly _tag = "ManifestRegistrationError" as const
+}
+
+/**
+ * ManifestLinkingError - Failed to link manifest to dataset.
+ *
+ * Causes:
+ * - Error during manifest linking in metadata database
+ * - Error updating dev tag
+ * - Database transaction failure
+ * - Foreign key constraint violations
+ *
+ * Applies to:
+ * - POST /datasets - During manifest linking to dataset
+ */
+export class ManifestLinkingError extends Schema.Class<ManifestLinkingError>("ManifestLinkingError")(
+  {
+    code: Schema.Literal("MANIFEST_LINKING_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "ManifestLinkingError" as const
+}
+
+/**
+ * VersionTaggingError - Failed to tag version for the dataset.
+ *
+ * Causes:
+ * - Error during version tagging in metadata database
+ * - Invalid semantic version format
+ * - Error updating latest tag
+ * - Database constraint violations
+ *
+ * Applies to:
+ * - POST /datasets - During version tagging
+ */
+export class VersionTaggingError extends Schema.Class<VersionTaggingError>("VersionTaggingError")(
+  {
+    code: Schema.Literal("VERSION_TAGGING_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "VersionTaggingError" as const
+}
+
+/**
+ * DependencyValidationError - Manifest dependency validation error.
+ *
+ * Causes:
+ * - SQL queries are invalid
+ * - SQL queries reference datasets not declared in dependencies
+ * - Undeclared dependencies in manifest
+ * - Circular dependencies
+ *
+ * Applies to:
+ * - POST /datasets - During manifest validation
+ */
+export class DependencyValidationError extends Schema.Class<DependencyValidationError>("DependencyValidationError")(
+  {
+    code: Schema.Literal("DEPENDENCY_VALIDATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "DependencyValidationError" as const
+}
+
+/**
+ * UnsupportedDatasetKind - Dataset kind is not supported.
+ *
+ * Causes:
+ * - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
+ * - Invalid or unknown dataset kind value
+ * - Legacy dataset kinds that are no longer supported
+ *
+ * Applies to:
+ * - POST /datasets - During manifest validation
+ */
+export class UnsupportedDatasetKind extends Schema.Class<UnsupportedDatasetKind>("UnsupportedDatasetKind")(
+  {
+    code: Schema.Literal("UNSUPPORTED_DATASET_KIND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "UnsupportedDatasetKind" as const
+}
+
+/**
+ * ManifestNotFound - Manifest with the provided hash not found.
+ *
+ * Causes:
+ * - A manifest hash was provided but the manifest doesn't exist in the system
+ * - The hash is valid format but no manifest is stored with that hash
+ * - Manifest was deleted or never registered
+ *
+ * Applies to:
+ * - POST /datasets - When linking to a manifest hash that doesn't exist
+ */
+export class ManifestNotFound extends Schema.Class<ManifestNotFound>("ManifestNotFound")(
+  {
+    code: Schema.Literal("MANIFEST_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "ManifestNotFound" as const
+}
+
+/**
+ * InvalidPayloadFormat - Invalid request payload format.
+ *
+ * Causes:
+ * - Request JSON is malformed or invalid
+ * - Required fields are missing or have wrong types
+ * - Dataset name or version format is invalid
+ * - JSON deserialization failures
+ *
+ * Applies to:
+ * - POST /datasets - When request body is invalid
+ */
+export class InvalidPayloadFormat extends Schema.Class<InvalidPayloadFormat>("InvalidPayloadFormat")(
+  {
+    code: Schema.Literal("INVALID_PAYLOAD_FORMAT").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidPayloadFormat" as const
+}
+
+/**
+ * StoreError - Dataset store operation error.
+ *
+ * Causes:
+ * - Failed to load dataset from store
+ * - Dataset store configuration errors
+ * - Dataset store connectivity issues
+ * - Object store access failures
+ *
+ * Applies to:
+ * - POST /datasets - During dataset store operations
+ */
+export class StoreError extends Schema.Class<StoreError>("StoreError")(
+  {
+    code: Schema.Literal("STORE_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "StoreError" as const
 }
 
 /**

@@ -150,9 +150,6 @@ pub async fn handler(
             dataset_store::RegisterManifestError::MetadataRegistration(e) => {
                 Error::MetadataDbError(e)
             }
-            dataset_store::RegisterManifestError::TransactionCommit(e) => {
-                Error::TransactionCommitError(e)
-            }
         }
         .into());
     }
@@ -240,16 +237,6 @@ pub enum Error {
     /// - Schema inconsistencies prevent registration
     #[error("failed to register manifest in metadata database: {0}")]
     MetadataDbError(#[source] metadata_db::Error),
-
-    /// Failed to commit transaction after successful database operations
-    ///
-    /// This occurs when:
-    /// - Database transaction commit fails after all operations succeed
-    /// - Connection is lost during commit
-    /// - Database lock conflicts prevent commit
-    /// - Transaction timeout occurs
-    #[error("failed to commit transaction: {0}")]
-    TransactionCommitError(#[source] metadata_db::Error),
 }
 
 impl IntoErrorResponse for Error {
@@ -261,7 +248,6 @@ impl IntoErrorResponse for Error {
             Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
             Error::ObjectStoreWriteError(_) => "MANIFEST_STORAGE_ERROR",
             Error::MetadataDbError(_) => "MANIFEST_REGISTRATION_ERROR",
-            Error::TransactionCommitError(_) => "MANIFEST_TRANSACTION_COMMIT_ERROR",
         }
     }
 
@@ -273,7 +259,6 @@ impl IntoErrorResponse for Error {
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
             Error::ObjectStoreWriteError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::TransactionCommitError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

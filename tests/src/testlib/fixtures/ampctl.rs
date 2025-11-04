@@ -6,6 +6,7 @@
 
 use common::BoxError;
 use datasets_common::reference::Reference;
+use serde_json::value::RawValue;
 use url::Url;
 
 /// ampctl fixture for registering dataset manifests and provider configurations.
@@ -62,9 +63,12 @@ impl Ampctl {
         let fqn = dataset_ref.as_fqn();
         let revision = dataset_ref.revision().as_version();
 
+        let manifest_json: Box<RawValue> = serde_json::from_str(manifest_content)
+            .map_err(|err| format!("Failed to parse manifest JSON: {}", err))?;
+
         self.client
             .datasets()
-            .register(fqn, revision, manifest_content)
+            .register(fqn, revision, manifest_json)
             .await
             .map_err(Into::into)
     }
