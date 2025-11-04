@@ -5,9 +5,14 @@
 
 mod memory;
 
+#[cfg(feature = "lmdb")]
+mod lmdb;
+
 use std::collections::VecDeque;
 
 use common::metadata::segments::BlockRange;
+#[cfg(feature = "lmdb")]
+pub use lmdb::LmdbStateStore;
 pub use memory::InMemoryStateStore;
 use serde::{Deserialize, Serialize};
 

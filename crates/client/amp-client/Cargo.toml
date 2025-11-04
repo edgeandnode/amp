@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
+[features]
+default = []
+lmdb = ["dep:heed", "dep:bincode"]
+
 [dependencies]
 alloy.workspace = true
 arrow-flight.workspace = true
@@ -18,3 +22,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+
+# Optional dependencies for LMDB backend
+heed = { version = "0.20", optional = true }
+bincode = { workspace = true, optional = true }
