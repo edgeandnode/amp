@@ -63,11 +63,8 @@ pub enum TransactionEvent {
         id: TransactionId,
         /// Block ranges confirmed complete at this watermark
         ranges: Vec<BlockRange>,
-        /// Transaction IDs that were pruned in this watermark event, or None if no pruning occurred
-        ///
-        /// If you need to prune data events too, you can interpret this range as `0..=last`
-        /// instead of using it verbatim.
-        prune: Option<RangeInclusive<TransactionId>>,
+        /// Last transaction id pruned at this watermark, or None if no pruning occurred.
+        prune: Option<TransactionId>,
     },
 }
 
@@ -89,14 +86,10 @@ pub(crate) enum Action {
 /// subsequent actions) and creates a `Commit` to track what needs to be
 /// persisted. The actual persistence happens when `CommitHandle::commit()` is called.
 #[derive(Clone)]
-enum PendingCommit {
-    Undo {
-        invalidate: RangeInclusive<TransactionId>,
-    },
-    Watermark {
-        ranges: Vec<BlockRange>,
-        prune: Option<RangeInclusive<TransactionId>>,
-    },
+struct PendingCommit {
+    ranges: Vec<BlockRange>,
+    /// Pre-computed pruning point based on buffer state at watermark creation time
+    prune: Option<TransactionId>,
 }
 
 /// Compressed representation of multiple pending commits.
@@ -107,79 +100,45 @@ enum PendingCommit {
 pub struct Commit {
     /// Watermarks to add (oldest to newest)
     pub insert: Vec<(TransactionId, Vec<BlockRange>)>,
-    /// Invalidated transaction id range (removed from back of buffer due to reorg/rewind)
-    pub invalidate: Option<RangeInclusive<TransactionId>>,
-    /// Pruned watermark transaction id range (removed from front of buffer)
-    ///
-    /// If you need to prune data events too, you can interpret this range as `0..=last`
-    /// instead of using it verbatim.
-    pub prune: Option<RangeInclusive<TransactionId>>,
+    /// Last transaction id to prune (inclusive).
+    pub prune: Option<TransactionId>,
 }
 
 impl Commit {
     /// Compress a list of pending commits into a single atomic update.
     ///
-    /// # No-Gaps Invariant
-    /// Since pruning happens from the front and invalidation from the back,
-    /// we just extend the ranges as we see more events. No merging needed!
+    /// Takes the maximum pruning point from all pending commits (since pruning is cumulative).
     fn new(events: Vec<(TransactionId, PendingCommit)>) -> Self {
         let mut compressed = Self {
             insert: Vec::new(),
-            invalidate: None,
             prune: None,
         };
 
+        // Collect watermarks and find maximum prune point
         for (id, event) in events {
-            match event {
-                PendingCommit::Watermark { ranges, prune } => {
-                    // Buffer this watermark (events are in order, so we just push)
-                    compressed.insert.push((id, ranges.clone()));
-                    // Extend prune range (grows from front)
-                    if let Some(range) = prune {
-                        compressed.prune = Some(match compressed.prune {
-                            None => range,
-                            Some(existing) => {
-                                let start = *existing.start().min(range.start());
-                                let end = *existing.end().max(range.end());
-                                start..=end
-                            }
-                        });
-                    }
-                }
-                PendingCommit::Undo { invalidate, .. } => {
-                    // Extend invalidation range (grows from back)
-                    compressed.invalidate = Some(match compressed.invalidate {
-                        None => invalidate,
-                        Some(existing) => {
-                            let start = *existing.start().min(invalidate.start());
-                            let end = *existing.end().max(invalidate.end());
-                            start..=end
-                        }
-                    });
-                }
+            compressed.insert.push((id, event.ranges.clone()));
+
+            // Take the maximum prune point (most recent pruning)
+            if let Some(event_prune) = event.prune {
+                compressed.prune = Some(
+                    compressed
+                        .prune
+                        .map(|existing| existing.max(event_prune))
+                        .unwrap_or(event_prune),
+                );
             }
         }
 
-        // Remove any watermarks that were pruned or invalidated
-        compressed.insert.retain(|(id, _)| {
-            let invalidated = compressed
-                .invalidate
-                .as_ref()
-                .map(|r| r.contains(id))
-                .unwrap_or(false);
-            let pruned = compressed
-                .prune
-                .as_ref()
-                .map(|r| r.contains(id))
-                .unwrap_or(false);
-            !invalidated && !pruned
-        });
+        // Remove any watermarks that were pruned
+        if let Some(prune) = compressed.prune {
+            compressed.insert.retain(|(id, _)| *id > prune);
+        }
 
         compressed
     }
 
     fn is_empty(&self) -> bool {
-        self.insert.is_empty() && self.invalidate.is_none() && self.prune.is_none()
+        self.insert.is_empty() && self.prune.is_none()
     }
 }
 
@@ -306,9 +265,9 @@ fn find_recovery_point(
     None
 }
 
-/// Compute which transaction IDs should be pruned based on retention window.
+/// Compute the last transaction ID that should be pruned based on retention window.
 ///
-/// Walks through watermarks from oldest to newest and identifies those outside
+/// Walks through watermarks from oldest to newest and identifies the last one outside
 /// the retention window (all networks before cutoff).
 ///
 /// # Arguments
@@ -316,12 +275,12 @@ fn find_recovery_point(
 /// - `retention`: Retention window in blocks
 ///
 /// # Returns
-/// - `Some(first..=last)` if watermarks should be pruned
+/// - `Some(end)` - Last transaction ID to prune (all IDs <= this are removed)
 /// - `None` if no pruning needed
-fn compute_pruning_range(
+fn find_pruning_point(
     buffer: &VecDeque<(TransactionId, Vec<BlockRange>)>,
     retention: BlockNum,
-) -> Option<RangeInclusive<TransactionId>> {
+) -> Option<TransactionId> {
     // Get latest ranges from buffer
     let (_, ranges) = buffer.back()?;
 
@@ -338,7 +297,6 @@ fn compute_pruning_range(
         return None;
     }
 
-    let mut first = None;
     let mut last = None;
 
     // Walk from front, checking which watermarks are outside retention (skip last watermark)
@@ -350,20 +308,13 @@ fn compute_pruning_range(
         });
 
         if outside {
-            if first.is_none() {
-                first = Some(*id);
-            }
-
             last = Some(*id);
         } else {
             break; // First watermark within retention
         }
     }
 
-    match (first, last) {
-        (Some(first), Some(last)) => Some(first..=last),
-        _ => None,
-    }
+    last
 }
 
 impl StateContainer {
@@ -482,18 +433,15 @@ impl StateActor {
                         // Add watermark to buffer
                         mgr.buffer.push_back((id, ranges.clone()));
 
-                        // Prune old watermarks outside retention window
-                        let prune = compute_pruning_range(&mgr.buffer, mgr.retention);
-                        if let Some(ref prune) = prune {
-                            mgr.buffer.retain(|(id, _)| !prune.contains(id));
-                        }
+                        // Compute pruning point based on current buffer state
+                        let prune = find_pruning_point(&mgr.buffer, mgr.retention);
 
-                        // Record pending commit for later persistence
+                        // Record pending commit with pre-computed pruning
                         mgr.uncommitted.push_back((
                             id,
-                            PendingCommit::Watermark {
+                            PendingCommit {
                                 ranges: ranges.clone(),
-                                prune: prune.clone(),
+                                prune,
                             },
                         ));
 
@@ -516,7 +464,7 @@ impl StateActor {
                                     Err(Error::UnrecoverableReorg)
                                 }
                             }
-                            Some((tx, ranges)) => {
+                            Some((tx, ref ranges)) => {
                                 // Check each range for partial reorg. A partial reorg is a reorg for which the
                                 // recovery point does not line up perfectly with the start of the invalidation
                                 // range. This is not recoverable and requires a reconnect using the recovery
@@ -541,16 +489,14 @@ impl StateActor {
                             }
                         }?;
 
-                        // Remove all watermarks that are affected by the invalidation.
-                        mgr.buffer.retain(|(id, _)| !invalidate.contains(id));
+                        // Immediately truncate buffer (both in-memory and persisted) to recovery point
+                        let tx = recovery.map(|(tx, _)| tx).unwrap_or(TransactionId::MIN);
+                        let truncate = tx + 1; // One past the recovery point
+                        mgr.buffer.retain(|(id, _)| *id < truncate);
+                        mgr.store.truncate(truncate).await?;
 
-                        // Record pending commit for later persistence
-                        mgr.uncommitted.push_back((
-                            id,
-                            PendingCommit::Undo {
-                                invalidate: invalidate.clone(),
-                            },
-                        ));
+                        // Clear uncommitted watermarks after recovery point
+                        mgr.uncommitted.retain(|(id, _)| *id < truncate);
 
                         TransactionEvent::Undo {
                             id,
@@ -588,9 +534,14 @@ impl StateActor {
             .map(|(id, pending)| (*id, pending.clone()))
             .collect();
 
-        // Compress and persist
+        // Compress and persist (uses pre-computed pruning from pending commits)
         let compressed = Commit::new(pending);
         if !compressed.is_empty() {
+            // Apply pruning to in-memory buffer
+            if let Some(prune) = compressed.prune {
+                mgr.buffer.retain(|(id, _)| *id > prune);
+            }
+
             mgr.store.commit(compressed).await?;
         }
 

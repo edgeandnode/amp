@@ -68,21 +68,32 @@ pub struct StateSnapshot {
 pub trait StateStore: Send + Sync {
     /// Persist the next transaction id.
     ///
-    /// Called by StateManager after incrementing the in-memory counter to pre-allocate
-    /// an ID. This guarantees ID uniqueness even across crashes.
+    /// Called after incrementing the in-memory counter to pre-allocate an ID.
+    /// This guarantees that transaction IDs are monotonically increasing even
+    /// across crashes.
     ///
     /// # Arguments
     /// - `next`: The new value of the next transaction id to persist
     async fn advance(&mut self, next: TransactionId) -> Result<(), Error>;
 
-    /// Persist a compressed commit.
+    /// Persist a compressed commit of watermark events.
     ///
-    /// Called by StateManager after a sequence of commits has been compressed into a single
-    /// atomic update. This ensures that all state changes are applied atomically.
+    /// Called after a sequence of commits has been compressed into a single
+    /// atomic update. This ensures that all watermark commits are applied
+    /// atomically.
     ///
     /// # Arguments
     /// - `commit`: The compressed commit to persist
     async fn commit(&mut self, commit: Commit) -> Result<(), Error>;
+
+    /// Truncate buffer by removing all watermarks beyond a certain point.
+    ///
+    /// Called during reorg handling to immediately cut the buffer to the recovery point.
+    /// This ensures both in-memory and persisted state are consistent.
+    ///
+    /// # Arguments
+    /// - `from`: Remove all watermarks with transaction ID >= this value
+    async fn truncate(&mut self, from: TransactionId) -> Result<(), Error>;
 
     /// Load initial state from persistent storage (called once on startup for rehydration).
     ///

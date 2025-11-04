@@ -75,8 +75,8 @@ async fn buffer_pruning_triggered_by_retention() {
     assert_data_event_with_label(&events[4], 4, "batch3");
     assert_watermark_event(&events[5], 5);
     assert_data_event_with_label(&events[6], 6, "batch4");
-    // Watermarks 1 and 3 have end blocks < 15, should be pruned
-    assert_watermark_event_with_prune(&events[7], 7, Some(1..=3));
+    // Watermarks 1 and 3 have end blocks < 15, should be pruned (last to prune is 3)
+    assert_watermark_event_with_prune(&events[7], 7, Some(3));
 }
 
 /// Tests that no pruning occurs when all batches are within the retention window.
@@ -123,7 +123,7 @@ async fn gradual_pruning_with_advancing_watermark() {
     assert_data_event_with_label(&events[2], 2, "batch2");
     assert_watermark_event_with_prune(&events[3], 3, None); // Still nothing to prune (end=10 >= cutoff=5)
     assert_data_event_with_label(&events[4], 4, "batch3");
-    assert_watermark_event_with_prune(&events[5], 5, Some(1..=1)); // Prune watermark 1 (end=5 < cutoff=10)
+    assert_watermark_event_with_prune(&events[5], 5, Some(1)); // Prune watermark 1 (end=5 < cutoff=10)
 }
 
 /// Verifies that the stream correctly handles multiple blockchain networks
