@@ -30,21 +30,31 @@ pub async fn run(
 
     // Spawn server only if at least one query server is enabled
     let server_fut: Pin<Box<dyn Future<Output = _> + Send>> = if flight_server || jsonl_server {
-        let (addrs, fut) = server::serve(
+        let flight_at = if flight_server {
+            Some(config.addrs.flight_addr)
+        } else {
+            None
+        };
+        let jsonl_at = if jsonl_server {
+            Some(config.addrs.jsonl_addr)
+        } else {
+            None
+        };
+        let (addrs, fut) = server::service::new(
             config.clone(),
             metadata_db.clone(),
-            flight_server,
-            jsonl_server,
+            flight_at,
+            jsonl_at,
             meter.as_ref(),
         )
         .await
-        .map_err(Error::ServerRun)?;
+        .map_err(|err| Error::ServerRun(Box::new(err)))?;
 
-        if flight_server {
-            tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
+        if let Some(addr) = addrs.flight_addr {
+            tracing::info!("Arrow Flight RPC Server running at {}", addr);
         }
-        if jsonl_server {
-            tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
+        if let Some(addr) = addrs.jsonl_addr {
+            tracing::info!("JSON Lines Server running at {}", addr);
         }
 
         Box::pin(fut)

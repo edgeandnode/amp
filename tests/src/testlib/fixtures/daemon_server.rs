@@ -11,7 +11,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
-use server::BoundAddrs;
+use server::service::BoundAddrs;
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon server instances in tests.
@@ -59,14 +59,19 @@ impl DaemonServer {
         let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
-        let (server_addrs, server) = server::serve(
-            config.clone(),
-            metadb,
-            enable_flight,
-            enable_jsonl,
-            meter_ref,
-        )
-        .await?;
+        let flight_at = if enable_flight {
+            Some(config.addrs.flight_addr)
+        } else {
+            None
+        };
+        let jsonl_at = if enable_jsonl {
+            Some(config.addrs.jsonl_addr)
+        } else {
+            None
+        };
+
+        let (server_addrs, server) =
+            server::service::new(config.clone(), metadb, flight_at, jsonl_at, meter_ref).await?;
 
         let server_task = tokio::spawn(server);
 
@@ -102,22 +107,26 @@ impl DaemonServer {
 
     /// Get the Flight server address.
     pub fn flight_server_addr(&self) -> SocketAddr {
-        self.server_addrs.flight_addr
+        self.server_addrs
+            .flight_addr
+            .expect("Flight server was not started")
     }
 
     /// Get the Flight server URL.
     pub fn flight_server_url(&self) -> String {
-        format!("grpc://{}", self.server_addrs.flight_addr)
+        format!("grpc://{}", self.flight_server_addr())
     }
 
     /// Get the JSON Lines server address.
     pub fn jsonl_server_addr(&self) -> SocketAddr {
-        self.server_addrs.jsonl_addr
+        self.server_addrs
+            .jsonl_addr
+            .expect("JSONL server was not started")
     }
 
     /// Get the JSON Lines server URL.
     pub fn jsonl_server_url(&self) -> String {
-        format!("http://{}", self.server_addrs.jsonl_addr)
+        format!("http://{}", self.jsonl_server_addr())
     }
 
     /// Get the bound addresses for all query server endpoints.
