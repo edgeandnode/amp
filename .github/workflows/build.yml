@@ -258,7 +258,7 @@ jobs:
         with:
           name: aarch64-unknown-linux-gnu-${{ matrix.binary }}
           path: ./arm64/
-          
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
         with:
@@ -346,3 +346,24 @@ jobs:
             images+="${tag}@${DIGEST} "
           done
           cosign sign --yes ${images}
+
+  trigger-deploy:
+    needs: build
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger AMP Deploy in amp-infra
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AMP_INFRA_DISPATCH_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'edgeandnode',
+              repo: 'amp-infra',
+              event_type: 'build-completed',
+              client_payload: {
+                ref: '${{ github.ref }}',
+                sha: '${{ github.sha }}',
+                workflow_run_id: '${{ github.run_id }}'
+              }
+            });

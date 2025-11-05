@@ -331,3 +331,4 @@ remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
 
     # Remove all Git hooks (see PRECOMMIT_HOOKS for default hooks)
     pre-commit uninstall --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
+
