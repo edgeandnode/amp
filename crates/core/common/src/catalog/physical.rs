@@ -280,7 +280,6 @@ impl PhysicalTable {
         debug!("Restoring latest revision in prefix {}", path);
 
         let revisions = list_revisions(&data_store, &prefix, &path).await?;
-        dbg!(revisions.len());
         Self::restore_latest(
             revisions,
             table,

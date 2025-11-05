@@ -186,7 +186,7 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
     for table in left.physical_tables() {
         let query = parse_sql(&format!(
             "select * from {} order by block_num",
-            table.table_ref()
+            table.table_ref().to_quoted_string()
         ))
         .expect("Failed to parse SQL query");
 

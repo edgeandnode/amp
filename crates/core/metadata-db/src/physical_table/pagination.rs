@@ -22,7 +22,7 @@ where
             url,
             active,
             writer
-        FROM physical_table
+        FROM physical_tables
         ORDER BY id DESC
         LIMIT $1
     "#};
@@ -54,7 +54,7 @@ where
             url,
             active,
             writer
-        FROM physical_table
+        FROM physical_tables
         WHERE id < $2
         ORDER BY id DESC
         LIMIT $1

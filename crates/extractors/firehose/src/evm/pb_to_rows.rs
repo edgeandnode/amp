@@ -243,17 +243,13 @@ pub fn protobufs_to_rows(
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity_for(&header);
         builder.append(&header);
-        builder
-            .build(block.clone())
-            .map_err(|e| ArrowError(dbg!(e)))?
+        builder.build(block.clone()).map_err(|e| ArrowError(e))?
     };
     let transactions_rows = transactions
         .build(block.clone())
-        .map_err(|e| ArrowError(dbg!(e)))?;
-    let calls_rows = calls
-        .build(block.clone())
-        .map_err(|e| ArrowError(dbg!(e)))?;
-    let logs_rows = logs.build(block.clone()).map_err(|e| ArrowError(dbg!(e)))?;
+        .map_err(|e| ArrowError(e))?;
+    let calls_rows = calls.build(block.clone()).map_err(|e| ArrowError(e))?;
+    let logs_rows = logs.build(block.clone()).map_err(|e| ArrowError(e))?;
 
     Ok(RawDatasetRows::new(vec![
         header_row,
