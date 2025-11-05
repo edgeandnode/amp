@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: amp-server-config
+  name: amp-config
 data:
   config.toml: |
     # Where the extracted datasets are stored.

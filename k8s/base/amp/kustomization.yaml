@@ -1,5 +1,5 @@
 resources:
   - deployment.yaml
-  - configmaps.yaml
-  - services.yaml
+  - amp-configmaps.yaml
+  - gateway-configmaps.yaml
   - onepassworditems.yaml

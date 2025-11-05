@@ -1,5 +1,8 @@
+namespace: amp-gateway
+
 resources:
-  - ../../base/amp-gateway
+  - ../../base/amp
+  - services.yaml
 
 labels:
   - pairs:
@@ -9,3 +12,34 @@ labels:
       environment: staging
     includeSelectors: true
     includeTemplates: true
+
+
+patches:
+  - target:
+      kind: Deployment
+      name: amp
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/name
+        value: gateway
+  - target:
+      kind: Deployment
+      name: amp
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/volumes
+  - target:
+      kind: Deployment
+      name: amp
+    path: patch-deployment.yaml
+  # These patch will delete the whole resource. We don't need it for this backend
+  - target:
+      kind: ConfigMap
+      name: amp-config
+    path: patch-amp-configmaps.yaml
+  - target:
+      kind: OnePasswordItem
+      name: config-secrets
+    path: patch-onepassworditems.yaml
+
+nameSuffix: "-gateway"

@@ -1,5 +1,8 @@
+namespace: amp-server
+
 resources:
-  - ../../base/amp-server
+  - ../../base/amp
+  - services.yaml
 
 labels:
   - pairs:
@@ -9,3 +12,23 @@ labels:
       environment: staging
     includeSelectors: true
     includeTemplates: true
+
+patches:
+  - target:
+      kind: Deployment
+      name: amp
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/name
+        value: server
+  - target:
+      kind: Deployment
+      name: amp
+    path: patch-deployment.yaml
+  # This patch will delete the whole resource. We don't need it for this backend
+  - target:
+      kind: ConfigMap
+      name: amp-envoy-config
+    path: patch-gateway-configmaps.yaml
+
+nameSuffix: "-server"

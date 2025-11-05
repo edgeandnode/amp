@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: amp-gateway-envoy-config
+  name: amp-envoy-config
 data:
   envoy-config.yaml: |
     static_resources:

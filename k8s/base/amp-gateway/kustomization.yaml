@@ -1,5 +1,0 @@
-resources:
-  - deployment.yaml
-  - configmaps.yaml
-  - servicemonitor.yaml
-  - services.yaml

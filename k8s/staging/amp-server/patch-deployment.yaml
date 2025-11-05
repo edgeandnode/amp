@@ -1,18 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: amp-server
+  name: amp
 spec:
-  replicas: 1
-  revisionHistoryLimit: 2
-  strategy:
-    type: Recreate
   template:
     spec:
-      imagePullSecrets:
-        - name: docker-registry
       containers:
-        - name: amp-server
+        - name: server
           image: ghcr.io/edgeandnode/amp:latest # This is just a placeholder, the image is set by the ArgoCD app
           command: ["/ampd", "server"]
           ports:
@@ -23,37 +17,25 @@ spec:
             - name: registry
               containerPort: 1611
           env:
+            - name: AMP_CONFIG
+              value: /config/config.toml
             - name: AMP_CONFIG_DATA_DIR
               valueFrom:
                 secretKeyRef:
-                  name: amp-server-config-secrets
+                  name: config-secrets-server
                   key: data_dir
             - name: AMP_CONFIG_PROVIDERS_DIR
               valueFrom:
                 secretKeyRef:
-                  name: amp-server-config-secrets
+                  name: config-secrets-server
                   key: providers_dir
             - name: AMP_CONFIG_DATASET_DEFS_DIR
               valueFrom:
                 secretKeyRef:
-                  name: amp-server-config-secrets
+                  name: config-secrets-server
                   key: dataset_defs_dir
             - name: AMP_CONFIG_METADATA_DB_URL
               valueFrom:
                 secretKeyRef:
-                  name: amp-server-config-secrets
+                  name: config-secrets-server
                   key: db_url
-            - name: AMP_CONFIG
-              value: /config/config.toml
-            - name: RUST_BACKTRACE
-              value: "1"
-          volumeMounts:
-            - name: amp-server-config
-              mountPath: /config
-      volumes:
-        - name: amp-server-config
-          configMap:
-            name: amp-server-config
-            items:
-              - key: config.toml
-                path: config.toml

@@ -1,36 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: amp-gateway
+  name: amp
 spec:
-  replicas: 1
-  revisionHistoryLimit: 2
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: amp-gateway
   template:
-    metadata:
-      labels:
-        app: amp-gateway
     spec:
-      imagePullSecrets:
-        - name: docker-registry
       containers:
-        - name: amp-gateway
+        - name: gateway
           image: envoyproxy/envoy:v1.28-latest # This is just a placeholder, the image is set by the ArgoCD app
           command: ["/usr/local/bin/envoy", "-c", "/config/envoy-config.yaml"]
           ports:
             - name: http
               containerPort: 80
           volumeMounts:
-            - name: amp-gateway-envoy-config
+            - name: amp-envoy-config
               mountPath: "/config"
       volumes:
-        - name: amp-gateway-envoy-config
+        - name: amp-envoy-config
           configMap:
-            name: amp-gateway-envoy-config
+            name: amp-envoy-config-gateway
             items:
               - key: envoy-config.yaml
                 path: envoy-config.yaml
