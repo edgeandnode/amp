@@ -1,4 +1,0 @@
-resources:
-  - deployment.yaml
-  - amp-configmaps.yaml
-  - gateway-configmaps.yaml
