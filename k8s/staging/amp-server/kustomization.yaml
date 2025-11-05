@@ -3,6 +3,7 @@ namespace: amp-server
 resources:
   - ../../base/amp
   - services.yaml
+  - onepassworditems.yaml
 
 labels:
   - pairs:
