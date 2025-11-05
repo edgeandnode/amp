@@ -89,6 +89,7 @@ mod decode;
 mod error;
 pub mod store;
 mod transactional;
+mod validation;
 
 pub use client::{
     AmpClient, BatchStream, InvalidationRange, Metadata, ProtocolMessage, ProtocolStream,
