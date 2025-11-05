@@ -1,3 +1,15 @@
+[[profile.default.overrides]]
+filter = 'test(postgres)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(ampsync)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(metadata-db)'
+threads-required = "num-test-threads"
+
 [profile.local]
 # Exclude tests that require external dependencies
 default-filter = '''
