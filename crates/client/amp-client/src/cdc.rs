@@ -54,7 +54,10 @@ use crate::{
     client::AmpClient,
     error::Error,
     store::{BatchStore, StateStore},
-    transactional::{CommitHandle, TransactionEvent, TransactionId, TransactionalStreamBuilder},
+    transactional::{
+        CommitHandle, TransactionEvent, TransactionId, TransactionalStream,
+        TransactionalStreamBuilder,
+    },
 };
 
 /// Iterator over delete batches that loads them lazily.
@@ -68,7 +71,7 @@ pub struct DeleteBatchIterator {
 }
 
 impl DeleteBatchIterator {
-    fn new(store: Arc<Mutex<Box<dyn BatchStore>>>, ids: Vec<TransactionId>) -> Self {
+    pub(crate) fn new(store: Arc<Mutex<Box<dyn BatchStore>>>, ids: Vec<TransactionId>) -> Self {
         Self {
             store,
             ids,
@@ -173,14 +176,22 @@ impl CdcStream {
     /// Create a CDC stream by wrapping a transactional stream with batch storage.
     ///
     /// # Arguments
-    /// - `builder`: TransactionalStreamBuilder to wrap
+    /// - `inner`: The transactional stream to wrap
     /// - `batch_store`: BatchStore for batch content persistence
-    pub(crate) async fn create(
-        builder: TransactionalStreamBuilder,
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Production usage:
+    /// let stream = CdcStream::create(builder.await?, batch_store)?;
+    ///
+    /// // Test usage:
+    /// let mock_stream = create_mock_transactional_stream();
+    /// let stream = CdcStream::create(mock_stream, batch_store)?;
+    /// ```
+    pub(crate) fn create(
+        mut inner: TransactionalStream,
         batch_store: Box<dyn BatchStore>,
     ) -> Result<Self, Error> {
-        // Create the underlying transactional stream and wrap it with the cdc stream
-        let mut inner = builder.await?;
         let store = Arc::new(Mutex::new(batch_store));
         let stream = try_stream! {
             while let Some(result) = inner.next().await {
@@ -297,7 +308,7 @@ impl IntoFuture for CdcStreamBuilder {
             );
 
             // Create the CDC stream by wrapping the transactional stream with batch storage
-            CdcStream::create(transactional_builder, self.batch_store).await
+            CdcStream::create(transactional_builder.await?, self.batch_store)
         })
     }
 }

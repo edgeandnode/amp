@@ -182,20 +182,20 @@ impl ScenarioStream {
 pub struct Scenario;
 
 /// Mock response stream that yields ResponseBatch from a Vec.
-struct MockResponseStream {
+pub struct MockResponseStream {
     responses: Vec<ResponseBatch>,
     index: usize,
 }
 
 impl MockResponseStream {
-    fn new(responses: Vec<ResponseBatch>) -> Self {
+    pub fn new(responses: Vec<ResponseBatch>) -> Self {
         Self {
             responses,
             index: 0,
         }
     }
 
-    fn boxed(self) -> BoxStream<'static, Result<ResponseBatch, Error>> {
+    pub fn boxed(self) -> BoxStream<'static, Result<ResponseBatch, Error>> {
         Box::pin(self)
     }
 }

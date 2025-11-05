@@ -145,6 +145,12 @@ impl Step {
         }
     }
 
+    /// Convert this step into a ResponseBatch using default epochs (all zero).
+    pub fn into_batch(self) -> ResponseBatch {
+        let epochs = std::collections::HashMap::new();
+        self.into_batch_with_epochs(&epochs)
+    }
+
     /// Convert this step into a ResponseBatch with per-network epochs.
     pub fn into_batch_with_epochs(
         self,

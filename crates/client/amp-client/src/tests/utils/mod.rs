@@ -35,13 +35,15 @@
 //! ```
 
 pub mod assert;
+pub mod cdc;
 pub mod response;
 pub mod scenario;
 pub mod store;
 
 pub use assert::*;
+pub use cdc::*;
 pub use response::Step;
-pub use scenario::Scenario;
+pub use scenario::{MockResponseStream, Scenario};
 pub use store::SharedStore;
 
 /// Macro for creating test scenarios with minimal boilerplate.
