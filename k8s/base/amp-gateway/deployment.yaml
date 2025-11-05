@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amp-gateway
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: amp-gateway
+  template:
+    metadata:
+      labels:
+        app: amp-gateway
+    spec:
+      imagePullSecrets:
+        - name: docker-registry
+      containers:
+        - name: amp-gateway
+          image: AMP_GATEWAY_IMAGE_NAME
+          command: ["/usr/local/bin/envoy", "-c", "/config/envoy-config.yaml"]
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: amp-gateway-envoy-config
+              mountPath: "/config"
+      volumes:
+        - name: amp-gateway-envoy-config
+          configMap:
+            name: amp-gateway-envoy-config
+            items:
+              - key: envoy-config.yaml
+                path: envoy-config.yaml

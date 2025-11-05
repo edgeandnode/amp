@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amp-controller
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+        - name: amp-controller
+          image: AMP_CONTROLLER_IMAGE_NAME
+          command: ["/ampd", "controller"]
+          ports:
+            - containerPort: 1610
+              name: admin
+          env:
+            - name: AMP_CONFIG_DATA_DIR
+              valueFrom:
+                secretKeyRef:
+                  name: controller-config-secrets
+                  key: data_dir
+            - name: AMP_CONFIG_PROVIDERS_DIR
+              valueFrom:
+                secretKeyRef:
+                  name: controller-config-secrets
+                  key: providers_dir
+            - name: AMP_CONFIG_DATASET_DEFS_DIR
+              valueFrom:
+                secretKeyRef:
+                  name: controller-config-secrets
+                  key: dataset_defs_dir
+            - name: AMP_CONFIG_METADATA_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: controller-config-secrets
+                  key: db_url
+            - name: AMP_CONFIG
+              value: /config/config.toml
+            - name: AMP_LOG
+              value: debug
+            - name: RUST_BACKTRACE
+              value: "1"
+          volumeMounts:
+            - name: controller-config
+              mountPath: /config
+      volumes:
+        - name: controller-config
+          configMap:
+            name: controller-config
+            items:
+              - key: config.toml
+                path: config.toml

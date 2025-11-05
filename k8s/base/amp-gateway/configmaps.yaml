@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amp-gateway-envoy-config
+data:
+  envoy-config.yaml: |
+    static_resources:
+      listeners:
+        - name: main_listener
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 80
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    access_log:
+                      - name: envoy.access_loggers.stdout
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                          log_format:
+                            text_format_source:
+                              inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %RESPONSE_CODE% %RESPONSE_FLAGS% JWT: %DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload)%\n"
+                    route_config:
+                      name: local_route
+                      virtual_hosts:
+                        - name: backend
+                          domains:
+                            - "*"
+                          routes:
+                            - match:
+                                prefix: "/controller/"
+                              route:
+                                prefix_rewrite: "/"
+                                cluster: amp_controller
+                            - match:
+                                prefix: "/api/"
+                              route:
+                                prefix_rewrite: "/"
+                                cluster: amp_server
+                                # max_stream_duration:
+                                #   grpc_timeout_header_max: 0s
+                    http_filters:
+                      - name: envoy.filters.http.jwt_authn
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                          providers:
+                            local_jwt_provider:
+                              issuer: "amp-admin"
+                              local_jwks:
+                                inline_string: '{"keys":[{"kty":"RSA","kid":"amp-admin","use":"sig","alg":"RS256","n":"vU5q9tF95v_SPjfYmEBRVnKDSvYUHyMzzxghtUbi-X03pKQHPTEAGC6vwvlnp8iOFpoqhRVL6BNTwMbIMJZwFMke_tkJ3_6Uyc-8n9MksJDulN6L6pKzSUVGEg7zF4UQOzH62IQs5DiRMsMmtODyKEhThLE3z2BRl9HA9g66CbYxibB-Lx6DLP18Mkrr4adx48ck0P5V-Ol8_GG9eruNLj1ftahUZIR8VDX1FSS4_RGcponWQdrtcCiqVjA84RALXyQZnunyLxfh_WD2cI6rGG8tJEo0_E84em2wCayr_IeGpPU0Xpbwc_ypv-ZKH2D1FKzkj1vht4C_x7z9_-sOmQ","e":"AQAB"}]}'
+                              from_headers:
+                                - name: Authorization
+                                  value_prefix: "Bearer "
+                              forward: true
+                              payload_in_metadata: jwt_payload
+                            remote_jwt_provider:
+                              issuer: "privy-amp"
+                              remote_jwks:
+                                http_uri:
+                                  uri: "https://auth.privy.io/api/v1/apps/cmf5rho0o008ckw0bo29qp5a2/jwks.json"
+                                  cluster: privy_jwks
+                                  timeout: 5s
+                                cache_duration:
+                                  seconds: 300
+                              from_headers:
+                                - name: Authorization
+                                  value_prefix: "Bearer "
+                              forward: true
+                              payload_in_metadata: jwt_payload
+                          rules:
+                            - match:
+                                prefix: "/controller/"
+                              requires:
+                                provider_name: local_jwt_provider
+                            - match:
+                                prefix: "/api"
+                              requires:
+                                requires_any:
+                                  requirements:
+                                    - provider_name: local_jwt_provider
+                                    - provider_name: remote_jwt_provider
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+        - name: amp_controller
+          connect_timeout: 5s
+          type: STRICT_DNS
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: amp_controller
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: amp-controller.amp-controller.svc.cluster.local
+                          port_value: 1610
+
+        - name: amp_server
+          connect_timeout: 5s
+          type: STRICT_DNS
+          lb_policy: ROUND_ROBIN
+          http2_protocol_options: {}
+          load_assignment:
+            cluster_name: amp_server
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: amp-server.amp-server.svc.cluster.local
+                          port_value: 80
+
+        - name: privy_jwks
+          connect_timeout: 10s
+          type: LOGICAL_DNS
+          dns_lookup_family: V4_ONLY
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: privy_jwks
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: auth.privy.io
+                          port_value: 443
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: auth.privy.io

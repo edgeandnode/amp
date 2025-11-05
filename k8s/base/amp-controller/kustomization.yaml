@@ -1,0 +1,5 @@
+resources:
+  - deployment.yaml
+  - configmaps.yaml
+  - services.yaml
+  - onepassworditems.yaml

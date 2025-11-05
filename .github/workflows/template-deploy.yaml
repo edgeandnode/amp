@@ -1,0 +1,112 @@
+name: ArgoCD Deploy Template
+
+on:
+  workflow_call:
+    inputs:
+      APP_NAME:
+        description: "Name of the application, same as k8s namespace"
+        required: true
+        type: string
+      ENVIRONMENT:
+        description: "Environment to deploy to"
+        required: false
+        type: string
+        default: staging
+      IMAGE_NAME:
+        description: "Name of the image"
+        required: false
+        type: string
+        default: ghcr.io/edgeandnode/amp
+      IMAGE_TAG:
+        description: "Tag of the image"
+        required: false
+        type: string
+        default: sha-${GITHUB_SHA::7}
+      DEST_PROJECT:
+        description: "Name of the project to deploy to, same as team name"
+        required: false
+        type: string
+        default: amp
+      REPO_URI:
+        description: "URI of the repository to deploy from"
+        required: false
+        type: string
+        default: git@github.com:edgeandnode/amp-private.git
+      DEST_SERVER_NAME:
+        description: "Name of the destination server to deploy to, defaults to the cluster where Argocd is running"
+        required: false
+        type: string
+        default: in-cluster
+      REVISION_HISTORY_LIMIT:
+        description: "Number of revision history to keep"
+        required: false
+        type: number
+        default: 2
+    secrets:
+      ARGOCD_SERVER_URL:
+        description: "URL of the ArgoCD server"
+        required: true
+      ARGOCD_AUTH_TOKEN:
+        description: "Auth token for the ArgoCD server"
+        required: true
+      ARGOCD_BASIC_AUTH_HASH:
+        description: "Basic auth hash for the ArgoCD server"
+        required: true
+
+jobs:
+  deploy-template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set ArgoCD Basic Auth Header
+        run: |
+          echo "ARGOCD_HEADER=\"Authorization: Basic ${{ secrets.ARGOCD_BASIC_AUTH_HASH }}\"" >> $GITHUB_ENV
+
+      - name: Setup ArgoCD CLI
+        run: |
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v3.1.9/argocd-linux-amd64
+          chmod +x argocd-linux-amd64
+          mv argocd-linux-amd64 /usr/local/bin/argocd
+
+      - name: ArgoCD app create and set the image tag
+        env:
+          ARGOCD_SERVER_URL: ${{ secrets.ARGOCD_SERVER_URL }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_HEADER: ${{ env.ARGOCD_HEADER }}
+        run: |
+          argocd app create ${{ inputs.APP_NAME }}  \
+          --repo ${{ inputs.REPO_URI }} \
+          --path k8s/${{ inputs.ENVIRONMENT}}/${{ inputs.APP_NAME }} \
+          --dest-name ${{ inputs.DEST_SERVER_NAME }} \
+          --dest-namespace ${{ inputs.APP_NAME }} \
+          --project ${{ inputs.DEST_PROJECT }} \
+          --kustomize-image ${{ inputs.IMAGE_NAME }}:${{ inputs.IMAGE_TAG }} \
+          --server ${{ env.ARGOCD_SERVER_URL }} \
+          --auth-token ${{ env.ARGOCD_AUTH_TOKEN }} \
+          --header ${{ env.ARGOCD_HEADER }} \
+          --revision-history-limit ${{ inputs.REVISION_HISTORY_LIMIT }} \
+          --grpc-web \
+          --upsert
+
+      - name: ArgoCD app sync
+        env:
+          ARGOCD_SERVER_URL: ${{ secrets.ARGOCD_SERVER_URL }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_HEADER: ${{ env.ARGOCD_HEADER }}
+        run: |
+          argocd app sync ${{ inputs.APP_NAME }}  \
+          --server ${{ env.ARGOCD_SERVER_URL }} \
+          --auth-token ${{ env.ARGOCD_AUTH_TOKEN }} \
+          --header ${{ env.ARGOCD_HEADER }} \
+          --grpc-web
+
+      - name: ArgoCD app details
+        env:
+          ARGOCD_SERVER_URL: ${{ secrets.ARGOCD_SERVER_URL }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_HEADER: ${{ env.ARGOCD_HEADER }}
+        run: |
+          argocd app get ${{ inputs.APP_NAME }}  \
+          --server ${{ env.ARGOCD_SERVER_URL }} \
+          --auth-token ${{ env.ARGOCD_AUTH_TOKEN }} \
+          --header ${{ env.ARGOCD_HEADER }} \
+          --grpc-web

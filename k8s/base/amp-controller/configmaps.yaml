@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: controller-config
+data:
+  config.toml: |
+    # Where the extracted datasets are stored.
+    # data_dir = "gs://amp-staging-data/data-1/"
+    # data_dir = $AMP_CONFIG_DATA_DIR
+
+    # Path to a providers directory. Each provider is configured as a separate toml file in this
+    # directory. Dataset definitions will reference providers by a relative path to this directory.
+    # providers_dir = "gs://amp-staging-config/config-green/providers/"
+    # providers_dir = $AMP_CONFIG_PROVIDERS_DIR
+
+    # Path to a directory containing dataset definition files.
+    # dataset_defs_dir = "gs://amp-staging-config/config-green/dataset_defs/"
+    # dataset_defs_dir = $AMP_CONFIG_DATASET_DEFS_DIR
+
+    # Maximum number of blocks to process per microbatch in SQL datasets
+    microbatch_max_interval = 10_000_000
+
+    # How much memory the server can use in bytes. Setting this to 0 means
+    # unlimited
+    max_mem_mb = 0
+
+    [metadata_db]
+    # url = "postgres://<pg_url>"
+    # url = $AMP_CONFIG_METADATA_DB_URL
+    auto_migrate = false
+
+    # Size of the connection pool (default: 10)
+    # pool_size = 10
+
+    # How much memory the server can use in MB. Setting this to 0, the default, means unlimited.
+    # max_mem_mb = 0
+
+    # Paths where DataFusion can create temporary files, enabling spill-to-disk when aggregation or join
+    # state exceeds the memory limit.
+    #
+    # spill_location = []
+
+    # Service addresses (optional - defaults shown below)
+    # Arrow Flight RPC server address
+    # flight_addr = "0.0.0.0:1602"
+
+    # JSON Lines server address
+    # jsonl_addr = "0.0.0.0:1603"
+
+    # Registry service address
+    # registry_service_addr = "0.0.0.0:1611"
+
+    # Admin API server address
+    # admin_api_addr = "0.0.0.0:1610"
+
+    # Parquet configuration (optional)
+    [parquet]
+    # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
+    # compression = "zstd(1)"
+
+    # Enable bloom filters (default: false)
+    # bloom_filters = false
+
+    # Parquet metadata cache size in MB (default: 1024)
+    # cache_size_mb = 1024
+
+    # File compaction configuration (optional)
+    [compaction]
+    # The maximum number of concurrent metadata operations (default: 10)
+    # metadata_concurrency = 10
+
+    # The maximum number of concurrent compaction write operations per table (default: 1)
+    # write_concurrency = 1
+
+    # The interval (in seconds) at which to run the garbage collector (default: 60)
+    # collector_interval_secs = 60
+
+    # The interval (in seconds) at which to run the compactor (default: 0)
+    # compactor_interval_secs = 0
+
+    # The minimum number of distinct blocks in a set of contiguous files before it is compacted (default: -1)
+    # block_threshold = -1
+
+    # The minimum number of bytes in a set of contiguous files before it is compacted (default: -1)
+    # byte_threshold = -1
+
+    # The minimum number of rows in a set of contiguous files before it is compacted (default: -1)
+    # row_threshold = -1
+
+    # The minimum number of contiguous files to compact at once (default: 2)
+    # min_file_count = 2
+
+    [opentelemetry]
+    # trace_url = "http://amp-otlp-service.amp:4317/v1/traces"
+    metrics_url = "http://vmsingle-victoria-metrics-k8s-stack.monitoring:8428/opentelemetry/v1/metrics"
+    metrics_export_interval_secs = 3.0
