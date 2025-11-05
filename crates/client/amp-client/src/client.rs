@@ -18,7 +18,13 @@ use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::{Streaming, transport::Endpoint};
 
-use crate::{decode, error::Error, store::StateStore, transactional::TransactionalStreamBuilder};
+use crate::{
+    decode,
+    error::Error,
+    store::StateStore,
+    transactional::TransactionalStreamBuilder,
+    validation::{validate_consecutiveness, validate_networks},
+};
 
 /// Metadata attached to each batch from the server.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -141,14 +147,13 @@ impl ProtocolStream {
 
             while let Some(response) = responses.next().await {
                 let batch = response?;
+                let ranges = batch.metadata.ranges;
 
-                // TODO: Validate protocol invariants here
-                // - Check no duplicate networks
-                // - Check network stability (no networks appeared/disappeared)
-                // - Check consecutiveness (except post-reorg)
-                // - Check post-reorg ranges match expected
+                // Validate network consistency (duplicates + stability)
+                validate_networks(&previous, &ranges)?;
 
-                let invalidation: Vec<InvalidationRange> = batch.metadata.ranges.iter().filter_map(|i| {
+                // Detect reorg before validating consecutiveness
+                let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|i| {
                     let p = previous.iter().find(|p| p.network == i.network)?;
                     if (i != p) && (i.start() <= p.end()) {
                         return Some(InvalidationRange {
@@ -162,23 +167,26 @@ impl ProtocolStream {
                 if !invalidation.is_empty() {
                     yield ProtocolMessage::Reorg {
                         previous: previous.clone(),
-                        incoming: batch.metadata.ranges.clone(),
+                        incoming: ranges.clone(),
                         invalidation,
                     };
+                } else {
+                    // Validate consecutiveness of block ranges
+                    validate_consecutiveness(&previous, &ranges)?;
                 }
 
                 if batch.metadata.ranges_complete {
                     yield ProtocolMessage::Watermark {
-                        ranges: batch.metadata.ranges.clone(),
+                        ranges: ranges.clone(),
                     };
                 } else {
                     yield ProtocolMessage::Data {
                         batch: batch.data,
-                        ranges: batch.metadata.ranges.clone(),
+                        ranges: ranges.clone(),
                     };
                 }
 
-                previous = batch.metadata.ranges;
+                previous = ranges;
             }
         }
         .boxed();
