@@ -42,6 +42,11 @@ on:
         required: false
         type: number
         default: 2
+      REVISION_TARGET:
+        description: "The tracking source branch, tag or commit to deploy from"
+        required: false
+        type: string
+        default: HEAD
     secrets:
       ARGOCD_SERVER_URL:
         description: "URL of the ArgoCD server"
@@ -84,6 +89,7 @@ jobs:
           --auth-token ${{ env.ARGOCD_AUTH_TOKEN }} \
           --header ${{ env.ARGOCD_HEADER }} \
           --revision-history-limit ${{ inputs.REVISION_HISTORY_LIMIT }} \
+          --revision ${{ inputs.REVISION_TARGET }} \
           --grpc-web \
           --upsert
 
