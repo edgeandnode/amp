@@ -353,7 +353,7 @@ export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFireh
  *
  * Future kinds: DatasetFirehose, DatasetEthBeacon, etc.
  */
-export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetEthBeacon)
+export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetEthBeacon, DatasetFirehose)
 export type DatasetManifest = Schema.Schema.Type<typeof DatasetManifest>
 
 export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({
