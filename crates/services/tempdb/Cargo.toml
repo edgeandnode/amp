@@ -1,0 +1,10 @@
+[package]
+name = "tempdb"
+version.workspace = true
+license-file.workspace = true
+edition.workspace = true
+
+[dependencies]
+pgtemp = "0.6.0"
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true

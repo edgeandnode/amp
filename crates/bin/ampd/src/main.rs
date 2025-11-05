@@ -81,6 +81,9 @@ enum Command {
         /// Enable Admin API Server.
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
+        /// Use temporary database (overrides metadata_db_url in config).
+        #[arg(long, env = "DEV_TEMP_DB", default_value = "true")]
+        temp_db: bool,
     },
     Server {
         /// Enable Arrow Flight RPC Server.
@@ -142,6 +145,7 @@ async fn main_inner() -> Result<(), BoxError> {
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
+            temp_db,
         } => {
             // If neither of the flags are set, enable all servers
             if !flight_server && !jsonl_server && !admin_server {
@@ -150,25 +154,28 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), true).await?;
-            let metadata_db = config.metadata_db().await?;
+            let Some(config_path_str) = config_path.as_ref() else {
+                return Err("--config parameter is mandatory".into());
+            };
 
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            // Build info from environment variables set by vergen
+            let build_info = common::config::BuildInfo {
+                version: env!("VERGEN_GIT_DESCRIBE").to_string(),
+                commit_sha: env!("VERGEN_GIT_SHA").to_string(),
+                commit_timestamp: env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
+                build_date: env!("VERGEN_BUILD_DATE").to_string(),
+            };
 
-            let result = dev_cmd::run(
-                config,
-                metadata_db,
+            dev_cmd::run(
+                config_path_str,
+                build_info,
                 flight_server,
                 jsonl_server,
                 admin_server,
-                metrics_meter,
+                temp_db,
             )
-            .await;
+            .await?;
 
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
             Ok(())
         }
         Command::Dump {
@@ -181,7 +188,7 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
             let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
@@ -217,7 +224,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
             let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
@@ -240,7 +247,7 @@ async fn main_inner() -> Result<(), BoxError> {
         Command::Worker { node_id } => {
             let node_id = node_id.parse()?;
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
             let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
@@ -254,7 +261,7 @@ async fn main_inner() -> Result<(), BoxError> {
             Ok(())
         }
         Command::Controller => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
@@ -273,7 +280,7 @@ async fn main_inner() -> Result<(), BoxError> {
             Ok(())
         }
         Command::Migrate => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
 
             let (tracing_provider, metrics_provider, _metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
@@ -286,7 +293,7 @@ async fn main_inner() -> Result<(), BoxError> {
             Ok(())
         }
         Command::Restore { dataset: datasets } => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref()).await?;
             let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, _metrics_meter) =
@@ -302,10 +309,7 @@ async fn main_inner() -> Result<(), BoxError> {
     }
 }
 
-async fn load_config(
-    config_path: Option<&String>,
-    allow_temp_db: bool,
-) -> Result<Config, BoxError> {
+async fn load_config(config_path: Option<&String>) -> Result<Config, BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
@@ -318,6 +322,6 @@ async fn load_config(
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
     };
 
-    let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
+    let config = Config::load(config, true, None, build_info).await?;
     Ok(config)
 }

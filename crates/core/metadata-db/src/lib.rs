@@ -17,13 +17,9 @@ pub mod jobs;
 mod locations;
 pub mod manifests;
 pub mod notification_multiplexer;
-#[cfg(feature = "temp-db")]
-pub mod temp;
 pub mod workers;
 
 use self::db::ConnPool;
-#[cfg(feature = "temp-db")]
-pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
@@ -151,6 +147,11 @@ impl MetadataDb {
 
     pub fn default_pool_size() -> u32 {
         DEFAULT_POOL_SIZE
+    }
+
+    /// Get the connection URL for this metadata database
+    pub fn url(&self) -> &str {
+        &self.url
     }
 }
 

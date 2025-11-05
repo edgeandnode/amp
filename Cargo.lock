@@ -927,11 +927,13 @@ dependencies = [
  "dataset-store",
  "datasets-common",
  "dump",
+ "figment",
  "metadata-db",
  "monitoring",
  "server",
  "snmalloc-rs",
  "static_assertions",
+ "tempdb",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -8699,6 +8701,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tempdb"
+version = "0.1.0"
+dependencies = [
+ "pgtemp",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8759,6 +8770,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "server",
+ "tempdb",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
