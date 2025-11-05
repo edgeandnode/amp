@@ -11,7 +11,7 @@ use std::{collections::VecDeque, ops::RangeInclusive};
 
 use common::{arrow::array::RecordBatch, metadata::segments::BlockRange};
 #[cfg(feature = "lmdb")]
-pub use lmdb::LmdbStateStore;
+pub use lmdb::{LmdbBatchStore, LmdbStateStore, open_lmdb_env, open_lmdb_env_with_options};
 pub use memory::{InMemoryBatchStore, InMemoryStateStore};
 #[cfg(feature = "postgres")]
 pub use postgres::PostgresStateStore;
