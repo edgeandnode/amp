@@ -105,7 +105,7 @@ async fn insert_on_conflict_returns_existing_id() {
     // Insert first location
     let first_id = physical_table::insert(
         &mut conn,
-        table.clone(),
+        table,
         "test-namespace",
         "test-dataset",
         Some("bucket1"),
@@ -623,7 +623,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url1 = Url::parse("s3://bucket/assign1.parquet").expect("Failed to parse assign1 URL");
     let location_id1 = physical_table::insert(
         &mut conn,
-        table.clone(),
+        table,
         "test-namespace",
         "test-dataset",
         None,
@@ -637,7 +637,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url2 = Url::parse("s3://bucket/assign2.parquet").expect("Failed to parse assign2 URL");
     let location_id2 = physical_table::insert(
         &mut conn,
-        table.clone(),
+        table,
         "test-namespace",
         "test-dataset",
         None,
@@ -651,7 +651,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url3 = Url::parse("s3://bucket/assign3.parquet").expect("Failed to parse assign3 URL");
     let location_id3 = physical_table::insert(
         &mut conn,
-        table.clone(),
+        table,
         "test-namespace",
         "test-dataset",
         None,

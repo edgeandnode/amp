@@ -100,15 +100,14 @@ impl Job {
 
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset = Arc::new(
-                        ctx.dataset_store
-                            .get_by_hash(&location.manifest_hash.into())
-                            .await
-                            .map_err(|err| JobCreationError::DatasetFetchFailed(err.into()))?
-                            .ok_or_else(|| JobCreationError::DatasetNotFound {
-                                dataset: location.manifest_hash.to_string(),
-                            })?,
-                    );
+                    let dataset = ctx
+                        .dataset_store
+                        .get_by_hash(&location.manifest_hash.into())
+                        .await
+                        .map_err(JobCreationError::DatasetFetchFailed)?
+                        .ok_or_else(|| JobCreationError::DatasetNotFound {
+                            dataset: location.manifest_hash.to_string(),
+                        })?;
 
                     let dataset_ref = Reference::new(
                         dataset_namespace.clone(),

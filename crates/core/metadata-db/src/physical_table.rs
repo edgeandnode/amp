@@ -18,6 +18,7 @@ mod location_id;
 mod pagination;
 
 /// Insert a physical table location into the database and return its ID (idempotent operation)
+#[allow(clippy::too_many_arguments)]
 pub async fn insert<'c, E>(
     exe: E,
     table: TableId<'_>,

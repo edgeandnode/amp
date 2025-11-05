@@ -11,7 +11,7 @@ use dataset_store::{
     providers::ProviderConfigsStore,
 };
 use datasets_common::reference::Reference;
-use dump::{EndBlock, metrics::MetricsRegistry};
+use dump::EndBlock;
 use metadata_db::{MetadataDb, notification_multiplexer};
 use static_assertions::const_assert;
 
@@ -107,8 +107,7 @@ pub async fn dump(
         }
     };
 
-    let mut physical_datasets: Vec<(Vec<Arc<PhysicalTable>>, Option<Arc<MetricsRegistry>>)> =
-        vec![];
+    let mut physical_datasets: Vec<_> = vec![];
     for dataset_ref in datasets {
         let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
@@ -163,8 +162,7 @@ pub async fn dump(
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets
         .iter()
-        .map(|(tables, _)| tables)
-        .flatten()
+        .flat_map(|(tables, _)| tables)
         .cloned()
         .collect();
 

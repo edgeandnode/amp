@@ -360,6 +360,7 @@ impl PhysicalTable {
     }
 
     /// Restore a location from the data store and register it in the metadata database.
+    #[allow(clippy::too_many_arguments)]
     async fn restore(
         table: &ResolvedTable,
         table_id: &TableId<'_>,
@@ -708,7 +709,7 @@ impl TableProvider for TableSnapshot {
 //
 // The path format is: `<dataset>/<table>/<UUIDv7>/`
 pub fn make_location_path(job_labels: &JobLabels, table: &str) -> String {
-    let mut path = location_prefix(&job_labels, table);
+    let mut path = location_prefix(job_labels, table);
 
     // Add UUIDv7
     let uuid = uuid::Uuid::now_v7();

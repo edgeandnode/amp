@@ -222,6 +222,7 @@ impl MetadataDb {
     /// a constraint violation. If an active location might exist, it is better to initialize the
     /// location with `active = false` and then call `set_active_location` to switch it as active.
     #[instrument(skip(self), err)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_location(
         &self,
         table: TableId<'_>,
@@ -277,7 +278,7 @@ impl MetadataDb {
         trace!("Setting location as active");
 
         let mut tx = self.pool.begin().await?;
-        physical_table::mark_inactive_by_table_id(&mut *tx, table.clone()).await?;
+        physical_table::mark_inactive_by_table_id(&mut *tx, table).await?;
         physical_table::mark_active_by_id(&mut *tx, table, location_id).await?;
         tx.commit().await?;
         Ok(())

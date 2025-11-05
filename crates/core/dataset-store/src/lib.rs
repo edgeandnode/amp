@@ -588,14 +588,12 @@ impl DatasetStore {
 impl DatasetStore {
     /// Retrieves a dataset by name and optional version, with in-memory caching.
     ///
-    /// This method resolves the dataset's manifest hash from the namespace+name+version tuple,
-    /// checks an in-memory cache keyed by the namespace+name+version, and loads the dataset
-    /// from storage on cache miss:
+    /// This method resolves the dataset's manifest hash from the namespace+name+version tuple
+    /// and delegates to `get_by_hash` for loading and caching:
     ///
     /// 1. Validate the dataset name and resolves the version (uses latest if not provided)
-    /// 2. Check the in-memory cache using the namespace+name+version as the key
-    /// 3. On cache miss, resolve the manifest hash for the namespace+name+version tuple
-    /// 4. Load the dataset from storage and caches it
+    /// 2. Resolve the manifest hash for the namespace+name+version tuple
+    /// 3. Delegate to `get_by_hash` which handles caching and loading
     ///
     /// Returns `None` if the dataset cannot be found in the metadata database or manifest store.
     pub async fn get_dataset(
@@ -632,13 +630,52 @@ impl DatasetStore {
             }
         };
 
-        // Check cache using `<namespace>/<name>@<version>` as the key
-        if let Some(dataset) = self.dataset_cache.read().get(&manifest_hash).cloned() {
+        match self.get_by_hash(&manifest_hash).await {
+            Ok(Some(dataset)) => {
+                tracing::debug!(
+                    dataset_namespace = %namespace,
+                    dataset_name = %name,
+                    dataset_version = %revision,
+                    "Dataset loaded successfully"
+                );
+                Ok(dataset)
+            }
+            Ok(None) => Err(GetDatasetError::DatasetNotFound(reference.clone())),
+            Err(e) => Err(GetDatasetError::ManifestRetrievalError {
+                namespace: namespace.to_string(),
+                name: name.to_string(),
+                version: Some(revision.to_string()),
+                source: e,
+            }),
+        }
+    }
+
+    /// Loads a dataset by its manifest hash, with in-memory caching.
+    ///
+    /// This retrieves the manifest content from the object store using the hash,
+    /// parses it to determine the dataset kind, and creates the appropriate dataset instance:
+    ///
+    /// 1. Check the in-memory cache using the manifest hash as the key
+    /// 2. On cache miss, retrieve the manifest path from metadata DB using the hash
+    /// 3. Retrieve the manifest content from the manifest store using the path
+    /// 4. Parse the common manifest structure to identify the dataset kind
+    /// 5. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
+    /// 6. Create the typed dataset instance, cache it, and return
+    ///
+    /// Returns `None` if the manifest cannot be found in the store, or an error if parsing or
+    /// [`Dataset`] instance creation fails.
+    #[instrument(skip(self), err)]
+    pub async fn get_by_hash(
+        &self,
+        manifest_hash: &Hash,
+    ) -> Result<Option<Arc<Dataset>>, BoxError> {
+        // Check cache using manifest hash as the key
+        if let Some(dataset) = self.dataset_cache.read().get(manifest_hash).cloned() {
             tracing::trace!(
                 manifest_hash = %manifest_hash,
                 "Cache hit, returning cached dataset"
             );
-            return Ok(dataset);
+            return Ok(Some(dataset));
         }
 
         tracing::debug!(
@@ -646,53 +683,8 @@ impl DatasetStore {
             "Cache miss, loading from store"
         );
 
-        let dataset = self.get_by_hash(&manifest_hash).await.map_err(|e| {
-            GetDatasetError::ManifestRetrievalError {
-                namespace: namespace.to_string(),
-                name: name.to_string(),
-                version: Some(revision.to_string()),
-                source: e,
-            }
-        })?;
-
-        let Some(dataset) = dataset else {
-            return Err(GetDatasetError::DatasetNotFound(reference.clone()));
-        };
-        let dataset = Arc::new(dataset);
-
-        // Cache the dataset.
-        self.dataset_cache
-            .write()
-            .insert(manifest_hash, dataset.clone());
-
-        tracing::debug!(
-            dataset_namespace = %namespace,
-            dataset_name = %name,
-            dataset_version = %revision,
-            "Dataset loaded (and cached) successfully"
-        );
-
-        Ok(dataset)
-    }
-
-    /// Loads a dataset by its manifest hash.
-    ///
-    /// This retrieves the manifest content from the object store using the hash,
-    /// parses it to determine the dataset kind, and creates the appropriate dataset instance:
-    ///
-    /// 1. Retrieve the manifest path from metadata DB using the hash
-    /// 2. Retrieve the manifest content from the manifest store using the path
-    /// 3. Parse the common manifest structure to identify the dataset kind
-    /// 4. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
-    /// 5. Create and return the typed dataset instance
-    ///
-    /// Returns `None` if the manifest cannot be found in the store, or an error if parsing or
-    /// [`Dataset`] instance creation fails.
-    #[instrument(skip(self), err)]
-    pub async fn get_by_hash(&self, manifest_hash: &Hash) -> Result<Option<Dataset>, BoxError> {
         // Get the manifest path from metadata database
-        let manifest_hash = manifest_hash.clone();
-        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, &manifest_hash)
+        let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, manifest_hash)
             .await?
             .map(ManifestPath::from)
         else {
@@ -711,21 +703,33 @@ impl DatasetStore {
         let dataset = match kind {
             DatasetKind::EvmRpc => {
                 let manifest = manifest_content.try_into_manifest::<EvmRpcManifest>()?;
-                evm_rpc_datasets::dataset(manifest_hash, manifest)
+                evm_rpc_datasets::dataset(manifest_hash.clone(), manifest)
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content.try_into_manifest::<EthBeaconManifest>()?;
-                eth_beacon_datasets::dataset(manifest_hash, manifest)
+                eth_beacon_datasets::dataset(manifest_hash.clone(), manifest)
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content.try_into_manifest::<FirehoseManifest>()?;
-                firehose_datasets::evm::dataset(manifest_hash, manifest)
+                firehose_datasets::evm::dataset(manifest_hash.clone(), manifest)
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content.try_into_manifest::<DerivedManifest>()?;
-                derived::dataset(manifest_hash, manifest)?
+                derived::dataset(manifest_hash.clone(), manifest)?
             }
         };
+
+        let dataset = Arc::new(dataset);
+
+        // Cache the dataset
+        self.dataset_cache
+            .write()
+            .insert(manifest_hash.clone(), dataset.clone());
+
+        tracing::debug!(
+            manifest_hash = %manifest_hash,
+            "Dataset loaded (and cached) successfully"
+        );
 
         Ok(Some(dataset))
     }
@@ -1346,17 +1350,16 @@ async fn search_dependencies_for_raw_dataset(
             continue;
         }
 
-        if dataset.kind != DerivedDatasetKind {
-            if let Some(dataset_network) = dataset.network.as_ref() {
-                if dataset_network == network {
-                    // Found matching dataset
-                    return Ok(dataset);
-                }
-            }
+        if dataset.kind != DerivedDatasetKind
+            && let Some(dataset_network) = dataset.network.as_ref()
+            && dataset_network == network
+        {
+            // Found matching dataset
+            return Ok(dataset);
         }
 
         // Enqueue dependencies for exploration
-        for (_, reference) in &dataset.dependencies {
+        for reference in dataset.dependencies.values() {
             let dataset = dataset_store.get_dataset(reference).await?;
             queue.push_back(dataset);
         }

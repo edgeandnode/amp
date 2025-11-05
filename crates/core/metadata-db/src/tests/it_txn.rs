@@ -29,10 +29,10 @@ async fn commit_persists_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, manifest_hash.clone(), &manifest_path)
+    manifests::register(&mut tx, manifest_hash, &manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash)
         .await
         .expect("Failed to link manifest in transaction");
 
@@ -75,10 +75,10 @@ async fn explicit_rollback_discards_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, manifest_hash.clone(), manifest_path)
+    manifests::register(&mut tx, manifest_hash, manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash)
         .await
         .expect("Failed to link manifest in transaction");
 
@@ -123,10 +123,10 @@ async fn rollback_on_drop_discards_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, manifest_hash.clone(), manifest_path)
+    manifests::register(&mut tx, manifest_hash, manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash)
         .await
         .expect("Failed to link manifest in transaction");
 
