@@ -1,4 +1,4 @@
-name: Build and Deploy Argocd App
+name: Deploy Argocd Apps
 
 concurrency:
    group: staging-crates-${{ github.ref }}
