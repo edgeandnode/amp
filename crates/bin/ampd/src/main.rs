@@ -259,6 +259,9 @@ async fn main_inner() -> Result<(), BoxError> {
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
+            let metadata_db_url = config.metadata_db.url.as_ref().unwrap().to_string();
+            tracing::warn!("{}", metadata_db_url);
+
             let admin_api_addr = config.addrs.admin_api_addr;
             let (addr, server) =
                 controller::service::new(Arc::new(config), metrics_meter.as_ref(), admin_api_addr)
