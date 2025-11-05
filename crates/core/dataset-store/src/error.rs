@@ -1,9 +1,8 @@
 use common::BoxError;
 use datasets_common::{
     hash::Hash,
-    name::{Name, NameError},
-    partial_reference::PartialReferenceError,
-    version::Version,
+    name::NameError,
+    partial_reference::{PartialReference, PartialReferenceError},
 };
 
 use crate::{
@@ -233,6 +232,10 @@ pub enum GetDatasetError {
         version: Option<String>,
         source: BoxError,
     },
+
+    /// Dataset not found.
+    #[error("Dataset '{0}' not found")]
+    DatasetNotFound(PartialReference),
 }
 
 /// Errors that occur when getting all datasets from the dataset store
@@ -273,12 +276,8 @@ pub enum GetDerivedManifestError {
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
     /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    ManifestRetrievalError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
+    #[error("Failed to retrieve manifest': {source}")]
+    ManifestRetrievalError { source: BoxError },
 
     /// Failed to parse the manifest file content.
     ///
@@ -286,46 +285,35 @@ pub enum GetDerivedManifestError {
     /// - The manifest file contains invalid JSON or TOML syntax
     /// - The manifest structure doesn't match the expected schema
     /// - Required fields are missing or have incorrect types
-    #[error("Failed to parse manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    ManifestParseError {
-        name: String,
-        version: Option<String>,
-        source: ManifestParseError,
-    },
+    #[error("Failed to parse manifest: {source}")]
+    ManifestParseError { source: ManifestParseError },
 
     /// The dataset kind is not SQL or Derived.
     ///
     /// This occurs when trying to get a dataset as a SQL dataset but the manifest
     /// indicates a different kind (e.g., evm-rpc, firehose).
     /// Only SQL and Derived dataset kinds can be retrieved as SQL datasets.
-    #[error("Dataset '{name}' version '{}' has unsupported kind '{kind}' for SQL dataset retrieval (expected 'sql' or 'derived')", version.as_deref().unwrap_or("latest"))]
-    UnsupportedKind {
-        name: String,
-        version: Option<String>,
-        kind: String,
-    },
+    #[error(
+        "Dataset has unsupported kind '{kind}' for SQL dataset retrieval (expected 'sql' or 'derived')"
+    )]
+    UnsupportedKind { kind: String },
+
+    #[error("Manifest {0} is not registered")]
+    ManifestNotRegistered(datasets_common::hash::Hash),
+
+    #[error("Manifest {0} not found in the manifest store")]
+    ManifestNotFound(datasets_common::hash::Hash),
 }
 
 /// Errors specific to getting client operations for raw datasets
 #[derive(Debug, thiserror::Error)]
 pub enum GetClientError {
-    /// The provided dataset name failed to parse according to the naming rules.
-    ///
-    /// This occurs during the initial validation of the dataset name string before
-    /// any database or manifest operations are performed.
-    #[error("Invalid dataset name '{name}': {source}")]
-    InvalidDatasetName { name: String, source: NameError },
-
     /// Failed to retrieve the manifest file from the manifest store.
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
     /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    ManifestRetrievalError {
-        name: String,
-        version: Option<String>,
-        source: BoxError,
-    },
+    #[error("Failed to retrieve manifest: {source}")]
+    ManifestRetrievalError { source: BoxError },
 
     /// Failed to parse the common manifest file content.
     ///
@@ -333,34 +321,25 @@ pub enum GetClientError {
     /// - The manifest file contains invalid JSON or TOML syntax
     /// - The manifest structure doesn't match the expected schema
     /// - Required fields are missing or have incorrect types
-    #[error("Failed to parse common manifest for dataset '{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    CommonManifestParseError {
-        name: String,
-        version: Option<String>,
-        source: ManifestParseError,
-    },
+    #[error("Failed to parse common manifest for dataset: {source}")]
+    CommonManifestParseError { source: ManifestParseError },
 
     /// The dataset kind is not a raw dataset type.
     ///
     /// This occurs when trying to get a client for a dataset that is not a raw data source.
     /// Only raw dataset kinds (evm-rpc, eth-beacon, firehose) can have clients retrieved.
     /// SQL and Derived datasets cannot have clients as they are views over other datasets.
-    #[error("Dataset '{name}' version '{}' has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc, eth-beacon, or firehose)", version.as_deref().unwrap_or("latest"))]
-    UnsupportedKind {
-        name: String,
-        version: Option<String>,
-        kind: String,
-    },
+    #[error(
+        "Dataset has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc, eth-beacon, or firehose)"
+    )]
+    UnsupportedKind { kind: String },
 
     /// Dataset is missing the required 'network' field.
     ///
     /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, or firehose)
     /// does not include the network field, which is required to determine the appropriate provider configuration.
-    #[error("Dataset '{name}' version '{}' is missing required 'network' field for raw dataset kind", version.as_deref().unwrap_or("latest"))]
-    MissingNetwork {
-        name: String,
-        version: Option<String>,
-    },
+    #[error("Dataset is missing required 'network' field for raw dataset kind")]
+    MissingNetwork,
 
     /// No provider configuration found for the dataset kind and network combination.
     ///
@@ -368,11 +347,8 @@ pub enum GetClientError {
     /// - No provider is configured for the specific kind-network pair
     /// - All providers for this kind-network are disabled
     /// - Provider configuration files are missing or invalid
-    #[error(
-        "No provider found for dataset '{name}' with kind '{dataset_kind}' and network '{network}'"
-    )]
+    #[error("No provider found with kind '{dataset_kind}' and network '{network}'")]
     ProviderNotFound {
-        name: String,
         dataset_kind: DatasetKind,
         network: String,
     },
@@ -381,7 +357,7 @@ pub enum GetClientError {
     ///
     /// This occurs when the provider configuration cannot be deserialized into the
     /// expected type for the dataset kind (EvmRpc, EthBeacon, or Firehose).
-    #[error("Failed to parse provider configuration for dataset '{name}': {source}")]
+    #[error("Failed to parse provider configuration for provider '{name}': {source}")]
     ProviderConfigParseError {
         name: String,
         source: ParseConfigError,
@@ -406,6 +382,12 @@ pub enum GetClientError {
         name: String,
         source: firehose_datasets::Error,
     },
+
+    #[error("Manifest {0} is not registered")]
+    ManifestNotRegistered(datasets_common::hash::Hash),
+
+    #[error("Manifest {0} not found in the manifest store")]
+    ManifestNotFound(datasets_common::hash::Hash),
 }
 
 /// Errors specific to get_logical_catalog operations
@@ -424,15 +406,6 @@ pub enum GetLogicalCatalogError {
     /// typically due to invalid function name formats or naming convention violations.
     #[error("Failed to extract datasets from function names: {0}")]
     ExtractDatasetFromFunctionNames(#[source] ExtractDatasetFromFunctionNamesError),
-
-    /// Dataset not found.
-    ///
-    /// This occurs when a dataset referenced in the query does not exist in the dataset store.
-    #[error("Dataset '{name}' version '{}' not found", version.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "latest".to_string()))]
-    DatasetNotFound {
-        name: String,
-        version: Option<Version>,
-    },
 
     /// Failed to get a dataset.
     ///
@@ -636,13 +609,8 @@ pub enum EthCallForDatasetError {
     ///
     /// This occurs when an EVM RPC dataset definition does not include the network
     /// field, which is required to determine the appropriate provider configuration.
-    #[error(
-        "Dataset '{dataset_name}' version '{dataset_version}' is missing required 'network' field for EvmRpc kind"
-    )]
-    MissingNetwork {
-        dataset_name: Name,
-        dataset_version: Version,
-    },
+    #[error("Dataset '{manifest_hash}' is missing required 'network' field for EvmRpc kind")]
+    MissingNetwork { manifest_hash: String },
 
     /// No provider configuration found for the dataset kind and network combination.
     ///

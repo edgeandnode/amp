@@ -7,7 +7,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use datafusion::sql::{parser, resolve::resolve_table_references};
-use datasets_common::{name::Name, namespace::Namespace, version::Version};
 use datasets_derived::{DerivedDatasetKind, Manifest, manifest::TableInput};
 
 use crate::{
@@ -34,11 +33,9 @@ pub fn queries(
 ///
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
-/// name, version) must be provided externally as they are not part of the manifest.
+/// name, version, manifest_hash) must be provided externally as they are not part of the manifest.
 pub fn dataset(
-    namespace: Namespace,
-    name: Name,
-    version: Version,
+    manifest_hash: datasets_common::hash::Hash,
     manifest: Manifest,
 ) -> Result<Dataset, BoxError> {
     let queries = {
@@ -60,7 +57,7 @@ pub fn dataset(
         })
         .collect();
     let unsorted_tables = unsorted_tables?;
-    let tables = sort_tables_by_dependencies(name.as_ref(), unsorted_tables, &queries)?;
+    let tables = sort_tables_by_dependencies(unsorted_tables, &queries)?;
 
     // Convert manifest functions into logical functions
     let functions = manifest
@@ -78,9 +75,8 @@ pub fn dataset(
         .collect();
 
     Ok(Dataset {
-        namespace,
-        name,
-        version: Some(version),
+        manifest_hash,
+        dependencies: manifest.dependencies,
         kind: DerivedDatasetKind.to_string(),
         network: None,
         start_block: None,
@@ -95,7 +91,6 @@ pub fn dataset(
 /// Analyzes table queries to determine dependencies and returns tables in dependency order.
 /// Tables with no dependencies come first, followed by tables that depend on them.
 pub fn sort_tables_by_dependencies(
-    dataset_name: &str,
     tables: Vec<LogicalTable>,
     queries: &BTreeMap<String, parser::Statement>,
 ) -> Result<Vec<LogicalTable>, BoxError> {
@@ -120,14 +115,11 @@ pub fn sort_tables_by_dependencies(
         let mut table_deps: Vec<String> = vec![];
         for table_ref in table_refs {
             match (table_ref.schema(), table_ref.table()) {
-                (Some(schema), table) if schema == dataset_name => {
-                    // Reference to a table in the same dataset
+                (None, table) => {
+                    // Unqualified reference is assumed to be to a table in the same dataset
                     if table != table_name && table_map.contains_key(table) {
                         table_deps.push(table.to_string());
                     }
-                }
-                (None, _) => {
-                    // Unqualified reference
                 }
                 _ => {
                     // Reference to external dataset, ignore

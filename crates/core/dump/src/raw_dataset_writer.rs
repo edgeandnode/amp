@@ -231,18 +231,10 @@ impl RawTableWriter {
 
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
-            let dataset_name = self.table.dataset().name.clone();
-            let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();
             // Record bytes only (rows tracked separately)
-            metrics.record_ingestion_bytes(
-                num_bytes,
-                dataset_name.to_string(),
-                dataset_version,
-                table_name,
-                *location_id,
-            );
+            metrics.record_ingestion_bytes(num_bytes, table_name, *location_id);
         }
 
         self.current_range = match self.current_range.take() {
@@ -279,16 +271,9 @@ impl RawTableWriter {
         let metadata = file.close(range, vec![], Generation::default()).await?;
 
         if let Some(ref metrics) = self.metrics {
-            let dataset_name = self.table.dataset().name.clone();
-            let dataset_version = self.table.dataset().dataset_version().unwrap_or_default();
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();
-            metrics.record_file_written(
-                dataset_name.to_string(),
-                dataset_version,
-                table_name,
-                *location_id,
-            );
+            metrics.record_file_written(table_name, *location_id);
         }
 
         self.compactor.try_run()?;

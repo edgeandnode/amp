@@ -22,12 +22,14 @@ async fn sql_dataset_input_batch_size() {
     let test = TestCtx::setup("sql_dataset_input_batch_size").await;
 
     // 2. First dump eth_rpc dependency on the spot
+    let eth_rpc_ref = "eth_rpc"
+        .parse::<datasets_common::reference::Reference>()
+        .unwrap();
     let start = test
         .dataset_store()
-        .get_dataset("eth_rpc", None)
+        .get_dataset(eth_rpc_ref)
         .await
         .unwrap()
-        .expect("Dataset should exist")
         .start_block
         .unwrap();
     let end = start + 3;

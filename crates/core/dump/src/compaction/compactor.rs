@@ -120,16 +120,14 @@ impl Compactor {
             match result {
                 Ok(range_start) => {
                     if let Some(metrics) = &self.metrics {
-                        let dataset = self.table.dataset().name.to_string();
                         let table_name = self.table.table_name().to_string();
-                        metrics.inc_successful_compactions(dataset, table_name, range_start);
+                        metrics.inc_successful_compactions(table_name, range_start);
                     }
                 }
                 Err(err) => {
                     if let Some(metrics) = &self.metrics {
-                        let dataset = self.table.dataset().name.to_string();
                         let table_name = self.table.table_name().to_string();
-                        metrics.inc_failed_compactions(dataset, table_name);
+                        metrics.inc_failed_compactions(table_name);
                     }
                     tracing::warn!("{err}");
                 }
@@ -229,7 +227,6 @@ impl CompactionGroup {
 
         // Extract values before move
         let metrics = self.metrics.clone();
-        let dataset = self.table.dataset().name.to_string();
         let table_name = self.table.table_name().to_string();
         let location_id = *self.table.location_id();
 
@@ -242,7 +239,6 @@ impl CompactionGroup {
         // Record metrics if available
         if let Some(ref metrics) = metrics {
             metrics.record_compaction(
-                dataset,
                 table_name,
                 location_id,
                 input_file_count,

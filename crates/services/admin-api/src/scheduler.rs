@@ -17,8 +17,10 @@
 //! - Job state validation and transitions
 //! - Bulk cleanup operations for terminal jobs
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use common::{BoxError, Dataset};
+use common::{BoxError, Dataset, catalog::JobLabels};
 use dump::EndBlock;
 use metadata_db::{Job, JobStatus};
 use worker::JobId;
@@ -31,9 +33,10 @@ pub trait JobScheduler: Send + Sync {
     /// Schedule a dataset synchronization job
     async fn schedule_dataset_sync_job(
         &self,
-        dataset: Dataset,
+        dataset: Arc<Dataset>,
         end_block: EndBlock,
         max_writers: u16,
+        job_labels: JobLabels,
     ) -> Result<JobId, ScheduleJobError>;
 
     /// Stop a running job

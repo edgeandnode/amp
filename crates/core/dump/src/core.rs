@@ -34,7 +34,6 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
     for t in tables {
@@ -45,7 +44,7 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, max_writers, end, metrics, meter).await
+        dump_raw_tables(ctx, tables, max_writers, end, metrics).await
     } else {
         dump_user_tables(
             ctx,
@@ -66,7 +65,6 @@ pub async fn dump_raw_tables(
     max_writers: u16,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -78,8 +76,10 @@ pub async fn dump_raw_tables(
     let dataset = {
         let ds = tables[0].table().dataset();
         for table in tables {
-            if table.dataset().name != ds.name {
-                return Err(format!("Table {} is not in {}", table.table_ref(), ds.name).into());
+            if table.dataset().manifest_hash != ds.manifest_hash {
+                return Err(
+                    format!("Table {} is not in {}", table.table_ref(), ds.manifest_hash).into(),
+                );
             }
         }
         ds
@@ -103,23 +103,19 @@ pub async fn dump_raw_tables(
                 tables,
                 parquet_opts,
                 end,
-                &dataset.name,
                 metrics,
-                meter,
                 dataset.finalized_blocks_only,
             )
             .await?;
         }
         DatasetKind::Derived => {
-            return Err(format!(
-                "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
-                dataset.name, kind,
-            )
-            .into());
+            return Err(
+                format!("Attempted to dump dataset of kind `{kind}` as raw dataset",).into(),
+            );
         }
     }
 
-    tracing::info!("dump of dataset {} completed successfully", dataset.name);
+    tracing::info!("dump completed successfully");
 
     Ok(())
 }
@@ -155,19 +151,8 @@ pub async fn dump_user_tables(
 
         let manifest = ctx
             .dataset_store
-            .get_derived_manifest(&dataset.name, dataset.version.as_ref())
-            .await?
-            .ok_or_else(|| {
-                format!(
-                    "Derived dataset '{}' version '{}' not found",
-                    dataset.name,
-                    dataset
-                        .version
-                        .as_ref()
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "latest".to_string())
-                )
-            })?;
+            .get_derived_manifest(dataset.manifest_hash())
+            .await?;
 
         sql_dump::dump_table(
             ctx.clone(),

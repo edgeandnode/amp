@@ -13,10 +13,13 @@ pub struct LocationInfo {
     /// Unique identifier for this location (64-bit integer)
     #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub id: LocationId,
+
+    /// Namespace of the dataset this location belongs to
+    pub dataset_namespace: String,
     /// Name of the dataset this location belongs to
-    pub dataset: String,
-    /// Version of the dataset using semantic versioning (e.g., "1.0.0", or empty string for unversioned)
-    pub dataset_version: String,
+    pub dataset_name: String,
+    /// Hash of the dataset manifest
+    pub manifest_hash: String,
     /// Name of the table within the dataset (e.g., "blocks", "transactions")
     pub table: String,
     /// Full URL to the storage location (e.g., "s3://bucket/path/table.parquet", "file:///local/path/table.parquet")
@@ -28,18 +31,19 @@ pub struct LocationInfo {
     pub writer: Option<JobId>,
 }
 
-impl From<metadata_db::Location> for LocationInfo {
+impl From<metadata_db::PhysicalTable> for LocationInfo {
     /// Converts a database `Location` record into an API-friendly `LocationInfo`
     ///
     /// This conversion handles:
     /// - Converting the URL from `url::Url` to `String` for JSON serialization
     /// - Preserving all other fields as-is
-    fn from(value: metadata_db::Location) -> Self {
+    fn from(value: metadata_db::PhysicalTable) -> Self {
         Self {
             id: value.id,
-            dataset: value.dataset,
-            dataset_version: value.dataset_version,
-            table: value.table,
+            dataset_namespace: value.dataset_namespace,
+            dataset_name: value.dataset_name,
+            manifest_hash: value.manifest_hash.to_string(),
+            table: value.table_name,
             url: value.url.to_string(),
             active: value.active,
             writer: value.writer,
@@ -62,10 +66,12 @@ pub struct LocationInfoWithDetails {
     /// Unique identifier for this location (64-bit integer)
     #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub id: LocationId,
+    /// Namespace of the dataset this location belongs to
+    pub dataset_namespace: String,
     /// Name of the dataset this location belongs to
-    pub dataset: String,
-    /// Version of the dataset using semantic versioning (e.g., "1.0.0", or empty string for unversioned)
-    pub dataset_version: String,
+    pub dataset_name: String,
+    /// Hash of the dataset manifest
+    pub manifest_hash: String,
     /// Name of the table within the dataset (e.g., "blocks", "transactions")
     pub table: String,
     /// Full URL to the storage location (e.g., "s3://bucket/path/table.parquet", "file:///local/path/table.parquet")
@@ -79,12 +85,13 @@ pub struct LocationInfoWithDetails {
 impl From<metadata_db::LocationWithDetails> for LocationInfoWithDetails {
     fn from(value: metadata_db::LocationWithDetails) -> Self {
         Self {
-            id: value.id,
-            dataset: value.dataset,
-            dataset_version: value.dataset_version,
-            table: value.table,
-            url: value.url.to_string(),
-            active: value.active,
+            id: value.location.id,
+            dataset_namespace: value.location.dataset_namespace,
+            dataset_name: value.location.dataset_name,
+            manifest_hash: value.location.manifest_hash.to_string(),
+            table: value.location.table_name,
+            url: value.location.url.to_string(),
+            active: value.location.active,
             writer: value.writer.map(Into::into),
         }
     }

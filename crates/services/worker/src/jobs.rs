@@ -2,10 +2,18 @@
 
 use std::sync::Arc;
 
-use common::{BoxError, catalog::physical::PhysicalTable};
+use common::{
+    BoxError,
+    catalog::{JobLabels, physical::PhysicalTable},
+};
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 pub use dump::Ctx;
-use dump::{EndBlock, metrics};
+use dump::{
+    EndBlock,
+    metrics::{self, MetricsRegistry},
+};
 pub use metadata_db::JobStatus;
+use tracing::instrument;
 
 use crate::JobCreationError;
 
@@ -25,6 +33,10 @@ pub enum Descriptor {
         end_block: EndBlock,
         #[serde(default = "default_max_writers")]
         max_writers: u16,
+
+        dataset_namespace: Namespace,
+        dataset_name: Name,
+        manifest_hash: datasets_common::hash::Hash,
     },
 }
 
@@ -49,20 +61,18 @@ pub enum Job {
         end_block: EndBlock,
         /// Number of parallel writers to run.
         max_writers: u16,
-        /// Metrics registry.
-        metrics: Option<Arc<metrics::MetricsRegistry>>,
-        /// Meter for creating telemetry objects.
-        meter: Option<monitoring::telemetry::metrics::Meter>,
+        /// Metrics.
+        metrics: Option<Arc<MetricsRegistry>>,
     },
 }
 
 impl Job {
     /// Try to build a job from a job ID and descriptor.
+    #[instrument(skip(ctx, job_desc, meter), err)]
     pub async fn try_from_descriptor(
         ctx: Ctx,
         job_id: JobId,
         job_desc: Descriptor,
-        metrics: Option<Arc<metrics::MetricsRegistry>>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Job, JobCreationError> {
         let output_locations = ctx
@@ -75,25 +85,42 @@ impl Job {
             Descriptor::Dump {
                 end_block,
                 max_writers,
+                dataset_namespace,
+                dataset_name,
+                manifest_hash,
             } => {
+                let job_labels = JobLabels {
+                    dataset_namespace: dataset_namespace.clone(),
+                    dataset_name: dataset_name.clone(),
+                    manifest_hash: manifest_hash.clone(),
+                };
+                let metrics = meter
+                    .as_ref()
+                    .map(|m| metrics::MetricsRegistry::new(m, job_labels.clone()));
+
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
-                            .get_dataset(&location.dataset, dataset_version.as_ref())
+                            .get_by_hash(&location.manifest_hash.into())
                             .await
                             .map_err(|err| JobCreationError::DatasetFetchFailed(err.into()))?
                             .ok_or_else(|| JobCreationError::DatasetNotFound {
-                                dataset: location.dataset.clone(),
+                                dataset: location.manifest_hash.to_string(),
                             })?,
                     );
 
-                    let mut resolved_tables = dataset.resolved_tables();
-                    let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
+                    let dataset_ref = Reference::new(
+                        dataset_namespace.clone(),
+                        dataset_name.clone(),
+                        Revision::Hash(manifest_hash.clone()),
+                    );
+                    let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
+                    let Some(table) = resolved_tables.find(|t| t.name() == location.table_name)
+                    else {
                         return Err(JobCreationError::TableNotFound {
-                            table: location.table,
-                            dataset: location.dataset,
+                            table: location.table_name,
+                            dataset: location.manifest_hash.to_string(),
                         });
                     };
 
@@ -103,6 +130,7 @@ impl Job {
                             location.url,
                             location.id,
                             ctx.metadata_db.clone(),
+                            job_labels.clone(),
                         )
                         .map_err(JobCreationError::PhysicalTableCreationFailed)?
                         .into(),
@@ -114,8 +142,7 @@ impl Job {
                     tables,
                     end_block,
                     max_writers,
-                    metrics,
-                    meter,
+                    metrics: metrics.map(Arc::new),
                 })
             }
         }
@@ -129,7 +156,6 @@ impl Job {
                 end_block,
                 max_writers,
                 metrics,
-                meter,
             } => {
                 dump::dump_tables(
                     ctx.clone(),
@@ -138,7 +164,6 @@ impl Job {
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,
-                    meter.as_ref(),
                 )
                 .await
             }

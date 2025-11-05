@@ -13,7 +13,7 @@ mod path;
 pub(crate) mod sql;
 
 pub use self::{
-    hash::{Hash as ManifestHash, HashOwned as ManifestHashOwned},
+    hash::Hash as ManifestHash,
     path::{Path as ManifestPath, PathOwned as ManifestPathOwned},
 };
 use crate::{db::Executor, error::Error};
@@ -26,7 +26,7 @@ use crate::{db::Executor, error::Error};
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
-    hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    hash: impl Into<ManifestHash> + std::fmt::Debug,
     path: impl Into<ManifestPath<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
@@ -44,7 +44,7 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_path<'c, E>(
     exe: E,
-    hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    hash: impl Into<ManifestHash> + std::fmt::Debug,
 ) -> Result<Option<ManifestPathOwned>, Error>
 where
     E: Executor<'c>,
@@ -62,7 +62,7 @@ where
 ///
 /// Returns a vector of manifest hashes for all orphaned manifests.
 #[tracing::instrument(skip(exe), err)]
-pub async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<ManifestHashOwned>, Error>
+pub async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<ManifestHash>, Error>
 where
     E: Executor<'c>,
 {
@@ -81,7 +81,7 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn count_dataset_links_and_lock<'c, E>(
     exe: E,
-    hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    hash: impl Into<ManifestHash> + std::fmt::Debug,
 ) -> Result<i64, Error>
 where
     E: Executor<'c>,
@@ -101,7 +101,7 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn delete<'c, E>(
     exe: E,
-    hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    hash: impl Into<ManifestHash> + std::fmt::Debug,
 ) -> Result<Option<ManifestPathOwned>, Error>
 where
     E: Executor<'c>,

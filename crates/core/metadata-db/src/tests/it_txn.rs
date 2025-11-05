@@ -17,7 +17,9 @@ async fn commit_persists_changes() {
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-commit");
-    let manifest_hash = ManifestHash::from_ref_unchecked("test-hash-commit");
+    let manifest_hash =
+        ManifestHash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            .unwrap();
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-commit.json");
 
     // Begin transaction
@@ -27,10 +29,10 @@ async fn commit_persists_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, &manifest_path)
+    manifests::register(&mut tx, manifest_hash.clone(), &manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
         .await
         .expect("Failed to link manifest in transaction");
 
@@ -41,7 +43,7 @@ async fn commit_persists_changes() {
     assert!(commit_result.is_ok(), "transaction commit should succeed");
 
     // Verify data persisted by querying outside the transaction
-    let path = manifests::get_path(&metadata_db, &manifest_hash)
+    let path = manifests::get_path(&metadata_db, manifest_hash)
         .await
         .expect("Failed to query manifest path after commit");
     assert_eq!(
@@ -62,7 +64,9 @@ async fn explicit_rollback_discards_changes() {
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-rollback");
-    let manifest_hash = ManifestHash::from_ref_unchecked("test-hash-rollback");
+    let manifest_hash =
+        ManifestHash::from_hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+            .unwrap();
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-rollback.json");
 
     let mut tx = metadata_db
@@ -71,10 +75,10 @@ async fn explicit_rollback_discards_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, manifest_path)
+    manifests::register(&mut tx, manifest_hash.clone(), manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
         .await
         .expect("Failed to link manifest in transaction");
 
@@ -88,7 +92,7 @@ async fn explicit_rollback_discards_changes() {
     );
 
     // Verify data was NOT persisted
-    let path = manifests::get_path(&metadata_db, &manifest_hash)
+    let path = manifests::get_path(&metadata_db, manifest_hash)
         .await
         .expect("Failed to query manifest path after rollback");
     assert_eq!(
@@ -108,7 +112,9 @@ async fn rollback_on_drop_discards_changes() {
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-drop");
-    let manifest_hash = ManifestHash::from_ref_unchecked("test-hash-drop");
+    let manifest_hash =
+        ManifestHash::from_hex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+            .unwrap();
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-drop.json");
 
     let mut tx = metadata_db
@@ -117,10 +123,10 @@ async fn rollback_on_drop_discards_changes() {
         .expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, manifest_path)
+    manifests::register(&mut tx, manifest_hash.clone(), manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
-    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, &manifest_hash)
+    datasets::link_manifest_to_dataset(&mut tx, &namespace, &name, manifest_hash.clone())
         .await
         .expect("Failed to link manifest in transaction");
 
@@ -129,7 +135,7 @@ async fn rollback_on_drop_discards_changes() {
 
     //* Then
     // Verify data was NOT persisted
-    let path = manifests::get_path(&metadata_db, &manifest_hash)
+    let path = manifests::get_path(&metadata_db, manifest_hash)
         .await
         .expect("Failed to query manifest path after drop");
     assert_eq!(

@@ -1,4 +1,4 @@
-//! Location-related database operations
+//! Physical table database operations
 
 use sqlx::{Executor, Postgres, types::JsonValue};
 use url::Url;
@@ -17,10 +17,12 @@ pub mod events;
 mod location_id;
 mod pagination;
 
-/// Insert a location into the database and return its ID (idempotent operation)
+/// Insert a physical table location into the database and return its ID (idempotent operation)
 pub async fn insert<'c, E>(
     exe: E,
     table: TableId<'_>,
+    dataset_namespace: &str,
+    dataset_name: &str,
     bucket: Option<&str>,
     path: &str,
     url: &Url,
@@ -29,20 +31,19 @@ pub async fn insert<'c, E>(
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let dataset_version = table.dataset_version.unwrap_or("");
-
     // Upsert with RETURNING id - the no-op update ensures RETURNING works for both insert and conflict cases
     let query = indoc::indoc! {"
-        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (url) DO UPDATE SET dataset = EXCLUDED.dataset
+        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, bucket, path, url, active)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (url) DO UPDATE SET manifest_hash = EXCLUDED.manifest_hash
         RETURNING id
     "};
 
     let id: LocationId = sqlx::query_scalar(query)
-        .bind(table.dataset)
-        .bind(dataset_version)
+        .bind(table.manifest_hash)
         .bind(table.table)
+        .bind(dataset_namespace)
+        .bind(dataset_name)
         .bind(bucket)
         .bind(path)
         .bind(url.as_str())
@@ -53,11 +54,11 @@ where
 }
 
 /// Get a location by its ID
-pub async fn get_by_id<'c, E>(exe: E, id: LocationId) -> Result<Option<Location>, sqlx::Error>
+pub async fn get_by_id<'c, E>(exe: E, id: LocationId) -> Result<Option<PhysicalTable>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = "SELECT * FROM locations WHERE id = $1";
+    let query = "SELECT * FROM physical_tables WHERE id = $1";
 
     sqlx::query_as(query).bind(id).fetch_optional(exe).await
 }
@@ -67,7 +68,7 @@ pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, s
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = "SELECT id FROM locations WHERE url = $1 LIMIT 1";
+    let query = "SELECT id FROM physical_tables WHERE url = $1 LIMIT 1";
 
     let id: Option<LocationId> = sqlx::query_scalar(query)
         .bind(url.as_str())
@@ -88,11 +89,12 @@ where
         SELECT
             -- Location fields
             l.id,
-            l.dataset,
-            l.dataset_version,
-            l.tbl,
+            l.manifest_hash,
+            l.table_name,
             l.url,
             l.active,
+            l.dataset_namespace,
+            l.dataset_name,
 
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
@@ -101,7 +103,7 @@ where
             j.descriptor  AS writer_job_descriptor,
             j.created_at  AS writer_job_created_at,
             j.updated_at  AS writer_job_updated_at
-        FROM locations l
+        FROM physical_tables l
         LEFT JOIN jobs j ON l.writer = j.id
         WHERE l.id = $1
     "};
@@ -110,13 +112,13 @@ where
     #[derive(sqlx::FromRow)]
     struct Row {
         id: LocationId,
-        dataset: String,
-        dataset_version: String,
-        #[sqlx(rename = "tbl")]
-        table: String,
+        manifest_hash: crate::manifests::ManifestHash,
+        table_name: String,
         #[sqlx(try_from = "&'a str")]
         url: Url,
         active: bool,
+        dataset_namespace: String,
+        dataset_name: String,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
@@ -155,40 +157,42 @@ where
         _ => None,
     };
 
-    Ok(Some(LocationWithDetails {
+    let location = PhysicalTable {
         id: row.id,
-        dataset: row.dataset,
-        dataset_version: row.dataset_version,
-        table: row.table,
+        manifest_hash: row.manifest_hash,
+        dataset_namespace: row.dataset_namespace,
+        dataset_name: row.dataset_name,
+        table_name: row.table_name,
         url: row.url,
         active: row.active,
-        writer,
-    }))
+        writer: writer.as_ref().map(|j| j.id),
+    };
+
+    Ok(Some(LocationWithDetails { location, writer }))
 }
 
-/// Get all active locations for a table
+/// Get the active physical table for a table
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_active_by_table_id<'c, E>(
+pub async fn get_active_physical_table<'c, E>(
     exe: E,
     table: TableId<'_>,
-) -> Result<Vec<(String, LocationId)>, sqlx::Error>
+) -> Result<Option<PhysicalTable>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT url, id
-        FROM locations
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
+        SELECT *
+        FROM physical_tables
+        WHERE manifest_hash = $1 AND table_name = $2 AND active
     "};
 
-    let tuples: Vec<(String, LocationId)> = sqlx::query_as(query)
-        .bind(table.dataset)
-        .bind(table.dataset_version.unwrap_or(""))
+    let table = sqlx::query_as(query)
+        .bind(table.manifest_hash)
         .bind(table.table)
-        .fetch_all(exe)
+        .fetch_optional(exe)
         .await?;
 
-    Ok(tuples)
+    Ok(table)
 }
 
 /// Deactivate all active locations for a specific table
@@ -197,17 +201,14 @@ pub async fn mark_inactive_by_table_id<'c, E>(exe: E, table: TableId<'_>) -> Res
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let dataset_version = table.dataset_version.unwrap_or("");
-
     let query = indoc::indoc! {"
-        UPDATE locations
+        UPDATE physical_tables
         SET active = false
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
+        WHERE manifest_hash = $1 AND table_name = $2 AND active
     "};
 
     sqlx::query(query)
-        .bind(table.dataset)
-        .bind(dataset_version)
+        .bind(table.manifest_hash)
         .bind(table.table)
         .execute(exe)
         .await?;
@@ -216,27 +217,24 @@ where
 
 /// Activate a specific location by URL (does not deactivate others)
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_active_by_url<'c, E>(
+pub async fn mark_active_by_id<'c, E>(
     exe: E,
-    table: TableId<'_>,
-    url: &Url,
+    table_id: TableId<'_>,
+    location_id: &LocationId,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let dataset_version = table.dataset_version.unwrap_or("");
-
     let query = indoc::indoc! {"
-        UPDATE locations
+        UPDATE physical_tables
         SET active = true
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
+        WHERE id = $1 AND manifest_hash = $2 AND table_name = $3
     "};
 
     sqlx::query(query)
-        .bind(table.dataset)
-        .bind(dataset_version)
-        .bind(table.table)
-        .bind(url.as_str())
+        .bind(location_id)
+        .bind(table_id.manifest_hash)
+        .bind(table_id.table)
         .execute(exe)
         .await?;
     Ok(())
@@ -244,13 +242,13 @@ where
 
 /// Get all locations that were written by a specific job
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_job_id<'c, E>(exe: E, job_id: JobId) -> Result<Vec<Location>, sqlx::Error>
+pub async fn get_by_job_id<'c, E>(exe: E, job_id: JobId) -> Result<Vec<PhysicalTable>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT id, dataset, dataset_version, tbl, url, active, writer
-        FROM locations
+        SELECT id, manifest_hash, dataset_namespace, dataset_name, table_name, url, active, writer
+        FROM physical_tables
         WHERE writer = $1
     "};
 
@@ -269,7 +267,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        UPDATE locations
+        UPDATE physical_tables
         SET writer = $1
         WHERE id = ANY($2)
     "};
@@ -292,7 +290,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        DELETE FROM locations
+        DELETE FROM physical_tables
         WHERE id = $1
     "};
 
@@ -303,16 +301,18 @@ where
 
 /// Basic location information from the database
 #[derive(Debug, Clone, sqlx::FromRow)]
-pub struct Location {
+pub struct PhysicalTable {
     /// Unique identifier for the location
     pub id: LocationId,
-    /// Name of the dataset this location belongs to
-    pub dataset: String,
-    /// Version of the dataset (empty string if unversioned)
-    pub dataset_version: String,
+    /// Manifest hash identifying the dataset version
+    pub manifest_hash: crate::manifests::ManifestHash,
+
+    // Labels for the dataset name under which this location was created
+    pub dataset_namespace: String,
+    pub dataset_name: String,
+
     /// Name of the table within the dataset
-    #[sqlx(rename = "tbl")]
-    pub table: String,
+    pub table_name: String,
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
@@ -322,23 +322,30 @@ pub struct Location {
     pub writer: Option<JobId>,
 }
 
-/// Basic location information from the database
+/// Location information with detailed writer job information
 #[derive(Debug, Clone)]
 pub struct LocationWithDetails {
-    /// Unique identifier for the location
-    pub id: LocationId,
-    /// Name of the dataset this location belongs to
-    pub dataset: String,
-    /// Version of the dataset (empty string if unversioned)
-    pub dataset_version: String,
-    /// Name of the table within the dataset
-    pub table: String,
-    /// Full URL to the storage location
-    pub url: Url,
-    /// Whether this location is currently active for queries
-    pub active: bool,
+    pub location: PhysicalTable,
+
     /// Writer job (if one exists)
     pub writer: Option<Job>,
+}
+
+impl LocationWithDetails {
+    /// Get the unique identifier for the location
+    pub fn id(&self) -> LocationId {
+        self.location.id
+    }
+
+    /// Get the storage URL for this location
+    pub fn url(&self) -> &Url {
+        &self.location.url
+    }
+
+    /// Check if this location is currently active for queries
+    pub fn active(&self) -> bool {
+        self.location.active
+    }
 }
 
 /// In-tree integration tests

@@ -5,6 +5,7 @@ use datafusion::{
     logical_expr::{DescribeTable, LogicalPlan},
     prelude::SessionContext,
 };
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 
 use crate::Table;
 
@@ -40,4 +41,22 @@ async fn print_schema(table: &Table) -> String {
     let df = ctx.execute_logical_plan(plan).await.unwrap();
     let batches = df.collect().await.unwrap();
     pretty_format_batches(&batches).unwrap().to_string()
+}
+
+#[derive(Debug, Clone)]
+pub struct JobLabels {
+    pub dataset_namespace: Namespace,
+    pub dataset_name: Name,
+    pub manifest_hash: datasets_common::hash::Hash,
+}
+
+impl JobLabels {
+    /// Turn namespace, name, and manifest hash into a dataset reference with hash revision.
+    pub fn dataset_reference(&self) -> Reference {
+        Reference::new(
+            self.dataset_namespace.clone(),
+            self.dataset_name.clone(),
+            Revision::Hash(self.manifest_hash.clone()),
+        )
+    }
 }

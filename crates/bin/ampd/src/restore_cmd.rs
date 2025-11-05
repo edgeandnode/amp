@@ -1,9 +1,14 @@
 use std::sync::Arc;
 
-use common::{BoxError, catalog::physical::PhysicalTable, config::Config};
+use common::{
+    BoxError,
+    catalog::{JobLabels, physical::PhysicalTable},
+    config::Config,
+};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
+use datasets_common::reference::Reference;
 use metadata_db::MetadataDb;
 
 /// Restores dataset snapshots from storage.
@@ -16,7 +21,7 @@ use metadata_db::MetadataDb;
 pub async fn run(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    datasets: Vec<String>,
+    datasets: Vec<Reference>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let dataset_store = {
         let provider_configs_store =
@@ -32,38 +37,42 @@ pub async fn run(
 
     let mut all_tables = Vec::new();
 
-    for dataset_name in datasets {
-        tracing::info!("Restoring dataset snapshot: {}", dataset_name);
+    for reference in datasets {
+        tracing::info!("Restoring dataset snapshot: {}", reference);
 
-        let dataset = dataset_store
-            .get_dataset(&dataset_name, None)
-            .await?
-            .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
+        let dataset = dataset_store.get_dataset(&reference).await?;
 
-        for table in Arc::new(dataset).resolved_tables() {
-            tracing::debug!("Restoring table: {}.{}", dataset_name, table.name());
+        let job_labels = JobLabels {
+            dataset_namespace: reference.namespace().clone(),
+            dataset_name: reference.name().clone(),
+            manifest_hash: dataset.manifest_hash().clone(),
+        };
+
+        for table in dataset.resolved_tables(reference.clone().into()) {
+            tracing::debug!("Restoring table: '{}'", reference);
 
             let physical_table = PhysicalTable::restore_latest_revision(
                 &table,
                 config.data_store.clone(),
                 metadata_db.clone(),
+                &job_labels,
             )
             .await?
             .ok_or_else(|| {
                 format!(
-                    "Failed to restore snapshot table '{}.{}'. \
+                    "Failed to restore snapshot table '\"{}\".{}'. \
                     This is likely due to the dataset or table being deleted or never dumped.",
-                    dataset_name,
+                    reference,
                     table.name()
                 )
             })?;
 
-            tracing::info!("Restored table: {}.{}", dataset_name, table.name());
+            tracing::info!("Restored table: '{}'", reference);
 
             all_tables.push(physical_table.into());
         }
 
-        tracing::info!("Successfully restored dataset: {}", dataset_name);
+        tracing::info!("Successfully restored dataset: {}", reference);
     }
 
     Ok(all_tables)

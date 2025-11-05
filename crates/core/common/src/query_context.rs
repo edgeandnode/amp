@@ -30,7 +30,7 @@ use datafusion_tracing::{
 use foyer::Cache;
 use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{FileId, TableId};
+use metadata_db::FileId;
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
@@ -255,15 +255,10 @@ impl QueryContext {
 
     /// Returns table or `TableNotFoundError`
     pub fn get_table(&self, table_ref: &TableReference) -> Result<Arc<TableSnapshot>, Error> {
-        let table_id = TableId {
-            dataset: table_ref.schema().unwrap(),
-            dataset_version: None,
-            table: table_ref.table(),
-        };
         self.catalog
             .table_snapshots()
             .iter()
-            .find(|snapshot| snapshot.physical_table().table_id() == table_id)
+            .find(|snapshot| snapshot.physical_table().table().table_ref() == table_ref)
             .cloned()
             .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }

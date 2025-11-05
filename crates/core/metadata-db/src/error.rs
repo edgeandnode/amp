@@ -1,6 +1,6 @@
 //! Error types for metadata database operations
 
-use crate::db::ConnError;
+use crate::{db::ConnError, physical_table::events::LocationNotifSendError};
 
 /// Errors that can occur when interacting with the metadata database
 #[derive(Debug, thiserror::Error)]
@@ -21,12 +21,10 @@ pub enum Error {
     JobNotificationRecvError(#[from] crate::workers::events::NotifRecvError),
 
     #[error("Error sending location notification: {0}")]
-    LocationNotificationSendError(#[from] crate::locations::events::LocationNotifSendError),
+    LocationNotificationSendError(#[from] LocationNotifSendError),
 
-    #[error(
-        "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
-    )]
-    MultipleActiveLocations(String, String, String, Vec<String>),
+    #[error("Multiple active locations found for manifest_hash={0}, table={1}: {2:?}")]
+    MultipleActiveLocations(String, String, Vec<String>),
 
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),

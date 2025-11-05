@@ -117,7 +117,7 @@ use crate::{
 };
 
 /// Dumps a derived dataset table
-#[instrument(skip_all, fields(dataset = %table.dataset().name), err)]
+#[instrument(skip_all, fields(table = %table.table_name()), err)]
 #[allow(clippy::too_many_arguments)]
 pub async fn dump_table(
     ctx: Ctx,
@@ -131,22 +131,17 @@ pub async fn dump_table(
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
 
-    let dataset_name = table.dataset().name.clone();
     let table_name = table.table_name().to_string();
 
     // Clone values needed for metrics after async block
-    let dataset_name_for_metrics = dataset_name.clone();
     let table_name_for_metrics = table_name.clone();
-    let dataset_version = table.dataset().dataset_version().unwrap_or_default();
     let metrics_for_after = metrics.clone();
 
     // Get the table definition from the manifest
-    let table_def = manifest.tables.get(&table_name).ok_or_else(|| {
-        format!(
-            "table `{}` not found in dataset `{}`",
-            table_name, dataset_name
-        )
-    })?;
+    let table_def = manifest
+        .tables
+        .get(&table_name)
+        .ok_or_else(|| format!("table `{}` not found in dataset", table_name))?;
 
     // Extract SQL query from the table input
     let query_sql = match &table_def.input {
@@ -170,9 +165,7 @@ pub async fn dump_table(
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
         if let Err(e) = plan.is_incremental() {
-            return Err(
-                format!("syncing table {table_name}.{dataset_name} is not supported: {e}",).into(),
-            );
+            return Err(format!("syncing table {table_name} is not supported: {e}",).into());
         }
 
         let Some(start) = catalog.earliest_block().await? else {
@@ -223,15 +216,11 @@ pub async fn dump_table(
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%dataset_name_for_metrics, error=%err, "dataset dump failed");
+        tracing::error!(table=%table_name_for_metrics, error=%err, "dataset dump failed");
 
         // Record error metrics
         if let Some(ref metrics) = metrics_for_after {
-            metrics.record_dump_error(
-                dataset_name_for_metrics.to_string(),
-                dataset_version,
-                table_name_for_metrics.to_string(),
-            );
+            metrics.record_dump_error(table_name_for_metrics.to_string());
         }
 
         return Err(err.into_box_error());
@@ -240,14 +229,8 @@ pub async fn dump_table(
     // Record dump duration on successful completion
     if let Some(ref metrics) = metrics_for_after {
         let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-        let job_id = format!("{}_{}", dataset_name_for_metrics, table_name_for_metrics);
-        metrics.record_dump_duration(
-            duration_millis,
-            dataset_name_for_metrics.to_string(),
-            dataset_version,
-            table_name_for_metrics.to_string(),
-            job_id,
-        );
+        let job_id = table_name_for_metrics.clone();
+        metrics.record_dump_duration(duration_millis, table_name_for_metrics.to_string(), job_id);
     }
 
     Ok(())
@@ -295,7 +278,6 @@ async fn dump_sql_query(
     let mut microbatch_start = start;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
-    let dataset_name = physical_table.dataset().name.clone();
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
@@ -321,24 +303,8 @@ async fn dump_sql_query(
                 if let Some(ref metrics) = metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                    let dataset_version = physical_table
-                        .dataset()
-                        .dataset_version()
-                        .unwrap_or_default();
-                    metrics.record_ingestion_rows(
-                        num_rows,
-                        dataset_name.to_string(),
-                        dataset_version.clone(),
-                        table_name.to_string(),
-                        location_id,
-                    );
-                    metrics.record_ingestion_bytes(
-                        num_bytes,
-                        dataset_name.to_string(),
-                        dataset_version,
-                        table_name.to_string(),
-                        location_id,
-                    );
+                    metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
+                    metrics.record_ingestion_bytes(num_bytes, table_name.to_string(), location_id);
                 }
             }
             QueryMessage::BlockComplete(_) => {
@@ -370,16 +336,7 @@ async fn dump_sql_query(
                 writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
                 if let Some(ref metrics) = metrics {
-                    let dataset_version = physical_table
-                        .dataset()
-                        .dataset_version()
-                        .unwrap_or_default();
-                    metrics.record_file_written(
-                        dataset_name.to_string(),
-                        dataset_version,
-                        table_name.to_string(),
-                        location_id,
-                    );
+                    metrics.record_file_written(table_name.to_string(), location_id);
                 }
             }
         }

@@ -34,7 +34,7 @@ use super::{
     namespace::{Namespace, NamespaceOwned},
     version::{Version, VersionOwned},
 };
-use crate::manifests::{ManifestHash, ManifestHashOwned};
+use crate::manifests::ManifestHash;
 
 /// Internal SQL operations for tag management
 ///
@@ -53,7 +53,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-        hash: ManifestHash<'_>,
+        hash: ManifestHash,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -86,7 +86,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: ManifestHash<'_>,
+        hash: ManifestHash,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -118,7 +118,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: ManifestHash<'_>,
+        hash: ManifestHash,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -169,49 +169,6 @@ pub(crate) mod sql {
             .bind(namespace)
             .bind(name)
             .bind(version)
-            .fetch_optional(exe)
-            .await?;
-
-        Ok(result)
-    }
-
-    /// Resolve the "latest" tag to its corresponding semver tag
-    ///
-    /// Returns the semver tag (excluding "dev" and "latest") that points to the same hash
-    /// as the "latest" tag. If multiple semver tags point to the same hash, returns the
-    /// most recently updated one.
-    pub async fn get_latest<'c, E>(
-        exe: E,
-        namespace: Namespace<'_>,
-        name: Name<'_>,
-    ) -> Result<Option<Tag>, sqlx::Error>
-    where
-        E: Executor<'c, Database = Postgres>,
-    {
-        let query = indoc::indoc! {r#"
-            WITH latest_hash AS (
-                SELECT hash
-                FROM tags
-                WHERE namespace = $1 AND name = $2 AND version = 'latest'
-            )
-            SELECT
-                t.namespace,
-                t.name,
-                t.version,
-                t.hash,
-                t.created_at,
-                t.updated_at
-            FROM tags t
-            INNER JOIN latest_hash lh ON t.hash = lh.hash
-            WHERE t.namespace = $1 AND t.name = $2
-              AND t.version NOT IN ('dev', 'latest')
-            ORDER BY t.updated_at DESC
-            LIMIT 1
-        "#};
-
-        let result = sqlx::query_as(query)
-            .bind(namespace)
-            .bind(name)
             .fetch_optional(exe)
             .await?;
 
@@ -284,7 +241,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHash>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -307,7 +264,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHash>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -329,7 +286,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
+    ) -> Result<Option<ManifestHash>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -434,7 +391,7 @@ pub(crate) mod sql {
     /// Excludes system-managed tags ("latest" and "dev").
     pub async fn list_by_manifest_hash<'c, E>(
         exe: E,
-        hash: ManifestHash<'_>,
+        hash: ManifestHash,
     ) -> Result<Vec<Tag>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -512,7 +469,7 @@ pub struct Tag {
     /// Version tag
     pub version: VersionOwned,
     /// Manifest hash this tag references
-    pub hash: ManifestHashOwned,
+    pub hash: ManifestHash,
     /// Timestamp when the tag was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the tag was last updated

@@ -10,13 +10,16 @@ use ampd::dump_cmd::dump;
 use common::{
     BoxError, LogicalCatalog,
     arrow::array::RecordBatch,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::{
+        JobLabels,
+        physical::{Catalog, PhysicalTable},
+    },
     config::Config,
     metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use datasets_common::reference::Reference;
+use datasets_common::{name::Name, partial_reference::PartialReference, reference::Reference};
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 
@@ -75,17 +78,21 @@ pub async fn restore_dataset_snapshot(
     dataset_store: &Arc<DatasetStore>,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let dataset = dataset_store
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
-        .await?
-        .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
+    let dataset = dataset_store.get_dataset(dataset_ref).await?;
+
+    let job_labels = JobLabels {
+        dataset_namespace: dataset_ref.namespace().clone(),
+        dataset_name: dataset_ref.name().clone(),
+        manifest_hash: dataset.manifest_hash().clone(),
+    };
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    for table in Arc::new(dataset).resolved_tables() {
+    for table in Arc::new(dataset).resolved_tables(dataset_ref.clone().into()) {
         let physical_table = PhysicalTable::restore_latest_revision(
             &table,
             config.data_store.clone(),
             metadata_db.clone(),
+            &job_labels,
         )
         .await?
         .unwrap_or_else(|| {
@@ -227,12 +234,14 @@ pub async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: &MetadataDb,
 ) -> Result<Catalog, BoxError> {
-    let dataset = dataset_store
-        .get_dataset(dataset_name, None)
-        .await?
-        .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
+    let dataset_ref = PartialReference::new(
+        None,
+        Name::try_from(dataset_name.to_string()).unwrap(),
+        None,
+    );
+    let dataset = dataset_store.get_dataset(dataset_ref.clone()).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table in Arc::new(dataset.clone()).resolved_tables() {
+    for table in dataset.resolved_tables(dataset_ref) {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
         let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
             .await?

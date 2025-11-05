@@ -3,7 +3,7 @@
 use sqlx::{Executor, Postgres};
 
 use super::{FileId, FileMetadata};
-use crate::locations::LocationId;
+use crate::physical_table::LocationId;
 
 /// List the first page of file metadata records for a specific location
 ///
@@ -26,7 +26,7 @@ where
                fm.object_e_tag,
                fm.object_version
         FROM file_metadata fm
-        JOIN locations l ON fm.location_id = l.id
+        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.location_id = $1
         ORDER BY fm.id DESC
         LIMIT $2
@@ -63,7 +63,7 @@ where
                fm.object_e_tag,
                fm.object_version
         FROM file_metadata fm
-        JOIN locations l ON fm.location_id = l.id
+        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.location_id = $1 AND fm.id < $3
         ORDER BY fm.id DESC
         LIMIT $2

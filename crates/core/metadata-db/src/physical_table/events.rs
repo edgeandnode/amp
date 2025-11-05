@@ -7,7 +7,7 @@
 use futures::stream::{Stream, TryStreamExt as _};
 use sqlx::{Postgres, postgres::PgListener};
 
-use crate::locations::LocationId;
+use crate::physical_table::LocationId;
 
 /// The location change actions PostgreSQL notification channel name
 const LOCATION_CHANGE_CHANNEL: &str = "change-tracking";
