@@ -1,16 +1,11 @@
 resources:
   - ../../base/amp-controller
 
-images:
-  - name: AMP_CONTROLLER_IMAGE_NAME
-    newName: ghcr.io/edgeandnode/amp
-    newTag: sha-4358a38
-
 labels:
   - pairs:
       app: amp-controller
-      repo: amp-infra
-      team: infrastructure
+      repo: amp-private
+      team: amp
       environment: staging
     includeSelectors: true
     includeTemplates: true

@@ -1,16 +1,11 @@
 resources:
   - ../../base/amp-gateway
 
-images:
-  - name: AMP_GATEWAY_IMAGE_NAME
-    newName: envoyproxy/envoy
-    newTag: v1.28-latest
-
 labels:
   - pairs:
       app: amp-gateway
-      repo: amp-infra
-      team: infrastructure
+      repo: amp-private
+      team: amp
       environment: staging
     includeSelectors: true
     includeTemplates: true

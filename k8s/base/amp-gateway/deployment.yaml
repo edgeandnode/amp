@@ -19,7 +19,7 @@ spec:
         - name: docker-registry
       containers:
         - name: amp-gateway
-          image: AMP_GATEWAY_IMAGE_NAME
+          image: envoyproxy/envoy:v1.28-latest # This is just a placeholder, the image is set by the ArgoCD app
           command: ["/usr/local/bin/envoy", "-c", "/config/envoy-config.yaml"]
           ports:
             - name: http

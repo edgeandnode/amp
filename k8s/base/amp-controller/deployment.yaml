@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
         - name: amp-controller
-          image: AMP_CONTROLLER_IMAGE_NAME
+          image: ghcr.io/edgeandnode/amp:latest # This is just a placeholder, the image is set by the ArgoCD app
           command: ["/ampd", "controller"]
           ports:
             - containerPort: 1610
