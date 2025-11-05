@@ -51,7 +51,7 @@
 //! }
 //! ```
 //!
-//! ## Transactional Stream (Stateful with Exactly-Once Semantics)
+//! ## Transactional Stream (Stateful)
 //!
 //! ```rust,ignore
 //! use amp_client::{AmpClient, InMemoryStateStore, TransactionEvent};
@@ -83,7 +83,47 @@
 //!     }
 //! }
 //! ```
+//!
+//! ## CDC Stream (Change Data Capture)
+//!
+//! ```rust,ignore
+//! use amp_client::{AmpClient, InMemoryStateStore, InMemoryBatchStore, CdcEvent};
+//! use futures::StreamExt;
+//!
+//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+//!
+//! // Create CDC stream with separate state and batch stores
+//! let state_store = InMemoryStateStore::new();
+//! let batch_store = InMemoryBatchStore::new();
+//! let mut stream = client
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .cdc(state_store, batch_store, 128)
+//!     .await?;
+//!
+//! while let Some(result) = stream.next().await {
+//!     let (event, commit) = result?;
+//!
+//!     match event {
+//!         CdcEvent::Insert { batch, .. } => {
+//!             for row in batch.rows() {
+//!                 // Process the row
+//!             }
+//!             commit.await?;
+//!         }
+//!         CdcEvent::Delete { mut batches, .. } => {
+//!             while let Some(result) = batches.next().await {
+//!                 let (id, batch) = result?;
+//!                 for row in batch.rows() {
+//!                     // Process the row
+//!                 }
+//!             }
+//!             commit.await?;
+//!         }
+//!     }
+//! }
+//! ```
 
+mod cdc;
 mod client;
 mod decode;
 mod error;
@@ -91,6 +131,7 @@ pub mod store;
 mod transactional;
 mod validation;
 
+pub use cdc::{CdcEvent, CdcStream, DeleteBatchIterator};
 pub use client::{
     AmpClient, BatchStream, InvalidationRange, Metadata, ProtocolMessage, ProtocolStream,
     RawStream, ResponseBatch, StreamBuilder,
@@ -101,7 +142,7 @@ pub use error::Error;
 pub use store::LmdbStateStore;
 #[cfg(feature = "postgres")]
 pub use store::PostgresStateStore;
-pub use store::{InMemoryStateStore, StateSnapshot, StateStore};
+pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapshot, StateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
 #[cfg(test)]

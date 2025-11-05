@@ -14,6 +14,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("state store error: {0}")]
     Store(String),
+    #[error("invalid batch: {0}")]
+    InvalidBatch(String),
     /// Protocol invariant violation (validation at stream boundary)
     #[error("protocol invariant violation: {0}")]
     ProtocolInvariantViolation(String),

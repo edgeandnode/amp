@@ -4,6 +4,7 @@
 mod utils;
 
 mod it_blockchain_reorg_test;
+mod it_cdc_stream_test;
 mod it_happy_path_test;
 #[cfg(feature = "lmdb")]
 mod it_lmdb_store_test;
