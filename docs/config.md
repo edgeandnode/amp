@@ -20,6 +20,11 @@ Note that the values in the `AMP_CONFIG` file can be overridden from the environ
 the env var name with `AMP_CONFIG_`. For example, to override the `data_dir` value, you can set a
 `AMP_CONFIG_DATA_DIR` env var to the desired path.
 
+For nested configuration values, use double underscores (`__`) to represent the nesting hierarchy. For example:
+- To override `metadata_db.url`, set `AMP_CONFIG_METADATA_DB__URL`
+- To override `metadata_db.pool_size`, set `AMP_CONFIG_METADATA_DB__POOL_SIZE`
+- To override `writer.compression`, set `AMP_CONFIG_WRITER__COMPRESSION`
+
 # Service addresses
 
 The following optional configuration keys allow you to control the hostname and port that each service binds to:
