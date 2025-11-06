@@ -27,7 +27,7 @@
     "@tanstack/react-router": "^1.133.27",
     "@tanstack/react-router-devtools": "^1.133.27",
     "@tanstack/router-plugin": "^1.133.27",
-    "effect": "^3.18.4",
+    "effect": "^3.19.2",
     "monaco-editor": "^0.54.0",
     "@edgeandnode/amp": "workspace:*",
     "react": "^19.2.0",

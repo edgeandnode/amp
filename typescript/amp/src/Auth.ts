@@ -4,7 +4,7 @@ import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
-import * as Cause from "effect/Cause"
+import { addSeconds } from "date-fns/addSeconds"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -12,8 +12,11 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as os from "node:os"
 import * as path from "node:path"
+import { isAddress } from "viem"
 
 export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
+
+const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
 )
@@ -29,8 +32,17 @@ export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>("Am
   session_update_action: Schema.String.annotations({
     identifier: "RefreshTokenResponse.session_update_action",
   }),
+  expires_in: Schema.Int.pipe(Schema.positive()).annotations({
+    identifier: "RefreshTokenResponse.expires_in",
+    description: "Seconds from receipt of when the token expires (def is 1hr)",
+  }),
   user: Schema.Struct({
     id: AuthUserId,
+    accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Address)).annotations({
+      identifier: "RefreshTokenResponse.user.accounts",
+      description: "List of accounts (connected wallets, etc) belonging to the user",
+      examples: [["cmfd6bf6u006vjx0b7xb2eybx", "0x5c8fA0bDf68C915a88cD68291fC7CF011C126C29"]],
+    }),
   }).annotations({
     identifier: "RefreshTokenResponse.user",
     description: "The user the access token belongs to",
@@ -40,9 +52,10 @@ export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/mode
   accessToken: Schema.NonEmptyTrimmedString,
   refreshToken: Schema.NonEmptyTrimmedString,
   userId: AuthUserId,
+  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Address)).pipe(Schema.optional),
+  expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
 }) {}
 export class AuthTokenExpiredError extends Data.TaggedError("Amp/errors/auth/AuthTokenExpiredError") {}
-export class AuthTokenNotFoundError extends Data.TaggedError("Amp/errors/auth/AuthTokenNotFoundError") {}
 export class AuthRateLimitError extends Data.TaggedError("Amp/errors/auth/AuthRateLimitError")<{
   readonly retryAfter: number
   readonly message: string
@@ -158,7 +171,10 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         accessToken: tokenResponse.token,
         refreshToken: tokenResponse.refresh_token ?? refreshToken,
         userId: tokenResponse.user.id,
+        accounts: tokenResponse.user.accounts,
+        expiry: addSeconds(Date.now(), tokenResponse.expires_in).getTime(),
       })
+      yield* kv.set(AUTH_TOKEN_STORAGE_KEY, refreshedAuth)
 
       return refreshedAuth
     })
@@ -170,7 +186,26 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         Effect.flatMap(
           Option.match({
             onNone: () => Effect.succeed(Option.none<AuthStorageSchema>()),
-            onSome: (token) => refreshAccessToken(token).pipe(Effect.map(Option.some)),
+            onSome: (token) =>
+              Effect.gen(function*() {
+                // Check if we need to refresh the token
+                const needsRefresh =
+                  // Missing expiry field - refresh to populate it
+                  token.expiry == null ||
+                  // Missing accounts field - refresh to populate it
+                  token.accounts == null ||
+                  // Token is expired
+                  token.expiry < Date.now() ||
+                  // Token is expiring within 5 minutes
+                  token.expiry - Date.now() <= 5 * 60 * 1000
+
+                if (needsRefresh) {
+                  return yield* refreshAccessToken(token).pipe(Effect.map(Option.some))
+                }
+
+                // Token is still valid, return it as-is
+                return Option.some(token)
+              }),
           }),
         ),
         // Return None on any error during refresh
@@ -178,22 +213,9 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       )
     })
 
-    const getRequired = Effect.fn("FetchAuthTokenRequired")(function*() {
-      const tokenOpt = yield* maybeGetToken.pipe(
-        Effect.tapError((error) => Effect.logError("Failure fetching the auth token", Cause.pretty(Cause.fail(error)))),
-        Effect.mapError(() => new AuthTokenNotFoundError()),
-      )
-
-      return yield* Option.match(tokenOpt, {
-        onNone: () => Effect.fail(new AuthTokenNotFoundError()),
-        onSome: (token) => refreshAccessToken(token),
-      })
-    })
-
     return {
       refreshAccessToken,
       get,
-      getRequired,
       set: (data: AuthStorageSchema) => kv.set(AUTH_TOKEN_STORAGE_KEY, data),
       delete: kv.remove(AUTH_TOKEN_STORAGE_KEY).pipe(
         Effect.catchIf(
