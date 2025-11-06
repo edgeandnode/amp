@@ -6,16 +6,14 @@ use std::{
 };
 
 use common::{
-    BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
-    catalog::physical::{Catalog, PhysicalTable},
+    BlockStreamer, BlockStreamerExt, BoxError, Dataset,
+    catalog::physical::PhysicalTable,
     evm::{self, udfs::EthCall},
     manifest::derived,
-    query_context::QueryEnv,
 };
 use datafusion::{
     common::HashMap,
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
-    sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use datasets_common::{
     hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
@@ -32,7 +30,6 @@ use evm_rpc_datasets::{
 use firehose_datasets::dataset::{
     Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig,
 };
-use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{DatasetVersion, MetadataDb};
 use parking_lot::RwLock;
 use rand::seq::SliceRandom as _;
@@ -45,7 +42,6 @@ mod env_substitute;
 mod error;
 pub mod manifests;
 pub mod providers;
-mod sql_visitors;
 
 use self::{
     block_stream_client::BlockStreamClient,
@@ -55,13 +51,11 @@ use self::{
 pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
     error::{
-        CatalogForSqlError, DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError,
-        ExtractDatasetFromFunctionNamesError, ExtractDatasetFromTableRefsError,
-        GetAllDatasetsError, GetClientError, GetDatasetError, GetDerivedManifestError,
-        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError, LinkManifestError,
-        ListAllDatasetsError, ListDatasetsUsingManifestError, ListOrphanedManifestsError,
-        ListVersionTagsError, PlanningCtxForSqlError, RegisterManifestError, ResolveRevisionError,
-        SetVersionTagError, UnlinkDatasetManifestsError,
+        DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError, GetAllDatasetsError,
+        GetClientError, GetDatasetError, GetDerivedManifestError, GetManifestError,
+        LinkManifestError, ListAllDatasetsError, ListDatasetsUsingManifestError,
+        ListOrphanedManifestsError, ListVersionTagsError, RegisterManifestError,
+        ResolveRevisionError, SetVersionTagError, UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
 };
@@ -92,6 +86,11 @@ impl DatasetStore {
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
         })
+    }
+
+    /// Returns a reference to the metadata database.
+    pub fn metadata_db(&self) -> &MetadataDb {
+        &self.metadata_db
     }
 }
 
@@ -945,168 +944,6 @@ impl DatasetStore {
         None
     }
 
-    /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
-    /// procedure is:
-    ///
-    /// 1. Collect table references in the query.
-    /// 2. Assume that in `foo.bar`, `foo` is a dataset name.
-    /// 3. Look up the dataset names in the configured dataset store.
-    /// 4. Collect the datasets into a catalog.
-    pub async fn catalog_for_sql(
-        &self,
-        query: &parser::Statement,
-        env: QueryEnv,
-    ) -> Result<Catalog, CatalogForSqlError> {
-        let (tables, _) = resolve_table_references(query, true)
-            .map_err(|err| CatalogForSqlError::TableReferenceResolution { source: err.into() })?;
-        let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| CatalogForSqlError::FunctionNameExtraction { source: err })?;
-
-        self.get_physical_catalog(tables, function_names, &env)
-            .await
-            .map_err(CatalogForSqlError::GetPhysicalCatalog)
-    }
-
-    /// Looks up the datasets for the given table references and gets them into a catalog.
-    pub async fn get_physical_catalog(
-        &self,
-        table_refs: impl IntoIterator<Item = TableReference>,
-        function_names: impl IntoIterator<Item = String>,
-        env: &QueryEnv,
-    ) -> Result<Catalog, GetPhysicalCatalogError> {
-        let logical_catalog = self
-            .get_logical_catalog(table_refs, function_names, &env.isolate_pool)
-            .await
-            .map_err(GetPhysicalCatalogError::GetLogicalCatalog)?;
-
-        let mut tables = Vec::new();
-        for table in &logical_catalog.tables {
-            let physical_table = PhysicalTable::get_active(table, self.metadata_db.clone())
-                .await
-                .map_err(|err| GetPhysicalCatalogError::PhysicalTableRetrieval {
-                    table: table.to_string(),
-                    source: err,
-                })?
-                .ok_or(GetPhysicalCatalogError::TableNotSynced {
-                    table: table.to_string(),
-                })?;
-            tables.push(physical_table.into());
-        }
-        Ok(Catalog::new(tables, logical_catalog))
-    }
-
-    /// Similar to `catalog_for_sql`, but only for planning and not execution. This does not require a
-    /// physical location to exist for the dataset views.
-    pub async fn planning_ctx_for_sql(
-        &self,
-        query: &parser::Statement,
-    ) -> Result<PlanningContext, PlanningCtxForSqlError> {
-        let (tables, _) = resolve_table_references(query, true).map_err(|err| {
-            PlanningCtxForSqlError::TableReferenceResolution { source: err.into() }
-        })?;
-        let function_names = sql_visitors::all_function_names(query)
-            .map_err(|err| PlanningCtxForSqlError::FunctionNameExtraction { source: err })?;
-        let resolved_tables = self
-            .get_logical_catalog(tables, function_names, &IsolatePool::dummy())
-            .await?;
-        Ok(PlanningContext::new(resolved_tables))
-    }
-
-    /// Looks up the datasets for the given table references and creates resolved tables. Create
-    /// UDFs specific to the referenced datasets.
-    async fn get_logical_catalog(
-        &self,
-        table_refs: impl IntoIterator<Item = TableReference>,
-        function_names: impl IntoIterator<Item = String>,
-        isolate_pool: &IsolatePool,
-    ) -> Result<LogicalCatalog, GetLogicalCatalogError> {
-        let table_refs = table_refs.into_iter().collect::<Vec<_>>();
-        let function_names = function_names.into_iter().collect::<Vec<_>>();
-
-        let datasets = {
-            let mut datasets = BTreeSet::new();
-
-            let table_refs_datasets = dataset_versions_from_table_refs(table_refs.iter())
-                .map_err(GetLogicalCatalogError::ExtractDatasetFromTableRefs)?;
-            tracing::debug!(
-                table_refs_datasets = ?table_refs_datasets,
-                "Extracted datasets from table references"
-            );
-            datasets.extend(table_refs_datasets);
-
-            let function_datasets =
-                dataset_versions_from_function_names(function_names.iter().map(AsRef::as_ref))
-                    .map_err(GetLogicalCatalogError::ExtractDatasetFromFunctionNames)?;
-            tracing::debug!(
-                function_datasets = ?function_datasets,
-                "Extracted datasets from function names"
-            );
-            datasets.extend(function_datasets);
-
-            tracing::debug!(
-                total_datasets = ?datasets,
-                "Combined datasets from table references and function names"
-            );
-            datasets
-        };
-
-        let mut resolved_tables = Vec::new();
-        let mut udfs = Vec::new();
-        for partial_ref in datasets {
-            let dataset = self
-                .get_dataset(partial_ref.clone())
-                .await
-                .map_err(GetLogicalCatalogError::GetDataset)?;
-
-            if dataset.kind == EvmRpcDatasetKind {
-                let udf = self
-                    .eth_call_for_dataset(&partial_ref.to_string(), &dataset)
-                    .await
-                    .map_err(|err| GetLogicalCatalogError::EthCallUdfCreation {
-                        dataset: partial_ref.name.to_string(),
-                        source: err,
-                    })?;
-                if let Some(udf) = udf {
-                    udfs.push(udf);
-                }
-            }
-
-            // Add JS UDFs
-            for udf in dataset.functions(partial_ref.name.to_string(), isolate_pool.clone()) {
-                udfs.push(udf.into());
-            }
-
-            for table in &dataset.tables {
-                // Only include tables that are actually referenced in the query
-                let is_referenced = table_refs.iter().any(|table_ref| {
-                    match (table_ref.schema(), table_ref.table()) {
-                        (Some(schema), table_name) => {
-                            // Reconstruct the schema name from partial reference
-                            let schema_name = partial_ref.to_string();
-                            schema == schema_name && table_name == table.name()
-                        }
-                        _ => false, // Unqualified table
-                    }
-                });
-
-                if is_referenced {
-                    // Use partial reference string representation as schema name
-                    let schema_name = partial_ref.to_string();
-                    let table_ref =
-                        TableReference::partial(schema_name.clone(), table.name().to_string());
-                    let resolved_table =
-                        common::ResolvedTable::new(table.clone(), dataset.clone(), table_ref);
-                    resolved_tables.push(resolved_table);
-                }
-            }
-        }
-
-        Ok(LogicalCatalog {
-            tables: resolved_tables,
-            udfs,
-        })
-    }
-
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
     ///
     /// The function will be named `<catalog_schema>.<eth_call>`.
@@ -1183,115 +1020,26 @@ impl DatasetStore {
     }
 }
 
-/// Extracts dataset names and versions from table references in SQL queries.
-///
-/// This function processes table references from SQL queries and extracts the dataset names
-/// and optional versions from the schema portion of qualified table names.
-///
-/// # Table Reference Format
-/// - All tables must be qualified with namespace and dataset name: `namespace/dataset_name.table_name`
-/// - Versioned datasets: `namespace/dataset_name@version.table_name` (e.g., `_/eth_rpc@1.0.0.blocks`)
-/// - Unversioned datasets: `namespace/dataset_name.table_name` (e.g., `_/eth_rpc.blocks`)
-/// - Catalog-qualified tables are not supported
-///
-/// # Returns
-/// A set of unique partial references extracted from the table references.
-fn dataset_versions_from_table_refs<'a>(
-    table_refs: impl Iterator<Item = &'a TableReference>,
-) -> Result<BTreeSet<PartialReference>, ExtractDatasetFromTableRefsError> {
-    let mut datasets = BTreeSet::new();
-
-    for table_ref in table_refs {
-        if table_ref.catalog().is_some() {
-            return Err(ExtractDatasetFromTableRefsError::CatalogQualifiedTable {
-                table: table_ref.table().to_string(),
-            });
-        }
-
-        let Some(catalog_schema) = table_ref.schema() else {
-            return Err(ExtractDatasetFromTableRefsError::UnqualifiedTable {
-                table: table_ref.table().to_string(),
-            });
-        };
-
-        // Parse using PartialReference to handle namespace/name@version format
-        let partial_ref = catalog_schema.parse::<PartialReference>().map_err(|err| {
-            ExtractDatasetFromTableRefsError::ReferenceParse {
-                schema: catalog_schema.to_string(),
-                source: err,
-            }
-        })?;
-
-        // Validate that revision (if present) is a Version type, not hash/latest/dev
-        if let Some(revision) = &partial_ref.revision
-            && !revision.is_version()
-        {
-            return Err(ExtractDatasetFromTableRefsError::InvalidVersion {
-                version: revision.to_string(),
-                schema: catalog_schema.to_string(),
-            });
-        }
-
-        datasets.insert(partial_ref);
+// Implement DatasetAccess trait for DatasetStore
+impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
+    async fn get_dataset(
+        &self,
+        reference: impl Into<PartialReference> + Send,
+    ) -> Result<Arc<Dataset>, BoxError> {
+        self.get_dataset(reference)
+            .await
+            .map_err(|e| Box::new(e) as BoxError)
     }
 
-    Ok(datasets)
-}
-
-/// Extracts dataset names and versions from function names in SQL queries.
-///
-/// This function processes qualified function names (e.g., `namespace/dataset.function` or `namespace/dataset@version.function`)
-/// and extracts the dataset name and optional version from the qualifier.
-///
-/// # Function Name Format
-/// - Simple function names (no qualifier) are assumed to be built-in DataFusion functions
-/// - Qualified functions: `namespace/dataset_name.function_name` or `namespace/dataset_name@version.function_name`
-/// - Examples: `_/eth_rpc.my_function()` or `_/eth_rpc@1.0.0.my_function()`
-///
-/// # Returns
-/// A set of unique partial references extracted from the function names.
-fn dataset_versions_from_function_names<'a>(
-    function_names: impl IntoIterator<Item = &'a str>,
-) -> Result<BTreeSet<PartialReference>, ExtractDatasetFromFunctionNamesError> {
-    let mut datasets = BTreeSet::new();
-
-    for func_name in function_names {
-        let parts: Vec<_> = func_name.split('.').collect();
-        let fn_dataset = match parts.as_slice() {
-            // Simple name assumed to be Datafusion built-in function.
-            [_] => continue,
-            [dataset, _] => dataset,
-            _ => {
-                return Err(
-                    ExtractDatasetFromFunctionNamesError::InvalidFunctionFormat {
-                        function: func_name.to_string(),
-                    },
-                );
-            }
-        };
-
-        // Parse using PartialReference to handle namespace/name@version format
-        let partial_ref = fn_dataset.parse::<PartialReference>().map_err(|err| {
-            ExtractDatasetFromFunctionNamesError::ReferenceParse {
-                function: func_name.to_string(),
-                source: err,
-            }
-        })?;
-
-        // Validate that revision (if present) is a Version type, not hash/latest/dev
-        if let Some(revision) = &partial_ref.revision
-            && !revision.is_version()
-        {
-            return Err(ExtractDatasetFromFunctionNamesError::InvalidVersion {
-                version: revision.to_string(),
-                function: func_name.to_string(),
-            });
-        }
-
-        datasets.insert(partial_ref);
+    async fn eth_call_for_dataset(
+        &self,
+        catalog_schema: &str,
+        dataset: &Dataset,
+    ) -> Result<Option<ScalarUDF>, BoxError> {
+        self.eth_call_for_dataset(catalog_schema, dataset)
+            .await
+            .map_err(|e| Box::new(e) as BoxError)
     }
-
-    Ok(datasets)
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.

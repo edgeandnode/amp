@@ -9,9 +9,12 @@ use datasets_common::{name::Name, namespace::Namespace, reference::Reference, re
 
 use crate::Table;
 
+pub mod dataset_access;
+pub mod errors;
 pub mod logical;
 pub mod physical;
 pub mod reader;
+pub mod sql;
 
 pub async fn schema_to_markdown(tables: Vec<Table>) -> String {
     let mut markdown = String::new();

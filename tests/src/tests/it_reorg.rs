@@ -2,7 +2,10 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
-use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use common::{
+    BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange,
+    query_context::parse_sql,
+};
 use datasets_common::reference::Reference;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
@@ -490,12 +493,15 @@ impl ReorgTestCtx {
             .config()
             .make_query_env()
             .expect("Failed to create query environment");
-        let catalog = test_env
-            .daemon_server()
-            .dataset_store()
-            .catalog_for_sql(&sql, env)
-            .await
-            .expect("Failed to create catalog for SQL query");
+        let dataset_store = test_env.daemon_server().dataset_store();
+        let catalog = catalog_for_sql(
+            dataset_store.as_ref(),
+            dataset_store.metadata_db(),
+            &sql,
+            env,
+        )
+        .await
+        .expect("Failed to create catalog for SQL query");
         let table = catalog
             .tables()
             .iter()

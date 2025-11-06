@@ -26,7 +26,11 @@ use common::{
         datatypes::SchemaRef,
         ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
-    catalog::physical::Catalog,
+    catalog::{
+        errors::{CatalogForSqlError, GetPhysicalCatalogError, PlanningCtxForSqlError},
+        physical::Catalog,
+        sql::{catalog_for_sql, planning_ctx_for_sql},
+    },
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv, parse_sql},
@@ -35,8 +39,8 @@ use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{
-    CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
-    PlanningCtxForSqlError, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, GetDatasetError, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
@@ -106,9 +110,14 @@ impl Service {
     ) -> Result<QueryResultStream, Error> {
         let query = parse_sql(sql).map_err(Error::from)?;
         let dataset_store = self.dataset_store.clone();
-        let catalog = dataset_store
-            .catalog_for_sql(&query, self.env.clone())
-            .await?;
+        let catalog = catalog_for_sql(
+            dataset_store.as_ref(),
+            dataset_store.metadata_db(),
+            &query,
+            self.env.clone(),
+        )
+        .await
+        .map_err(Error::CatalogForSqlError)?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
@@ -241,7 +250,9 @@ impl Service {
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
                     let query = parse_sql(&sql_query.query)?;
-                    let plan_ctx = self.dataset_store.planning_ctx_for_sql(&query).await?;
+                    let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
+                        .await
+                        .map_err(Error::PlanningCtxForSqlError)?;
                     let is_streaming = common::stream_helpers::is_streaming(&query);
                     let schema = plan_ctx.sql_output_schema(query).await?;
                     let ticket = AmpTicket {
@@ -806,13 +817,13 @@ pub enum Error {
     DatasetStoreError(#[from] GetDatasetError),
 
     #[error("error loading catalog for SQL: {0}")]
-    CatalogForSqlError(#[from] CatalogForSqlError),
+    CatalogForSqlError(#[source] CatalogForSqlError),
 
     #[error("error loading physical catalog: {0}")]
-    GetPhysicalCatalogError(#[from] GetPhysicalCatalogError),
+    GetPhysicalCatalogError(#[source] GetPhysicalCatalogError),
 
     #[error("error creating planning context: {0}")]
-    PlanningCtxForSqlError(#[from] PlanningCtxForSqlError),
+    PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),

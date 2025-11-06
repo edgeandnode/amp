@@ -98,7 +98,10 @@ use std::{sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::{
+        physical::{Catalog, PhysicalTable},
+        sql::catalog_for_sql,
+    },
     metadata::{Generation, segments::ResumeWatermark},
     query_context::{QueryEnv, parse_sql},
 };
@@ -157,10 +160,13 @@ pub async fn dump_table(
     let opts = opts.clone();
 
     join_set.spawn(async move {
-        let catalog = dataset_store
-            .clone()
-            .catalog_for_sql(&query, env.clone())
-            .await?;
+        let catalog = catalog_for_sql(
+            dataset_store.as_ref(),
+            dataset_store.metadata_db(),
+            &query,
+            env.clone(),
+        )
+        .await?;
         let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
