@@ -79,6 +79,7 @@ const AMP_CRATES: &[&str] = &[
     "metadata_db",
     "monitoring",
     "server",
+    "tempdb",
     "tests",
     "worker",
 ];

@@ -21,11 +21,13 @@ controller = { path = "../../services/controller" }
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
+figment.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 static_assertions.workspace = true
+tempdb = { path = "../../services/tempdb" }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

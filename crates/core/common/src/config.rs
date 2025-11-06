@@ -19,7 +19,7 @@ use figment::{
 use foyer::CacheBuilder;
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
+use metadata_db::{DEFAULT_POOL_SIZE, MetadataDb};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -410,7 +410,6 @@ impl Config {
         file: impl Into<PathBuf>,
         env_override: bool,
         config_override: Option<Figment>,
-        allow_temp_db: bool,
         build_info: impl Into<Option<BuildInfo>>,
     ) -> Result<Self, ConfigError> {
         let input_path = file.into();
@@ -456,17 +455,6 @@ impl Config {
         } else if let Some(url) = config_file.metadata_db_url {
             MetadataDbConfig {
                 url: Some(url),
-                pool_size: config_file.metadata_db.pool_size,
-                auto_migrate: config_file.metadata_db.auto_migrate,
-            }
-        } else if allow_temp_db {
-            MetadataDbConfig {
-                url: Some(
-                    temp_metadata_db(*KEEP_TEMP_DIRS, config_file.metadata_db.pool_size)
-                        .await
-                        .url()
-                        .to_string(),
-                ),
                 pool_size: config_file.metadata_db.pool_size,
                 auto_migrate: config_file.metadata_db.auto_migrate,
             }

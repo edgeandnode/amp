@@ -27,6 +27,7 @@ members = [
     "crates/services/admin-api/gen",
     "crates/services/controller",
     "crates/services/server",
+    "crates/services/tempdb",
     "crates/services/worker",
     "tests",
 ]
