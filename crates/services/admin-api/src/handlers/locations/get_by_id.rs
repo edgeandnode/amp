@@ -66,7 +66,7 @@ pub async fn handler(
         }
     };
 
-    match ctx.metadata_db.get_location_by_id_with_details(id).await {
+    match metadata_db::physical_table::get_by_id_with_details(&ctx.metadata_db, id).await {
         Ok(Some(location)) => Ok(Json(location.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {

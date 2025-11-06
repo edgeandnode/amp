@@ -6,8 +6,7 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
-use tracing::{instrument, trace};
-use url::Url;
+use tracing::instrument;
 
 pub mod datasets;
 mod db;
@@ -16,7 +15,7 @@ mod files;
 pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
-mod physical_table;
+pub mod physical_table;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 pub mod workers;
@@ -60,14 +59,6 @@ pub const DEFAULT_POOL_SIZE: u32 = 10;
 pub struct MetadataDb {
     pool: ConnPool,
     pub(crate) url: Arc<str>,
-}
-
-/// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
-/// is at most one active physical_table entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TableId<'a> {
-    pub manifest_hash: ManifestHash<'a>,
-    pub table: &'a str,
 }
 
 impl MetadataDb {
@@ -213,137 +204,6 @@ impl<'c> sqlx::Executor<'c> for &'c MetadataDb {
 impl<'c> Executor<'c> for &'c MetadataDb {}
 
 impl _priv::Sealed for &MetadataDb {}
-
-/// Location-related API
-impl MetadataDb {
-    /// Register a materialized table into the metadata database.
-    ///
-    /// If setting `active = true`, make sure no other active location exists for this table, to avoid
-    /// a constraint violation. If an active location might exist, it is better to initialize the
-    /// location with `active = false` and then call `set_active_location` to switch it as active.
-    #[instrument(skip(self), err)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn register_location(
-        &self,
-        table: TableId<'_>,
-        dataset_namespace: &str,
-        dataset_name: &str,
-        bucket: Option<&str>,
-        path: &str,
-        url: &Url,
-        active: bool,
-    ) -> Result<LocationId, sqlx::Error> {
-        physical_table::insert(
-            &*self.pool,
-            table,
-            dataset_namespace,
-            dataset_name,
-            bucket,
-            path,
-            url,
-            active,
-        )
-        .await
-    }
-
-    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<PhysicalTable>, Error> {
-        Ok(physical_table::get_by_id(&*self.pool, id).await?)
-    }
-
-    pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
-        Ok(physical_table::url_to_id(&*self.pool, url).await?)
-    }
-
-    /// Returns the active physical table. The active location has meaning on both the write and read side:
-    /// - On the write side, it is the location that is being kept in sync with the source data.
-    /// - On the read side, it is default location that should receive queries.
-    #[instrument(skip(self), err)]
-    pub async fn get_active_location(
-        &self,
-        table: TableId<'_>,
-    ) -> Result<Option<PhysicalTable>, Error> {
-        Ok(physical_table::get_active_physical_table(&*self.pool, table).await?)
-    }
-
-    /// Set a location as the active materialization for a table.
-    ///
-    /// If there was a previously active location, it will be made inactive in the
-    /// same transaction, achieving an atomic switch.
-    #[instrument(skip(self), err)]
-    pub async fn set_active_location(
-        &self,
-        table: TableId<'_>,
-        location_id: &LocationId,
-    ) -> Result<(), Error> {
-        trace!("Setting location as active");
-
-        let mut tx = self.pool.begin().await?;
-        physical_table::mark_inactive_by_table_id(&mut *tx, table.clone()).await?;
-        physical_table::mark_active_by_id(&mut *tx, table, location_id).await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
-    /// Returns locations that were written by a specific job.
-    ///
-    /// This method queries the `physical_table` table for all locations where the given job
-    /// was assigned as the writer, converting them to [`Location`] type.
-    pub async fn output_locations(
-        &self,
-        id: impl Into<JobId>,
-    ) -> Result<Vec<PhysicalTable>, Error> {
-        Ok(physical_table::get_by_job_id(&*self.pool, id.into()).await?)
-    }
-
-    /// List locations with cursor-based pagination support
-    ///
-    /// Uses cursor-based pagination where `last_location_id` is the ID of the last location
-    /// from the previous page. For the first page, pass `None` for `last_location_id`.
-    pub async fn list_locations(
-        &self,
-        limit: i64,
-        last_location_id: Option<LocationId>,
-    ) -> Result<Vec<PhysicalTable>, Error> {
-        match last_location_id {
-            Some(location_id) => {
-                Ok(physical_table::list_next_page(&*self.pool, limit, location_id).await?)
-            }
-            None => Ok(physical_table::list_first_page(&*self.pool, limit).await?),
-        }
-    }
-
-    // Get a location by its ID with full details including writer job
-    //
-    // Returns the location if found, or None if no location exists with the given ID.
-    pub async fn get_location_by_id_with_details(
-        &self,
-        location_id: LocationId,
-    ) -> Result<Option<LocationWithDetails>, Error> {
-        Ok(physical_table::get_by_id_with_details(&*self.pool, location_id).await?)
-    }
-
-    /// Delete a location by its ID
-    ///
-    /// This will also delete all associated file_metadata entries due to CASCADE.
-    /// Returns true if the location was deleted, false if it didn't exist.
-    pub async fn delete_location_by_id(&self, location_id: LocationId) -> Result<bool, Error> {
-        Ok(physical_table::delete_by_id(&*self.pool, location_id).await?)
-    }
-
-    /// Notify that a location has changed
-    #[instrument(skip(self), err)]
-    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
-        physical_table::events::notify(&*self.pool, location_id).await?;
-        Ok(())
-    }
-
-    /// Listen for location change notifications
-    pub async fn listen_for_location_notifications(&self) -> Result<LocationNotifListener, Error> {
-        physical_table::events::listen_url(&self.url)
-            .await
-            .map_err(Into::into)
-    }
-}
 
 /// File metadata-related API
 impl MetadataDb {

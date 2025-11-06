@@ -101,14 +101,13 @@ pub async fn handler(
     };
 
     // Fetch locations from metadata DB
-    let locations = ctx
-        .metadata_db
-        .list_locations(limit as i64, query.last_location_id)
-        .await
-        .map_err(|err| {
-            tracing::debug!(error=?err, "failed to list locations");
-            Error::MetadataDbError(err)
-        })?;
+    let locations =
+        metadata_db::physical_table::list(&ctx.metadata_db, limit as i64, query.last_location_id)
+            .await
+            .map_err(|err| {
+                tracing::debug!(error=?err, "failed to list locations");
+                Error::MetadataDbError(err)
+            })?;
 
     // Determine next cursor (ID of the last location in this page)
     let next_cursor = locations.last().map(|location| *location.id);

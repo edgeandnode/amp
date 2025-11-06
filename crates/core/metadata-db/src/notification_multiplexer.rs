@@ -86,7 +86,8 @@ impl NotificationMultiplexer {
     #[instrument(skip(self))]
     async fn execute(self) -> Result<(), BoxError> {
         // Establish connection
-        let listener = self.metadata_db.listen_for_location_notifications().await?;
+        let listener =
+            crate::physical_table::listen_for_location_change_notif(&self.metadata_db).await?;
         let mut stream = std::pin::pin!(listener.into_stream());
 
         tracing::debug!("Connected to notification channel: change-tracking");

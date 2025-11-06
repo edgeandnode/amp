@@ -1,303 +1,269 @@
 //! Physical table database operations
+//!
+//! This module provides a type-safe API for managing physical table locations in the metadata database.
+//! Physical tables represent actual storage locations (e.g., Parquet files) for dataset tables.
 
-use sqlx::{Executor, Postgres, types::JsonValue};
 use url::Url;
-
-pub use self::{
-    location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
-    pagination::{list_first_page, list_next_page},
-};
-use crate::{
-    DatasetNameOwned, DatasetNamespaceOwned, JobStatus, ManifestHashOwned, TableId,
-    jobs::{Job, JobId},
-    workers::WorkerNodeIdOwned,
-};
 
 pub mod events;
 mod location_id;
-mod pagination;
+pub(crate) mod sql;
 
-/// Insert a physical table location into the database and return its ID (idempotent operation)
+pub use self::location_id::{
+    LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+};
+use crate::{
+    DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
+    db::Executor,
+    error::Error,
+    jobs::{Job, JobId},
+    manifests::ManifestHash,
+};
+
+/// Register a new physical table location in the database
+///
+/// This operation is idempotent - if a location with the same URL already exists,
+/// its manifest_hash will be updated and the existing location ID will be returned.
 #[allow(clippy::too_many_arguments)]
-pub async fn insert<'c, E>(
+#[tracing::instrument(skip(exe), err)]
+pub async fn register<'c, E>(
     exe: E,
-    table: TableId<'_>,
-    dataset_namespace: &str,
-    dataset_name: &str,
+    table_id: TableId<'_>,
+    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     bucket: Option<&str>,
     path: &str,
     url: &Url,
     active: bool,
-) -> Result<LocationId, sqlx::Error>
+) -> Result<LocationId, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    // Upsert with RETURNING id - the no-op update ensures RETURNING works for both insert and conflict cases
-    let query = indoc::indoc! {"
-        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, bucket, path, url, active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (url) DO UPDATE SET manifest_hash = EXCLUDED.manifest_hash
-        RETURNING id
-    "};
-
-    let id: LocationId = sqlx::query_scalar(query)
-        .bind(table.manifest_hash)
-        .bind(table.table)
-        .bind(dataset_namespace)
-        .bind(dataset_name)
-        .bind(bucket)
-        .bind(path)
-        .bind(url.as_str())
-        .bind(active)
-        .fetch_one(exe)
-        .await?;
-    Ok(id)
+    sql::insert(
+        exe,
+        table_id.manifest_hash,
+        table_id.table,
+        dataset_namespace.into(),
+        dataset_name.into(),
+        bucket,
+        path,
+        url,
+        active,
+    )
+    .await
+    .map_err(Into::into)
 }
 
-/// Get a location by its ID
-pub async fn get_by_id<'c, E>(exe: E, id: LocationId) -> Result<Option<PhysicalTable>, sqlx::Error>
+/// Get a physical table location by its ID
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_by_id<'c, E>(
+    exe: E,
+    id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<Option<PhysicalTable>, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = "SELECT * FROM physical_tables WHERE id = $1";
-
-    sqlx::query_as(query).bind(id).fetch_optional(exe).await
+    sql::get_by_id(exe, id.into()).await.map_err(Into::into)
 }
 
-/// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = "SELECT id FROM physical_tables WHERE url = $1 LIMIT 1";
-
-    let id: Option<LocationId> = sqlx::query_scalar(query)
-        .bind(url.as_str())
-        .fetch_optional(exe)
-        .await?;
-    Ok(id)
-}
-
-/// Get a location by its ID
+/// Get a physical table location with full writer job details
+#[tracing::instrument(skip(exe), err)]
 pub async fn get_by_id_with_details<'c, E>(
     exe: E,
-    id: LocationId,
-) -> Result<Option<LocationWithDetails>, sqlx::Error>
+    id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<Option<LocationWithDetails>, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        SELECT
-            -- Location fields
-            l.id,
-            l.manifest_hash,
-            l.table_name,
-            l.url,
-            l.active,
-            l.dataset_namespace,
-            l.dataset_name,
-
-            -- Writer job fields (optional)
-            j.id          AS writer_job_id,
-            j.node_id     AS writer_job_node_id,
-            j.status      AS writer_job_status,
-            j.descriptor  AS writer_job_descriptor,
-            j.created_at  AS writer_job_created_at,
-            j.updated_at  AS writer_job_updated_at
-        FROM physical_tables l
-        LEFT JOIN jobs j ON l.writer = j.id
-        WHERE l.id = $1
-    "};
-
-    // Internal row structure to match the query result
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        id: LocationId,
-        manifest_hash: ManifestHashOwned,
-        table_name: String,
-        #[sqlx(try_from = "&'a str")]
-        url: Url,
-        active: bool,
-        dataset_namespace: DatasetNamespaceOwned,
-        dataset_name: DatasetNameOwned,
-        writer_job_id: Option<JobId>,
-        writer_job_node_id: Option<WorkerNodeIdOwned>,
-        writer_job_status: Option<JobStatus>,
-        writer_job_descriptor: Option<JsonValue>,
-        writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
-        writer_job_updated_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
-    }
-
-    let Some(row) = sqlx::query_as::<_, Row>(query)
-        .bind(id)
-        .fetch_optional(exe)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    // Construct the writer job if all fields are present
-    let writer = match (
-        row.writer_job_id,
-        row.writer_job_node_id,
-        row.writer_job_status,
-        row.writer_job_descriptor,
-        row.writer_job_created_at,
-        row.writer_job_updated_at,
-    ) {
-        (Some(id), Some(node_id), Some(status), Some(desc), Some(created_at), Some(updated_at)) => {
-            Some(Job {
-                id,
-                node_id,
-                status,
-                desc,
-                created_at,
-                updated_at,
-            })
-        }
-        _ => None,
-    };
-
-    let location = PhysicalTable {
-        id: row.id,
-        manifest_hash: row.manifest_hash,
-        dataset_namespace: row.dataset_namespace,
-        dataset_name: row.dataset_name,
-        table_name: row.table_name,
-        url: row.url,
-        active: row.active,
-        writer: writer.as_ref().map(|j| j.id),
-    };
-
-    Ok(Some(LocationWithDetails { location, writer }))
+    sql::get_by_id_with_details(exe, id.into())
+        .await
+        .map_err(Into::into)
 }
 
-/// Get the active physical table for a table
+/// Look up a location ID by its storage URL
+///
+/// If multiple locations exist with the same URL (which shouldn't happen in normal operation),
+/// this returns the first match found.
+#[tracing::instrument(skip(exe), err)]
+pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::url_to_id(exe, url).await.map_err(Into::into)
+}
+
+/// Get the currently active physical table location for a given table
+///
+/// Each table can have multiple locations, but only one should be marked as active.
+/// This function returns the active location for querying.
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_active_physical_table<'c, E>(
     exe: E,
-    table: TableId<'_>,
-) -> Result<Option<PhysicalTable>, sqlx::Error>
+    table_id: TableId<'_>,
+) -> Result<Option<PhysicalTable>, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        SELECT *
-        FROM physical_tables
-        WHERE manifest_hash = $1 AND table_name = $2 AND active
-    "};
-
-    let table = sqlx::query_as(query)
-        .bind(table.manifest_hash)
-        .bind(table.table)
-        .fetch_optional(exe)
-        .await?;
-
-    Ok(table)
+    sql::get_active_physical_table(exe, table_id.manifest_hash, table_id.table)
+        .await
+        .map_err(Into::into)
 }
 
-/// Deactivate all active locations for a specific table
+/// Mark all active locations for a table as inactive
+///
+/// This is typically used before marking a new location as active, ensuring
+/// only one location per table is active at a time.
+///
+/// # Transaction Boundaries
+///
+/// This operation should typically be performed within a transaction along with
+/// `mark_active_by_id()` to ensure atomicity when switching active locations.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_inactive_by_table_id<'c, E>(exe: E, table: TableId<'_>) -> Result<(), sqlx::Error>
+pub async fn mark_inactive_by_table_id<'c, E>(exe: E, table_id: TableId<'_>) -> Result<(), Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        UPDATE physical_tables
-        SET active = false
-        WHERE manifest_hash = $1 AND table_name = $2 AND active
-    "};
-
-    sqlx::query(query)
-        .bind(table.manifest_hash)
-        .bind(table.table)
-        .execute(exe)
-        .await?;
-    Ok(())
+    sql::mark_inactive_by_table_id(exe, table_id.manifest_hash, table_id.table)
+        .await
+        .map_err(Into::into)
 }
 
-/// Activate a specific location by URL (does not deactivate others)
+/// Mark a specific location as active
+///
+/// This does not automatically deactivate other locations. Use `mark_inactive_by_table_id()`
+/// first within a transaction to ensure only one location is active.
+///
+/// # Transaction Boundaries
+///
+/// This operation should typically be performed within a transaction along with
+/// `mark_inactive_by_table_id()` to ensure atomicity when switching active locations.
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_active_by_id<'c, E>(
     exe: E,
     table_id: TableId<'_>,
-    location_id: &LocationId,
-) -> Result<(), sqlx::Error>
+    location_id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<(), Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        UPDATE physical_tables
-        SET active = true
-        WHERE id = $1 AND manifest_hash = $2 AND table_name = $3
-    "};
-
-    sqlx::query(query)
-        .bind(location_id)
-        .bind(table_id.manifest_hash)
-        .bind(table_id.table)
-        .execute(exe)
-        .await?;
-    Ok(())
+    sql::mark_active_by_id(
+        exe,
+        table_id.manifest_hash,
+        table_id.table,
+        location_id.into(),
+    )
+    .await
+    .map_err(Into::into)
 }
 
-/// Get all locations that were written by a specific job
+/// Get all physical table locations that were written by a specific job
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_job_id<'c, E>(exe: E, job_id: JobId) -> Result<Vec<PhysicalTable>, sqlx::Error>
+pub async fn get_by_job_id<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<Vec<PhysicalTable>, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        SELECT id, manifest_hash, dataset_namespace, dataset_name, table_name, url, active, writer
-        FROM physical_tables
-        WHERE writer = $1
-    "};
-
-    let locations = sqlx::query_as(query).bind(job_id).fetch_all(exe).await?;
-    Ok(locations)
+    sql::get_by_job_id(exe, job_id.into())
+        .await
+        .map_err(Into::into)
 }
 
 /// Assign a job as the writer for multiple locations
+///
+/// This updates the `writer` field for all specified locations, establishing
+/// a relationship between the job and the physical table locations it created.
 #[tracing::instrument(skip(exe), err)]
 pub async fn assign_job_writer<'c, E>(
     exe: E,
     locations: &[LocationId],
-    job_id: JobId,
-) -> Result<(), sqlx::Error>
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        UPDATE physical_tables
-        SET writer = $1
-        WHERE id = ANY($2)
-    "};
-
-    sqlx::query(query)
-        .bind(job_id)
-        .bind(locations)
-        .execute(exe)
-        .await?;
-    Ok(())
+    sql::assign_job_writer(exe, locations, job_id.into())
+        .await
+        .map_err(Into::into)
 }
 
-/// Delete a location by its ID
+/// Delete a physical table location by its ID
 ///
-/// This will also delete all associated file_metadata entries due to CASCADE.
-/// Returns true if the location was deleted, false if it didn't exist.
+/// This will also delete all associated file_metadata entries due to CASCADE constraints.
+///
+/// # Cascade Effects
+///
+/// Deleting a location will also delete:
+/// - All file_metadata entries associated with this location
 #[tracing::instrument(skip(exe), err)]
-pub async fn delete_by_id<'c, E>(exe: E, id: LocationId) -> Result<bool, sqlx::Error>
+pub async fn delete_by_id<'c, E>(
+    exe: E,
+    id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<bool, Error>
 where
-    E: Executor<'c, Database = Postgres>,
+    E: Executor<'c>,
 {
-    let query = indoc::indoc! {"
-        DELETE FROM physical_tables
-        WHERE id = $1
-    "};
+    sql::delete_by_id(exe, id.into()).await.map_err(Into::into)
+}
 
-    let result = sqlx::query(query).bind(id).execute(exe).await?;
+/// List physical table locations with cursor-based pagination
+///
+/// This function provides an ergonomic interface for paginated listing that automatically
+/// handles first page vs subsequent page logic based on the cursor parameter.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list<'c, E>(
+    exe: E,
+    limit: i64,
+    last_id: Option<impl Into<LocationId> + std::fmt::Debug>,
+) -> Result<Vec<PhysicalTable>, Error>
+where
+    E: Executor<'c>,
+{
+    match last_id {
+        None => sql::list_first_page(exe, limit).await,
+        Some(id) => sql::list_next_page(exe, limit, id.into()).await,
+    }
+    .map_err(Into::into)
+}
 
-    Ok(result.rows_affected() > 0)
+/// Listen for location change notifications
+///
+/// Creates a new PostgreSQL LISTEN connection to receive notifications when
+/// location data changes in the database. This enables real-time cache
+/// invalidation and data refresh.
+#[tracing::instrument(skip(metadata_db), err)]
+pub async fn listen_for_location_change_notif(
+    metadata_db: &crate::MetadataDb,
+) -> Result<events::LocationNotifListener, Error> {
+    events::listen_url(&metadata_db.url)
+        .await
+        .map_err(Into::into)
+}
+
+/// Send a location change notification
+///
+/// Sends a notification to all listeners that a location has changed.
+/// This is used to trigger cache invalidation and data refresh.
+#[tracing::instrument(skip(exe), err)]
+pub async fn send_location_change_notif<'c, E>(
+    exe: E,
+    location_id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    events::notify(exe, location_id.into())
+        .await
+        .map_err(|err| Error::DbError(err.0))
+}
+
+/// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
+/// is at most one active physical_table entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableId<'a> {
+    pub manifest_hash: ManifestHash<'a>,
+    pub table: &'a str,
 }
 
 /// Basic location information from the database
@@ -326,7 +292,7 @@ pub struct PhysicalTable {
 /// Location information with detailed writer job information
 #[derive(Debug, Clone)]
 pub struct LocationWithDetails {
-    pub location: PhysicalTable,
+    pub table: PhysicalTable,
 
     /// Writer job (if one exists)
     pub writer: Option<Job>,
@@ -335,17 +301,17 @@ pub struct LocationWithDetails {
 impl LocationWithDetails {
     /// Get the unique identifier for the location
     pub fn id(&self) -> LocationId {
-        self.location.id
+        self.table.id
     }
 
     /// Get the storage URL for this location
     pub fn url(&self) -> &Url {
-        &self.location.url
+        &self.table.url
     }
 
     /// Check if this location is currently active for queries
     pub fn active(&self) -> bool {
-        self.location.active
+        self.table.active
     }
 }
 

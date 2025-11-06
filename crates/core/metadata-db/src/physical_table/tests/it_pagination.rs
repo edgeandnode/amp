@@ -3,14 +3,13 @@
 use pgtemp::PgTempDB;
 use url::Url;
 
-use crate::{TableId, db::Connection, manifests::ManifestHashOwned, physical_table};
-
-/// Helper function to create a test manifest hash
-fn test_manifest_hash() -> ManifestHashOwned {
-    ManifestHashOwned::from_ref_unchecked(
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    )
-}
+use crate::{
+    DatasetName, DatasetNamespace,
+    db::Connection,
+    manifests::ManifestHash,
+    physical_table,
+    physical_table::{LocationId, TableId},
+};
 
 #[tokio::test]
 async fn list_locations_first_page_when_empty() {
@@ -24,7 +23,7 @@ async fn list_locations_first_page_when_empty() {
         .expect("Failed to run migrations");
 
     //* When
-    let locations = physical_table::list_first_page(&mut conn, 10)
+    let locations = physical_table::list(&mut conn, 10, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -43,20 +42,26 @@ async fn list_locations_first_page_respects_limit() {
         .await
         .expect("Failed to run migrations");
 
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
     // Create 5 locations with unique table names to avoid unique constraint violation
     for i in 0..5 {
         let table_name = format!("test-table-{}", i);
         let table = TableId {
-            manifest_hash: test_manifest_hash(),
+            manifest_hash: hash.clone(),
             table: &table_name,
         };
         let url =
             Url::parse(&format!("s3://bucket/file{}.parquet", i)).expect("Failed to parse URL");
-        physical_table::insert(
+        physical_table::register(
             &mut conn,
             table,
-            "test-namespace",
-            "test-dataset",
+            namespace.clone(),
+            name.clone(),
             None,
             &format!("/file{}.parquet", i),
             &url,
@@ -70,7 +75,7 @@ async fn list_locations_first_page_respects_limit() {
     }
 
     //* When
-    let locations = physical_table::list_first_page(&mut conn, 3)
+    let locations = physical_table::list(&mut conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -95,21 +100,27 @@ async fn list_locations_next_page_uses_cursor() {
         .await
         .expect("Failed to run migrations");
 
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
     // Create 10 locations with unique table names to avoid unique constraint violation
     let mut all_location_ids = Vec::new();
     for i in 0..10 {
         let table_name = format!("test-table-page-{}", i);
         let table = TableId {
-            manifest_hash: test_manifest_hash(),
+            manifest_hash: hash.clone(),
             table: &table_name,
         };
         let url =
             Url::parse(&format!("s3://bucket/page{}.parquet", i)).expect("Failed to parse URL");
-        let location_id = physical_table::insert(
+        let location_id = physical_table::register(
             &mut conn,
             table,
-            "test-namespace",
-            "test-dataset",
+            namespace.clone(),
+            name.clone(),
             None,
             &format!("/page{}.parquet", i),
             &url,
@@ -124,7 +135,7 @@ async fn list_locations_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = physical_table::list_first_page(&mut conn, 3)
+    let first_page = physical_table::list(&mut conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -133,7 +144,7 @@ async fn list_locations_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = physical_table::list_next_page(&mut conn, 3, cursor)
+    let second_page = physical_table::list(&mut conn, 3, Some(cursor))
         .await
         .expect("Failed to list second page");
 
