@@ -129,7 +129,7 @@ pub async fn dump(
     let provider_name = client.provider_name().to_string();
     tracing::info!("connected to provider: {provider_name}");
 
-    let mut start = dataset.start_block.unwrap_or(0);
+    let start = dataset.start_block.unwrap_or(0);
     let resolved = end
         .resolve(start, client.latest_block(finalized_blocks_only))
         .await?;
@@ -262,8 +262,6 @@ pub async fn dump(
             }
             return Ok(());
         }
-
-        start = latest_block + 1;
     }
 }
 
