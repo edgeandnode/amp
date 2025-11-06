@@ -3911,6 +3911,7 @@ dependencies = [
  "common",
  "datafusion",
  "dataset-store",
+ "datasets-common",
  "datasets-derived",
  "futures",
  "metadata-db",
@@ -5797,6 +5798,7 @@ version = "0.1.0"
 dependencies = [
  "backon",
  "futures",
+ "hex",
  "indoc",
  "pgtemp",
  "serde",
@@ -10295,6 +10297,7 @@ dependencies = [
  "backon",
  "common",
  "dataset-store",
+ "datasets-common",
  "dump",
  "futures",
  "metadata-db",

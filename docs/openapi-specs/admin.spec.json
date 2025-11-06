@@ -2025,8 +2025,9 @@
         "description": "Location information returned by the API\n\nThis struct represents location metadata from the database in a format\nsuitable for API responses. It contains all the essential information\nabout where dataset table data is stored.",
         "required": [
           "id",
-          "dataset",
-          "dataset_version",
+          "dataset_namespace",
+          "dataset_name",
+          "manifest_hash",
           "table",
           "url",
           "active"
@@ -2036,18 +2037,22 @@
             "type": "boolean",
             "description": "Whether this location is currently active for queries"
           },
-          "dataset": {
+          "dataset_name": {
             "type": "string",
             "description": "Name of the dataset this location belongs to"
           },
-          "dataset_version": {
+          "dataset_namespace": {
             "type": "string",
-            "description": "Version of the dataset using semantic versioning (e.g., \"1.0.0\", or empty string for unversioned)"
+            "description": "Namespace of the dataset this location belongs to"
           },
           "id": {
             "type": "integer",
             "format": "int64",
             "description": "Unique identifier for this location (64-bit integer)"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Hash of the dataset manifest"
           },
           "table": {
             "type": "string",
@@ -2072,8 +2077,9 @@
         "description": "Location information with writer job details",
         "required": [
           "id",
-          "dataset",
-          "dataset_version",
+          "dataset_namespace",
+          "dataset_name",
+          "manifest_hash",
           "table",
           "url",
           "active"
@@ -2083,18 +2089,22 @@
             "type": "boolean",
             "description": "Whether this location is currently active for queries"
           },
-          "dataset": {
+          "dataset_name": {
             "type": "string",
             "description": "Name of the dataset this location belongs to"
           },
-          "dataset_version": {
+          "dataset_namespace": {
             "type": "string",
-            "description": "Version of the dataset using semantic versioning (e.g., \"1.0.0\", or empty string for unversioned)"
+            "description": "Namespace of the dataset this location belongs to"
           },
           "id": {
             "type": "integer",
             "format": "int64",
             "description": "Unique identifier for this location (64-bit integer)"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Hash of the dataset manifest"
           },
           "table": {
             "type": "string",

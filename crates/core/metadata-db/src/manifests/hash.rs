@@ -1,167 +1,155 @@
 //! Dataset version hash new-type wrapper for database values
 //!
-//! This module provides a [`Hash`] new-type wrapper around [`Cow<str>`] that maintains
-//! version hash invariants for database operations. The type provides efficient handling
-//! with support for both borrowed and owned strings.
+//! This module provides a [`Hash`] new-type wrapper around `[u8; 64]` that maintains
+//! version hash invariants for database operations. The type stores the hash as raw bytes
+//! internally and converts to/from hex strings at system boundaries.
 //!
 //! ## Validation Strategy
 //!
-//! This type **maintains invariants but does not validate** input data. Validation occurs
-//! at system boundaries through types like [`datasets_common::Hash`], which enforce the
-//! required format before converting into this database-layer type. Database values are
-//! trusted as already valid, following the principle of "validate at boundaries, trust
-//! database data."
+//! This type **validates input data** when constructing from strings. Version hashes must:
+//! - Be exactly 64 characters long (64 hex digits representing 32 bytes)
+//! - Contain only valid hex digits (`0-9`, `a-f`, `A-F`)
 //!
-//! Types that convert into [`Hash`] are responsible for ensuring invariants are met:
-//! - Version hashes must be exactly 64 characters long (64 hex digits)
-//! - Version hashes must contain only valid hex digits (`0-9`, `a-f`, `A-F`)
+//! Database values are trusted as already valid, following the principle of "validate at
+//! boundaries, trust database data."
 
-use std::borrow::Cow;
+use hex::FromHexError;
 
-/// An owned version hash type for database return values and owned storage scenarios.
-///
-/// This is a type alias for `Hash<'static>`, specifically intended for use as a return type from
-/// database queries or in any context where a version hash with owned storage is required.
-/// Prefer this alias when working with version hashes that need to be stored or returned from the database,
-/// rather than just representing a version hash with owned storage in general.
-pub type HashOwned = Hash<'static>;
+/// Error type for Hash validation failures
+#[derive(Debug, thiserror::Error)]
+pub enum HashError {
+    /// Hash string must be exactly 64 hex characters
+    #[error("Hash must be exactly 64 hex characters, got {0} characters")]
+    InvalidLength(usize),
+    /// Hash contains invalid hex characters
+    #[error("Hash contains invalid hex characters: {0}")]
+    InvalidHex(#[from] FromHexError),
+}
 
 /// A version hash wrapper for database values.
 ///
-/// This new-type wrapper around `Cow<str>` maintains version hash invariants for database
-/// operations. It supports both borrowed and owned strings through copy-on-write semantics,
-/// enabling efficient handling without unnecessary allocations.
+/// This new-type wrapper around `[u8; 64]` maintains version hash invariants for database
+/// operations. It stores the hash as raw bytes internally and converts to/from hex strings
+/// at system boundaries.
 ///
-/// The type trusts that values are already validated. Validation must occur at system
-/// boundaries before conversion into this type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Hash<'a>(Cow<'a, str>);
+/// The type validates input when constructing from strings and trusts database values.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Hash([u8; 64]);
 
-impl<'a> Hash<'a> {
-    /// Create a new Hash wrapper from a reference to str (borrowed)
+impl Hash {
+    /// Create a new Hash from a hex string (borrowed or owned)
     ///
-    /// # Safety
-    /// The caller must ensure the provided version hash upholds the version hash invariants.
-    /// This method does not perform validation. Failure to uphold the invariants may
-    /// cause undefined behavior.
-    pub fn from_ref_unchecked(hash: &'a str) -> Self {
-        Self(Cow::Borrowed(hash))
-    }
-
-    /// Create a new Hash wrapper from an owned String
+    /// This method validates that the input is exactly 64 hex characters.
     ///
-    /// # Safety
-    /// The caller must ensure the provided version hash upholds the version hash invariants.
-    /// This method does not perform validation. Failure to uphold the invariants may
-    /// cause undefined behavior.
-    pub fn from_owned_unchecked(hash: String) -> Hash<'static> {
-        Hash(Cow::Owned(hash))
-    }
-
-    /// Consume and return the inner String (owned)
-    pub fn into_inner(self) -> String {
-        match self {
-            Hash(Cow::Owned(hash)) => hash,
-            Hash(Cow::Borrowed(hash)) => hash.to_owned(),
+    /// # Errors
+    /// Returns an error if:
+    /// - The string is not exactly 64 characters long
+    /// - The string contains non-hex characters
+    pub fn from_hex(hash: impl AsRef<str>) -> Result<Self, HashError> {
+        let hash_str = hash.as_ref();
+        if hash_str.len() != 64 {
+            return Err(HashError::InvalidLength(hash_str.len()));
         }
+
+        let mut bytes = [0u8; 64];
+        // We validate hex and store the ASCII hex characters directly
+        for (i, c) in hash_str.chars().enumerate() {
+            if !c.is_ascii_hexdigit() {
+                return Err(HashError::InvalidHex(FromHexError::InvalidHexCharacter {
+                    c,
+                    index: i,
+                }));
+            }
+            bytes[i] = c as u8;
+        }
+
+        Ok(Self(bytes))
     }
 
-    /// Get a reference to the inner str
+    /// Get a reference to the raw bytes
+    pub fn as_bytes(&self) -> &[u8; 64] {
+        &self.0
+    }
+
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.as_ref()
     }
 }
 
-impl<'a> From<&'a Hash<'a>> for Hash<'a> {
-    fn from(value: &'a Hash<'a>) -> Self {
-        // Create a borrowed Cow variant pointing to the data inside the input Hash.
-        // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
-        // SAFETY: The input Hash already upholds invariants, so the referenced data is valid.
-        Hash::from_ref_unchecked(value.as_ref())
-    }
-}
-
-impl<'a> std::ops::Deref for Hash<'a> {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a> AsRef<str> for Hash<'a> {
+impl AsRef<str> for Hash {
     fn as_ref(&self) -> &str {
-        &self.0
+        // SAFETY: bytes are guaranteed to be valid ASCII hex digits
+        std::str::from_utf8(&self.0).unwrap()
     }
 }
 
-impl<'a> PartialEq<&str> for Hash<'a> {
+impl PartialEq<&str> for Hash {
     fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
+        self.as_ref() == *other
     }
 }
 
-impl<'a> PartialEq<Hash<'a>> for &str {
-    fn eq(&self, other: &Hash<'a>) -> bool {
-        *self == other.as_str()
+impl PartialEq<Hash> for &str {
+    fn eq(&self, other: &Hash) -> bool {
+        *self == other.as_ref()
     }
 }
 
-impl<'a> PartialEq<str> for Hash<'a> {
+impl PartialEq<str> for Hash {
     fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
+        self.as_ref() == other
     }
 }
 
-impl<'a> PartialEq<Hash<'a>> for str {
-    fn eq(&self, other: &Hash<'a>) -> bool {
-        self == other.as_str()
+impl PartialEq<Hash> for str {
+    fn eq(&self, other: &Hash) -> bool {
+        self == other.as_ref()
     }
 }
 
-impl<'a> PartialEq<String> for Hash<'a> {
+impl PartialEq<String> for Hash {
     fn eq(&self, other: &String) -> bool {
-        self.as_str() == other
+        self.as_ref() == other.as_str()
     }
 }
 
-impl<'a> PartialEq<Hash<'a>> for String {
-    fn eq(&self, other: &Hash<'a>) -> bool {
-        self == other.as_str()
+impl PartialEq<Hash> for String {
+    fn eq(&self, other: &Hash) -> bool {
+        self.as_str() == other.as_ref()
     }
 }
 
-impl<'a> std::fmt::Display for Hash<'a> {
+impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        f.write_str(self.as_str())
     }
 }
 
-impl<'a> std::fmt::Debug for Hash<'a> {
+impl std::fmt::Debug for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        f.debug_tuple("Hash").field(&self.as_ref()).finish()
     }
 }
 
-impl sqlx::Type<sqlx::Postgres> for Hash<'_> {
+impl sqlx::Type<sqlx::Postgres> for Hash {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <String as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
-impl<'a> sqlx::Encode<'_, sqlx::Postgres> for Hash<'a> {
+impl sqlx::Encode<'_, sqlx::Postgres> for Hash {
     fn encode_by_ref(
         &self,
         buf: &mut <sqlx::Postgres as sqlx::Database>::ArgumentBuffer<'_>,
     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        <&str as sqlx::Encode<'_, sqlx::Postgres>>::encode_by_ref(&self.as_str(), buf)
+        let s = self.as_ref();
+        <&str as sqlx::Encode<'_, sqlx::Postgres>>::encode_by_ref(&s, buf)
     }
 }
 
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for HashOwned {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+impl sqlx::Decode<'_, sqlx::Postgres> for Hash {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
         let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        // SAFETY: Database values are trusted to uphold invariants; validation occurs at boundaries before insertion.
-        Ok(Hash::from_owned_unchecked(s))
+        Ok(Hash::from_hex(&s)?)
     }
 }

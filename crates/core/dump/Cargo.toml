@@ -10,6 +10,7 @@ common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 datasets-derived = { path = "../datasets-derived" }
+datasets-common = { path = "../datasets-common" }
 futures.workspace = true
 tracing.workspace = true
 object_store.workspace = true

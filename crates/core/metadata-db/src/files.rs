@@ -7,7 +7,7 @@ use futures::stream::Stream;
 use tracing::instrument;
 use url::Url;
 
-use crate::locations::LocationId;
+use crate::physical_table::LocationId;
 
 pub mod file_id;
 pub mod pagination;
@@ -76,7 +76,7 @@ where
                fm.object_version,
                fm.metadata
         FROM file_metadata fm
-        JOIN locations l ON fm.location_id = l.id
+        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.id = $1
     "#};
 
@@ -107,7 +107,7 @@ where
                fm.object_version,
                fm.metadata
         FROM file_metadata fm
-        JOIN locations l ON fm.location_id = l.id
+        JOIN physical_tables l ON fm.location_id = l.id
         WHERE location_id = $1
     "#};
 

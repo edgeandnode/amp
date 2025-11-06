@@ -106,7 +106,7 @@ use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
 ///
 /// Returns `Ok(())` on successful completion or an error if any partition fails.
 /// On failure, all running partitions are terminated to prevent partial dumps.
-#[instrument(skip_all, fields(dataset = %dataset_name), err)]
+#[instrument(skip_all, err)]
 #[allow(clippy::too_many_arguments)]
 pub async fn dump(
     ctx: Ctx,
@@ -115,29 +115,28 @@ pub async fn dump(
     tables: &[Arc<PhysicalTable>],
     parquet_opts: Arc<WriterProperties>,
     end: EndBlock,
-    dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
     finalized_blocks_only: bool,
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
+    let dataset = tables[0].dataset();
 
     let mut client = ctx
         .dataset_store
-        .get_client(dataset_name, None, meter)
-        .await?
-        .ok_or_else(|| format!("Client for dataset '{}' not found", dataset_name))?;
+        .get_client(dataset.manifest_hash(), metrics.as_ref().map(|m| m.meter()))
+        .await?;
 
-    tracing::info!("connected to provider: {}", client.provider_name());
+    let provider_name = client.provider_name().to_string();
+    tracing::info!("connected to provider: {provider_name}");
 
-    let mut start = tables[0].dataset().start_block.unwrap_or(0);
+    let mut start = dataset.start_block.unwrap_or(0);
     let resolved = end
         .resolve(start, client.latest_block(finalized_blocks_only))
         .await?;
 
     let end = match resolved {
         ResolvedEndBlock::NoDataAvailable => {
-            tracing::warn!("no blocks available from provider for {}", dataset_name);
+            tracing::warn!("no blocks available from provider: {provider_name}");
             return Ok(());
         }
         ResolvedEndBlock::Continuous => None,
@@ -181,13 +180,13 @@ pub async fn dump(
             if let Some(end) = end
                 && end <= latest_block
             {
-                tracing::info!("no blocks to dump for {dataset_name}");
+                tracing::info!("no blocks to dump");
                 return Ok(());
             }
             continue;
         }
         tracing::info!(
-            "dumping dataset {dataset_name} for ranges {}",
+            "dumping ranges {}",
             missing_dataset_ranges
                 .iter()
                 .map(|r| format!("[{}-{}]", r.start(), r.end()))
@@ -222,7 +221,6 @@ pub async fn dump(
                 parquet_opts: parquet_opts.clone(),
                 missing_ranges_by_table: missing_ranges_by_table.clone(),
                 id: i as u32,
-                dataset_name: dataset_name.to_string(),
                 metrics: metrics.clone(),
                 progress_reporter: progress_reporter.clone(),
             });
@@ -237,18 +235,13 @@ pub async fn dump(
 
         // Wait for all the writers to finish, returning an error if any writer panics or fails.
         if let Err(err) = join_set.try_wait_all().await {
-            tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+            tracing::error!(error=%err, "dataset dump failed");
 
             // Record error metrics
             if let Some(ref metrics) = metrics {
-                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
                 for table in tables {
                     let table_name = table.table_name().to_string();
-                    metrics.record_dump_error(
-                        dataset_name.to_string(),
-                        dataset_version.clone(),
-                        table_name,
-                    );
+                    metrics.record_dump_error(table_name);
                 }
             }
 
@@ -261,17 +254,10 @@ pub async fn dump(
             // Record dump duration on successful completion
             if let Some(ref metrics) = metrics {
                 let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-                let dataset_version = tables[0].dataset().dataset_version().unwrap_or_default();
                 for table in tables {
                     let table_name = table.table_name().to_string();
-                    let job_id = format!("{}_{}", dataset_name, table_name);
-                    metrics.record_dump_duration(
-                        duration_millis,
-                        dataset_name.to_string(),
-                        dataset_version.clone(),
-                        table_name,
-                        job_id,
-                    );
+                    let job_id = table_name.clone();
+                    metrics.record_dump_duration(duration_millis, table_name, job_id);
                 }
             }
             return Ok(());
@@ -369,8 +355,6 @@ fn split_and_partition(
 struct DumpPartition<S: BlockStreamer> {
     /// The block streamer
     block_streamer: S,
-    /// The name of the dataset
-    dataset_name: String,
     /// The metadata database
     metadata_db: MetadataDb,
     /// The tables to write to
@@ -465,26 +449,10 @@ impl<S: BlockStreamer> DumpPartition<S> {
                         .find(|t| t.table_name() == table_name)
                         .expect("table should exist");
                     let location_id = *physical_table.location_id();
-                    let dataset_version = physical_table
-                        .dataset()
-                        .dataset_version()
-                        .unwrap_or_default();
                     // Record rows only (bytes tracked separately in writer)
-                    metrics.record_ingestion_rows(
-                        num_rows,
-                        self.dataset_name.clone(),
-                        dataset_version.clone(),
-                        table_name.clone(),
-                        location_id,
-                    );
+                    metrics.record_ingestion_rows(num_rows, table_name.clone(), location_id);
                     // Update latest block gauge
-                    metrics.set_latest_block(
-                        block_num,
-                        self.dataset_name.clone(),
-                        dataset_version,
-                        table_name,
-                        location_id,
-                    );
+                    metrics.set_latest_block(block_num, table_name, location_id);
                 }
 
                 writer.write(table_rows).await?;

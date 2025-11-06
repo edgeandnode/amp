@@ -185,7 +185,6 @@ pub struct Worker {
     meta: MetadataDb,
     job_ctx: Ctx,
     job_set: JobSet,
-    metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
 }
 
@@ -214,11 +213,6 @@ impl Worker {
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
-        // Create metrics registry if meter is available
-        let metrics = meter
-            .as_ref()
-            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m)));
-
         Self {
             node_id,
             meta: metadata_db.clone(),
@@ -230,7 +224,6 @@ impl Worker {
                 notification_multiplexer,
             },
             job_set: JobSet::default(),
-            metrics,
             meter,
         }
     }
@@ -416,7 +409,6 @@ impl Worker {
             self.job_ctx.clone(),
             job_id.into(),
             job_desc,
-            self.metrics.clone(),
             self.meter.clone(),
         )
         .await

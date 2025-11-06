@@ -64,7 +64,6 @@ impl Collector {
 
     #[tracing::instrument(skip_all, err, fields(location_id=%self.table.location_id(), table=%self.table.table_ref()))]
     pub(super) async fn collect(self) -> CollectionResult<Self> {
-        let dataset_name: Arc<str> = Arc::from(self.table.dataset().name.as_str());
         let table_name: Arc<str> = Arc::from(self.table.table_name());
 
         let metadata_db = self.table.metadata_db();
@@ -101,7 +100,6 @@ impl Collector {
         if let Some(metrics) = &self.metrics {
             metrics.inc_expired_files_found(
                 found_file_ids_to_paths.len(),
-                self.table.dataset().name.to_string(),
                 self.table.table_name().to_string(),
             );
         }
@@ -121,7 +119,6 @@ impl Collector {
         if let Some(metrics) = &self.metrics {
             metrics.inc_expired_entries_deleted(
                 paths_to_remove.len(),
-                self.table.dataset().name.to_string(),
                 self.table.table_name().to_string(),
             );
         }
@@ -138,7 +135,6 @@ impl Collector {
                 (0, 0),
                 |(mut files_deleted, mut files_not_found), object_meta| {
                     let object_store = Arc::clone(&object_store);
-                    let dataset_name = Arc::clone(&dataset_name);
                     let table_name = Arc::clone(&table_name);
                     let location = object_meta.location.clone();
                     let metrics = self.metrics.as_ref();
@@ -149,22 +145,14 @@ impl Collector {
                             Ok(_) => {
                                 tracing::debug!("Deleted expired file: {}", location);
                                 if let Some(metrics) = metrics {
-                                    metrics.inc_files_deleted(
-                                        1,
-                                        dataset_name.to_string(),
-                                        table_name.clone().to_string(),
-                                    );
+                                    metrics.inc_files_deleted(1, table_name.clone().to_string());
                                 }
                                 files_deleted += 1;
                             }
                             Err(ObjectStoreError::NotFound { .. }) => {
                                 tracing::debug!("Expired file not found: {}", location);
                                 if let Some(metrics) = metrics {
-                                    metrics.inc_files_not_found(
-                                        1,
-                                        dataset_name.to_string(),
-                                        table_name.to_string(),
-                                    );
+                                    metrics.inc_files_not_found(1, table_name.to_string());
                                 }
                                 files_not_found += 1;
                             }
@@ -172,10 +160,7 @@ impl Collector {
                                 tracing::debug!("Expired files deleted: {}", files_deleted);
                                 tracing::debug!("Expired files not found: {}", files_not_found);
                                 if let Some(metrics) = &metrics {
-                                    metrics.inc_failed_collections(
-                                        dataset_name.to_string(),
-                                        table_name.to_string(),
-                                    );
+                                    metrics.inc_failed_collections(table_name.to_string());
                                 }
 
                                 return Err(e);
@@ -191,7 +176,7 @@ impl Collector {
         tracing::debug!("Expired files not found: {}", files_not_found);
 
         if let Some(metrics) = self.metrics.as_ref() {
-            metrics.inc_successful_collections(dataset_name.to_string(), table_name.to_string());
+            metrics.inc_successful_collections(table_name.to_string());
         }
 
         return Ok(self);

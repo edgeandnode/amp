@@ -50,7 +50,7 @@ impl std::hash::Hash for JsUdf {
 impl JsUdf {
     pub fn new(
         isolate_pool: IsolatePool,
-        dataset_name: &str,
+        catalog_schema: String,
         code: Arc<str>,
         script_name: Arc<str>,
         function_name: Arc<str>,
@@ -63,7 +63,7 @@ impl JsUdf {
         };
         Self {
             isolate_pool,
-            udf_name: format!("{}.{}", dataset_name, function_name),
+            udf_name: format!("{}.{}", catalog_schema, function_name),
             code,
             script_name,
             function_name,
@@ -168,7 +168,7 @@ async fn js_udf_smoke_test() {
     let isolate_pool = IsolatePool::new();
     let udf = JsUdf::new(
         isolate_pool,
-        "",
+        String::new(),
         TEST_JS.into(),
         "test.js".into(),
         "int_in_int_out".into(),

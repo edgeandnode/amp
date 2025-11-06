@@ -1,11 +1,15 @@
-use std::{collections::BTreeSet, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{name::Name, namespace::Namespace, version::Version};
+use datasets_common::{partial_reference::PartialReference, reference::Reference};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -14,9 +18,8 @@ use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
-    pub namespace: Namespace,
-    pub name: Name,
-    pub version: Option<Version>,
+    pub manifest_hash: datasets_common::hash::Hash,
+    pub dependencies: BTreeMap<String, Reference>,
     pub kind: String,
     pub network: Option<String>,
     pub start_block: Option<BlockNum>,
@@ -30,27 +33,37 @@ impl Dataset {
         &self.tables
     }
 
-    pub fn resolved_tables(self: &Arc<Self>) -> impl Iterator<Item = ResolvedTable> + '_ {
+    /// Resolved tables serve two purposes:
+    /// 1. Associate a table with its dataset.
+    /// 2. Associate the table with a `TableReference`
+    ///    - If no reference is provided, the table reference will be a bare table name.
+    ///
+    /// TODO: Separate a mandatory full `Reference` from a `TableReference` alias.
+    pub fn resolved_tables(
+        self: &Arc<Self>,
+        dataset_ref: PartialReference,
+    ) -> impl Iterator<Item = ResolvedTable> + '_ {
         self.tables.iter().map(move |table| {
-            ResolvedTable::new(
-                table.clone(),
-                self.clone(),
-                TableReference::partial(self.name.to_string(), table.name().to_string()),
-            )
+            let table_ref =
+                TableReference::partial(dataset_ref.to_string(), table.name().to_string());
+            ResolvedTable::new(table.clone(), self.clone(), table_ref)
         })
     }
 
     /// Returns the JS functions defined in this dataset.
     ///
-    /// JS functions need a V8 isolate pool order to be executed.
+    /// ## Arguments
+    /// `catalog_schema`: The function will be named `<catalog_schema>.<function_name>`.
+    /// `isolate_pool`: JS functions need a V8 isolate pool order to be executed.
     pub fn functions(
         &self,
+        catalog_schema: String,
         isolate_pool: IsolatePool,
     ) -> impl Iterator<Item = AsyncScalarUDF> + '_ {
         self.functions.iter().map(move |f| {
             AsyncScalarUDF::new(Arc::new(JsUdf::new(
                 isolate_pool.clone(),
-                &self.name,
+                catalog_schema.to_string(),
                 f.source.source.clone(),
                 f.source.filename.clone().into(),
                 f.name.clone().into(),
@@ -60,8 +73,8 @@ impl Dataset {
         })
     }
 
-    pub fn dataset_version(&self) -> Option<String> {
-        self.version.as_ref().map(|v| v.to_string())
+    pub fn manifest_hash(&self) -> &datasets_common::hash::Hash {
+        &self.manifest_hash
     }
 }
 
@@ -139,10 +152,6 @@ impl ResolvedTable {
 
     pub fn dataset(&self) -> &Arc<Dataset> {
         &self.dataset
-    }
-
-    pub fn dataset_version(&self) -> Option<String> {
-        self.dataset.dataset_version()
     }
 
     pub fn table_ref(&self) -> &TableReference {

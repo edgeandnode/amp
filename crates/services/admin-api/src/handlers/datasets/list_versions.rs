@@ -84,7 +84,7 @@ pub async fn handler(
         .into_iter()
         .filter_map(|tag| {
             let version_str = tag.version.into_inner();
-            let hash_str = tag.hash.into_inner();
+            let hash_str = tag.hash.to_string();
 
             // Parse version string
             version_str
