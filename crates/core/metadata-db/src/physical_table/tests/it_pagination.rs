@@ -3,12 +3,13 @@
 use pgtemp::PgTempDB;
 use url::Url;
 
-use crate::{TableId, db::Connection, manifests::ManifestHash, physical_table};
+use crate::{TableId, db::Connection, manifests::ManifestHashOwned, physical_table};
 
 /// Helper function to create a test manifest hash
-fn test_manifest_hash() -> ManifestHash {
-    ManifestHash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        .unwrap()
+fn test_manifest_hash() -> ManifestHashOwned {
+    ManifestHashOwned::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
 }
 
 #[tokio::test]

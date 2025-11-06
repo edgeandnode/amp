@@ -36,7 +36,7 @@ pub use self::{
         FileMetadataWithDetails, FooterBytes,
     },
     jobs::{Job, JobId, JobStatus, JobStatusUpdateError},
-    manifests::{ManifestHash, ManifestPath, ManifestPathOwned},
+    manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     physical_table::{
         LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
@@ -64,9 +64,9 @@ pub struct MetadataDb {
 
 /// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
 /// is at most one active physical_table entry.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
-    pub manifest_hash: ManifestHash,
+    pub manifest_hash: ManifestHash<'a>,
     pub table: &'a str,
 }
 
@@ -278,7 +278,7 @@ impl MetadataDb {
         trace!("Setting location as active");
 
         let mut tx = self.pool.begin().await?;
-        physical_table::mark_inactive_by_table_id(&mut *tx, table).await?;
+        physical_table::mark_inactive_by_table_id(&mut *tx, table.clone()).await?;
         physical_table::mark_active_by_id(&mut *tx, table, location_id).await?;
         tx.commit().await?;
         Ok(())
