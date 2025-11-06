@@ -209,7 +209,10 @@ where
 /// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
 /// If `version` is `None`, all versions of the dataset are included.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_dataset<'c, E>(exe: E, manifest_hash: ManifestHash) -> Result<Vec<Job>, Error>
+pub async fn get_by_dataset<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+) -> Result<Vec<Job>, Error>
 where
     E: Executor<'c>,
 {

@@ -34,7 +34,7 @@ use super::{
     namespace::{Namespace, NamespaceOwned},
     version::{Version, VersionOwned},
 };
-use crate::manifests::ManifestHash;
+use crate::manifests::{ManifestHash, ManifestHashOwned};
 
 /// Internal SQL operations for tag management
 ///
@@ -53,7 +53,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-        hash: ManifestHash,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -86,7 +86,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: ManifestHash,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -118,7 +118,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-        hash: ManifestHash,
+        hash: ManifestHash<'_>,
     ) -> Result<(), sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -241,7 +241,7 @@ pub(crate) mod sql {
         namespace: Namespace<'_>,
         name: Name<'_>,
         version: Version<'_>,
-    ) -> Result<Option<ManifestHash>, sqlx::Error>
+    ) -> Result<Option<crate::manifests::ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -264,7 +264,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<ManifestHash>, sqlx::Error>
+    ) -> Result<Option<crate::manifests::ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -286,7 +286,7 @@ pub(crate) mod sql {
         exe: E,
         namespace: Namespace<'_>,
         name: Name<'_>,
-    ) -> Result<Option<ManifestHash>, sqlx::Error>
+    ) -> Result<Option<ManifestHashOwned>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -391,7 +391,7 @@ pub(crate) mod sql {
     /// Excludes system-managed tags ("latest" and "dev").
     pub async fn list_by_manifest_hash<'c, E>(
         exe: E,
-        hash: ManifestHash,
+        hash: ManifestHash<'_>,
     ) -> Result<Vec<Tag>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
@@ -469,7 +469,7 @@ pub struct Tag {
     /// Version tag
     pub version: VersionOwned,
     /// Manifest hash this tag references
-    pub hash: ManifestHash,
+    pub hash: ManifestHashOwned,
     /// Timestamp when the tag was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the tag was last updated
