@@ -110,7 +110,7 @@ pub async fn dump_raw_tables(
         }
         DatasetKind::Derived => {
             return Err(
-                format!("Attempted to dump dataset of kind `{kind}` as raw dataset",).into(),
+                format!("Attempted to dump dataset of kind `{kind}` as raw dataset").into(),
             );
         }
     }

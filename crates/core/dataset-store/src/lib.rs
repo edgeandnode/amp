@@ -586,7 +586,7 @@ impl DatasetStore {
 
 // Dataset loading API
 impl DatasetStore {
-    /// Retrieves a dataset by name and optional version, with in-memory caching.
+    /// Retrieves a dataset by reference, with in-memory caching.
     ///
     /// This method resolves the dataset's manifest hash from the namespace+name+version tuple
     /// and delegates to `get_by_hash` for loading and caching:

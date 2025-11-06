@@ -107,7 +107,7 @@ pub async fn dump(
         }
     };
 
-    let mut physical_datasets: Vec<_> = vec![];
+    let mut physical_datasets = vec![];
     for dataset_ref in datasets {
         let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
