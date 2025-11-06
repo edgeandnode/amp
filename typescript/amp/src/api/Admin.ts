@@ -37,39 +37,48 @@ const jobId = HttpApiSchema.param("jobId", Model.JobIdParam)
  * The register dataset endpoint (POST /datasets).
  */
 const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
-  .addError(Error.InvalidRequest)
+  .addError(Error.InvalidPayloadFormat)
   .addError(Error.InvalidManifest)
+  .addError(Error.DependencyValidationError)
+  .addError(Error.UnsupportedDatasetKind)
   .addError(Error.ManifestRegistrationError)
-  .addError(Error.DatasetAlreadyExists)
-  .addError(Error.DatasetDefStoreError)
-  .addError(Error.DatasetStoreError)
+  .addError(Error.ManifestLinkingError)
+  .addError(Error.VersionTaggingError)
+  .addError(Error.StoreError)
+  .addError(Error.ManifestNotFound)
   .addSuccess(Schema.Void, { status: 201 })
   .setPayload(
     Schema.Struct({
       namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
       name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
       version: Schema.optional(Schema.String).pipe(Schema.fromKey("version")),
-      manifest: Schema.parseJson(Model.DatasetManifest),
+      manifest: Model.DatasetManifest,
     }),
   )
 
 /**
  * Error type for the `registerDataset` endpoint.
  *
- * - InvalidRequest: Invalid request parameters or dataset name format.
- * - InvalidManifest: The manifest is semantically invalid.
+ * - InvalidPayloadFormat: Request JSON is malformed or invalid.
+ * - InvalidManifest: Manifest JSON is malformed or structurally invalid.
+ * - DependencyValidationError: SQL queries reference undeclared dependencies.
+ * - UnsupportedDatasetKind: Dataset kind is not supported.
  * - ManifestRegistrationError: Failed to register manifest in system.
- * - DatasetAlreadyExists: Dataset exists and manifest provided (conflict).
- * - DatasetDefStoreError: Failure in dataset definition store operations.
- * - DatasetStoreError: Failed to load dataset from store.
+ * - ManifestLinkingError: Failed to link manifest to dataset.
+ * - VersionTaggingError: Failed to tag version for the dataset.
+ * - StoreError: Dataset store operation error.
+ * - ManifestNotFound: Manifest hash provided but manifest doesn't exist.
  */
 export type RegisterDatasetError =
-  | Error.InvalidRequest
+  | Error.InvalidPayloadFormat
   | Error.InvalidManifest
+  | Error.DependencyValidationError
+  | Error.UnsupportedDatasetKind
   | Error.ManifestRegistrationError
-  | Error.DatasetAlreadyExists
-  | Error.DatasetDefStoreError
-  | Error.DatasetStoreError
+  | Error.ManifestLinkingError
+  | Error.VersionTaggingError
+  | Error.StoreError
+  | Error.ManifestNotFound
 
 /**
  * The get datasets endpoint (GET /datasets).

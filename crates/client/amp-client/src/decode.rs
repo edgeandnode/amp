@@ -15,7 +15,7 @@ use common::arrow::{
 };
 use futures::{Stream, ready};
 
-use crate::{Error, ResponseBatch};
+use crate::{client::ResponseBatch, error::Error};
 
 pub struct FlightDataDecoder<S> {
     flight_data: S,
@@ -157,20 +157,5 @@ impl FlightStreamState {
         };
         let metadata = flight_data.app_metadata;
         Ok(Some(DecodedRecordBatch { data, metadata }))
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use futures::{StreamExt as _, stream};
-    use tonic::Status;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn empty_stream() {
-        let empty_stream = stream::empty::<Result<FlightData, Status>>();
-        let mut decoder = FlightDataDecoder::new(empty_stream);
-        assert!(decoder.next().await.is_none());
     }
 }

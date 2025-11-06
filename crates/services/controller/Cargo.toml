@@ -6,5 +6,17 @@ license-file.workspace = true
 
 [dependencies]
 admin-api = { path = "../admin-api" }
+async-trait.workspace = true
+axum.workspace = true
 common = { path = "../../core/common" }
+dataset-store = { version = "0.1.0", path = "../../core/dataset-store" }
+dump = { version = "0.1.0", path = "../../core/dump" }
+metadata-db = { version = "0.1.0", path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
+opentelemetry-instrumentation-tower = { version = "0.17.0", features = ["axum"] }
+rand.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
+worker = { version = "0.1.0", path = "../worker" }

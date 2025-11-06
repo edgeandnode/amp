@@ -18,6 +18,7 @@ futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
+rand.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }

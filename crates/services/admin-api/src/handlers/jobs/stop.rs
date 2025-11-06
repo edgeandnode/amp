@@ -93,7 +93,7 @@ pub async fn handler(
     };
 
     // Attempt to stop the job - this operation is atomic and includes job lookup
-    if let Err(err) = ctx.scheduler.stop_job(&id).await {
+    if let Err(err) = ctx.scheduler.stop_job(id).await {
         return match err {
             scheduler::StopJobError::JobNotFound => {
                 tracing::debug!(job_id=%id, "Job not found");

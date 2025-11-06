@@ -107,7 +107,7 @@ test *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --all-features
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
@@ -116,7 +116,7 @@ test *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================================="
         sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace
+        cargo test {{EXTRA_FLAGS}} --workspace --all-features
     fi
 
 # Run unit tests
@@ -126,7 +126,7 @@ test-unit *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
@@ -135,7 +135,7 @@ test-unit *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================================="
         sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup -- --nocapture
+        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features -- --nocapture
     fi
 
 # Run integration tests
@@ -164,7 +164,7 @@ test-local *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run --profile local {{EXTRA_FLAGS}} --workspace
+        cargo nextest run --profile local {{EXTRA_FLAGS}} --workspace --all-features
     else
         >&2 echo "================================================="
         >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
@@ -331,3 +331,4 @@ remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
 
     # Remove all Git hooks (see PRECOMMIT_HOOKS for default hooks)
     pre-commit uninstall --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
+

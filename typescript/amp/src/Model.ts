@@ -351,6 +351,22 @@ export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")(
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
+export class DatasetEthBeacon extends Schema.Class<DatasetEthBeacon>("DatasetEthBeacon")({
+  kind: Schema.Literal("eth-beacon"),
+  network: Network,
+  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
+}) {}
+
+export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFirehose")({
+  kind: Schema.Literal("firehose"),
+  network: Network,
+  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
+}) {}
+
 /**
  * Union type representing any dataset manifest kind.
  *
@@ -360,10 +376,12 @@ export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")(
  * Supported kinds:
  * - DatasetDerived (kind: "manifest") - SQL-based derived datasets
  * - DatasetEvmRpc (kind: "evm-rpc") - EVM RPC extraction datasets
+ * - DatasetEthBeacon (kind: "eth-beacon") - ETH beacon extraction datasets
+ * - DatasetFirehose (kind: "firehose") - Firehose extraction datasets
  *
  * Future kinds: DatasetFirehose, DatasetEthBeacon, etc.
  */
-export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc)
+export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetEthBeacon, DatasetFirehose)
 export type DatasetManifest = Schema.Schema.Type<typeof DatasetManifest>
 
 export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({

@@ -45,7 +45,7 @@ struct SchemaDiff<'a> {
 #[derive(Debug, Clone)]
 pub enum ResumePoint {
     /// Hash-verified watermark resumption (preferred)
-    /// Pass this to SqlClient::query() for server-side resumption
+    /// Pass this to AmpClient::query() for server-side resumption
     Watermark(common::metadata::segments::ResumeWatermark),
 
     /// Best-effort incremental checkpoint resumption
@@ -667,7 +667,7 @@ impl AmpsyncDbEngine {
     /// Load the watermark for a table to enable stream resumption
     ///
     /// Returns None if no watermark exists (first run or after migration).
-    /// The returned ResumeWatermark can be passed to SqlClient::query() for hash-verified resumption.
+    /// The returned ResumeWatermark can be passed to AmpClient::query() for hash-verified resumption.
     pub async fn load_watermark(
         &self,
         table_name: &str,

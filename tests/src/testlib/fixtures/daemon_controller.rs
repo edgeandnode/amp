@@ -35,7 +35,8 @@ impl DaemonController {
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
         let (admin_api_addr, controller_server) =
-            controller::serve(config.addrs.admin_api_addr, config.clone(), meter_ref).await?;
+            controller::service::new(config.clone(), meter_ref, config.addrs.admin_api_addr)
+                .await?;
 
         let controller_task = tokio::spawn(controller_server);
 

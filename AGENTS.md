@@ -343,6 +343,9 @@ Edit File → [Check Skills: format] → just fmt-file
 - **General patterns**: [.patterns/README.md](.patterns/README.md)
   - Cargo workspace patterns (crate creation, dependency management)
   - Testing patterns (test structure, naming conventions)
+- **Service patterns**: [.patterns/services-pattern.md](.patterns/services-pattern.md)
+  - Two-phase service creation pattern for `crates/services/*`
+  - Service initialization and lifecycle management
 - **Crate-specific patterns**: `.patterns/<crate>/crate.md`
   - admin-api: HTTP handler patterns, error handling, documentation
   - metadata-db: Database design patterns, API conventions

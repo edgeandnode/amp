@@ -1,5 +1,6 @@
 use common::BoxError;
 use datasets_common::{
+    hash::Hash,
     name::{Name, NameError},
     partial_reference::PartialReferenceError,
     version::Version,
@@ -18,9 +19,60 @@ pub enum RegisterManifestError {
     #[error("Failed to store manifest in dataset definitions store")]
     ManifestStorage(#[from] StoreError),
 
-    /// Failed to register dataset in metadata database
-    #[error("Failed to register dataset in metadata database")]
+    /// Failed to register manifest in metadata database
+    ///
+    /// This occurs when the database operation to register the manifest metadata fails,
+    /// typically due to:
+    /// - Database connection issues
+    /// - Permission problems
+    /// - Database constraint violations
+    #[error("Failed to register manifest in metadata database")]
     MetadataRegistration(#[source] metadata_db::Error),
+}
+
+/// Errors specific to manifest linking operations
+#[derive(Debug, thiserror::Error)]
+pub enum LinkManifestError {
+    /// Manifest does not exist in the system
+    ///
+    /// This occurs when attempting to link a manifest hash that hasn't been registered.
+    /// The manifest must be registered first via `register_manifest` before it can be
+    /// linked to a dataset.
+    ///
+    /// This error is detected via foreign key constraint violation (PostgreSQL error code 23503)
+    /// when the database rejects the link operation due to the missing manifest.
+    #[error("Manifest with hash '{0}' does not exist")]
+    ManifestNotFound(Hash),
+
+    /// Failed to begin transaction
+    ///
+    /// This occurs when the database connection fails to start a transaction,
+    /// typically due to connection issues, database unavailability, or permission problems.
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to link manifest to dataset in metadata database
+    ///
+    /// This occurs when the database operation to create the manifest-dataset link fails,
+    /// typically due to:
+    /// - Database connection issues during the operation
+    /// - Permission problems
+    /// - Other database errors
+    ///
+    /// Note: Foreign key constraint violations (manifest doesn't exist) are handled separately
+    /// as `ManifestNotFound` errors.
+    #[error("Failed to link manifest to dataset in metadata database")]
+    LinkManifestToDataset(#[source] metadata_db::Error),
+
+    /// Failed to set dev tag for dataset
+    ///
+    /// This occurs when the database operation to update the dev tag fails,
+    /// typically due to:
+    /// - Database connection issues during the operation
+    /// - Permission problems
+    /// - Constraint violations
+    #[error("Failed to set dev tag for dataset")]
+    SetDevTag(#[source] metadata_db::Error),
 
     /// Failed to commit transaction after successful database operations
     ///

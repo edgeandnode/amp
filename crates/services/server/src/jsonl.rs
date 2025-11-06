@@ -1,44 +1,27 @@
-use std::{future::Future, net::SocketAddr};
-
 use axum::{
+    Router,
     body::Body,
     extract::State,
     response::{IntoResponse, Response},
     routing::post,
-    serve::{Listener as _, ListenerExt as _},
 };
-use common::{
-    BoxError, BoxResult, arrow, query_context::parse_sql, stream_helpers::is_streaming,
-    utils::shutdown_signal,
-};
+use common::{BoxError, arrow, query_context::parse_sql, stream_helpers::is_streaming};
 use futures::{StreamExt as _, TryStreamExt as _};
-use tokio::net::TcpListener;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
-use crate::service::Service;
+use crate::flight::Service;
 
-pub async fn run_server(
-    service: Service,
-    addr: SocketAddr,
-) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
-    let listener = TcpListener::bind(addr)
-        .await?
-        .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
-    let addr = listener.local_addr()?;
-
-    let app = axum::Router::new()
+/// Build the JSON Lines HTTP router
+///
+/// Creates an axum router with a POST endpoint at "/" that accepts SQL queries
+/// and returns results in JSON Lines format. Includes gzip compression and
+/// permissive CORS middleware.
+pub fn build_router(service: Service) -> Router {
+    Router::new()
         .route("/", post(handle_jsonl_request))
         .layer(CompressionLayer::new().gzip(true))
         .layer(CorsLayer::permissive())
-        .with_state(service);
-
-    let fut = async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .map_err(Into::into)
-    };
-    Ok((addr, fut))
+        .with_state(service)
 }
 
 #[tracing::instrument(skip_all)]

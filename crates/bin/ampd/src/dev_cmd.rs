@@ -2,7 +2,6 @@ use std::{pin::Pin, sync::Arc};
 
 use common::{BoxError, config::Config};
 use metadata_db::MetadataDb;
-use worker::Worker;
 
 pub async fn run(
     config: Config,
@@ -18,9 +17,9 @@ pub async fn run(
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
         let (addr, fut) =
-            controller::serve(config.addrs.admin_api_addr, config.clone(), meter.as_ref())
+            controller::service::new(config.clone(), meter.as_ref(), config.addrs.admin_api_addr)
                 .await
-                .map_err(Error::ControllerServe)?;
+                .map_err(Error::ServiceInit)?;
 
         tracing::info!("Controller Admin API running at {}", addr);
         Box::pin(fut)
@@ -30,21 +29,31 @@ pub async fn run(
 
     // Spawn server only if at least one query server is enabled
     let server_fut: Pin<Box<dyn Future<Output = _> + Send>> = if flight_server || jsonl_server {
-        let (addrs, fut) = server::serve(
+        let flight_at = if flight_server {
+            Some(config.addrs.flight_addr)
+        } else {
+            None
+        };
+        let jsonl_at = if jsonl_server {
+            Some(config.addrs.jsonl_addr)
+        } else {
+            None
+        };
+        let (addrs, fut) = server::service::new(
             config.clone(),
             metadata_db.clone(),
-            flight_server,
-            jsonl_server,
+            flight_at,
+            jsonl_at,
             meter.as_ref(),
         )
         .await
-        .map_err(Error::ServerRun)?;
+        .map_err(|err| Error::ServerRun(Box::new(err)))?;
 
-        if flight_server {
-            tracing::info!("Arrow Flight RPC Server running at {}", addrs.flight_addr);
+        if let Some(addr) = addrs.flight_addr {
+            tracing::info!("Arrow Flight RPC Server running at {}", addr);
         }
-        if jsonl_server {
-            tracing::info!("JSON Lines Server running at {}", addrs.jsonl_addr);
+        if let Some(addr) = addrs.jsonl_addr {
+            tracing::info!("JSON Lines Server running at {}", addr);
         }
 
         Box::pin(fut)
@@ -53,8 +62,7 @@ pub async fn run(
     };
 
     // Create worker future
-    let worker = Worker::new(config, metadata_db, worker_id, meter.clone());
-    let worker_fut = worker.run();
+    let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter.clone());
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;
@@ -69,12 +77,12 @@ pub async fn run(
 /// Errors that can occur during dev mode execution.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to start the controller service (Admin API).
+    /// Failed to initialize the controller service (Admin API).
     ///
     /// This occurs during the initialization phase when attempting to bind and
     /// start the Admin API server.
-    #[error("Failed to start controller service: {0}")]
-    ControllerServe(#[source] BoxError),
+    #[error("Failed to initialize controller service: {0}")]
+    ServiceInit(#[source] controller::service::Error),
 
     /// Failed to start the query server (Arrow Flight RPC and/or JSON Lines).
     ///

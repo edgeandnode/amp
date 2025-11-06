@@ -57,10 +57,10 @@ pub use self::{
         CatalogForSqlError, DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError,
         ExtractDatasetFromFunctionNamesError, ExtractDatasetFromTableRefsError,
         GetAllDatasetsError, GetClientError, GetDatasetError, GetDerivedManifestError,
-        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError, ListAllDatasetsError,
-        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
-        PlanningCtxForSqlError, RegisterManifestError, ResolveRevisionError, SetVersionTagError,
-        UnlinkDatasetManifestsError,
+        GetLogicalCatalogError, GetManifestError, GetPhysicalCatalogError, LinkManifestError,
+        ListAllDatasetsError, ListDatasetsUsingManifestError, ListOrphanedManifestsError,
+        ListVersionTagsError, PlanningCtxForSqlError, RegisterManifestError, ResolveRevisionError,
+        SetVersionTagError, UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
 };
@@ -309,48 +309,49 @@ impl DatasetStore {
 
 // Dataset versioning API
 impl DatasetStore {
-    /// Register a dataset manifest and link it to a dataset
+    /// Link an existing manifest to a dataset
     ///
-    /// Stores manifest in object store, registers in DB, then links to dataset and updates "dev" tag
-    /// in a transaction. Idempotent - safe to retry if transaction fails after storage/registration.
-    pub async fn register_manifest_and_link(
+    /// This method assumes the manifest already exists in the system and only performs the linking
+    /// operation. It does NOT store or register the manifest - use `register_manifest` first if
+    /// you need to store a new manifest.
+    ///
+    /// ## Operations performed (in transaction)
+    /// 1. Link manifest to dataset (idempotent)
+    /// 2. Update "dev" tag to point to this manifest (idempotent)
+    pub async fn link_manifest(
         &self,
         namespace: &Namespace,
         name: &Name,
         manifest_hash: &Hash,
-        manifest_str: String,
-    ) -> Result<(), RegisterManifestError> {
-        // Store manifest file in object store (idempotent) and get the path
-        let path = self
-            .dataset_manifests_store
-            .store(manifest_hash, manifest_str)
-            .await?;
-
-        // Register manifest in metadata database (idempotent)
-        metadata_db::manifests::register(&self.metadata_db, manifest_hash, &path)
-            .await
-            .map_err(RegisterManifestError::MetadataRegistration)?;
-
+    ) -> Result<(), LinkManifestError> {
         // Use transaction to ensure both operations succeed atomically
         let mut tx = self
             .metadata_db
             .begin_txn()
             .await
-            .map_err(RegisterManifestError::MetadataRegistration)?;
+            .map_err(LinkManifestError::TransactionBegin)?;
 
         // Link manifest to dataset (idempotent)
-        metadata_db::datasets::link_manifest_to_dataset(&mut tx, namespace, name, manifest_hash)
-            .await
-            .map_err(RegisterManifestError::MetadataRegistration)?;
+        // Foreign key constraint will reject if manifest doesn't exist
+        if let Err(err) =
+            metadata_db::datasets::link_manifest_to_dataset(&mut tx, namespace, name, manifest_hash)
+                .await
+        {
+            return Err(if err.is_foreign_key_violation() {
+                LinkManifestError::ManifestNotFound(manifest_hash.clone())
+            } else {
+                LinkManifestError::LinkManifestToDataset(err)
+            });
+        }
 
-        // Automatically update dev tag to point to the newly registered manifest
+        // Automatically update dev tag to point to the linked manifest
         metadata_db::datasets::set_dev_tag(&mut tx, namespace, name, manifest_hash)
             .await
-            .map_err(RegisterManifestError::MetadataRegistration)?;
+            .map_err(LinkManifestError::SetDevTag)?;
 
         tx.commit()
             .await
-            .map_err(RegisterManifestError::TransactionCommit)?;
+            .map_err(LinkManifestError::TransactionCommit)?;
 
         Ok(())
     }

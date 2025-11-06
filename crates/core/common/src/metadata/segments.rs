@@ -56,12 +56,12 @@ pub struct Watermark {
 pub struct ResumeWatermark(pub BTreeMap<String, Watermark>);
 
 impl ResumeWatermark {
-    pub fn from_ranges(ranges: Vec<BlockRange>) -> Self {
+    pub fn from_ranges(ranges: &[BlockRange]) -> Self {
         let watermark = ranges
-            .into_iter()
+            .iter()
             .map(|r| {
                 let watermark = r.watermark();
-                (r.network, watermark)
+                (r.network.clone(), watermark)
             })
             .collect();
         Self(watermark)

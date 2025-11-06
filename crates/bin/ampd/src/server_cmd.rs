@@ -23,15 +23,26 @@ pub async fn run(
         !config.spill_location.is_empty()
     );
 
-    let (addrs, server) = server::serve(config, metadata_db, flight_server, jsonl_server, meter)
-        .await
-        .map_err(Error::ServerStart)?;
+    let flight_at = if flight_server {
+        Some(config.addrs.flight_addr)
+    } else {
+        None
+    };
+    let jsonl_at = if jsonl_server {
+        Some(config.addrs.jsonl_addr)
+    } else {
+        None
+    };
 
-    if flight_server {
-        tracing::info!("Arrow Flight RPC server running at {}", addrs.flight_addr);
+    let (addrs, server) = server::service::new(config, metadata_db, flight_at, jsonl_at, meter)
+        .await
+        .map_err(|err| Error::ServerStart(Box::new(err)))?;
+
+    if let Some(addr) = addrs.flight_addr {
+        tracing::info!("Arrow Flight RPC server running at {}", addr);
     }
-    if jsonl_server {
-        tracing::info!("JSON Lines server running at {}", addrs.jsonl_addr);
+    if let Some(addr) = addrs.jsonl_addr {
+        tracing::info!("JSON Lines server running at {}", addr);
     }
 
     server.await.map_err(Error::ServerRuntime)

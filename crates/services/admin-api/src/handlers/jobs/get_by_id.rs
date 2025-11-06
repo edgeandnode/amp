@@ -62,7 +62,7 @@ pub async fn handler(
         }
     };
 
-    match ctx.scheduler.get_job(&id).await {
+    match ctx.scheduler.get_job(id).await {
         Ok(Some(job)) => Ok(Json(job.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {

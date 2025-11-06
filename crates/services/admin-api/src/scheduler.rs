@@ -1,205 +1,144 @@
-use std::sync::Arc;
+//! Scheduler trait abstraction for job management
+//!
+//! This module defines the `JobScheduler` trait, which provides the abstraction layer for
+//! scheduling and managing dataset extraction jobs. The trait is implemented by the
+//! controller service, following the dependency inversion principle.
+//!
+//! ## Architecture
+//!
+//! - **admin-api**: Defines the `JobScheduler` trait (abstraction)
+//! - **controller**: Provides `Scheduler` (implementation)
+//! - **handlers**: Depend on the trait via `Arc<dyn JobScheduler>`
+//!
+//! ## Responsibilities
+//!
+//! - Job lifecycle management (schedule, stop, query, delete)
+//! - Worker coordination and selection
+//! - Job state validation and transitions
+//! - Bulk cleanup operations for terminal jobs
 
-use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
+use async_trait::async_trait;
+use common::{BoxError, Dataset};
 use dump::EndBlock;
-use metadata_db::{Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb};
-use rand::seq::IndexedRandom as _;
-use worker::{JobDescriptor, JobId, JobNotification};
+use metadata_db::{Job, JobStatus};
+use worker::JobId;
 
-#[derive(Clone)]
-pub struct Scheduler {
-    config: Arc<Config>,
-    metadata_db: MetadataDb,
-}
-
-impl Scheduler {
-    pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Self {
-        Self {
-            config,
-            metadata_db,
-        }
-    }
-
-    /// Schedule a dump for a new copy of a dataset.
-    pub async fn schedule_dataset_dump(
+/// Trait for scheduling and managing dataset extraction jobs
+// NOTE: Using specific wrapper methods instead of `delete_jobs_by_status<const N: usize>`
+// because const generics make the trait not dyn-compatible.
+#[async_trait]
+pub trait JobScheduler: Send + Sync {
+    /// Schedule a dataset synchronization job
+    async fn schedule_dataset_sync_job(
         &self,
         dataset: Dataset,
         end_block: EndBlock,
         max_writers: u16,
-    ) -> Result<JobId, ScheduleJobError> {
-        // Avoid re-scheduling jobs in a scheduled or running state.
-        let existing_jobs = metadata_db::jobs::get_by_dataset(
-            &self.metadata_db,
-            dataset.name.clone(),
-            dataset.version.clone(),
-        )
-        .await?;
-        for job in existing_jobs {
-            match job.status {
-                JobStatus::Scheduled | JobStatus::Running => return Ok(job.id.into()),
-                JobStatus::Completed
-                | JobStatus::Stopped
-                | JobStatus::StopRequested
-                | JobStatus::Stopping
-                | JobStatus::Failed
-                | JobStatus::Unknown => (),
-            };
-        }
-
-        // Scheduling procedure for a new `DumpDataset` job:
-        // 1. Choose a responsive node.
-        // 2. Create a new location for each table.
-        // 3. Register the job in the metadata db.
-        // 4. Send a `Start` command through `worker_actions` for that job.
-        //
-        // The worker node should then receive the notification and start the dump run.
-
-        let candidates = self.metadata_db.active_workers().await?;
-        let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
-            return Err(ScheduleJobError::NoAvailableWorkers);
-        };
-
-        let mut locations = Vec::new();
-        for table in Arc::new(dataset).resolved_tables() {
-            let physical_table =
-                match PhysicalTable::get_active(&table, self.metadata_db.clone()).await? {
-                    Some(physical_table) => physical_table,
-                    None => {
-                        let store = &self.config.data_store;
-                        PhysicalTable::next_revision(&table, store, self.metadata_db.clone(), true)
-                            .await?
-                    }
-                };
-            locations.push(physical_table.location_id());
-        }
-
-        let job_desc = serde_json::to_string(&JobDescriptor::Dump {
-            end_block,
-            max_writers,
-        })?;
-        let job_id =
-            metadata_db::jobs::schedule(&self.metadata_db, &node_id, &job_desc, &locations)
-                .await
-                .map(Into::into)?;
-
-        // Notify the worker about the new job
-        self.metadata_db
-            .send_job_notification(node_id, &JobNotification::start(job_id))
-            .await?;
-
-        Ok(job_id)
-    }
+    ) -> Result<JobId, ScheduleJobError>;
 
     /// Stop a running job
-    ///
-    /// This method fetches the job and performs the stop operation within a single transaction,
-    /// ensuring atomicity and preventing race conditions.
-    pub async fn stop_job(&self, job_id: &JobId) -> Result<(), StopJobError> {
-        // Begin a transaction to ensure atomicity
-        let mut tx = self
-            .metadata_db
-            .begin_txn()
-            .await
-            .map_err(StopJobError::BeginTransaction)?;
-
-        // Fetch the job to get its node_id and validate it exists
-        let job = metadata_db::jobs::get_by_id(&mut tx, job_id)
-            .await
-            .map_err(StopJobError::GetJob)?
-            .ok_or(StopJobError::JobNotFound)?;
-
-        // Attempt to stop the job
-        metadata_db::jobs::request_stop(&mut tx, job_id)
-            .await
-            .map_err(|err| match err {
-                MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::NotFound) => {
-                    StopJobError::JobNotFound
-                }
-                MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::StateConflict {
-                    actual,
-                    ..
-                }) => match actual {
-                    JobStatus::Stopped | JobStatus::Completed | JobStatus::Failed => {
-                        StopJobError::JobAlreadyTerminated { status: actual }
-                    }
-                    _ => StopJobError::StateConflict {
-                        current_status: actual,
-                    },
-                },
-                other => StopJobError::UpdateJobStatus(other),
-            })?;
-
-        // Commit the transaction
-        tx.commit().await.map_err(StopJobError::CommitTransaction)?;
-
-        // Notify the worker about the stop request
-        // TODO: Include into the transaction
-        self.metadata_db
-            .send_job_notification(job.node_id, &JobNotification::stop(*job_id))
-            .await
-            .map_err(StopJobError::SendNotification)?;
-
-        Ok(())
-    }
+    async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError>;
 
     /// Get a job by its ID
-    pub async fn get_job(&self, job_id: &JobId) -> Result<Option<Job>, GetJobError> {
-        metadata_db::jobs::get_by_id(&self.metadata_db, job_id)
-            .await
-            .map_err(GetJobError)
-    }
+    async fn get_job(&self, job_id: JobId) -> Result<Option<Job>, GetJobError>;
 
     /// List jobs with cursor-based pagination
-    pub async fn list_jobs(
+    async fn list_jobs(
         &self,
         limit: i64,
-        last_job_id: Option<JobId>,
-    ) -> Result<Vec<Job>, ListJobsError> {
-        metadata_db::jobs::list(&self.metadata_db, limit, last_job_id)
-            .await
-            .map_err(ListJobsError)
-    }
+        last_id: Option<JobId>,
+    ) -> Result<Vec<Job>, ListJobsError>;
 
     /// Delete a job if it's in a terminal state
-    ///
-    /// Returns `true` if the job was deleted, `false` if it wasn't found or wasn't in a terminal state.
-    pub async fn delete_job(&self, job_id: &JobId) -> Result<bool, DeleteJobError> {
-        metadata_db::jobs::delete_if_terminal(&self.metadata_db, job_id)
-            .await
-            .map_err(DeleteJobError)
-    }
+    async fn delete_job(&self, job_id: JobId) -> Result<bool, DeleteJobError>;
 
-    /// Delete all jobs matching the specified status or statuses
-    ///
-    /// Returns the number of jobs deleted.
-    pub async fn delete_jobs_by_status<const N: usize>(
-        &self,
-        statuses: [JobStatus; N],
-    ) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, statuses)
-            .await
-            .map_err(DeleteJobsByStatusError)
-    }
+    /// Delete all jobs in terminal states (Completed, Stopped, Failed)
+    async fn delete_jobs_in_terminal_state(&self) -> Result<usize, DeleteJobsByStatusError>;
+
+    /// Delete all completed jobs
+    async fn delete_completed_jobs(&self) -> Result<usize, DeleteJobsByStatusError>;
+
+    /// Delete all stopped jobs
+    async fn delete_stopped_jobs(&self) -> Result<usize, DeleteJobsByStatusError>;
+
+    /// Delete all failed jobs
+    async fn delete_failed_jobs(&self) -> Result<usize, DeleteJobsByStatusError>;
 }
 
 /// Errors that can occur when scheduling a dataset dump job
 #[derive(Debug, thiserror::Error)]
 pub enum ScheduleJobError {
-    /// Metadata database error
-    #[error("metadata database error: {0}")]
-    MetadataDb(#[from] metadata_db::Error),
+    /// Failed to check for existing jobs in the database
+    ///
+    /// This occurs when:
+    /// - Database query for existing jobs by dataset fails
+    /// - Connection is lost during job lookup
+    /// - Connection pool is exhausted
+    #[error("failed to check existing jobs: {0}")]
+    CheckExistingJobs(#[source] metadata_db::Error),
 
-    /// No available workers
-    #[error("no available workers")]
-    NoAvailableWorkers,
+    /// Failed to list active workers from the database
+    ///
+    /// This occurs when:
+    /// - Worker heartbeat query fails
+    /// - Connection is lost during worker lookup
+    /// - Worker table is inaccessible
+    #[error("failed to list active workers: {0}")]
+    ListActiveWorkers(#[source] metadata_db::Error),
 
-    /// Dataset operation error
-    #[error("dataset operation error: {0}")]
-    DatasetError(#[from] BoxError),
+    /// No workers available to schedule the job
+    ///
+    /// This occurs when:
+    /// - All workers are inactive or haven't sent heartbeats recently
+    /// - No workers are registered in the system
+    /// - All workers are at capacity
+    #[error("no workers available")]
+    NoWorkersAvailable,
 
-    /// JSON serialization error
-    #[error("serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+    /// Failed to get active physical table for dataset
+    ///
+    /// This occurs when:
+    /// - Physical table lookup query fails
+    /// - Catalog metadata is corrupted or inconsistent
+    /// - Database connection fails during table lookup
+    #[error("failed to get physical table: {0}")]
+    GetPhysicalTable(#[source] BoxError),
+
+    /// Failed to create new physical table revision
+    ///
+    /// This occurs when:
+    /// - Storage location allocation fails
+    /// - Physical table creation in catalog fails
+    /// - Insufficient storage space or permissions
+    #[error("failed to create physical table: {0}")]
+    CreatePhysicalTable(#[source] BoxError),
+
+    /// Failed to serialize job descriptor to JSON
+    ///
+    /// This occurs when:
+    /// - JobDescriptor cannot be serialized to JSON
+    /// - Invalid UTF-8 characters in job parameters
+    /// - Serialization buffer overflow
+    #[error("failed to serialize job descriptor: {0}")]
+    SerializeJobDescriptor(#[source] serde_json::Error),
+
+    /// Failed to register job in the metadata database
+    ///
+    /// This occurs when:
+    /// - Job insertion into database fails
+    /// - Unique constraint violation on job ID
+    /// - Connection is lost during job registration
+    #[error("failed to register job: {0}")]
+    RegisterJob(#[source] metadata_db::Error),
+
+    /// Failed to send job notification to worker
+    ///
+    /// This occurs when:
+    /// - PostgreSQL LISTEN/NOTIFY fails
+    /// - Worker notification channel is unavailable
+    /// - Connection is lost during notification
+    #[error("failed to notify worker: {0}")]
+    NotifyWorker(#[source] metadata_db::Error),
 }
 
 /// Errors that can occur when stopping a job
