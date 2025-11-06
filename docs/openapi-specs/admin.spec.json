@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Amp Admin API",
-    "description": "Administration API for Amp, a high-performance ETL system for blockchain data services on The Graph.\n\n## About\n\nThe Admin API provides a RESTful HTTP interface for managing Amp's ETL operations. This API serves as the primary administrative interface for monitoring and controlling the Amp data pipeline, allowing you to deploy datasets, trigger data extraction jobs, monitor job progress, manage distributed worker locations, configure external data providers, and perform operations on Parquet files and their metadata.\n\n## Key Capabilities\n\n### Dataset Management\nHandle the lifecycle of data extraction configurations and access dataset information:\n- List all registered datasets from the metadata database registry\n- Register new dataset configurations with versioning support\n- Trigger data extraction jobs for specific datasets or dataset versions\n- Retrieve dataset details including tables and active storage locations\n\n### Job Control\nControl and monitor data extraction and processing jobs:\n- List and retrieve job information with pagination\n- Trigger extraction jobs with optional end block configuration\n- Stop running jobs gracefully\n- Delete jobs in terminal states (Completed, Stopped, Failed)\n- Bulk cleanup operations for finalized jobs\n\n### Storage Management\nManage locations where dataset tables are stored:\n- Supports local filesystem, S3, GCS, and Azure Blob Storage\n- List storage locations and their associated files\n- Delete locations with comprehensive cleanup (removes files and metadata)\n- Query file information including Parquet metadata and statistics\n\n### Provider Configuration\nConfigure external blockchain data sources:\n- Create, retrieve, and delete provider configurations\n- Support for EVM RPC endpoints and Firehose streams\n- Providers are reusable across multiple dataset definitions\n- **Security Note**: Provider configurations may contain connection details; ensure sensitive information is properly managed\n\n### Schema Analysis\nValidate SQL queries and infer output schemas:\n- Validate queries against registered datasets without execution\n- Determine output schema using DataFusion's query planner\n- Useful for building dynamic query tools and validating dataset definitions\n\n## Pagination\n\nMost list endpoints use cursor-based pagination for efficient data retrieval:\n\n### Paginated Endpoints\nThe following endpoints support pagination:\n- Jobs: `/jobs`\n- Locations: `/locations`\n- Files: `/locations/{location_id}/files`\n\n### Non-Paginated Endpoints\nThe following endpoints return all results without pagination:\n- Datasets: `/datasets` (returns all datasets)\n- Dataset Versions: `/datasets/{name}/versions` (returns all versions for a dataset)\n\n### Query Parameters (Paginated Endpoints Only)\n- `limit`: Maximum items per page (default: 50, max: 1000)\n- `last_*_id`: Cursor from previous page's `next_cursor` field\n\n### Response Format\nPaginated responses include:\n- Array of items (e.g., `jobs`, `locations`, `files`)\n- `next_cursor`: Cursor for the next page (absent when no more results)\n\n### Usage Pattern\n\n**First Page Request:**\n```\nGET /jobs?limit=100\n```\n\n**First Page Response:**\n```json\n{\n  \"jobs\": [...],\n  \"next_cursor\": 12345\n}\n```\n\n**Next Page Request:**\n```\nGET /jobs?limit=100&last_job_id=12345\n```\n\n**Last Page Response:**\n```json\n{\n  \"jobs\": [...]\n  // No next_cursor field = end of results\n}\n```\n\n### Cursor Formats\n\nEndpoints use different cursor formats based on their data type:\n\n**Integer ID Cursors (64-bit integers):**\nMost paginated endpoints use simple integer IDs as cursors:\n- Jobs: `last_job_id=12345`\n- Locations: `last_location_id=67890`\n- Files: `last_file_id=54321`\n\n## Error Handling\n\nAll error responses follow a consistent format with:\n- `error_code`: Stable, machine-readable code (SCREAMING_SNAKE_CASE)\n- `error_message`: Human-readable error description\n\nError codes are stable across API versions and suitable for programmatic error handling. Messages may change and should only be used for display or logging.\n\n## Important Notes\n\n### Dataset Registration\nSupports two main scenarios:\n- **Derived datasets** (kind=\"manifest\"): Registered in both object store and metadata database\n- **SQL datasets** (other kinds): Dataset definitions stored in object store\n\n### Job Lifecycle\nJobs have the following terminal states that allow deletion:\n- **Completed**: Job finished successfully\n- **Stopped**: Job was manually stopped\n- **Failed**: Job encountered an error\n\nNon-terminal jobs (Scheduled, Running, StopRequested, Stopping) are protected from deletion.\n\n### Storage Locations\n- Locations can be active or inactive for queries\n- Deleting a location performs comprehensive cleanup including file removal from object store\n- Each location is associated with a specific dataset table and storage URL\n",
+    "description": "Administration API for Amp, a high-performance ETL system for blockchain data services on The Graph.\n\n## About\n\nThe Admin API provides a RESTful HTTP interface for managing Amp's ETL operations. This API serves as the primary administrative interface for monitoring and controlling the Amp data pipeline, allowing you to deploy datasets, trigger data extraction jobs, monitor job progress, manage distributed worker locations, configure external data providers, and perform operations on Parquet files and their metadata.\n\n## Key Capabilities\n\n### Dataset Management\nHandle the lifecycle of data extraction configurations and access dataset information:\n- List all registered datasets from the metadata database registry\n- Register new dataset configurations with versioning support\n- Trigger data extraction jobs for specific datasets or dataset versions\n- Retrieve dataset details including tables and active storage locations\n\n### Job Control\nControl and monitor data extraction and processing jobs:\n- List and retrieve job information with pagination\n- Trigger extraction jobs with optional end block configuration\n- Stop running jobs gracefully\n- Delete jobs in terminal states (Completed, Stopped, Failed)\n- Bulk cleanup operations for finalized jobs\n\n### Storage Management\nManage locations where dataset tables are stored:\n- Supports local filesystem, S3, GCS, and Azure Blob Storage\n- List storage locations and their associated files\n- Delete locations with comprehensive cleanup (removes files and metadata)\n- Query file information including Parquet metadata and statistics\n\n### Provider Configuration\nConfigure external blockchain data sources:\n- Create, retrieve, and delete provider configurations\n- Support for EVM RPC endpoints and Firehose streams\n- Providers are reusable across multiple dataset definitions\n- **Security Note**: Provider configurations may contain connection details; ensure sensitive information is properly managed\n\n### Schema Analysis\nValidate SQL queries and infer output schemas:\n- Validate queries against registered datasets without execution\n- Determine output schema using DataFusion's query planner\n- Useful for building dynamic query tools and validating dataset definitions\n\n## Pagination\n\nMost list endpoints use cursor-based pagination for efficient data retrieval:\n\n### Paginated Endpoints\nThe following endpoints support pagination:\n- Jobs: `/jobs`\n\n### Non-Paginated Endpoints\nThe following endpoints return all results without pagination:\n- Datasets: `/datasets` (returns all datasets)\n- Dataset Versions: `/datasets/{name}/versions` (returns all versions for a dataset)\n\n### Query Parameters (Paginated Endpoints Only)\n- `limit`: Maximum items per page (default: 50, max: 1000)\n- `last_*_id`: Cursor from previous page's `next_cursor` field\n\n### Response Format\nPaginated responses include:\n- Array of items (e.g., `jobs`, `locations`, `files`)\n- `next_cursor`: Cursor for the next page (absent when no more results)\n\n### Usage Pattern\n\n**First Page Request:**\n```\nGET /jobs?limit=100\n```\n\n**First Page Response:**\n```json\n{\n  \"jobs\": [...],\n  \"next_cursor\": 12345\n}\n```\n\n**Next Page Request:**\n```\nGET /jobs?limit=100&last_job_id=12345\n```\n\n**Last Page Response:**\n```json\n{\n  \"jobs\": [...]\n  // No next_cursor field = end of results\n}\n```\n\n### Cursor Formats\n\nEndpoints use different cursor formats based on their data type:\n\n**Integer ID Cursors (64-bit integers):**\nMost paginated endpoints use simple integer IDs as cursors:\n- Jobs: `last_job_id=12345`\n- Locations: `last_location_id=67890`\n- Files: `last_file_id=54321`\n\n## Error Handling\n\nAll error responses follow a consistent format with:\n- `error_code`: Stable, machine-readable code (SCREAMING_SNAKE_CASE)\n- `error_message`: Human-readable error description\n\nError codes are stable across API versions and suitable for programmatic error handling. Messages may change and should only be used for display or logging.\n\n## Important Notes\n\n### Dataset Registration\nSupports two main scenarios:\n- **Derived datasets** (kind=\"manifest\"): Registered in both object store and metadata database\n- **SQL datasets** (other kinds): Dataset definitions stored in object store\n\n### Job Lifecycle\nJobs have the following terminal states that allow deletion:\n- **Completed**: Job finished successfully\n- **Stopped**: Job was manually stopped\n- **Failed**: Job encountered an error\n\nNon-terminal jobs (Scheduled, Running, StopRequested, Stopping) are protected from deletion.\n\n### Storage Locations\n- Locations can be active or inactive for queries\n- Deleting a location performs comprehensive cleanup including file removal from object store\n- Each location is associated with a specific dataset table and storage URL\n",
     "license": {
       "name": ""
     },
@@ -854,261 +854,6 @@
         }
       }
     },
-    "/locations": {
-      "get": {
-        "tags": [
-          "locations"
-        ],
-        "summary": "Handler for the `GET /locations` endpoint",
-        "description": "Retrieves and returns a paginated list of locations from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of locations to return (default: 50, max: 1000)\n- `last_location_id`: ID of the last location from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated location data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_REQUEST`: Invalid query parameters (limit out of range)\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Accepts query parameters for pagination (limit, last_location_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list locations with pagination\n- Returns a structured response with locations and next cursor",
-        "operationId": "locations_list",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Maximum number of locations to return (default: 50, max: 1000)",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "last_location_id",
-            "in": "query",
-            "description": "ID of the last location from the previous page for pagination",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved locations",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LocationsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid query parameters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/locations/{id}": {
-      "get": {
-        "tags": [
-          "locations"
-        ],
-        "summary": "Handler for the `GET /locations/{id}` endpoint",
-        "description": "Retrieves and returns a specific location by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the location to retrieve (must be a positive integer)\n\n## Response\n- **200 OK**: Returns the location information as JSON\n- **400 Bad Request**: Invalid location ID format (not a number, zero, or negative)\n- **404 Not Found**: Location with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: The provided ID is not a valid positive integer\n- `LOCATION_NOT_FOUND`: No location exists with the given ID\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Queries the metadata database for the location\n- Returns appropriate HTTP status codes and error messages",
-        "operationId": "locations_get",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Location ID",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved location information",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LocationInfoWithDetails"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid location ID",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Location not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "locations"
-        ],
-        "summary": "Handler for the `DELETE /locations/{id}` endpoint",
-        "description": "Deletes a specific location by its ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique identifier of the location to delete (must be a positive integer)\n\n## Query Parameters\n- `force`: (optional, default: false) Force deletion even if location is active\n\n## Response\n- **204 No Content**: Location successfully deleted\n- **400 Bad Request**: Invalid location ID format or invalid query parameters\n- **404 Not Found**: Location with the given ID does not exist\n- **409 Conflict**: Location is active (without force=true) or has an ongoing job\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: The provided ID is not a valid positive integer\n- `INVALID_QUERY_PARAMETERS`: The query parameters cannot be parsed\n- `LOCATION_NOT_FOUND`: No location exists with the given ID\n- `ACTIVE_LOCATION_CONFLICT`: Location is active and cannot be deleted without force=true\n- `ONGOING_JOB_CONFLICT`: Location has an ongoing job and cannot be deleted\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Safety Checks\n- Active locations require `force=true` to be deleted\n- Locations with ongoing jobs cannot be deleted (even with force=true)\n- Users must stop active jobs before deleting associated locations\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Validates optional query parameters (force flag)\n- Performs safety checks for active locations and ongoing jobs\n- Deletes associated files from object store\n- Deletes the location from the metadata database\n- Returns appropriate HTTP status codes and error messages",
-        "operationId": "locations_delete",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Location ID",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "force",
-            "in": "query",
-            "description": "Force deletion even if location is active",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Location successfully deleted"
-          },
-          "400": {
-            "description": "Invalid location ID or query parameters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Location not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Location is active or has ongoing job",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/locations/{location_id}/files": {
-      "get": {
-        "tags": [
-          "locations"
-        ],
-        "summary": "Handler for the `GET /locations/{location_id}/files` endpoint",
-        "description": "Retrieves and returns a paginated list of files for a specific location from the metadata database.\n\n## Path Parameters\n- `location_id`: The unique identifier of the location (must be a positive integer)\n\n## Query Parameters\n- `limit`: Maximum number of files to return (default: 50, max: 1000)\n- `last_file_id`: ID of the last file from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated file data with next cursor\n- **400 Bad Request**: Invalid location ID format or invalid limit parameter\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_LOCATION_ID`: Invalid location ID format\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (limit out of range)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value\n- `LIMIT_INVALID`: Limit is zero or negative\n- `METADATA_DB_ERROR`: Internal database error occurred\n\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Accepts query parameters for pagination (limit, last_file_id)\n- Validates the limit parameter (max 1000)\n- Calls the metadata DB to list files with pagination for the specified location\n- Returns a structured response with minimal file info and next cursor",
-        "operationId": "locations_list_files",
-        "parameters": [
-          {
-            "name": "location_id",
-            "in": "path",
-            "description": "Location ID",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved location files",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LocationFilesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid location ID or query parameters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/manifests": {
       "post": {
         "tags": [
@@ -1917,50 +1662,29 @@
           }
         }
       },
-      "FileListInfo": {
-        "type": "object",
-        "description": "Minimal file information for location file listings\n\nThis struct represents essential file metadata for list endpoints,\ncontaining only the most relevant information needed for file browsing\nwithin a location context.",
-        "required": [
-          "id",
-          "file_name"
-        ],
-        "properties": {
-          "file_name": {
-            "type": "string",
-            "description": "Name of the file (e.g., \"blocks_0000000000_0000099999.parquet\")"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Unique identifier for this file (64-bit integer)"
-          },
-          "object_size": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Size of the file object in bytes"
-          }
-        }
-      },
       "JobInfo": {
         "type": "object",
-        "description": "Job information returned by the API\n\nThis struct represents job metadata in a format suitable for API responses.\nIt contains essential information about a job without exposing internal\ndatabase implementation details.",
+        "description": "Represents job information for the API response",
         "required": [
           "id",
+          "created_at",
+          "updated_at",
           "node_id",
           "status",
           "descriptor"
         ],
         "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Job creation timestamp in ISO 8601 / RFC 3339 format"
+          },
           "descriptor": {
             "description": "Job descriptor containing job-specific parameters as JSON"
           },
           "id": {
             "type": "integer",
             "format": "int64",
-            "description": "Unique identifier for this job (64-bit integer)"
+            "description": "Unique identifier for the job (64-bit integer)"
           },
           "node_id": {
             "type": "string",
@@ -1969,6 +1693,10 @@
           "status": {
             "type": "string",
             "description": "Current status of the job (Scheduled, Running, Completed, Stopped, Failed, etc.)"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "Job last update timestamp in ISO 8601 / RFC 3339 format"
           }
         }
       },
@@ -1985,161 +1713,6 @@
               "$ref": "#/components/schemas/JobInfo"
             },
             "description": "List of jobs"
-          },
-          "next_cursor": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Cursor for the next page of results (None if no more results)"
-          }
-        }
-      },
-      "LocationFilesResponse": {
-        "type": "object",
-        "description": "Collection response for location file listings\n\nThis response structure provides paginated file data with\ncursor-based pagination support for efficient traversal.",
-        "required": [
-          "files"
-        ],
-        "properties": {
-          "files": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FileListInfo"
-            },
-            "description": "List of files in this page with minimal information"
-          },
-          "next_cursor": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Cursor for the next page of results - use as last_file_id in next request (None if no more results)"
-          }
-        }
-      },
-      "LocationInfo": {
-        "type": "object",
-        "description": "Location information returned by the API\n\nThis struct represents location metadata from the database in a format\nsuitable for API responses. It contains all the essential information\nabout where dataset table data is stored.",
-        "required": [
-          "id",
-          "dataset_namespace",
-          "dataset_name",
-          "manifest_hash",
-          "table",
-          "url",
-          "active"
-        ],
-        "properties": {
-          "active": {
-            "type": "boolean",
-            "description": "Whether this location is currently active for queries"
-          },
-          "dataset_name": {
-            "type": "string",
-            "description": "Name of the dataset this location belongs to"
-          },
-          "dataset_namespace": {
-            "type": "string",
-            "description": "Namespace of the dataset this location belongs to"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Unique identifier for this location (64-bit integer)"
-          },
-          "manifest_hash": {
-            "type": "string",
-            "description": "Hash of the dataset manifest"
-          },
-          "table": {
-            "type": "string",
-            "description": "Name of the table within the dataset (e.g., \"blocks\", \"transactions\")"
-          },
-          "url": {
-            "type": "string",
-            "description": "Full URL to the storage location (e.g., \"s3://bucket/path/table.parquet\", \"file:///local/path/table.parquet\")"
-          },
-          "writer": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Writer job ID (64-bit integer, if one exists)"
-          }
-        }
-      },
-      "LocationInfoWithDetails": {
-        "type": "object",
-        "description": "Location information with writer job details",
-        "required": [
-          "id",
-          "dataset_namespace",
-          "dataset_name",
-          "manifest_hash",
-          "table",
-          "url",
-          "active"
-        ],
-        "properties": {
-          "active": {
-            "type": "boolean",
-            "description": "Whether this location is currently active for queries"
-          },
-          "dataset_name": {
-            "type": "string",
-            "description": "Name of the dataset this location belongs to"
-          },
-          "dataset_namespace": {
-            "type": "string",
-            "description": "Namespace of the dataset this location belongs to"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Unique identifier for this location (64-bit integer)"
-          },
-          "manifest_hash": {
-            "type": "string",
-            "description": "Hash of the dataset manifest"
-          },
-          "table": {
-            "type": "string",
-            "description": "Name of the table within the dataset (e.g., \"blocks\", \"transactions\")"
-          },
-          "url": {
-            "type": "string",
-            "description": "Full URL to the storage location (e.g., \"s3://bucket/path/table.parquet\", \"file:///local/path/table.parquet\")"
-          },
-          "writer": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/JobInfo",
-                "description": "Writer job information with full details (if one exists)"
-              }
-            ]
-          }
-        }
-      },
-      "LocationsResponse": {
-        "type": "object",
-        "description": "API response containing location information\n\nThis response structure provides paginated location data with\ncursor-based pagination support for efficient traversal.",
-        "required": [
-          "locations"
-        ],
-        "properties": {
-          "locations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LocationInfo"
-            },
-            "description": "List of locations in this page"
           },
           "next_cursor": {
             "type": [
@@ -2567,10 +2140,6 @@
     {
       "name": "jobs",
       "description": "Job management endpoints"
-    },
-    {
-      "name": "locations",
-      "description": "Location management endpoints"
     },
     {
       "name": "manifests",
