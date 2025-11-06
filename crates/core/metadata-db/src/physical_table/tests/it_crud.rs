@@ -7,15 +7,16 @@ use crate::{
     TableId, WorkerInfo, WorkerNodeId,
     db::Connection,
     jobs::{self, JobId},
-    manifests::ManifestHash,
+    manifests::ManifestHashOwned,
     physical_table::{self, LocationId},
     workers,
 };
 
 /// Helper function to create a test manifest hash
-fn test_manifest_hash() -> ManifestHash {
-    ManifestHash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        .unwrap()
+fn test_manifest_hash() -> ManifestHashOwned {
+    ManifestHashOwned::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
 }
 
 #[tokio::test]
@@ -105,7 +106,7 @@ async fn insert_on_conflict_returns_existing_id() {
     // Insert first location
     let first_id = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         Some("bucket1"),
@@ -224,7 +225,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url1 = Url::parse("s3://bucket/active1.parquet").expect("Failed to parse active1 URL");
     let active_id1 = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -239,7 +240,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url2 = Url::parse("s3://bucket/active2.parquet").expect("Failed to parse active2 URL");
     let active_id2 = physical_table::insert(
         &mut conn,
-        table2,
+        table2.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -254,7 +255,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url3 = Url::parse("s3://bucket/inactive.parquet").expect("Failed to parse inactive URL");
     physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -333,7 +334,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     let url1 = Url::parse("s3://bucket/target1.parquet").expect("Failed to parse target1 URL");
     let target_id1 = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -364,7 +365,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         .expect("Failed to parse already-inactive URL");
     let inactive_id = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -436,7 +437,7 @@ async fn mark_active_by_id_activates_specific_location() {
         Url::parse("s3://bucket/to-activate.parquet").expect("Failed to parse to-activate URL");
     let target_id = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -451,7 +452,7 @@ async fn mark_active_by_id_activates_specific_location() {
         Url::parse("s3://bucket/stay-inactive.parquet").expect("Failed to parse stay-inactive URL");
     let other_id = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -623,7 +624,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url1 = Url::parse("s3://bucket/assign1.parquet").expect("Failed to parse assign1 URL");
     let location_id1 = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -637,7 +638,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url2 = Url::parse("s3://bucket/assign2.parquet").expect("Failed to parse assign2 URL");
     let location_id2 = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,
@@ -651,7 +652,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url3 = Url::parse("s3://bucket/assign3.parquet").expect("Failed to parse assign3 URL");
     let location_id3 = physical_table::insert(
         &mut conn,
-        table,
+        table.clone(),
         "test-namespace",
         "test-dataset",
         None,

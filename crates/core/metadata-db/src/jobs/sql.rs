@@ -160,7 +160,7 @@ where
 /// If `version` is `None`, all versions of the dataset are included.
 pub async fn get_jobs_by_dataset<'c, E>(
     exe: E,
-    manifest_hash: ManifestHash,
+    manifest_hash: ManifestHash<'_>,
 ) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,

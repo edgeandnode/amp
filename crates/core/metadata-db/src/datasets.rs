@@ -20,7 +20,7 @@ pub use self::{
     tags::Tag as DatasetTag,
     version::{Version as DatasetVersion, VersionOwned as DatasetVersionOwned},
 };
-use crate::{db::Executor, error::Error, manifests::ManifestHash};
+use crate::{ManifestHashOwned, db::Executor, error::Error, manifests::ManifestHash};
 
 /// Link manifest to dataset in junction table
 ///
@@ -32,7 +32,7 @@ pub async fn link_manifest_to_dataset<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -53,7 +53,7 @@ pub async fn register_version_tag<'c, E>(
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -79,7 +79,7 @@ pub async fn set_latest_tag<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -99,7 +99,7 @@ pub async fn set_dev_tag<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -158,7 +158,7 @@ pub async fn get_version_tag_hash<'c, E>(
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
-) -> Result<Option<ManifestHash>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -176,7 +176,7 @@ pub async fn get_latest_tag_hash<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-) -> Result<Option<ManifestHash>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -194,7 +194,7 @@ pub async fn get_dev_tag_hash<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-) -> Result<Option<ManifestHash>, Error>
+) -> Result<Option<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -263,7 +263,7 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn list_tags_by_hash<'c, E>(
     exe: E,
-    manifest_hash: impl Into<ManifestHash> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<Vec<DatasetTag>, Error>
 where
     E: Executor<'c>,
@@ -325,7 +325,7 @@ pub async fn unlink_manifests<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-) -> Result<Vec<ManifestHash>, Error>
+) -> Result<Vec<ManifestHashOwned>, Error>
 where
     E: Executor<'c>,
 {

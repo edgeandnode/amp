@@ -17,7 +17,6 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
-use datasets_common::{name::Name, namespace::Namespace};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
@@ -225,7 +224,7 @@ impl PhysicalTable {
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
             .register_location(
-                table_id,
+                table_id.clone(),
                 &job_labels.dataset_namespace,
                 &job_labels.dataset_name,
                 data_store.bucket(),
@@ -321,8 +320,8 @@ impl PhysicalTable {
             metadata_db,
             object_store,
             job_labels: JobLabels {
-                dataset_namespace: Namespace::try_from(physical_table.dataset_namespace)?,
-                dataset_name: Name::try_from(physical_table.dataset_name)?,
+                dataset_namespace: physical_table.dataset_namespace.into(),
+                dataset_name: physical_table.dataset_name.into(),
                 manifest_hash: physical_table.manifest_hash.into(),
             },
         }))
@@ -373,7 +372,7 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
             .register_location(
-                *table_id,
+                table_id.clone(),
                 &job_labels.dataset_namespace,
                 &job_labels.dataset_name,
                 data_store.bucket(),
@@ -384,7 +383,7 @@ impl PhysicalTable {
             .await?;
 
         metadata_db
-            .set_active_location(*table_id, &location_id)
+            .set_active_location(table_id.clone(), &location_id)
             .await?;
 
         let object_store = data_store.object_store();

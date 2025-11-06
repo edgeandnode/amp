@@ -1,5 +1,6 @@
 //! Location information types for API responses
 
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{JobId, LocationId};
 
 /// Location information returned by the API
@@ -15,11 +16,14 @@ pub struct LocationInfo {
     pub id: LocationId,
 
     /// Namespace of the dataset this location belongs to
-    pub dataset_namespace: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub dataset_namespace: Namespace,
     /// Name of the dataset this location belongs to
-    pub dataset_name: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub dataset_name: Name,
     /// Hash of the dataset manifest
-    pub manifest_hash: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub manifest_hash: Hash,
     /// Name of the table within the dataset (e.g., "blocks", "transactions")
     pub table: String,
     /// Full URL to the storage location (e.g., "s3://bucket/path/table.parquet", "file:///local/path/table.parquet")
@@ -40,9 +44,9 @@ impl From<metadata_db::PhysicalTable> for LocationInfo {
     fn from(value: metadata_db::PhysicalTable) -> Self {
         Self {
             id: value.id,
-            dataset_namespace: value.dataset_namespace,
-            dataset_name: value.dataset_name,
-            manifest_hash: value.manifest_hash.to_string(),
+            dataset_namespace: value.dataset_namespace.into(),
+            dataset_name: value.dataset_name.into(),
+            manifest_hash: value.manifest_hash.into(),
             table: value.table_name,
             url: value.url.to_string(),
             active: value.active,
@@ -86,8 +90,8 @@ impl From<metadata_db::LocationWithDetails> for LocationInfoWithDetails {
     fn from(value: metadata_db::LocationWithDetails) -> Self {
         Self {
             id: value.location.id,
-            dataset_namespace: value.location.dataset_namespace,
-            dataset_name: value.location.dataset_name,
+            dataset_namespace: value.location.dataset_namespace.to_string(),
+            dataset_name: value.location.dataset_name.to_string(),
             manifest_hash: value.location.manifest_hash.to_string(),
             table: value.location.table_name,
             url: value.location.url.to_string(),

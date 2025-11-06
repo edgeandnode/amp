@@ -6,7 +6,9 @@ use common::{
     BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
 };
-use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use datasets_common::{
+    hash::Hash, name::Name, namespace::Namespace, reference::Reference, revision::Revision,
+};
 pub use dump::Ctx;
 use dump::{
     EndBlock,
@@ -100,13 +102,16 @@ impl Job {
 
                 let mut tables = vec![];
                 for location in output_locations {
+                    let hash: Hash = location.manifest_hash.into();
+                    let hash_str = hash.to_string();
+
                     let dataset = ctx
                         .dataset_store
-                        .get_by_hash(&location.manifest_hash.into())
+                        .get_by_hash(&hash)
                         .await
                         .map_err(JobCreationError::DatasetFetchFailed)?
                         .ok_or_else(|| JobCreationError::DatasetNotFound {
-                            dataset: location.manifest_hash.to_string(),
+                            dataset: hash_str.clone(),
                         })?;
 
                     let dataset_ref = Reference::new(
@@ -119,7 +124,7 @@ impl Job {
                     else {
                         return Err(JobCreationError::TableNotFound {
                             table: location.table_name,
-                            dataset: location.manifest_hash.to_string(),
+                            dataset: hash_str,
                         });
                     };
 

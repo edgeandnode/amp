@@ -8,7 +8,7 @@ pub use self::{
     pagination::{list_first_page, list_next_page},
 };
 use crate::{
-    JobStatus, TableId,
+    DatasetNameOwned, DatasetNamespaceOwned, JobStatus, ManifestHashOwned, TableId,
     jobs::{Job, JobId},
     workers::WorkerNodeIdOwned,
 };
@@ -113,13 +113,13 @@ where
     #[derive(sqlx::FromRow)]
     struct Row {
         id: LocationId,
-        manifest_hash: crate::manifests::ManifestHash,
+        manifest_hash: ManifestHashOwned,
         table_name: String,
         #[sqlx(try_from = "&'a str")]
         url: Url,
         active: bool,
-        dataset_namespace: String,
-        dataset_name: String,
+        dataset_namespace: DatasetNamespaceOwned,
+        dataset_name: DatasetNameOwned,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
@@ -306,11 +306,11 @@ pub struct PhysicalTable {
     /// Unique identifier for the location
     pub id: LocationId,
     /// Manifest hash identifying the dataset version
-    pub manifest_hash: crate::manifests::ManifestHash,
+    pub manifest_hash: ManifestHashOwned,
 
     // Labels for the dataset name under which this location was created
-    pub dataset_namespace: String,
-    pub dataset_name: String,
+    pub dataset_namespace: DatasetNamespaceOwned,
+    pub dataset_name: DatasetNameOwned,
 
     /// Name of the table within the dataset
     pub table_name: String,
