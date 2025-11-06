@@ -3,14 +3,14 @@
 use sqlx::{Executor, Postgres};
 
 use super::{
-    hash::{Hash, HashOwned},
+    hash::Hash,
     path::{Path, PathOwned},
 };
 
 /// Insert a new manifest record
 ///
 /// Idempotent (`ON CONFLICT DO NOTHING`).
-pub(crate) async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Path<'_>) -> Result<(), sqlx::Error>
+pub(crate) async fn insert<'c, E>(exe: E, hash: Hash, path: Path<'_>) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -34,7 +34,7 @@ where
 /// Returns `None` if not found.
 pub(crate) async fn get_path_by_hash<'c, E>(
     exe: E,
-    hash: Hash<'_>,
+    hash: Hash,
 ) -> Result<Option<PathOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -53,7 +53,7 @@ where
 /// concurrent link creation. Must be called within a transaction to be effective.
 pub(crate) async fn count_dataset_links_for_update<'c, E>(
     exe: E,
-    hash: Hash<'_>,
+    hash: Hash,
 ) -> Result<i64, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -67,7 +67,7 @@ where
 ///
 /// CASCADE deletes all `dataset_manifests` and `tags` entries.
 /// Returns `Some(path)` if deleted, `None` if not found.
-pub(crate) async fn delete<'c, E>(exe: E, hash: Hash<'_>) -> Result<Option<PathOwned>, sqlx::Error>
+pub(crate) async fn delete<'c, E>(exe: E, hash: Hash) -> Result<Option<PathOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -83,7 +83,7 @@ where
 ///
 /// Returns a vector of manifest hashes for all manifests in `manifest_files`
 /// that have no corresponding entries in `dataset_manifests`.
-pub(crate) async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<HashOwned>, sqlx::Error>
+pub(crate) async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<Hash>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {

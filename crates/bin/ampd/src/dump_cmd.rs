@@ -1,7 +1,10 @@
 use std::{fs, sync::Arc, time::Duration};
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, store::ObjectStoreUrl,
+    BoxError, Store,
+    catalog::{JobLabels, physical::PhysicalTable},
+    config::Config,
+    store::ObjectStoreUrl,
 };
 use dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
@@ -25,7 +28,7 @@ pub async fn run(
     location: Option<String>,
     fresh: bool,
     metrics_meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+) -> Result<(), BoxError> {
     if let Some(size_mb) = partition_size_mb {
         config.parquet.target_size.bytes = size_mb * 1024 * 1024;
     }
@@ -53,7 +56,9 @@ pub async fn run(
         fresh,
         metrics_meter,
     )
-    .await
+    .await?;
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -70,9 +75,6 @@ pub async fn dump(
     fresh: bool,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    // Create metrics registry if meter is available
-    let metrics = meter.map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m)));
-
     let data_store = match new_location {
         Some(location) => {
             let data_path = fs::canonicalize(&location)
@@ -107,10 +109,18 @@ pub async fn dump(
 
     let mut physical_datasets = vec![];
     for dataset_ref in datasets {
-        let dataset = dataset_store
-            .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
-            .await?
-            .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
+        let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+
+        let job_labels = JobLabels {
+            dataset_namespace: dataset_ref.namespace().clone(),
+            dataset_name: dataset_ref.name().clone(),
+            manifest_hash: dataset.manifest_hash().clone(),
+        };
+
+        // Create metrics registry if meter is available
+        let metrics =
+            meter.map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
+
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
@@ -122,27 +132,22 @@ pub async fn dump(
             );
         }
 
-        for table in Arc::new(dataset).resolved_tables() {
+        for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+            let db = metadata_db.clone();
             let physical_table = if fresh {
-                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
-                    .await?
+                PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels).await?
             } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
                     None => {
-                        PhysicalTable::next_revision(
-                            &table,
-                            data_store.as_ref(),
-                            metadata_db.clone(),
-                            true,
-                        )
-                        .await?
+                        PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels)
+                            .await?
                     }
                 }
             };
             tables.push(physical_table.into());
         }
-        physical_datasets.push(tables);
+        physical_datasets.push((tables, metrics));
     }
 
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
@@ -155,11 +160,15 @@ pub async fn dump(
         notification_multiplexer,
     };
 
-    let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
+    let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets
+        .iter()
+        .flat_map(|(tables, _)| tables)
+        .cloned()
+        .collect();
 
     match run_every {
         None => {
-            for tables in &physical_datasets {
+            for (tables, metrics) in &physical_datasets {
                 dump::dump_tables(
                     ctx.clone(),
                     tables,
@@ -167,7 +176,6 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
-                    meter,
                 )
                 .await?
             }
@@ -175,7 +183,7 @@ pub async fn dump(
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            for tables in &physical_datasets {
+            for (tables, metrics) in &physical_datasets {
                 dump::dump_tables(
                     ctx.clone(),
                     tables,
@@ -183,7 +191,6 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
-                    meter,
                 )
                 .await?;
             }

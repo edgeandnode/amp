@@ -8,7 +8,8 @@ use axum::{
     },
     http::StatusCode,
 };
-use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+use common::catalog::JobLabels;
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use worker::JobId;
 
 use crate::{
@@ -106,91 +107,28 @@ pub async fn handler(
         "deploying dataset"
     );
 
-    // Resolve the revision to get the version tag
-    // For semantic versions, this is straightforward
-    // For "latest", "dev", and hashes, we need to find which version points to the manifest
-    let version = match &revision {
-        Revision::Version(ver) => ver.clone(),
-        Revision::Latest => {
-            // Get the latest semantic version for this dataset
-            let version_tags = ctx
-                .dataset_store
-                .list_dataset_version_tags(&namespace, &name)
-                .await
-                .map_err(Error::ListVersionTags)?;
-
-            // list_version_tags returns semantic versions sorted descending, so first is latest
-            version_tags
-                .into_iter()
-                .next()
-                .map(|tag| tag.version.into())
-                .ok_or_else(|| Error::NotFound {
-                    namespace: namespace.clone(),
-                    name: name.clone(),
-                    revision: revision.clone(),
-                })?
-        }
-        Revision::Dev | Revision::Hash(_) => {
-            // For dev tag or hash, we need to resolve it to get the manifest hash first
-            let manifest_hash = ctx
-                .dataset_store
-                .resolve_dataset_revision(&namespace, &name, &revision)
-                .await
-                .map_err(Error::ResolveRevision)?
-                .ok_or_else(|| Error::NotFound {
-                    namespace: namespace.clone(),
-                    name: name.clone(),
-                    revision: revision.clone(),
-                })?;
-
-            // Find which version tag points to this manifest hash
-            let version_tags = ctx
-                .dataset_store
-                .list_dataset_version_tags(&namespace, &name)
-                .await
-                .map_err(Error::ListVersionTags)?;
-
-            version_tags
-                .into_iter()
-                .find(|tag| tag.hash == manifest_hash)
-                .map(|tag| tag.version.into())
-                .ok_or_else(|| Error::NotFound {
-                    namespace: namespace.clone(),
-                    name: name.clone(),
-                    revision: revision.clone(),
-                })?
-        }
-    };
-
-    tracing::debug!(
-        namespace=%namespace,
-        name=%name,
-        version=%version,
-        "loading dataset from store"
-    );
-
     // Load the full dataset object using the resolved version
+    let reference = Reference::new(namespace, name, revision);
     let dataset = ctx
         .dataset_store
-        .get_dataset(&name, &version)
+        .get_dataset(&reference)
         .await
-        .map_err(Error::GetDataset)?
-        .ok_or_else(|| Error::NotFound {
-            namespace: namespace.clone(),
-            name: name.clone(),
-            revision: revision.clone(),
-        })?;
+        .map_err(Error::GetDataset)?;
+
+    let job_labels = JobLabels {
+        dataset_namespace: reference.namespace().clone(),
+        dataset_name: reference.name().clone(),
+        manifest_hash: dataset.manifest_hash().clone(),
+    };
 
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
-        .schedule_dataset_sync_job(dataset, end_block.into(), parallelism)
+        .schedule_dataset_sync_job(dataset, end_block.into(), parallelism, job_labels)
         .await
         .map_err(|err| {
             tracing::error!(
-                namespace=%namespace,
-                name=%name,
-                revision=%revision,
+                dataset_reference=%reference,
                 error=?err,
                 "failed to schedule dataset deployment"
             );

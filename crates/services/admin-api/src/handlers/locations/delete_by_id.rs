@@ -114,7 +114,7 @@ pub async fn handler(
             Error::NotFound { id: location_id }
         })?;
 
-    if location.active && !query.force {
+    if location.active() && !query.force {
         tracing::debug!(location_id = %location_id, "Cannot delete active location without force flag");
         return Err(Error::ActiveLocation { id: location_id }.into());
     }
@@ -136,10 +136,10 @@ pub async fn handler(
         .into());
     }
 
-    let location_url = location.url.clone().try_into().map_err(|err| {
+    let location_url = location.url().clone().try_into().map_err(|err| {
         tracing::error!(
-            location_id = %location.id,
-            location_url = %location.url,
+            location_id = %location.id(),
+            location_url = %location.url(),
             error = ?err,
             "Invalid location URL from database, cannot create object store"
         );
@@ -148,7 +148,7 @@ pub async fn handler(
 
     let (store, _) = object_store(&location_url).map_err(|err| {
         tracing::error!(
-            location_id = %location.id,
+            location_id = %location.id(),
             location_url = %location_url,
             error = ?err,
             "Failed to create object store instance for location deletion"
@@ -156,15 +156,16 @@ pub async fn handler(
         Error::ObjectStoreError(Box::new(err))
     })?;
 
+    let loc_id = location.id();
     let file_paths: Vec<ObjectPath> = ctx
         .metadata_db
-        .stream_files_by_location_id_with_details(location.id)
+        .stream_files_by_location_id_with_details(loc_id)
         .try_filter_map(|file_metadata| async move {
             match ObjectPath::parse(&file_metadata.file_name) {
                 Ok(path1) => Ok(Some(path1)),
                 Err(path_error) => {
                     tracing::warn!(
-                        location_id = %location.id,
+                        location_id = %loc_id,
                         file_metadata_id = %file_metadata.id,
                         file_name = %file_metadata.file_name,
                         error = ?path_error,
@@ -178,7 +179,7 @@ pub async fn handler(
         .await
         .map_err(|err| {
             tracing::error!(
-                location_id = %location.id,
+                location_id = %loc_id,
                 error = ?err,
                 "Failed to list file metadata from database for location deletion"
             );
@@ -187,7 +188,7 @@ pub async fn handler(
 
     let num_files = file_paths.len();
     tracing::info!(
-        location_id = %location.id,
+        location_id = %loc_id,
         num_files = num_files,
         "Starting bulk deletion of files"
     );
@@ -199,7 +200,7 @@ pub async fn handler(
         .map_err(Error::MetadataDbError)?;
 
     tracing::info!(
-        location_id = %location.id,
+        location_id = %loc_id,
         "Location metadata deleted from database, proceeding to delete files"
     );
 
@@ -210,7 +211,7 @@ pub async fn handler(
         .await
         .map_err(|err| {
             tracing::error!(
-                location_id = %location.id,
+                location_id = %loc_id,
                 error = ?err,
                 "Bulk deletion operation failed"
             );
@@ -219,13 +220,13 @@ pub async fn handler(
 
     if deleted_paths.len() == num_files {
         tracing::info!(
-            location_id = %location.id,
+            location_id = %loc_id,
             deleted_files = deleted_paths.len(),
             "Successfully deleted all files"
         );
     } else {
         tracing::warn!(
-            location_id = %location.id,
+            location_id = %loc_id,
             expected = num_files,
             actual = deleted_paths.len(),
             "Incomplete files deletion: some files may have already been deleted or may not exist"

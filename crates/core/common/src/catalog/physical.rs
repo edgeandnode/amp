@@ -17,16 +17,17 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
+use datasets_common::{name::Name, namespace::Namespace};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
-use tracing::info;
+use tracing::{debug, info};
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, Dataset, LogicalCatalog, ParquetFooterCache, ResolvedTable,
-    catalog::reader::AmpReaderFactory,
+    catalog::{JobLabels, reader::AmpReaderFactory},
     metadata::{
         FileMetadata, amp_metadata_from_parquet_file,
         parquet::ParquetMeta,
@@ -173,6 +174,9 @@ pub struct PhysicalTable {
     metadata_db: MetadataDb,
     /// Object store for accessing the data files.
     object_store: Arc<dyn ObjectStore>,
+
+    /// Observability and management information such as dataset name.
+    job_labels: JobLabels,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -183,6 +187,7 @@ impl PhysicalTable {
         url: Url,
         location_id: LocationId,
         metadata_db: MetadataDb,
+        job_labels: JobLabels,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
@@ -195,6 +200,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store,
+            job_labels,
         })
     }
 
@@ -207,23 +213,32 @@ impl PhysicalTable {
         data_store: &Store,
         metadata_db: MetadataDb,
         set_active: bool,
+        job_labels: &JobLabels,
     ) -> Result<Self, BoxError> {
-        let dataset_name = &table.dataset().name;
-        let dataset_version = table.dataset_version();
+        let manifest_hash = table.dataset().manifest_hash();
         let table_id = TableId {
-            dataset: dataset_name,
-            dataset_version: dataset_version.as_deref(),
+            manifest_hash: manifest_hash.into(),
             table: table.name(),
         };
 
-        let path = make_location_path(dataset_name, table.name());
+        let path = make_location_path(job_labels, table.name());
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
-            .register_location(table_id, data_store.bucket(), &path, &url, false)
+            .register_location(
+                table_id,
+                &job_labels.dataset_namespace,
+                &job_labels.dataset_name,
+                data_store.bucket(),
+                &path,
+                &url,
+                false,
+            )
             .await?;
 
         if set_active {
-            metadata_db.set_active_location(table_id, &url).await?;
+            metadata_db
+                .set_active_location(table_id, &location_id)
+                .await?;
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
@@ -236,6 +251,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store,
+            job_labels: job_labels.clone(),
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -249,18 +265,20 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
+        job_labels: &JobLabels,
     ) -> Result<Option<Self>, BoxError> {
-        let dataset_name = &table.dataset().name;
-        let dataset_version = table.dataset_version();
+        let manifest_hash = table.dataset().manifest_hash();
         let table_id = TableId {
-            dataset: &table.dataset().name,
-            dataset_version: dataset_version.as_deref(),
+            manifest_hash: manifest_hash.into(),
             table: table.name(),
         };
 
-        let prefix = format!("{}/{}/", &dataset_name, table.name());
+        let prefix = location_prefix(job_labels, table.name());
         let url = data_store.url().join(&prefix)?;
         let path = Path::from_url_path(url.path()).unwrap();
+
+        debug!("Restoring latest revision in prefix {}", path);
+
         let revisions = list_revisions(&data_store, &prefix, &path).await?;
         Self::restore_latest(
             revisions,
@@ -268,6 +286,7 @@ impl PhysicalTable {
             &table_id,
             Arc::clone(&data_store),
             metadata_db.clone(),
+            job_labels,
         )
         .await
     }
@@ -277,18 +296,18 @@ impl PhysicalTable {
         table: &ResolvedTable,
         metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
-        let dataset_name = &table.dataset().name;
-        let dataset_version = table.dataset_version();
+        let manifest_hash = table.dataset().manifest_hash().into();
         let table_id = TableId {
-            dataset: dataset_name,
-            dataset_version: dataset_version.as_deref(),
+            manifest_hash,
             table: table.name(),
         };
 
-        let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? else {
+        let Some(physical_table) = metadata_db.get_active_location(table_id).await? else {
             return Ok(None);
         };
 
+        let url = physical_table.url;
+        let location_id = physical_table.id;
         let path = Path::from_url_path(url.path()).unwrap();
 
         let object_store_url = url.clone().try_into()?;
@@ -301,6 +320,11 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store,
+            job_labels: JobLabels {
+                dataset_namespace: Namespace::try_from(physical_table.dataset_namespace)?,
+                dataset_name: Name::try_from(physical_table.dataset_name)?,
+                manifest_hash: physical_table.manifest_hash.into(),
+            },
         }))
     }
 
@@ -315,17 +339,28 @@ impl PhysicalTable {
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
+        job_labels: &JobLabels,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
-            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
-                .await
-                .map(Some)
+            Self::restore(
+                table,
+                table_id,
+                prefix,
+                path,
+                url,
+                data_store,
+                metadata_db,
+                job_labels,
+            )
+            .await
+            .map(Some)
         } else {
             Ok(None)
         }
     }
 
     /// Restore a location from the data store and register it in the metadata database.
+    #[allow(clippy::too_many_arguments)]
     async fn restore(
         table: &ResolvedTable,
         table_id: &TableId<'_>,
@@ -334,12 +369,23 @@ impl PhysicalTable {
         url: &Url,
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
+        job_labels: &JobLabels,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
-            .register_location(*table_id, data_store.bucket(), prefix, url, false)
+            .register_location(
+                *table_id,
+                &job_labels.dataset_namespace,
+                &job_labels.dataset_name,
+                data_store.bucket(),
+                prefix,
+                url,
+                false,
+            )
             .await?;
 
-        metadata_db.set_active_location(*table_id, url).await?;
+        metadata_db
+            .set_active_location(*table_id, &location_id)
+            .await?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(path));
@@ -377,6 +423,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store: Arc::clone(&object_store),
+            job_labels: job_labels.clone(),
         };
 
         Ok(physical_table)
@@ -406,11 +453,15 @@ impl PhysicalTable {
         }
         Ok(())
     }
+
+    pub fn job_labels(&self) -> &JobLabels {
+        &self.job_labels
+    }
 }
 
 // Methods for accessing properties of PhysicalTable
 impl PhysicalTable {
-    pub fn dataset(&self) -> &Dataset {
+    pub fn dataset(&self) -> &Arc<Dataset> {
         self.table.dataset()
     }
 
@@ -441,14 +492,6 @@ impl PhysicalTable {
     /// Qualified table reference in the format `dataset_name.table_name`.
     pub fn table_ref(&self) -> &TableReference {
         self.table.table_ref()
-    }
-
-    pub fn table_id(&self) -> TableId<'_> {
-        TableId {
-            dataset: self.catalog_schema(),
-            dataset_version: None,
-            table: self.table_name(),
-        }
     }
 
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
@@ -662,17 +705,11 @@ impl TableProvider for TableSnapshot {
     }
 }
 
+// We use the job labels for a more human-readable path hierarchy in object storage.
+//
 // The path format is: `<dataset>/<table>/<UUIDv7>/`
-pub fn make_location_path(dataset: &str, table: &str) -> String {
-    let mut path = String::new();
-
-    // Add dataset
-    path.push_str(dataset);
-    path.push('/');
-
-    // Add table
-    path.push_str(table);
-    path.push('/');
+pub fn make_location_path(job_labels: &JobLabels, table: &str) -> String {
+    let mut path = location_prefix(job_labels, table);
 
     // Add UUIDv7
     let uuid = uuid::Uuid::now_v7();
@@ -680,6 +717,20 @@ pub fn make_location_path(dataset: &str, table: &str) -> String {
     path.push('/');
 
     path
+}
+
+pub fn location_prefix(job_labels: &JobLabels, table: &str) -> String {
+    let mut prefix = String::new();
+
+    // Add dataset
+    prefix.push_str(&job_labels.dataset_name);
+    prefix.push('/');
+
+    // Add table
+    prefix.push_str(table);
+    prefix.push('/');
+
+    prefix
 }
 
 pub async fn list_revisions(

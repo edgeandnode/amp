@@ -102,7 +102,7 @@ enum Command {
     Restore {
         /// The name or names of the datasets to restore (comma-separated).
         #[arg(long, required = true, value_delimiter = ',')]
-        dataset: Vec<String>,
+        dataset: Vec<Reference>,
     },
 }
 

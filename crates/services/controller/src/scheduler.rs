@@ -32,7 +32,11 @@ use admin_api::scheduler::{
     ScheduleJobError, StopJobError,
 };
 use async_trait::async_trait;
-use common::{Dataset, catalog::physical::PhysicalTable, config::Config};
+use common::{
+    Dataset,
+    catalog::{JobLabels, physical::PhysicalTable},
+    config::Config,
+};
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb};
 use rand::seq::IndexedRandom as _;
@@ -73,15 +77,13 @@ impl Scheduler {
         dataset: Dataset,
         end_block: EndBlock,
         max_writers: u16,
+        job_labels: JobLabels,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
-        let existing_jobs = metadata_db::jobs::get_by_dataset(
-            &self.metadata_db,
-            dataset.name.clone(),
-            dataset.version.clone(),
-        )
-        .await
-        .map_err(ScheduleJobError::CheckExistingJobs)?;
+        let existing_jobs =
+            metadata_db::jobs::get_by_dataset(&self.metadata_db, (&dataset.manifest_hash).into())
+                .await
+                .map_err(ScheduleJobError::CheckExistingJobs)?;
         for job in existing_jobs {
             match job.status {
                 JobStatus::Scheduled | JobStatus::Running => return Ok(job.id.into()),
@@ -110,7 +112,7 @@ impl Scheduler {
         };
 
         let mut locations = Vec::new();
-        for table in Arc::new(dataset).resolved_tables() {
+        for table in Arc::new(dataset).resolved_tables(job_labels.dataset_reference().into()) {
             let physical_table = match PhysicalTable::get_active(&table, self.metadata_db.clone())
                 .await
                 .map_err(ScheduleJobError::GetPhysicalTable)?
@@ -118,9 +120,15 @@ impl Scheduler {
                 Some(physical_table) => physical_table,
                 None => {
                     let store = &self.config.data_store;
-                    PhysicalTable::next_revision(&table, store, self.metadata_db.clone(), true)
-                        .await
-                        .map_err(ScheduleJobError::CreatePhysicalTable)?
+                    PhysicalTable::next_revision(
+                        &table,
+                        store,
+                        self.metadata_db.clone(),
+                        true,
+                        &job_labels,
+                    )
+                    .await
+                    .map_err(ScheduleJobError::CreatePhysicalTable)?
                 }
             };
             locations.push(physical_table.location_id());
@@ -129,6 +137,9 @@ impl Scheduler {
         let job_desc = serde_json::to_string(&JobDescriptor::Dump {
             end_block,
             max_writers,
+            dataset_namespace: job_labels.dataset_namespace.clone(),
+            dataset_name: job_labels.dataset_name.clone(),
+            manifest_hash: job_labels.manifest_hash.clone(),
         })
         .map_err(ScheduleJobError::SerializeJobDescriptor)?;
         let job_id =
@@ -205,12 +216,18 @@ impl Scheduler {
 impl JobScheduler for Scheduler {
     async fn schedule_dataset_sync_job(
         &self,
-        dataset: Dataset,
+        dataset: Arc<Dataset>,
         end_block: EndBlock,
         max_writers: u16,
+        job_labels: JobLabels,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_dataset_sync_job_impl(dataset, end_block, max_writers)
-            .await
+        self.schedule_dataset_sync_job_impl(
+            Arc::try_unwrap(dataset).unwrap_or_else(|arc| (*arc).clone()),
+            end_block,
+            max_writers,
+            job_labels,
+        )
+        .await
     }
 
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError> {

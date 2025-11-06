@@ -131,68 +131,17 @@ impl<'de> serde::Deserialize<'de> for Hash {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<metadata_db::ManifestHashOwned> for Hash {
-    fn from(value: metadata_db::ManifestHashOwned) -> Self {
-        // Convert to string - Database values are trusted to uphold invariants
-        Hash(value.into_inner())
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl From<Hash> for metadata_db::ManifestHashOwned {
-    fn from(value: Hash) -> Self {
-        // SAFETY: Hash is validated at construction time, ensuring invariants are upheld.
-        metadata_db::ManifestHash::from_owned_unchecked(value.0)
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> From<&'a Hash> for metadata_db::ManifestHash<'a> {
+impl<'a> From<&'a Hash> for metadata_db::ManifestHash {
     fn from(value: &'a Hash) -> Self {
-        // SAFETY: Hash is validated at construction time, ensuring invariants are upheld.
-        metadata_db::ManifestHash::from_ref_unchecked(&value.0)
+        // Unwrap: The Hash type guarantees valid hex format
+        metadata_db::ManifestHash::from_hex(&value.0).unwrap()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::ManifestHash<'a>> for Hash {
-    fn eq(&self, other: &metadata_db::ManifestHash<'a>) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Hash> for metadata_db::ManifestHash<'a> {
-    fn eq(&self, other: &Hash) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&metadata_db::ManifestHash<'a>> for Hash {
-    fn eq(&self, other: &&metadata_db::ManifestHash<'a>) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Hash> for &metadata_db::ManifestHash<'a> {
-    fn eq(&self, other: &Hash) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::ManifestHash<'a>> for &Hash {
-    fn eq(&self, other: &metadata_db::ManifestHash<'a>) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&Hash> for metadata_db::ManifestHash<'a> {
-    fn eq(&self, other: &&Hash) -> bool {
-        self.as_str() == other.as_str()
+impl From<metadata_db::ManifestHash> for Hash {
+    fn from(value: metadata_db::ManifestHash) -> Self {
+        Hash(value.to_string())
     }
 }
 

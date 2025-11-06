@@ -4,12 +4,16 @@
 //! where the namespace and/or revision may be omitted. This is useful for parsing
 //! user input where these components are optional.
 
+use std::str::FromStr;
+
 use crate::{
     name::{Name, NameError},
     namespace::{Namespace, NamespaceError},
     reference::Reference,
     revision::{Revision, RevisionParseError},
 };
+
+const GLOBAL_NAMESPACE: &str = "_";
 
 /// A partial dataset reference with optional namespace and revision.
 ///
@@ -51,17 +55,36 @@ impl PartialReference {
         }
     }
 
-    /// Convert to a complete Reference by providing defaults for missing components.
-    pub fn into_reference(
-        self,
-        default_namespace: Namespace,
-        default_revision: Revision,
-    ) -> Reference {
-        Reference::new(
-            self.namespace.unwrap_or(default_namespace),
-            self.name,
-            self.revision.unwrap_or(default_revision),
-        )
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn revision_or_latest(&self) -> &Revision {
+        self.revision.as_ref().unwrap_or(&Revision::Latest)
+    }
+
+    /// Returns the namespace if present, or the global namespace otherwise.
+    pub fn namespace_or_global(&self) -> Namespace {
+        self.namespace
+            .clone()
+            .unwrap_or_else(|| Namespace::from_str(GLOBAL_NAMESPACE).unwrap())
+    }
+}
+
+impl From<Reference> for PartialReference {
+    fn from(value: Reference) -> Self {
+        let (namespace, name, revision) = value.into_parts();
+        Self {
+            namespace: Some(namespace),
+            name,
+            revision: Some(revision),
+        }
+    }
+}
+
+impl From<&Reference> for PartialReference {
+    fn from(value: &Reference) -> Self {
+        Self::from(value.clone())
     }
 }
 

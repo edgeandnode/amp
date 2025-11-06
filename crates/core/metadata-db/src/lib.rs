@@ -6,7 +6,7 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
-use tracing::instrument;
+use tracing::{instrument, trace};
 use url::Url;
 
 pub mod datasets;
@@ -14,9 +14,9 @@ mod db;
 mod error;
 mod files;
 pub mod jobs;
-mod locations;
 pub mod manifests;
 pub mod notification_multiplexer;
+mod physical_table;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 pub mod workers;
@@ -36,16 +36,16 @@ pub use self::{
         FileMetadataWithDetails, FooterBytes,
     },
     jobs::{Job, JobId, JobStatus, JobStatusUpdateError},
-    locations::{
-        Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
-        LocationWithDetails,
+    manifests::{ManifestHash, ManifestPath, ManifestPathOwned},
+    notification_multiplexer::NotificationMultiplexerHandle,
+    physical_table::{
+        LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+        LocationWithDetails, PhysicalTable,
         events::{
             LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
             LocationNotification,
         },
     },
-    manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
-    notification_multiplexer::NotificationMultiplexerHandle,
     workers::{
         HEARTBEAT_INTERVAL, Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
@@ -62,12 +62,11 @@ pub struct MetadataDb {
     pub(crate) url: Arc<str>,
 }
 
-/// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
-/// is at most one active location.
+/// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
+/// is at most one active physical_table entry.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
-    pub dataset: &'a str,
-    pub dataset_version: Option<&'a str>,
+    pub manifest_hash: ManifestHash,
     pub table: &'a str,
 }
 
@@ -223,48 +222,47 @@ impl MetadataDb {
     /// a constraint violation. If an active location might exist, it is better to initialize the
     /// location with `active = false` and then call `set_active_location` to switch it as active.
     #[instrument(skip(self), err)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_location(
         &self,
         table: TableId<'_>,
+        dataset_namespace: &str,
+        dataset_name: &str,
         bucket: Option<&str>,
         path: &str,
         url: &Url,
         active: bool,
     ) -> Result<LocationId, sqlx::Error> {
-        locations::insert(&*self.pool, table, bucket, path, url, active).await
+        physical_table::insert(
+            &*self.pool,
+            table,
+            dataset_namespace,
+            dataset_name,
+            bucket,
+            path,
+            url,
+            active,
+        )
+        .await
     }
 
-    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<Location>, Error> {
-        Ok(locations::get_by_id(&*self.pool, id).await?)
+    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<PhysicalTable>, Error> {
+        Ok(physical_table::get_by_id(&*self.pool, id).await?)
     }
 
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
-        Ok(locations::url_to_id(&*self.pool, url).await?)
+        Ok(physical_table::url_to_id(&*self.pool, url).await?)
     }
 
-    /// Returns the active location. The active location has meaning on both the write and read side:
+    /// Returns the active physical table. The active location has meaning on both the write and read side:
     /// - On the write side, it is the location that is being kept in sync with the source data.
     /// - On the read side, it is default location that should receive queries.
     #[instrument(skip(self), err)]
     pub async fn get_active_location(
         &self,
         table: TableId<'_>,
-    ) -> Result<Option<(Url, LocationId)>, Error> {
-        let active_locations = locations::get_active_by_table_id(&*self.pool, table).await?;
-
-        match active_locations.as_slice() {
-            [] => Ok(None),
-            [(url, location_id)] => {
-                let url = Url::parse(url)?;
-                Ok(Some((url, *location_id)))
-            }
-            multiple => Err(Error::MultipleActiveLocations(
-                table.dataset.to_string(),
-                table.dataset_version.unwrap_or("").to_string(),
-                table.table.to_string(),
-                multiple.iter().map(|(url, _)| url.clone()).collect(),
-            )),
-        }
+    ) -> Result<Option<PhysicalTable>, Error> {
+        Ok(physical_table::get_active_physical_table(&*self.pool, table).await?)
     }
 
     /// Set a location as the active materialization for a table.
@@ -275,21 +273,26 @@ impl MetadataDb {
     pub async fn set_active_location(
         &self,
         table: TableId<'_>,
-        location: &Url,
+        location_id: &LocationId,
     ) -> Result<(), Error> {
+        trace!("Setting location as active");
+
         let mut tx = self.pool.begin().await?;
-        locations::mark_inactive_by_table_id(&mut *tx, table).await?;
-        locations::mark_active_by_url(&mut *tx, table, location).await?;
+        physical_table::mark_inactive_by_table_id(&mut *tx, table).await?;
+        physical_table::mark_active_by_id(&mut *tx, table, location_id).await?;
         tx.commit().await?;
         Ok(())
     }
 
     /// Returns locations that were written by a specific job.
     ///
-    /// This method queries the `locations` table for all locations where the given job
+    /// This method queries the `physical_table` table for all locations where the given job
     /// was assigned as the writer, converting them to [`Location`] type.
-    pub async fn output_locations(&self, id: impl Into<JobId>) -> Result<Vec<Location>, Error> {
-        Ok(locations::get_by_job_id(&*self.pool, id.into()).await?)
+    pub async fn output_locations(
+        &self,
+        id: impl Into<JobId>,
+    ) -> Result<Vec<PhysicalTable>, Error> {
+        Ok(physical_table::get_by_job_id(&*self.pool, id.into()).await?)
     }
 
     /// List locations with cursor-based pagination support
@@ -300,12 +303,12 @@ impl MetadataDb {
         &self,
         limit: i64,
         last_location_id: Option<LocationId>,
-    ) -> Result<Vec<Location>, Error> {
+    ) -> Result<Vec<PhysicalTable>, Error> {
         match last_location_id {
             Some(location_id) => {
-                Ok(locations::list_next_page(&*self.pool, limit, location_id).await?)
+                Ok(physical_table::list_next_page(&*self.pool, limit, location_id).await?)
             }
-            None => Ok(locations::list_first_page(&*self.pool, limit).await?),
+            None => Ok(physical_table::list_first_page(&*self.pool, limit).await?),
         }
     }
 
@@ -316,7 +319,7 @@ impl MetadataDb {
         &self,
         location_id: LocationId,
     ) -> Result<Option<LocationWithDetails>, Error> {
-        Ok(locations::get_by_id_with_details(&*self.pool, location_id).await?)
+        Ok(physical_table::get_by_id_with_details(&*self.pool, location_id).await?)
     }
 
     /// Delete a location by its ID
@@ -324,19 +327,19 @@ impl MetadataDb {
     /// This will also delete all associated file_metadata entries due to CASCADE.
     /// Returns true if the location was deleted, false if it didn't exist.
     pub async fn delete_location_by_id(&self, location_id: LocationId) -> Result<bool, Error> {
-        Ok(locations::delete_by_id(&*self.pool, location_id).await?)
+        Ok(physical_table::delete_by_id(&*self.pool, location_id).await?)
     }
 
     /// Notify that a location has changed
     #[instrument(skip(self), err)]
     pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
-        locations::events::notify(&*self.pool, location_id).await?;
+        physical_table::events::notify(&*self.pool, location_id).await?;
         Ok(())
     }
 
     /// Listen for location change notifications
     pub async fn listen_for_location_notifications(&self) -> Result<LocationNotifListener, Error> {
-        locations::events::listen_url(&self.url)
+        physical_table::events::listen_url(&self.url)
             .await
             .map_err(Into::into)
     }

@@ -24,7 +24,7 @@ use metadata_db::{LocationId, NotificationMultiplexerHandle};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{Instrument, instrument};
+use tracing::{Instrument, debug, instrument};
 
 /// Awaits any update for tables in a query context catalog.
 struct TableUpdates {
@@ -208,8 +208,11 @@ impl StreamingQuery {
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
-        let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
-        let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
+        let src_datasets = tables
+            .iter()
+            .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
+            .collect();
+        let blocks_table = resolve_blocks_table(&dataset_store, src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
@@ -335,6 +338,7 @@ impl StreamingQuery {
         // The latest common watermark across the source tables.
         let Some(common_watermark) = self.latest_src_watermark(&blocks_ctx, chains).await? else {
             // No common watermark across source tables.
+            debug!("no common watermark found");
             return Ok(None);
         };
 
@@ -344,6 +348,7 @@ impl StreamingQuery {
         }
 
         let Some(direction) = self.next_microbatch_start(&blocks_ctx).await? else {
+            debug!("no next microbatch start found");
             return Ok(None);
         };
         let start = direction.block();
@@ -351,6 +356,7 @@ impl StreamingQuery {
             .next_microbatch_end(&blocks_ctx, start, common_watermark)
             .await?
         else {
+            debug!("no next microbatch end found");
             return Ok(None);
         };
         Ok(Some(MicrobatchRange {
@@ -528,6 +534,7 @@ impl StreamingQuery {
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         if results.num_rows() == 0 {
+            debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
         let get_hash_value = |column_name: &str| -> Option<BlockHash> {

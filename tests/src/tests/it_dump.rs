@@ -22,10 +22,9 @@ async fn evm_rpc_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -100,10 +99,9 @@ async fn eth_beacon_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -178,10 +176,9 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -256,10 +253,9 @@ async fn evm_rpc_base_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -334,10 +330,9 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -412,10 +407,9 @@ async fn eth_firehose_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block
@@ -490,10 +484,9 @@ async fn base_firehose_single_dump() {
     let dataset = test_env
         .daemon_server()
         .dataset_store()
-        .get_dataset(dataset_ref.name(), dataset_ref.revision().as_version())
+        .get_dataset(&dataset_ref)
         .await
-        .expect("Failed to load dataset")
-        .expect("Dataset should exist");
+        .expect("Failed to load dataset");
 
     let block = dataset
         .start_block

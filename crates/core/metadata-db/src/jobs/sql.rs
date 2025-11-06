@@ -3,10 +3,7 @@
 use sqlx::{Executor, Postgres};
 
 use super::{Job, JobId, JobStatus, JobStatusUpdateError};
-use crate::{
-    datasets::{DatasetName, DatasetVersion},
-    workers::WorkerNodeId,
-};
+use crate::{ManifestHash, workers::WorkerNodeId};
 
 /// Insert a new job into the queue
 ///
@@ -163,8 +160,7 @@ where
 /// If `version` is `None`, all versions of the dataset are included.
 pub async fn get_jobs_by_dataset<'c, E>(
     exe: E,
-    dataset: DatasetName<'_>,
-    version: Option<DatasetVersion<'_>>,
+    manifest_hash: ManifestHash,
 ) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -178,13 +174,12 @@ where
             j.created_at,
             j.updated_at
         FROM jobs j
-        INNER JOIN locations l ON j.id = l.writer
-        WHERE l.dataset = $1 AND l.dataset_version = $2
+        INNER JOIN physical_tables l ON j.id = l.writer
+        WHERE l.manifest_hash = $1
         ORDER BY j.id ASC
     "#};
     let res = sqlx::query_as(query)
-        .bind(dataset)
-        .bind(version.map(|v| v.to_string()).unwrap_or_default())
+        .bind(manifest_hash)
         .fetch_all(exe)
         .await?;
     Ok(res)

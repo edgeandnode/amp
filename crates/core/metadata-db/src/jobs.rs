@@ -14,10 +14,10 @@ pub(crate) mod sql;
 
 pub use self::{job_id::JobId, job_status::JobStatus};
 use crate::{
-    datasets::{DatasetName, DatasetVersion},
+    ManifestHash,
     db::Executor,
     error::Error,
-    locations::{self, LocationId},
+    physical_table::{self, LocationId},
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
 
@@ -51,7 +51,7 @@ pub async fn schedule(
     let job_id = register(&mut tx, node_id.into(), job_desc).await?;
 
     // Lock the locations for this job by assigning the job ID as the writer
-    locations::assign_job_writer(&mut tx, locations, job_id).await?;
+    physical_table::assign_job_writer(&mut tx, locations, job_id).await?;
 
     tx.commit().await?;
 
@@ -209,15 +209,11 @@ where
 /// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
 /// If `version` is `None`, all versions of the dataset are included.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_dataset<'c, E>(
-    exe: E,
-    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    dataset_version: Option<impl Into<DatasetVersion<'_>> + std::fmt::Debug>,
-) -> Result<Vec<Job>, Error>
+pub async fn get_by_dataset<'c, E>(exe: E, manifest_hash: ManifestHash) -> Result<Vec<Job>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_jobs_by_dataset(exe, dataset_name.into(), dataset_version.map(Into::into))
+    sql::get_jobs_by_dataset(exe, manifest_hash)
         .await
         .map_err(Into::into)
 }
