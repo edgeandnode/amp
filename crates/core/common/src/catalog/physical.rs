@@ -18,7 +18,7 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use metadata_db::{LocationId, MetadataDb, TableId};
+use metadata_db::{LocationId, MetadataDb, physical_table::TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::{debug, info};
 use url::Url;
@@ -222,22 +222,24 @@ impl PhysicalTable {
 
         let path = make_location_path(job_labels, table.name());
         let url = data_store.url().join(&path)?;
-        let location_id = metadata_db
-            .register_location(
-                table_id.clone(),
-                &job_labels.dataset_namespace,
-                &job_labels.dataset_name,
-                data_store.bucket(),
-                &path,
-                &url,
-                false,
-            )
-            .await?;
+        let location_id = metadata_db::physical_table::register(
+            &metadata_db,
+            table_id.clone(),
+            &job_labels.dataset_namespace,
+            &job_labels.dataset_name,
+            data_store.bucket(),
+            &path,
+            &url,
+            false,
+        )
+        .await?;
 
         if set_active {
-            metadata_db
-                .set_active_location(table_id, &location_id)
+            let mut tx = metadata_db.begin_txn().await?;
+            metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone())
                 .await?;
+            metadata_db::physical_table::mark_active_by_id(&mut tx, table_id, location_id).await?;
+            tx.commit().await?;
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
@@ -301,7 +303,9 @@ impl PhysicalTable {
             table: table.name(),
         };
 
-        let Some(physical_table) = metadata_db.get_active_location(table_id).await? else {
+        let Some(physical_table) =
+            metadata_db::physical_table::get_active_physical_table(&metadata_db, table_id).await?
+        else {
             return Ok(None);
         };
 
@@ -370,21 +374,23 @@ impl PhysicalTable {
         metadata_db: MetadataDb,
         job_labels: &JobLabels,
     ) -> Result<Self, BoxError> {
-        let location_id = metadata_db
-            .register_location(
-                table_id.clone(),
-                &job_labels.dataset_namespace,
-                &job_labels.dataset_name,
-                data_store.bucket(),
-                prefix,
-                url,
-                false,
-            )
-            .await?;
+        let location_id = metadata_db::physical_table::register(
+            &metadata_db,
+            table_id.clone(),
+            &job_labels.dataset_namespace,
+            &job_labels.dataset_name,
+            data_store.bucket(),
+            prefix,
+            url,
+            false,
+        )
+        .await?;
 
-        metadata_db
-            .set_active_location(table_id.clone(), &location_id)
+        let mut tx = metadata_db.begin_txn().await?;
+        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone()).await?;
+        metadata_db::physical_table::mark_active_by_id(&mut tx, table_id.clone(), location_id)
             .await?;
+        tx.commit().await?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(path));

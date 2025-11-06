@@ -89,13 +89,13 @@ pub struct LocationInfoWithDetails {
 impl From<metadata_db::LocationWithDetails> for LocationInfoWithDetails {
     fn from(value: metadata_db::LocationWithDetails) -> Self {
         Self {
-            id: value.location.id,
-            dataset_namespace: value.location.dataset_namespace.to_string(),
-            dataset_name: value.location.dataset_name.to_string(),
-            manifest_hash: value.location.manifest_hash.to_string(),
-            table: value.location.table_name,
-            url: value.location.url.to_string(),
-            active: value.location.active,
+            id: value.table.id,
+            dataset_namespace: value.table.dataset_namespace.to_string(),
+            dataset_name: value.table.dataset_name.to_string(),
+            manifest_hash: value.table.manifest_hash.to_string(),
+            table: value.table.table_name,
+            url: value.table.url.to_string(),
+            active: value.table.active,
             writer: value.writer.map(Into::into),
         }
     }

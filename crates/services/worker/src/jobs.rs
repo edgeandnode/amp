@@ -77,9 +77,7 @@ impl Job {
         job_desc: Descriptor,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Job, JobCreationError> {
-        let output_locations = ctx
-            .metadata_db
-            .output_locations(job_id)
+        let output_locations = metadata_db::physical_table::get_by_job_id(&ctx.metadata_db, job_id)
             .await
             .map_err(JobCreationError::OutputLocationsFetchFailed)?;
 

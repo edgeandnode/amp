@@ -49,7 +49,7 @@ pub async fn commit_metadata(
 
     // Notify that the dataset has been changed
     trace!("notifying location change for location_id: {}", location_id);
-    metadata_db.notify_location_change(location_id).await?;
+    metadata_db::physical_table::send_location_change_notif(metadata_db, location_id).await?;
 
     Ok(())
 }

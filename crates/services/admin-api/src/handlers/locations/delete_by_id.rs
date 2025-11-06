@@ -104,15 +104,14 @@ pub async fn handler(
         }
     };
 
-    let location = ctx
-        .metadata_db
-        .get_location_by_id_with_details(location_id)
-        .await
-        .map_err(Error::MetadataDbError)?
-        .ok_or_else(|| {
-            tracing::debug!(location_id = %location_id, "Location not found");
-            Error::NotFound { id: location_id }
-        })?;
+    let location =
+        metadata_db::physical_table::get_by_id_with_details(&ctx.metadata_db, location_id)
+            .await
+            .map_err(Error::MetadataDbError)?
+            .ok_or_else(|| {
+                tracing::debug!(location_id = %location_id, "Location not found");
+                Error::NotFound { id: location_id }
+            })?;
 
     if location.active() && !query.force {
         tracing::debug!(location_id = %location_id, "Cannot delete active location without force flag");
@@ -193,9 +192,7 @@ pub async fn handler(
         "Starting bulk deletion of files"
     );
 
-    let _ = ctx
-        .metadata_db
-        .delete_location_by_id(location_id)
+    let _ = metadata_db::physical_table::delete_by_id(&ctx.metadata_db, location_id)
         .await
         .map_err(Error::MetadataDbError)?;
 

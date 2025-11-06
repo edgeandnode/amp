@@ -290,7 +290,7 @@ pub enum JobCreationError {
     ///
     /// Common causes include:
     /// - Database connection failures
-    /// - Job ID not found in the `output_locations` table
+    /// - Job ID not found in the `physical_tables` table
     /// - Database query execution errors
     #[error("failed to fetch output locations: {0}")]
     OutputLocationsFetchFailed(#[source] metadata_db::Error),
