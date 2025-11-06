@@ -250,7 +250,6 @@ export class JobNotFound extends Schema.Class<JobNotFound>("JobNotFound")(
  *
  * Applies to:
  * - GET /jobs - Invalid pagination parameters
- * - GET /locations - Invalid pagination parameters
  * - Any endpoint with query parameter validation
  */
 export class InvalidQueryParameters extends Schema.Class<InvalidQueryParameters>("InvalidQueryParameters")(
@@ -275,7 +274,6 @@ export class InvalidQueryParameters extends Schema.Class<InvalidQueryParameters>
  *
  * Applies to:
  * - GET /jobs - When limit exceeds maximum
- * - GET /locations - When limit exceeds maximum
  * - Any paginated endpoint with limit validation
  */
 export class LimitTooLarge extends Schema.Class<LimitTooLarge>("LimitTooLarge")(
@@ -300,7 +298,6 @@ export class LimitTooLarge extends Schema.Class<LimitTooLarge>("LimitTooLarge")(
  *
  * Applies to:
  * - GET /jobs - When limit is 0 or negative
- * - GET /locations - When limit is 0 or negative
  * - Any paginated endpoint with limit validation
  */
 export class LimitInvalid extends Schema.Class<LimitInvalid>("LimitInvalid")(

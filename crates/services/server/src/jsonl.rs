@@ -26,6 +26,24 @@ pub fn build_router(service: Service) -> Router {
 
 #[tracing::instrument(skip_all)]
 async fn handle_jsonl_request(State(service): State<Service>, request: String) -> Response {
+    // Parse query to check if it's a streaming query
+    let query = match parse_sql(&request) {
+        Ok(query) => query,
+        Err(err) => return err.into_response(),
+    };
+
+    // Reject streaming queries
+    if is_streaming(&query) {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "error_code": "STREAMING_NOT_SUPPORTED",
+                "error_message": "Streaming queries (SETTINGS stream = true) are not supported on the JSONL endpoint. Please use the Arrow Flight endpoint instead.",
+            })),
+        )
+            .into_response();
+    }
+
     let stream = match service.execute_query(&request, None, None).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
@@ -42,18 +60,10 @@ async fn handle_jsonl_request(State(service): State<Service>, request: String) -
         })
         .map_err(error_payload);
 
-    let mut response = Response::builder().header("content-type", "application/x-ndjson");
-    let query = match parse_sql(&request) {
-        Ok(query) => query,
-        Err(err) => return err.into_response(),
-    };
-
-    // For streaming queries, disable compression
-    if is_streaming(&query) {
-        response = response.header("content-encoding", "identity");
-    }
-
-    response.body(Body::from_stream(stream)).unwrap()
+    Response::builder()
+        .header("content-type", "application/x-ndjson")
+        .body(Body::from_stream(stream))
+        .unwrap()
 }
 
 fn error_payload(message: impl std::fmt::Display) -> String {

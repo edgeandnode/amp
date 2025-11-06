@@ -48,8 +48,6 @@ Most list endpoints use cursor-based pagination for efficient data retrieval:
 ### Paginated Endpoints
 The following endpoints support pagination:
 - Jobs: `/jobs`
-- Locations: `/locations`
-- Files: `/locations/{location_id}/files`
 
 ### Non-Paginated Endpoints
 The following endpoints return all results without pagination:
