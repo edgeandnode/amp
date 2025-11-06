@@ -5,6 +5,7 @@ import * as NodePath from "@effect/platform-node/NodePath"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
+import { addSeconds } from "date-fns/addSeconds"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -15,6 +16,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as crypto from "node:crypto"
 import open from "open"
+import { isAddress } from "viem"
 import * as Auth from "../../../Auth.ts"
 
 /**
@@ -95,6 +97,14 @@ class DeviceTokenResponse extends Schema.Class<DeviceTokenResponse>("Amp/auth/lo
   user_id: Schema.NonEmptyTrimmedString.annotations({
     identifier: "DeviceTokenResponse.user_id",
     description: "The authenticated user's ID",
+  }),
+  user_accounts: Schema.Array(Schema.Union(
+    Schema.NonEmptyTrimmedString,
+    Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val))),
+  )),
+  expires_in: Schema.Int.pipe(Schema.positive()).annotations({
+    identifier: "DeviceTokenResponse.expires_in",
+    description: "Seconds until the token expires from receipt",
   }),
 }) {}
 
@@ -330,11 +340,13 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
   )
 
   // Step 4: Store the tokens
-  yield* auth.set({
+  yield* auth.set(Auth.AuthStorageSchema.make({
     accessToken: tokenResponse.access_token,
     refreshToken: tokenResponse.refresh_token,
     userId: tokenResponse.user_id,
-  })
+    accounts: tokenResponse.user_accounts,
+    expiry: addSeconds(Date.now(), tokenResponse.expires_in).getTime(),
+  }))
 
   // Step 5: Log success
   yield* Effect.logInfo("Successfully authenticated!")
