@@ -74,7 +74,7 @@ impl Scheduler {
     /// worker node, creates physical table locations, and registers the job in the metadata database.
     async fn schedule_dataset_sync_job_impl(
         &self,
-        dataset: Dataset,
+        dataset: Arc<Dataset>,
         end_block: EndBlock,
         max_writers: u16,
         job_labels: JobLabels,
@@ -112,7 +112,7 @@ impl Scheduler {
         };
 
         let mut locations = Vec::new();
-        for table in Arc::new(dataset).resolved_tables(job_labels.dataset_reference().into()) {
+        for table in dataset.resolved_tables(job_labels.dataset_reference().into()) {
             let physical_table = match PhysicalTable::get_active(&table, self.metadata_db.clone())
                 .await
                 .map_err(ScheduleJobError::GetPhysicalTable)?
@@ -221,13 +221,8 @@ impl JobScheduler for Scheduler {
         max_writers: u16,
         job_labels: JobLabels,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_dataset_sync_job_impl(
-            Arc::try_unwrap(dataset).unwrap_or_else(|arc| (*arc).clone()),
-            end_block,
-            max_writers,
-            job_labels,
-        )
-        .await
+        self.schedule_dataset_sync_job_impl(dataset, end_block, max_writers, job_labels)
+            .await
     }
 
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError> {
