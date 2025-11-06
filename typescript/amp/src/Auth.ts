@@ -14,8 +14,8 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { isAddress } from "viem"
 
-// export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
-export const AUTH_PLATFORM_URL = new URL("http://localhost:3001")
+export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
+
 const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
