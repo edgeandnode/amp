@@ -87,14 +87,15 @@
 //! ## CDC Stream (Change Data Capture)
 //!
 //! ```rust,ignore
-//! use amp_client::{AmpClient, InMemoryStateStore, InMemoryBatchStore, CdcEvent};
+//! use amp_client::{AmpClient, CdcEvent};
+//! use amp_client::store::{open_lmdb_env, LmdbStateStore, LmdbBatchStore};
 //! use futures::StreamExt;
 //!
-//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
+//! let env = open_lmdb_env("/path/to/db")?;
+//! let state_store = LmdbStateStore::new(env.clone())?;
+//! let batch_store = LmdbBatchStore::new(env)?;
 //!
-//! // Create CDC stream with separate state and batch stores
-//! let state_store = InMemoryStateStore::new();
-//! let batch_store = InMemoryBatchStore::new();
+//! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
 //! let mut stream = client
 //!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
 //!     .cdc(state_store, batch_store, 128)
@@ -138,11 +139,11 @@ pub use client::{
 };
 pub use common::metadata::segments::BlockRange;
 pub use error::Error;
-#[cfg(feature = "lmdb")]
-pub use store::LmdbStateStore;
 #[cfg(feature = "postgres")]
 pub use store::PostgresStateStore;
 pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapshot, StateStore};
+#[cfg(feature = "lmdb")]
+pub use store::{LmdbBatchStore, LmdbStateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
 #[cfg(test)]
