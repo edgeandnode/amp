@@ -23,7 +23,8 @@ class AmpRegistryInsertDatasetVersionDto
     status: Schema.Literal("draft", "published"),
     changelog: Schema.String.pipe(Schema.optionalWith({ nullable: true })),
     version_tag: Model.DatasetRevision,
-    manifest: Model.DatasetDerived,
+    manifest: Model.DatasetManifest,
+    kind: Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose"),
     ancestors: Schema.Array(Model.DatasetReference),
   })
 {}
@@ -93,6 +94,7 @@ export const publish = Command.make("publish", {
             version_tag: "1.0.0",
             status: Option.isSome(version) && version.value === "dev" ? "draft" : "published",
             manifest: ctx.manifest,
+            kind: ctx.manifest.kind,
             ancestors: [],
           },
         }))

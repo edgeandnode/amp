@@ -227,6 +227,8 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
   description: DatasetDescription.pipe(Schema.optional),
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
+  visibility: Schema.Literal("public", "private").pipe(Schema.optional),
+  status: Schema.Literal("draft", "published").pipe(Schema.optional),
 }) {}
 
 export class DatasetConfig extends Schema.Class<DatasetConfig>(
@@ -239,6 +241,9 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   repository: DatasetRepository.pipe(Schema.optional),
   description: DatasetDescription.pipe(Schema.optional),
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  license: DatasetLicense.pipe(Schema.optional),
+  private: Schema.Boolean.pipe(Schema.optional),
+  draft: Schema.Boolean.pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
