@@ -10,7 +10,7 @@ pub mod handlers;
 pub mod scheduler;
 
 use ctx::Ctx;
-use handlers::{datasets, files, jobs, locations, manifests, providers, schema, workers};
+use handlers::{datasets, files, jobs, manifests, providers, schema, workers};
 
 /// Create the admin API router with all routes registered
 ///
@@ -51,15 +51,6 @@ pub fn router(ctx: Ctx) -> Router<()> {
             get(jobs::get_by_id::handler).delete(jobs::delete_by_id::handler),
         )
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
-        .route("/locations", get(locations::get_all::handler))
-        .route(
-            "/locations/{id}",
-            get(locations::get_by_id::handler).delete(locations::delete_by_id::handler),
-        )
-        .route(
-            "/locations/{location_id}/files",
-            get(locations::get_files::handler),
-        )
         .route(
             "/manifests",
             post(manifests::register::handler).delete(manifests::prune::handler),
@@ -116,11 +107,6 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::jobs::stop::handler,
         handlers::jobs::delete::handler,
         handlers::jobs::delete_by_id::handler,
-        // Location endpoints
-        handlers::locations::get_all::handler,
-        handlers::locations::get_by_id::handler,
-        handlers::locations::delete_by_id::handler,
-        handlers::locations::get_files::handler,
         // Provider endpoints
         handlers::providers::get_all::handler,
         handlers::providers::get_by_id::handler,
@@ -155,17 +141,11 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,
         handlers::jobs::delete::JobStatusFilter,
-        // Location schemas
-        handlers::locations::location_info::LocationInfoWithDetails,
-        handlers::locations::location_info::LocationInfo,
-        handlers::locations::get_all::LocationsResponse,
-        handlers::locations::get_files::LocationFilesResponse,
         // Provider schemas
         handlers::providers::provider_info::ProviderInfo,
         handlers::providers::get_all::ProvidersResponse,
         // File schemas
         handlers::files::get_by_id::FileInfo,
-        handlers::locations::get_files::FileListInfo,
         // Schema schemas
         handlers::schema::OutputSchemaRequest,
         handlers::schema::OutputSchemaResponse,
@@ -178,7 +158,6 @@ pub fn router(ctx: Ctx) -> Router<()> {
     tags(
         (name = "datasets", description = "Dataset management endpoints"),
         (name = "jobs", description = "Job management endpoints"),
-        (name = "locations", description = "Location management endpoints"),
         (name = "manifests", description = "Manifest management endpoints"),
         (name = "providers", description = "Provider management endpoints"),
         (name = "files", description = "File access endpoints"),
