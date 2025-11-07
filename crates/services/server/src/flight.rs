@@ -69,6 +69,7 @@ pub struct Service {
     dataset_store: Arc<DatasetStore>,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
+    metadata_db: MetadataDb,
 }
 
 impl Service {
@@ -99,6 +100,7 @@ impl Service {
             dataset_store,
             notification_multiplexer,
             metrics,
+            metadata_db,
         })
     }
 
@@ -112,7 +114,7 @@ impl Service {
         let dataset_store = self.dataset_store.clone();
         let catalog = catalog_for_sql(
             dataset_store.as_ref(),
-            dataset_store.metadata_db(),
+            &self.metadata_db,
             &query,
             self.env.clone(),
         )

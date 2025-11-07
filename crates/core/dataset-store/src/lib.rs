@@ -87,11 +87,6 @@ impl DatasetStore {
             dataset_cache: Default::default(),
         })
     }
-
-    /// Returns a reference to the metadata database.
-    pub fn metadata_db(&self) -> &MetadataDb {
-        &self.metadata_db
-    }
 }
 
 // Provider configuration  management APIs

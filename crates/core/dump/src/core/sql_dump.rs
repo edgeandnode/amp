@@ -162,7 +162,7 @@ pub async fn dump_table(
     join_set.spawn(async move {
         let catalog = catalog_for_sql(
             dataset_store.as_ref(),
-            dataset_store.metadata_db(),
+            &ctx.metadata_db,
             &query,
             env.clone(),
         )
