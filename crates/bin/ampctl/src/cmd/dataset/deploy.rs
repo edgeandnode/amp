@@ -17,7 +17,7 @@
 
 use datasets_common::reference::Reference;
 use dump::EndBlock;
-use worker::job::JobId;
+use worker::{job::JobId, node_id::NodeId};
 
 use crate::args::GlobalArgs;
 
@@ -55,6 +55,15 @@ pub struct Args {
     /// Defaults to 1 if not specified.
     #[arg(long, default_value = "1")]
     pub parallelism: u16,
+
+    /// Worker ID to assign the job to
+    ///
+    /// If specified, the job will be assigned to this specific worker.
+    /// If not specified, a worker will be selected randomly from available workers.
+    ///
+    /// The worker must be active (has sent heartbeats recently) for the deployment to succeed.
+    #[arg(long, value_parser = clap::value_parser!(NodeId))]
+    pub worker_id: Option<NodeId>,
 }
 
 /// Deploy a dataset to start syncing blockchain data.
@@ -71,16 +80,18 @@ pub async fn run(
         dataset_ref,
         end_block,
         parallelism,
+        worker_id,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!(
         %dataset_ref,
         ?end_block,
         %parallelism,
+        ?worker_id,
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism).await?;
+    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism, worker_id).await?;
 
     crate::success!("Dataset deployed successfully");
     crate::info!("Job ID: {}", job_id);
@@ -92,17 +103,18 @@ pub async fn run(
 ///
 /// POSTs to the versioned `/datasets/{namespace}/{name}/versions/{version}/deploy` endpoint
 /// and returns the job ID.
-#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism))]
+#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism, ?worker_id))]
 async fn deploy_dataset(
     global: &GlobalArgs,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
+    worker_id: Option<NodeId>,
 ) -> Result<JobId, Error> {
     let client = global.build_client()?;
     let job_id = client
         .datasets()
-        .deploy(dataset_ref, end_block, parallelism)
+        .deploy(dataset_ref, end_block, parallelism, worker_id)
         .await
         .map_err(|source| Error::Deploy { source })?;
 

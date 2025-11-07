@@ -54,6 +54,7 @@ pub trait SchedulerJobs: Send + Sync {
         end_block: EndBlock,
         max_writers: u16,
         job_labels: JobLabels,
+        worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError>;
 
     /// Stop a running job
@@ -114,6 +115,14 @@ pub enum ScheduleJobError {
     /// - All workers are at capacity
     #[error("no workers available")]
     NoWorkersAvailable,
+
+    /// Specified worker not found or inactive
+    ///
+    /// This occurs when:
+    /// - The specified worker ID doesn't exist in the system
+    /// - The specified worker hasn't sent heartbeats recently (inactive)
+    #[error("specified worker '{0}' not found or inactive")]
+    WorkerNotAvailable(NodeId),
 
     /// Failed to get active physical table for dataset
     ///
