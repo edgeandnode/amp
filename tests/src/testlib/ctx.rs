@@ -32,7 +32,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use common::{BoxError, config::Config};
 use datasets_common::reference::Reference;
-use worker::NodeId;
+use worker::node_id::NodeId;
 
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,

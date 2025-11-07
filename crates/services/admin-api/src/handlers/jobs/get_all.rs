@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use worker::JobId;
+use worker::job::JobId;
 
 use super::job_info::JobInfo;
 use crate::{

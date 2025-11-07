@@ -14,18 +14,9 @@ use dump::{
     EndBlock,
     metrics::{self, MetricsRegistry},
 };
-pub use metadata_db::JobStatus;
 use tracing::instrument;
 
-use crate::JobCreationError;
-
-mod id;
-mod notif;
-
-pub use self::{
-    id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
-    notif::{Action, Notification},
-};
+use crate::{job::JobId, service::JobCreationError};
 
 /// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
 /// metadata DB table.

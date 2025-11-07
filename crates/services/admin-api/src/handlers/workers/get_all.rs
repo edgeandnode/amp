@@ -1,7 +1,7 @@
 //! Workers get all handler
 
 use axum::{Json, extract::State, http::StatusCode};
-use worker::NodeId;
+use worker::node_id::NodeId;
 
 use crate::{
     ctx::Ctx,
@@ -10,17 +10,17 @@ use crate::{
 
 /// Handler for the `GET /workers` endpoint
 ///
-/// Retrieves and returns a list of all workers from the metadata database.
+/// Retrieves and returns a list of all workers from the scheduler.
 ///
 /// ## Response
 /// - **200 OK**: Returns all workers with their information
-/// - **500 Internal Server Error**: Database connection or query error
+/// - **500 Internal Server Error**: Scheduler query error
 ///
 /// ## Error Codes
-/// - `METADATA_DB_LIST_ERROR`: Failed to retrieve workers list from database
+/// - `SCHEDULER_LIST_WORKERS_ERROR`: Failed to retrieve workers list from scheduler
 ///
 /// This handler:
-/// - Fetches all workers from the metadata database
+/// - Fetches all workers from the scheduler
 /// - Converts worker records to API response format with ISO 8601 RFC3339 timestamps
 /// - Returns a structured response with worker information including node IDs and last heartbeat times
 #[tracing::instrument(skip_all, err)]
@@ -38,13 +38,11 @@ use crate::{
     )
 )]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<WorkersResponse>, ErrorResponse> {
-    // Fetch all workers from metadata DB
-    let workers = metadata_db::workers::list(&ctx.metadata_db)
-        .await
-        .map_err(|err| {
-            tracing::debug!(error=?err, "failed to list workers");
-            Error::MetadataDbList(err)
-        })?;
+    // Fetch all workers from scheduler
+    let workers = ctx.scheduler.list_workers().await.map_err(|err| {
+        tracing::debug!(error=?err, "failed to list workers");
+        Error::SchedulerListWorkers(err)
+    })?;
 
     let workers = workers.into_iter().map(Into::into).collect();
 
@@ -71,26 +69,26 @@ pub struct WorkersResponse {
 /// when handling a `GET /workers` request.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to list workers from the metadata database
+    /// Failed to list workers from the scheduler
     ///
     /// This occurs when:
     /// - Database connection fails or is lost during the query
     /// - Query execution encounters an internal database error
     /// - Connection pool is exhausted or unavailable
     #[error("failed to list workers: {0}")]
-    MetadataDbList(#[source] metadata_db::Error),
+    SchedulerListWorkers(#[source] crate::scheduler::ListWorkersError),
 }
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
-            Error::MetadataDbList(_) => "METADATA_DB_LIST_ERROR",
+            Error::SchedulerListWorkers(_) => "SCHEDULER_LIST_WORKERS_ERROR",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::MetadataDbList(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SchedulerListWorkers(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

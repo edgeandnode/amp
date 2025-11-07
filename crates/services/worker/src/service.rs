@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use common::config::Config;
 use dataset_store::{
@@ -11,34 +11,40 @@ use monitoring::telemetry::metrics::Meter;
 use tokio::time::MissedTickBehavior;
 use tokio_util::task::AbortOnDropHandle;
 
+use crate::{
+    info::WorkerInfo,
+    job::{JobAction, JobId, JobNotification},
+    node_id::NodeId,
+};
+
 mod db;
+mod error;
+mod job_impl;
 mod job_set;
 
+pub use self::error::{
+    AbortJobError, HeartbeatTaskError, InitError, JobCreationError, JobResultError,
+    NotificationError, ReconcileError, RuntimeError, SpawnJobError, StartActionError,
+};
 use self::{
     db::{JobMeta, JobStatus, MetadataDbRetryExt as _},
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
-use crate::{
-    AbortJobError, BootstrapError, Error, HeartbeatSetupError, HeartbeatTaskError, JobId,
-    JobResultError, MainLoopError, NodeId, NotificationError, NotificationSetupError,
-    ReconcileError, RegistrationError, SpawnJobError, StartActionError, WorkerInfo,
-    jobs::{Action, Job, Notification},
-};
-
 /// Run the worker service
 ///
-/// This function creates and runs a worker instance with the provided configuration.
+/// This function creates and runs a worker instance with the provided configuration
+/// using a two-phase initialization pattern:
 ///
-/// # Errors
-///
-/// Returns an error if a fatal condition occurs that prevents the worker from continuing.
-#[allow(clippy::manual_async_fn)]
-pub fn new(
+/// - **Phase 1 (Initialization)**: Worker registration, heartbeat setup, notification
+///   listener setup, and bootstrap. Errors in this phase are returned as [`InitError`].
+/// - **Phase 2 (Runtime)**: Main event loop handling heartbeats, job notifications,
+///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
+pub async fn new(
     node_id: NodeId,
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    meter: Option<monitoring::telemetry::metrics::Meter>,
-) -> impl Future<Output = Result<(), Error>> {
+    meter: Option<Meter>,
+) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
     // Create worker info from build information
     let worker_info = WorkerInfo {
         version: Some(config.build_info.version.clone()),
@@ -47,65 +53,58 @@ pub fn new(
         build_date: Some(config.build_info.build_date.clone()),
     };
 
-    async move {
-        // Create worker instance
-        let mut worker = Worker::new(node_id, config, metadata_db, meter);
+    // Register the worker in the Metadata DB and update the latest heartbeat timestamp.
+    // Retry on failure
+    metadata_db
+        .register_worker_with_retry(&node_id, &worker_info)
+        .await
+        .map_err(InitError::Registration)?;
 
+    // Establish a dedicated connection to the metadata DB, and start the heartbeat loop
+    let heartbeat_fut = metadata_db
+        .worker_heartbeat_loop_with_retry(node_id.clone())
+        .await
+        .map_err(InitError::HeartbeatSetup)?;
+    let mut heartbeat_loop_handle = AbortOnDropHandle::new(tokio::spawn(heartbeat_fut));
+
+    // Start listening for job notifications. Retry on initial connection failure
+    let listener = metadata_db
+        .listen_for_job_notifications_with_retry(&node_id)
+        .await
+        .map_err(InitError::NotificationSetup)?;
+
+    // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
+    // from the last known state.
+    //
+    // This is done by fetching all the active jobs (jobs in [`JobStatus::Scheduled`] or
+    // [`JobStatus::Running`]) from the Metadata DB's jobs table and spawning them in the jobs
+    // set, ensuring the worker is in sync with the Metadata DB's jobs table state.
+    let scheduled_jobs = metadata_db
+        .get_scheduled_jobs_with_retry(&node_id)
+        .await
+        .map_err(InitError::BootstrapFetchScheduledJobs)?;
+
+    let mut worker = Worker::new(node_id, config, metadata_db, meter);
+
+    for job in scheduled_jobs {
+        let job_id = job.id.into();
+        worker
+            .spawn_job(job)
+            .await
+            .map_err(|source| InitError::BootstrapSpawnJob { job_id, source })?;
+    }
+
+    // The worker service future
+    let fut = async move {
+        // Setup reconcile interval
         let mut reconcile_interval = tokio::time::interval(Duration::from_secs(60));
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        // Register the worker in the Metadata DB. and update the latest heartbeat timestamp.
-        // Retry on failure
-        worker
-            .meta
-            .register_worker_with_retry(&worker.node_id, &worker_info)
-            .await
-            .map_err(|err| Error::Registration(RegistrationError(err)))?;
-
-        // Establish a dedicated connection to the metadata DB, and start the heartbeat loop
-        let mut heartbeat_loop_handle = {
-            let fut = worker
-                .meta
-                .worker_heartbeat_loop_with_retry(worker.node_id.clone())
-                .await
-                .map_err(|err| Error::HeartbeatSetup(HeartbeatSetupError(err)))?;
-            AbortOnDropHandle::new(tokio::spawn(fut))
-        };
-
-        // Start listening for job notifications. Retry on initial connection failure
-        let mut job_notification_stream = {
-            let listener = worker
-                .meta
-                .listen_for_job_notifications_with_retry(&worker.node_id)
-                .await
-                .map_err(|err| Error::NotificationSetup(NotificationSetupError(err)))?;
-
-            let stream = listener
-                .into_stream::<Notification>()
-                .map_err(NotificationError::DeserializationFailed);
-            std::pin::pin!(stream)
-        };
-
-        // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
-        // from the last known state.
-        //
-        // This is done by fetching all the active jobs (jobs in [`JobStatus::Scheduled`] or
-        // [`JobStatus::Running`]) from the Metadata DB's jobs table and spawning them in the jobs
-        // set, ensuring the worker is in sync with the Metadata DB's jobs table state.
-        let scheduled_jobs = worker
-            .meta
-            .get_scheduled_jobs_with_retry(&worker.node_id)
-            .await
-            .map_err(|err| Error::Bootstrap(BootstrapError::FetchScheduledJobsFailed(err)))?;
-        for job in scheduled_jobs {
-            let job_id = job.id.into();
-            worker.spawn_job(job).await.map_err(|err| {
-                Error::Bootstrap(BootstrapError::SpawnJobFailed {
-                    job_id,
-                    source: err,
-                })
-            })?;
-        }
+        // Setup job notification stream (must be inside the async move block to avoid borrow issues)
+        let stream = listener
+            .into_stream::<JobNotification>()
+            .map_err(NotificationError::DeserializationFailed);
+        let mut job_notification_stream = std::pin::pin!(stream);
 
         // Main loop
         loop {
@@ -116,23 +115,23 @@ pub fn new(
                         Ok(Ok(())) => {
                             // The heartbeat loop must never exit, this is a fatal error.
                             // Exit the worker
-                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                            return Err(RuntimeError::HeartbeatTaskDied(
                                 HeartbeatTaskError::UnexpectedExit,
-                            )));
+                            ));
                         }
                         Ok(Err(err)) => {
                             // A fatal error occurred in the heartbeat loop.
                             // Exit the worker
-                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                            return Err(RuntimeError::HeartbeatTaskDied(
                                 HeartbeatTaskError::UpdateFailed(err),
-                            )));
+                            ));
                         }
                         Err(err) => {
                             // A fatal error occurred in the heartbeat loop task.
                             // Exit the worker
-                            return Err(Error::MainLoop(MainLoopError::HeartbeatTaskDied(
+                            return Err(RuntimeError::HeartbeatTaskDied(
                                 HeartbeatTaskError::Panicked(err.into()),
-                            )));
+                            ));
                         }
                     }
                 },
@@ -143,6 +142,8 @@ pub fn new(
                         Ok(Some(notif)) => notif,
                         Ok(None) => {
                             tracing::error!(node_id=%worker.node_id, "job notification stream closed");
+                            // The stream has been closed, which is unexpected.
+                            // Attempt to re-establish the listener after a short delay
                             tokio::time::sleep(Duration::from_secs(2)).await;
                             continue;
                         }
@@ -159,33 +160,35 @@ pub fn new(
 
                     worker.handle_job_notification_action(notif.job_id, notif.action)
                         .await
-                        .map_err(|err| Error::MainLoop(MainLoopError::NotificationHandling(err)))?;
+                        .map_err(RuntimeError::NotificationHandling)?;
                 },
 
                 // 3. Poll the job set for job execution results
                 Some((job_id, result)) = worker.job_set.join_next_with_id() => {
                     worker.handle_job_result(job_id, result)
                         .await
-                        .map_err(|err| Error::MainLoop(MainLoopError::JobResultHandling(err)))?;
+                        .map_err(RuntimeError::JobResultHandling)?;
                 }
 
                 // 4. Periodically reconcile the jobs state with the Metadata DB jobs table state
                 _ = reconcile_interval.tick() => {
                     worker.reconcile_jobs()
                         .await
-                        .map_err(|err| Error::MainLoop(MainLoopError::Reconciliation(err)))?;
+                        .map_err(RuntimeError::Reconciliation)?;
                 }
             }
         }
-    }
+    };
+
+    Ok(fut)
 }
 
 pub struct Worker {
     node_id: NodeId,
-    meta: MetadataDb,
+    metadata_db: MetadataDb,
     job_ctx: Ctx,
     job_set: JobSet,
-    meter: Option<monitoring::telemetry::metrics::Meter>,
+    meter: Option<Meter>,
 }
 
 impl Worker {
@@ -215,7 +218,7 @@ impl Worker {
 
         Self {
             node_id,
-            meta: metadata_db.clone(),
+            metadata_db: metadata_db.clone(),
             job_ctx: Ctx {
                 config,
                 metadata_db,
@@ -235,17 +238,19 @@ impl Worker {
     async fn handle_job_notification_action(
         &mut self,
         job_id: JobId,
-        action: Action,
+        action: JobAction,
     ) -> Result<(), NotificationError> {
         match action {
-            Action::Start => {
+            JobAction::Start => {
                 // Load the job from the metadata DB (retry on failure)
-                let job = self.meta.get_job_with_retry(&job_id).await.map_err(|err| {
-                    NotificationError::StartActionFailed {
+                let job = self
+                    .metadata_db
+                    .get_job_with_retry(&job_id)
+                    .await
+                    .map_err(|err| NotificationError::StartActionFailed {
                         job_id,
                         source: StartActionError::JobLoadFailed(err),
-                    }
-                })?;
+                    })?;
 
                 let Some(job) = job else {
                     // If the job is not found, just ignore the notification
@@ -260,7 +265,7 @@ impl Worker {
                         source: StartActionError::SpawnFailed(error),
                     })
             }
-            Action::Stop => {
+            JobAction::Stop => {
                 self.abort_job(job_id)
                     .await
                     .map_err(|error| NotificationError::StopActionFailed {
@@ -285,7 +290,7 @@ impl Worker {
                 tracing::info!(node_id=%self.node_id, %job_id, "job completed successfully");
 
                 // Mark the job as COMPLETED (retry on failure)
-                self.meta
+                self.metadata_db
                     .mark_job_completed_with_retry(&job_id)
                     .await
                     .map_err(|error| JobResultError::MarkCompletedFailed {
@@ -297,7 +302,7 @@ impl Worker {
                 tracing::error!(node_id=%self.node_id, %job_id, "job failed: {:?}", err);
 
                 // Mark the job as FAILED (retry on failure)
-                self.meta
+                self.metadata_db
                     .mark_job_failed_with_retry(&job_id)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
@@ -309,7 +314,7 @@ impl Worker {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
 
                 // Mark the job as STOPPED (retry on failure)
-                self.meta
+                self.metadata_db
                     .mark_job_stopped_with_retry(&job_id)
                     .await
                     .map_err(|error| JobResultError::MarkStoppedFailed {
@@ -321,7 +326,7 @@ impl Worker {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, "job panicked");
 
                 // Mark the job as FAILED (retry on failure)
-                self.meta
+                self.metadata_db
                     .mark_job_failed_with_retry(&job_id)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
@@ -345,7 +350,7 @@ impl Worker {
     /// This method is called periodically to maintain consistency between the worker and database state.
     async fn reconcile_jobs(&mut self) -> Result<(), ReconcileError> {
         let active_jobs = match self
-            .meta
+            .metadata_db
             .get_active_jobs_with_retry(self.node_id.clone())
             .await
         {
@@ -394,7 +399,7 @@ impl Worker {
 
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {
-            self.meta
+            self.metadata_db
                 .mark_job_running_with_retry(&job.id.into())
                 .await
                 .map_err(SpawnJobError::StatusUpdateFailed)?;
@@ -405,7 +410,7 @@ impl Worker {
         let job_desc =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
-        let job = Job::try_from_descriptor(
+        let job = job_impl::Job::try_from_descriptor(
             self.job_ctx.clone(),
             job_id.into(),
             job_desc,
@@ -427,7 +432,7 @@ impl Worker {
         tracing::info!(node_id=%self.node_id, %job_id, "job stop requested");
 
         // Mark the job as STOPPING (retry on failure)
-        self.meta
+        self.metadata_db
             .mark_job_stopping_with_retry(&job_id)
             .await
             .map_err(AbortJobError)?;
