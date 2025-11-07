@@ -1,77 +1,122 @@
 name: Trigger AMP Deploy
 
 on:
-   workflow_dispatch:
-   push:
-      tags: ["v*"]
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
-   trigger-deploy:
-      runs-on: ubuntu-latest
-      steps:
-         - name: Verify containerize jobs and trigger deploy
-           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-           with:
-              github-token: ${{ secrets.AMP_INFRA_DISPATCH_TOKEN }}
-              script: |
-                 // Find the Build workflow run - match by ref if triggered by push, otherwise get most recent
-                 const currentRef = context.ref;
-                 const isTagPush = context.eventName === 'push' && currentRef.startsWith('refs/tags/');
+  trigger-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify containerize jobs and trigger deploy
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          github-token: ${{ secrets.AMP_INFRA_DISPATCH_TOKEN }}
+          script: |
+            // Find the Build workflow run - match by ref if triggered by push, otherwise get most recent
+            const currentRef = context.ref;
+            const currentSha = context.sha;
+            const isTagPush = context.eventName === 'push' && currentRef.startsWith('refs/tags/');
+            const tagName = isTagPush ? currentRef.replace('refs/tags/', '') : null;
 
-                 const runs = await github.request('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
-                   owner: context.repo.owner,
-                   repo: context.repo.repo,
-                   workflow_id: 'build.yml',
-                   status: 'success',
-                   per_page: isTagPush ? 10 : 1
-                 });
+            try {
+              // First, get the workflow ID by listing workflows
+              const workflows = await github.request('GET /repos/{owner}/{repo}/actions/workflows', {
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
 
-                 if (runs.data.total_count === 0) {
-                   core.setFailed('No successful Build workflow run found. Please run the Build workflow first.');
-                 }
+              const buildWorkflow = workflows.data.workflows.find(w => w.name === 'Build' || w.path === '.github/workflows/build.yml');
+              if (!buildWorkflow) {
+                core.setFailed('Build workflow not found. Please ensure the build.yml workflow exists.');
+                return;
+              }
 
-                 // If triggered by tag push, find the build run for this specific tag
-                 let latestRun;
-                 if (isTagPush) {
-                   const buildRun = runs.data.workflow_runs.find(run => run.head_branch === currentRef.replace('refs/tags/', '') || run.head_ref === currentRef);
-                   if (!buildRun) {
-                     core.setFailed(`No successful Build workflow run found for tag ${currentRef}. Please ensure the Build workflow completed for this tag.`);
-                   }
-                   latestRun = buildRun;
-                 } else {
-                   latestRun = runs.data.workflow_runs[0];
-                 }
+              // Fetch workflow runs - get more for tag pushes to find the matching one
+              const runs = await github.request('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: buildWorkflow.id,
+                status: 'success',
+                per_page: isTagPush ? 30 : 10
+              });
 
-                 // Get jobs for this workflow run
-                 const jobs = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs', {
-                   owner: context.repo.owner,
-                   repo: context.repo.repo,
-                   run_id: latestRun.id
-                 });
+              if (runs.data.total_count === 0) {
+                core.setFailed('No successful Build workflow run found. Please run the Build workflow first.');
+                return;
+              }
 
-                 // Check if all containerize jobs completed successfully
-                 const containerizeJobs = jobs.data.jobs.filter(job => job.name.startsWith('Containerize'));
+              // If triggered by tag push, find the build run for this specific tag
+              // For tag runs, head_branch is null and head_ref contains the tag name
+              let latestRun;
+              if (isTagPush) {
+                const buildRun = runs.data.workflow_runs.find(run => {
+                  // Match by tag name in head_ref (most reliable for tag runs)
+                  // head_ref contains the tag name for tag-triggered runs
+                  return run.head_ref === tagName || run.head_sha === currentSha;
+                });
+                if (!buildRun) {
+                  core.setFailed(`No successful Build workflow run found for tag ${tagName} (${currentRef}). Please ensure the Build workflow completed for this tag.`);
+                  return;
+                }
+                latestRun = buildRun;
+              } else {
+                // For workflow_dispatch, try to match by SHA first, then use most recent
+                const matchingRun = runs.data.workflow_runs.find(run => run.head_sha === currentSha);
+                latestRun = matchingRun || runs.data.workflow_runs[0];
+              }
 
-                 if (containerizeJobs.length === 0) {
-                   core.setFailed('Containerize jobs not found in the Build workflow run. Please ensure the containerize jobs have completed.');
-                 }
+              // Get jobs for this workflow run
+              const jobs = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs', {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: latestRun.id
+              });
 
-                 const failedJobs = containerizeJobs.filter(job => job.conclusion !== 'success');
-                 if (failedJobs.length > 0) {
-                   const failedJobNames = failedJobs.map(job => `${job.name} (${job.conclusion})`).join(', ');
-                   core.setFailed(`Some containerize jobs did not complete successfully: ${failedJobNames}`);
-                 }
+              // Check if all containerize jobs completed successfully
+              const containerizeJobs = jobs.data.jobs.filter(job => job.name.startsWith('Containerize'));
 
-                 // All containerize jobs succeeded - trigger deploy
-                 await github.rest.repos.createDispatchEvent({
-                   owner: 'edgeandnode',
-                   repo: 'amp-infra',
-                   event_type: 'build-completed',
-                   client_payload: {
-                     ref: latestRun.head_branch || latestRun.head_ref,
-                     sha: latestRun.head_sha,
-                     workflow_run_id: latestRun.id,
-                     build_status: 'success',
-                     repository: context.repo.repo
-                   }
-                 });
+              if (containerizeJobs.length === 0) {
+                core.setFailed('Containerize jobs not found in the Build workflow run. Please ensure the containerize jobs have completed.');
+                return;
+              }
+
+              // Filter out skipped jobs (they're fine) and check for actual failures
+              const failedJobs = containerizeJobs.filter(job => {
+                // Only consider jobs that actually ran (not skipped)
+                return job.conclusion !== 'success' && job.conclusion !== 'skipped';
+              });
+
+              if (failedJobs.length > 0) {
+                const failedJobNames = failedJobs.map(job => `${job.name} (${job.conclusion})`).join(', ');
+                core.setFailed(`Some containerize jobs did not complete successfully: ${failedJobNames}`);
+                return;
+              }
+
+              // Determine the ref to use - prefer head_ref for tags, fallback to head_branch or currentRef
+              const deployRef = latestRun.head_ref || latestRun.head_branch || currentRef;
+
+              // All containerize jobs succeeded - trigger deploy
+              await github.rest.repos.createDispatchEvent({
+                owner: 'edgeandnode',
+                repo: 'amp-infra',
+                event_type: 'build-completed',
+                client_payload: {
+                  ref: deployRef,
+                  sha: latestRun.head_sha,
+                  workflow_run_id: latestRun.id,
+                  build_status: 'success',
+                  repository: context.repo.repo
+                }
+              });
+
+              core.info(`Successfully triggered deploy for ${deployRef} (${latestRun.head_sha})`);
+            } catch (error) {
+              core.setFailed(`Failed to trigger deploy: ${error.message}`);
+              throw error;
+            }
