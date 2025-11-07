@@ -8,7 +8,7 @@ use datasets_common::{
 };
 use dump::EndBlock;
 use serde_json::value::RawValue;
-use worker::job::JobId;
+use worker::{job::JobId, node_id::NodeId};
 
 use super::{
     Client,
@@ -216,12 +216,13 @@ impl<'a> DatasetsClient<'a> {
     ///
     /// Returns [`DeployError`] for network errors, API errors (400/404/500),
     /// or unexpected responses.
-    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref, ?end_block, parallelism))]
+    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref, ?end_block, parallelism, ?worker_id))]
     pub async fn deploy(
         &self,
         dataset_ref: &Reference,
         end_block: Option<EndBlock>,
         parallelism: u16,
+        worker_id: Option<NodeId>,
     ) -> Result<JobId, DeployError> {
         let namespace = dataset_ref.namespace();
         let name = dataset_ref.name();
@@ -238,6 +239,7 @@ impl<'a> DatasetsClient<'a> {
         let request_body = DeployRequest {
             end_block,
             parallelism,
+            worker_id,
         };
 
         let response = self
@@ -297,6 +299,9 @@ impl<'a> DatasetsClient<'a> {
                     }
                     "GET_DATASET_ERROR" => Err(DeployError::GetDatasetError(error_response.into())),
                     "SCHEDULER_ERROR" => Err(DeployError::SchedulerError(error_response.into())),
+                    "WORKER_NOT_AVAILABLE" => {
+                        Err(DeployError::WorkerNotAvailable(error_response.into()))
+                    }
                     _ => Err(DeployError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text,
@@ -889,6 +894,8 @@ struct DeployRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     end_block: Option<EndBlock>,
     parallelism: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worker_id: Option<NodeId>,
 }
 
 /// Input type for dataset registration manifest parameter.
@@ -1113,6 +1120,14 @@ pub enum DeployError {
     /// - Invalid job configuration
     #[error("scheduler error")]
     SchedulerError(#[source] ApiError),
+
+    /// Specified worker not found or inactive (400, WORKER_NOT_AVAILABLE)
+    ///
+    /// This occurs when:
+    /// - The specified worker ID doesn't exist in the system
+    /// - The specified worker hasn't sent heartbeats recently (inactive)
+    #[error("worker not available")]
+    WorkerNotAvailable(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

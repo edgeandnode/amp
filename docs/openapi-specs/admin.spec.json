@@ -288,7 +288,7 @@
           "datasets"
         ],
         "summary": "Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/deploy` endpoint",
-        "description": "Schedules a data extraction job for the specified dataset revision.\n\n## Response\n- **202 Accepted**: Job successfully scheduled\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n\n## Behavior\nThis endpoint schedules a data extraction job for a dataset:\n1. Resolves the revision to find the corresponding version tag\n2. Loads the full dataset configuration from the dataset store\n3. Schedules an extraction job with the specified parameters\n4. Returns job ID for tracking\n\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\") - uses that specific version\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version tag\n- Manifest hash (SHA256 hash) - finds the version that points to this hash\n\nJobs are executed asynchronously by worker nodes. Use the returned job ID\nto track progress via the jobs endpoints.",
+        "description": "Schedules a data extraction job for the specified dataset revision.\n\n## Response\n- **202 Accepted**: Job successfully scheduled\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `WORKER_NOT_AVAILABLE`: Specified worker not found or inactive\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n\n## Behavior\nThis endpoint schedules a data extraction job for a dataset:\n1. Resolves the revision to find the corresponding version tag\n2. Loads the full dataset configuration from the dataset store\n3. Schedules an extraction job with the specified parameters\n4. Returns job ID for tracking\n\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\") - uses that specific version\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version tag\n- Manifest hash (SHA256 hash) - finds the version that points to this hash\n\nJobs are executed asynchronously by worker nodes. Use the returned job ID\nto track progress via the jobs endpoints.",
         "operationId": "deploy_dataset",
         "parameters": [
           {
@@ -1564,6 +1564,13 @@
             "format": "int32",
             "description": "Number of parallel workers to run\n\nEach worker will be responsible for an equal number of blocks.\nFor example, if extracting blocks 0-10,000,000 with parallelism=10,\neach worker will handle a contiguous section of 1 million blocks.\n\nOnly applicable to raw datasets (EVM RPC, Firehose, etc.).\nDerived datasets ignore this parameter.\n\nDefaults to 1 if not specified.",
             "minimum": 0
+          },
+          "worker_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional worker ID to assign the job to\n\nIf specified, the job will be assigned to this specific worker.\nIf not specified, a worker will be selected randomly from available workers.\n\nThe worker must be active (has sent heartbeats recently) for the deployment to succeed."
           }
         }
       },

@@ -76,13 +76,15 @@ impl Scheduler {
     /// Schedule a dataset synchronization job
     ///
     /// Checks for existing scheduled or running jobs to avoid duplicates, selects an available
-    /// worker node, creates physical table locations, and registers the job in the metadata database.
+    /// worker node (or uses the specified worker_id), creates physical table locations, and
+    /// registers the job in the metadata database.
     async fn schedule_dataset_sync_job_impl(
         &self,
         dataset: Arc<Dataset>,
         end_block: EndBlock,
         max_writers: u16,
         job_labels: JobLabels,
+        worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
         let existing_jobs =
@@ -112,8 +114,22 @@ impl Scheduler {
         let candidates = metadata_db::workers::list_active(&self.metadata_db, DEAD_WORKER_INTERVAL)
             .await
             .map_err(ScheduleJobError::ListActiveWorkers)?;
-        let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
-            return Err(ScheduleJobError::NoWorkersAvailable);
+
+        let node_id = match worker_id {
+            Some(worker_id) => {
+                let worker_id_ref = metadata_db::WorkerNodeId::from(&worker_id);
+                if !candidates.contains(&worker_id_ref) {
+                    return Err(ScheduleJobError::WorkerNotAvailable(worker_id));
+                }
+                worker_id_ref.to_owned()
+            }
+            None => {
+                // Randomly select from active workers
+                let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
+                    return Err(ScheduleJobError::NoWorkersAvailable);
+                };
+                node_id
+            }
         };
 
         let mut locations = Vec::new();
@@ -225,8 +241,9 @@ impl SchedulerJobs for Scheduler {
         end_block: EndBlock,
         max_writers: u16,
         job_labels: JobLabels,
+        worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_dataset_sync_job_impl(dataset, end_block, max_writers, job_labels)
+        self.schedule_dataset_sync_job_impl(dataset, end_block, max_writers, job_labels, worker_id)
             .await
     }
 
