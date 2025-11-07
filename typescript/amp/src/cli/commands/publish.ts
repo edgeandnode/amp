@@ -49,12 +49,9 @@ export const publish = Command.make("publish", {
 
       // Determine version tag (handle optional, default to "dev")
       const versionTag = Option.getOrElse(args.tag, () => "dev" as const)
-
-      // Determine status based on tag
       const status = versionTag === "dev" ? "draft" : "published"
 
-      // Publish dataset/version
-      yield* ampRegistry.publishFlow({
+      const publishResult = yield* ampRegistry.publishFlow({
         auth: accessToken,
         context,
         versionTag,
@@ -80,6 +77,11 @@ export const publish = Command.make("publish", {
               Effect.zipRight(Effect.fail(err)),
             ),
         }),
+      )
+
+      yield* Console.log("Dataset successfully published!")
+      yield* Console.log(
+        `Visit https://registry.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
       )
     })
   ),
