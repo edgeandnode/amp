@@ -1,0 +1,77 @@
+name: Trigger AMP Deploy
+
+on:
+   workflow_dispatch:
+   push:
+      tags: ["v*"]
+
+jobs:
+   trigger-deploy:
+      runs-on: ubuntu-latest
+      steps:
+         - name: Verify containerize jobs and trigger deploy
+           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+           with:
+              github-token: ${{ secrets.AMP_INFRA_DISPATCH_TOKEN }}
+              script: |
+                 // Find the Build workflow run - match by ref if triggered by push, otherwise get most recent
+                 const currentRef = context.ref;
+                 const isTagPush = context.eventName === 'push' && currentRef.startsWith('refs/tags/');
+
+                 const runs = await github.request('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
+                   owner: context.repo.owner,
+                   repo: context.repo.repo,
+                   workflow_id: 'build.yml',
+                   status: 'success',
+                   per_page: isTagPush ? 10 : 1
+                 });
+
+                 if (runs.data.total_count === 0) {
+                   core.setFailed('No successful Build workflow run found. Please run the Build workflow first.');
+                 }
+
+                 // If triggered by tag push, find the build run for this specific tag
+                 let latestRun;
+                 if (isTagPush) {
+                   const buildRun = runs.data.workflow_runs.find(run => run.head_branch === currentRef.replace('refs/tags/', '') || run.head_ref === currentRef);
+                   if (!buildRun) {
+                     core.setFailed(`No successful Build workflow run found for tag ${currentRef}. Please ensure the Build workflow completed for this tag.`);
+                   }
+                   latestRun = buildRun;
+                 } else {
+                   latestRun = runs.data.workflow_runs[0];
+                 }
+
+                 // Get jobs for this workflow run
+                 const jobs = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs', {
+                   owner: context.repo.owner,
+                   repo: context.repo.repo,
+                   run_id: latestRun.id
+                 });
+
+                 // Check if all containerize jobs completed successfully
+                 const containerizeJobs = jobs.data.jobs.filter(job => job.name.startsWith('Containerize'));
+
+                 if (containerizeJobs.length === 0) {
+                   core.setFailed('Containerize jobs not found in the Build workflow run. Please ensure the containerize jobs have completed.');
+                 }
+
+                 const failedJobs = containerizeJobs.filter(job => job.conclusion !== 'success');
+                 if (failedJobs.length > 0) {
+                   const failedJobNames = failedJobs.map(job => `${job.name} (${job.conclusion})`).join(', ');
+                   core.setFailed(`Some containerize jobs did not complete successfully: ${failedJobNames}`);
+                 }
+
+                 // All containerize jobs succeeded - trigger deploy
+                 await github.rest.repos.createDispatchEvent({
+                   owner: 'edgeandnode',
+                   repo: 'amp-infra',
+                   event_type: 'build-completed',
+                   client_payload: {
+                     ref: latestRun.head_branch || latestRun.head_ref,
+                     sha: latestRun.head_sha,
+                     workflow_run_id: latestRun.id,
+                     build_status: 'success',
+                     repository: context.repo.repo
+                   }
+                 });
