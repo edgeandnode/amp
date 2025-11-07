@@ -17,8 +17,6 @@ evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
-object_store.workspace = true
-rand.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = "3.14.0"

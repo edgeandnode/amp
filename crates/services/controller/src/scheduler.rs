@@ -38,12 +38,10 @@ use common::{
     config::Config,
 };
 use dump::EndBlock;
-use metadata_db::{
-    Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb, Worker,
-};
+use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
 use rand::seq::IndexedRandom as _;
 use worker::{
-    job::{JobDescriptor, JobId, JobNotification},
+    job::{Job, JobDescriptor, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
 
@@ -90,7 +88,7 @@ impl Scheduler {
                 .await
                 .map_err(ScheduleJobError::CheckExistingJobs)?;
         for job in existing_jobs {
-            match job.status {
+            match job.status.into() {
                 JobStatus::Scheduled | JobStatus::Running => return Ok(job.id.into()),
                 JobStatus::Completed
                 | JobStatus::Stopped
@@ -194,12 +192,14 @@ impl Scheduler {
                 MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::StateConflict {
                     actual,
                     ..
-                }) => match actual {
+                }) => match actual.into() {
                     JobStatus::Stopped | JobStatus::Completed | JobStatus::Failed => {
-                        StopJobError::JobAlreadyTerminated { status: actual }
+                        StopJobError::JobAlreadyTerminated {
+                            status: actual.into(),
+                        }
                     }
                     _ => StopJobError::StateConflict {
-                        current_status: actual,
+                        current_status: actual.into(),
                     },
                 },
                 other => StopJobError::UpdateJobStatus(other),
@@ -235,9 +235,11 @@ impl SchedulerJobs for Scheduler {
     }
 
     async fn get_job(&self, job_id: JobId) -> Result<Option<Job>, GetJobError> {
-        metadata_db::jobs::get_by_id(&self.metadata_db, &job_id)
+        let job = metadata_db::jobs::get_by_id(&self.metadata_db, &job_id)
             .await
-            .map_err(GetJobError)
+            .map_err(GetJobError)?
+            .map(Into::into);
+        Ok(job)
     }
 
     async fn list_jobs(
@@ -245,9 +247,13 @@ impl SchedulerJobs for Scheduler {
         limit: i64,
         last_id: Option<JobId>,
     ) -> Result<Vec<Job>, ListJobsError> {
-        metadata_db::jobs::list(&self.metadata_db, limit, last_id)
+        let jobs = metadata_db::jobs::list(&self.metadata_db, limit, last_id)
             .await
-            .map_err(ListJobsError)
+            .map_err(ListJobsError)?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(jobs)
     }
 
     async fn delete_job(&self, job_id: JobId) -> Result<bool, DeleteJobError> {
@@ -257,26 +263,26 @@ impl SchedulerJobs for Scheduler {
     }
 
     async fn delete_jobs_in_terminal_state(&self) -> Result<usize, DeleteJobsByStatusError> {
-        let statuses = JobStatus::terminal_statuses();
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, statuses)
+        let status = JobStatus::terminal_statuses();
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, status.map(Into::into))
             .await
             .map_err(DeleteJobsByStatusError)
     }
 
     async fn delete_completed_jobs(&self) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Completed])
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Completed.into()])
             .await
             .map_err(DeleteJobsByStatusError)
     }
 
     async fn delete_stopped_jobs(&self) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Stopped])
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Stopped.into()])
             .await
             .map_err(DeleteJobsByStatusError)
     }
 
     async fn delete_failed_jobs(&self) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Failed])
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Failed.into()])
             .await
             .map_err(DeleteJobsByStatusError)
     }
