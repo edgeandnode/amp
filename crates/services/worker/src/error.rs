@@ -5,103 +5,57 @@
 
 use crate::JobId;
 
-/// Top-level worker error that aggregates all specific errors.
+/// Errors that can occur during worker initialization (Phase 1).
 ///
-/// This is the main error type exposed by the worker, providing
-/// a hierarchical view of all possible failure modes.
+/// These errors occur during the setup phase before the worker service
+/// starts its main event loop. Initialization includes:
+/// - Worker registration in the metadata database
+/// - Establishing the heartbeat connection
+/// - Setting up the job notification listener
+/// - Bootstrapping scheduled jobs from the database
+///
+/// All initialization errors are fatal and prevent the worker from starting.
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum InitError {
     /// Worker registration failed.
     ///
     /// This occurs during the initial registration phase when the worker attempts to
     /// register itself in the metadata database. Registration is required before the
     /// worker can accept jobs.
-    #[error("worker registration failed: {0}")]
-    Registration(#[from] RegistrationError),
+    ///
+    /// Common causes include:
+    /// - Database connection failures
+    /// - Database query execution errors
+    /// - Insufficient database permissions
+    #[error("database error during registration")]
+    Registration(#[source] metadata_db::Error),
 
     /// Heartbeat setup failed.
     ///
     /// This occurs when establishing the dedicated database connection for the heartbeat
     /// loop. The heartbeat is required to maintain the worker's active status in the
     /// metadata database.
-    #[error("heartbeat setup failed: {0}")]
-    HeartbeatSetup(#[from] HeartbeatSetupError),
+    ///
+    /// Common causes include:
+    /// - Database connection pool exhaustion
+    /// - Network connectivity issues
+    /// - Database authentication failures
+    #[error("failed to establish heartbeat connection")]
+    HeartbeatSetup(#[source] metadata_db::Error),
 
     /// Notification listener setup failed.
     ///
     /// This occurs when establishing the `PostgreSQL` LISTEN connection for receiving job
     /// notifications. Without this connection, the worker cannot receive new job assignments.
-    #[error("notification listener setup failed: {0}")]
-    NotificationSetup(#[from] NotificationSetupError),
-
-    /// Bootstrap phase failed.
     ///
-    /// This occurs during worker startup when attempting to recover the worker's state
-    /// by fetching and resuming previously scheduled or running jobs from the metadata
-    /// database.
-    #[error("bootstrap failed: {0}")]
-    Bootstrap(#[from] BootstrapError),
+    /// Common causes include:
+    /// - Database connection pool exhaustion
+    /// - Network connectivity issues
+    /// - `PostgreSQL` LISTEN channel subscription failures
+    #[error("failed to establish listener connection")]
+    NotificationSetup(#[source] metadata_db::Error),
 
-    /// Main loop error.
-    ///
-    /// This occurs during the worker's main event loop, which handles heartbeats, job
-    /// notifications, job results, and periodic reconciliation. These are typically
-    /// fatal errors that prevent the worker from continuing operation.
-    #[error("main loop error: {0}")]
-    MainLoop(#[from] MainLoopError),
-}
-
-/// Errors that can occur during worker registration.
-///
-/// This error occurs when the worker attempts to register itself in the metadata
-/// database during startup. Registration is an idempotent operation that records
-/// the worker's node ID and updates its last heartbeat timestamp.
-///
-/// Common causes include:
-/// - Database connection failures
-/// - Database query execution errors
-/// - Insufficient database permissions
-#[derive(Debug, thiserror::Error)]
-#[error("database error during registration: {0}")]
-pub struct RegistrationError(#[source] pub metadata_db::Error);
-
-/// Errors that can occur during heartbeat setup.
-///
-/// This error occurs when the worker attempts to establish a dedicated database
-/// connection for the heartbeat loop. The heartbeat loop runs continuously to
-/// update the worker's last-seen timestamp, indicating the worker is still alive.
-///
-/// Common causes include:
-/// - Database connection pool exhaustion
-/// - Network connectivity issues
-/// - Database authentication failures
-#[derive(Debug, thiserror::Error)]
-#[error("failed to establish heartbeat connection: {0}")]
-pub struct HeartbeatSetupError(#[source] pub metadata_db::Error);
-
-/// Errors that can occur during notification listener setup.
-///
-/// This error occurs when the worker attempts to establish a `PostgreSQL` LISTEN
-/// connection for receiving job notifications via the `PostgreSQL` NOTIFY mechanism.
-/// This connection is used to receive real-time notifications about new jobs
-/// assigned to this worker.
-///
-/// Common causes include:
-/// - Database connection pool exhaustion
-/// - Network connectivity issues
-/// - `PostgreSQL` LISTEN channel subscription failures
-#[derive(Debug, thiserror::Error)]
-#[error("failed to establish listener connection: {0}")]
-pub struct NotificationSetupError(#[source] pub metadata_db::Error);
-
-/// Errors that can occur during worker bootstrap.
-///
-/// Bootstrap is the phase where the worker recovers its state after startup or restart
-/// by fetching all jobs that were previously scheduled or running and resuming their
-/// execution. This ensures job continuity across worker restarts.
-#[derive(Debug, thiserror::Error)]
-pub enum BootstrapError {
-    /// Failed to fetch scheduled jobs from the metadata database.
+    /// Failed to fetch scheduled jobs from the metadata database during bootstrap.
     ///
     /// This occurs when querying the metadata database for jobs in `SCHEDULED` or
     /// `RUNNING` status that are assigned to this worker. The query failure prevents
@@ -111,8 +65,8 @@ pub enum BootstrapError {
     /// - Database connection failures during the query
     /// - Database query execution errors
     /// - Timeout while waiting for the query results
-    #[error("failed to fetch scheduled jobs: {0}")]
-    FetchScheduledJobsFailed(#[source] metadata_db::Error),
+    #[error("failed to fetch scheduled jobs")]
+    BootstrapFetchScheduledJobs(#[source] metadata_db::Error),
 
     /// Failed to spawn a job during bootstrap.
     ///
@@ -121,24 +75,26 @@ pub enum BootstrapError {
     /// but could not be spawned in the worker's job set.
     ///
     /// See [`SpawnJobError`] for specific failure modes during job spawning.
-    #[error("failed to spawn job {job_id} during bootstrap: {source}")]
-    SpawnJobFailed {
+    #[error("failed to spawn job {job_id} during bootstrap")]
+    BootstrapSpawnJob {
         job_id: JobId,
+        #[source]
         source: SpawnJobError,
     },
 }
 
-/// Errors that can occur in the main worker loop.
+/// Errors that can occur during worker runtime (Phase 2).
 ///
-/// The main loop is the core event processing loop that handles:
+/// These errors occur during the worker's main event loop after successful
+/// initialization. The main loop handles:
 /// - Heartbeat task monitoring
 /// - Job notification processing
 /// - Job completion/failure handling
 /// - Periodic state reconciliation with the metadata database
 ///
-/// These errors are typically fatal and will cause the worker to shut down.
+/// Runtime errors are typically fatal and will cause the worker to shut down.
 #[derive(Debug, thiserror::Error)]
-pub enum MainLoopError {
+pub enum RuntimeError {
     /// Heartbeat task died unexpectedly.
     ///
     /// This occurs when the background heartbeat task exits, panics, or encounters

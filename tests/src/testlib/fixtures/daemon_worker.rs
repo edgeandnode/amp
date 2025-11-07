@@ -12,7 +12,7 @@ use dataset_store::{
 };
 use metadata_db::MetadataDb;
 use tokio::task::JoinHandle;
-use worker::{Error as WorkerError, NodeId};
+use worker::{NodeId, RuntimeError as WorkerRuntimeError};
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///
@@ -23,7 +23,7 @@ pub struct DaemonWorker {
     node_id: NodeId,
     config: Arc<Config>,
     dataset_store: Arc<DatasetStore>,
-    _worker_task: JoinHandle<Result<(), WorkerError>>,
+    _worker_task: JoinHandle<Result<(), WorkerRuntimeError>>,
 }
 
 impl DaemonWorker {
@@ -49,12 +49,11 @@ impl DaemonWorker {
             )
         };
 
-        let worker_task = tokio::spawn(worker::service::new(
-            node_id.clone(),
-            config.clone(),
-            metadb,
-            meter,
-        ));
+        // Two-phase worker initialization
+        let worker_fut = worker::service::new(node_id.clone(), config.clone(), metadb, meter)
+            .await
+            .map_err(Box::new)?;
+        let worker_task = tokio::spawn(worker_fut);
 
         Ok(Self {
             node_id,

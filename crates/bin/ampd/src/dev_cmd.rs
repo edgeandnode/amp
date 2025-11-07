@@ -61,8 +61,10 @@ pub async fn run(
         Box::pin(std::future::pending())
     };
 
-    // Create worker future
-    let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter.clone());
+    // Initialize worker
+    let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter.clone())
+        .await
+        .map_err(Error::WorkerInit)?;
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;
@@ -91,6 +93,13 @@ pub enum Error {
     #[error("Failed to start server: {0}")]
     ServerRun(#[source] BoxError),
 
+    /// Failed to initialize the worker service.
+    ///
+    /// This occurs during the worker initialization phase (registration, heartbeat
+    /// setup, notification listener setup, or bootstrap).
+    #[error("Failed to initialize worker: {0}")]
+    WorkerInit(#[source] worker::InitError),
+
     /// Controller service (Admin API) encountered a runtime error.
     ///
     /// This occurs after the Admin API server has started successfully but
@@ -109,5 +118,5 @@ pub enum Error {
     ///
     /// This occurs when the worker process encounters an error during operation.
     #[error("Worker runtime error: {0}")]
-    WorkerRuntime(#[source] worker::Error),
+    WorkerRuntime(#[source] worker::RuntimeError),
 }
