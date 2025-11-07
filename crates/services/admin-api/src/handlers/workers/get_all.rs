@@ -1,7 +1,7 @@
 //! Workers get all handler
 
 use axum::{Json, extract::State, http::StatusCode};
-use worker::NodeId;
+use worker::node_id::NodeId;
 
 use crate::{
     ctx::Ctx,

@@ -8,7 +8,7 @@ use datasets_common::{
 };
 use dump::EndBlock;
 use serde_json::value::RawValue;
-use worker::JobId;
+use worker::job::JobId;
 
 use super::{
     Client,

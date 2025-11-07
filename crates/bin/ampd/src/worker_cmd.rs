@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use common::config::Config;
 use metadata_db::MetadataDb;
-use worker::NodeId;
+use worker::node_id::NodeId;
 
 pub async fn run(
     config: Config,
@@ -29,11 +29,11 @@ pub enum Error {
     /// This occurs during the initialization phase (registration, heartbeat
     /// setup, notification listener setup, or bootstrap).
     #[error("Worker initialization failed: {0}")]
-    Init(#[source] worker::InitError),
+    Init(#[source] worker::service::InitError),
 
     /// Worker runtime error.
     ///
     /// This occurs during the worker's main event loop after successful initialization.
     #[error("Worker runtime error: {0}")]
-    Runtime(#[source] worker::RuntimeError),
+    Runtime(#[source] worker::service::RuntimeError),
 }

@@ -11,19 +11,25 @@ use monitoring::telemetry::metrics::Meter;
 use tokio::time::MissedTickBehavior;
 use tokio_util::task::AbortOnDropHandle;
 
+use crate::{
+    info::WorkerInfo,
+    job::{JobAction, JobId, JobNotification},
+    node_id::NodeId,
+};
+
 mod db;
+mod error;
+mod job_impl;
 mod job_set;
 
+pub use self::error::{
+    AbortJobError, HeartbeatTaskError, InitError, JobCreationError, JobResultError,
+    NotificationError, ReconcileError, RuntimeError, SpawnJobError, StartActionError,
+};
 use self::{
     db::{JobMeta, JobStatus, MetadataDbRetryExt as _},
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
-use crate::{
-    AbortJobError, HeartbeatTaskError, InitError, JobId, JobResultError, NodeId, NotificationError,
-    ReconcileError, RuntimeError, SpawnJobError, StartActionError, WorkerInfo,
-    jobs::{Action, Job, Notification},
-};
-
 /// Run the worker service
 ///
 /// This function creates and runs a worker instance with the provided configuration
@@ -96,7 +102,7 @@ pub async fn new(
 
         // Setup job notification stream (must be inside the async move block to avoid borrow issues)
         let stream = listener
-            .into_stream::<Notification>()
+            .into_stream::<JobNotification>()
             .map_err(NotificationError::DeserializationFailed);
         let mut job_notification_stream = std::pin::pin!(stream);
 
@@ -232,10 +238,10 @@ impl Worker {
     async fn handle_job_notification_action(
         &mut self,
         job_id: JobId,
-        action: Action,
+        action: JobAction,
     ) -> Result<(), NotificationError> {
         match action {
-            Action::Start => {
+            JobAction::Start => {
                 // Load the job from the metadata DB (retry on failure)
                 let job = self
                     .metadata_db
@@ -259,7 +265,7 @@ impl Worker {
                         source: StartActionError::SpawnFailed(error),
                     })
             }
-            Action::Stop => {
+            JobAction::Stop => {
                 self.abort_job(job_id)
                     .await
                     .map_err(|error| NotificationError::StopActionFailed {
@@ -404,7 +410,7 @@ impl Worker {
         let job_desc =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
-        let job = Job::try_from_descriptor(
+        let job = job_impl::Job::try_from_descriptor(
             self.job_ctx.clone(),
             job_id.into(),
             job_desc,

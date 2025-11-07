@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::JobId;
+use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,

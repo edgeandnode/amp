@@ -17,6 +17,7 @@
 
 use datasets_common::reference::Reference;
 use dump::EndBlock;
+use worker::job::JobId;
 
 use crate::args::GlobalArgs;
 
@@ -97,7 +98,7 @@ async fn deploy_dataset(
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
-) -> Result<worker::JobId, Error> {
+) -> Result<JobId, Error> {
     let client = global.build_client()?;
     let job_id = client
         .datasets()

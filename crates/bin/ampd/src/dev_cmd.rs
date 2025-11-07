@@ -98,7 +98,7 @@ pub enum Error {
     /// This occurs during the worker initialization phase (registration, heartbeat
     /// setup, notification listener setup, or bootstrap).
     #[error("Failed to initialize worker: {0}")]
-    WorkerInit(#[source] worker::InitError),
+    WorkerInit(#[source] worker::service::InitError),
 
     /// Controller service (Admin API) encountered a runtime error.
     ///
@@ -118,5 +118,5 @@ pub enum Error {
     ///
     /// This occurs when the worker process encounters an error during operation.
     #[error("Worker runtime error: {0}")]
-    WorkerRuntime(#[source] worker::RuntimeError),
+    WorkerRuntime(#[source] worker::service::RuntimeError),
 }
