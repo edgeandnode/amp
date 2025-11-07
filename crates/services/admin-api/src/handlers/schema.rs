@@ -1,5 +1,6 @@
 use axum::{Json, extract::State, http::StatusCode};
 use common::{
+    catalog::{errors::PlanningCtxForSqlError, sql::planning_ctx_for_sql},
     plan_visitors::prepend_special_block_num_field,
     query_context::{Error as QueryContextError, parse_sql},
 };
@@ -66,9 +67,7 @@ pub async fn handler(
 ) -> Result<Json<OutputSchemaResponse>, ErrorResponse> {
     let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParse)?;
 
-    let query_ctx = ctx
-        .dataset_store
-        .planning_ctx_for_sql(&stmt)
+    let query_ctx = planning_ctx_for_sql(ctx.dataset_store.as_ref(), &stmt)
         .await
         .map_err(Error::DatasetStore)?;
 
@@ -152,7 +151,7 @@ enum Error {
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("Dataset store error: {0}")]
-    DatasetStore(#[from] dataset_store::PlanningCtxForSqlError),
+    DatasetStore(#[from] PlanningCtxForSqlError),
     /// Planning error while determining output schema
     ///
     /// This occurs when:
