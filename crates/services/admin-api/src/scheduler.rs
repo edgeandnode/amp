@@ -1,35 +1,52 @@
-//! Scheduler trait abstraction for job management
+//! Scheduler trait abstractions for job and worker management
 //!
-//! This module defines the `JobScheduler` trait, which provides the abstraction layer for
-//! scheduling and managing dataset extraction jobs. The trait is implemented by the
-//! controller service, following the dependency inversion principle.
+//! This module defines the `SchedulerJobs` and `SchedulerWorkers` traits, which provide
+//! abstraction layers for scheduling/managing dataset extraction jobs and querying worker
+//! information. The traits are implemented by the controller service, following the
+//! dependency inversion principle.
 //!
 //! ## Architecture
 //!
-//! - **admin-api**: Defines the `JobScheduler` trait (abstraction)
+//! - **admin-api**: Defines the `SchedulerJobs` and `SchedulerWorkers` traits (abstractions)
 //! - **controller**: Provides `Scheduler` (implementation)
-//! - **handlers**: Depend on the trait via `Arc<dyn JobScheduler>`
+//! - **handlers**: Depend on the traits via `Arc<dyn SchedulerJobs>` and `Arc<dyn SchedulerWorkers>`
 //!
 //! ## Responsibilities
 //!
+//! ### SchedulerJobs
 //! - Job lifecycle management (schedule, stop, query, delete)
 //! - Worker coordination and selection
 //! - Job state validation and transitions
 //! - Bulk cleanup operations for terminal jobs
+//!
+//! ### SchedulerWorkers
+//! - Worker information queries
+//! - Worker status retrieval
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use common::{BoxError, Dataset, catalog::JobLabels};
 use dump::EndBlock;
-use metadata_db::{Job, JobStatus};
-use worker::JobId;
+use metadata_db::{Job, JobStatus, Worker};
+use worker::{JobId, NodeId};
+
+/// Combined trait for scheduler functionality
+///
+/// This trait combines both job management and worker query capabilities,
+/// providing a unified interface for handlers that need both.
+/// Any type implementing both `SchedulerJobs` and `SchedulerWorkers` automatically
+/// implements this trait.
+pub trait Scheduler: SchedulerJobs + SchedulerWorkers {}
+
+/// Blanket implementation for any type that implements both traits
+impl<T> Scheduler for T where T: SchedulerJobs + SchedulerWorkers {}
 
 /// Trait for scheduling and managing dataset extraction jobs
 // NOTE: Using specific wrapper methods instead of `delete_jobs_by_status<const N: usize>`
 // because const generics make the trait not dyn-compatible.
 #[async_trait]
-pub trait JobScheduler: Send + Sync {
+pub trait SchedulerJobs: Send + Sync {
     /// Schedule a dataset synchronization job
     async fn schedule_dataset_sync_job(
         &self,
@@ -257,3 +274,43 @@ pub struct DeleteJobError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct DeleteJobsByStatusError(#[source] pub metadata_db::Error);
+
+/// Trait for querying worker information
+///
+/// This trait provides methods to retrieve information about registered worker nodes
+/// in the system. It abstracts the metadata database operations for worker queries,
+/// allowing handlers to depend on this interface rather than direct database access.
+#[async_trait]
+pub trait SchedulerWorkers: Send + Sync {
+    /// List all registered workers
+    ///
+    /// Returns all workers in the system with their complete information including
+    /// node_id, build info, and timestamp information (created_at, registered_at, heartbeat_at).
+    async fn list_workers(&self) -> Result<Vec<Worker>, ListWorkersError>;
+
+    /// Get a worker by its node ID
+    ///
+    /// Returns worker information if a worker with the specified node_id exists,
+    /// or None if no such worker is found.
+    async fn get_worker_by_id(&self, id: &NodeId) -> Result<Option<Worker>, GetWorkerError>;
+}
+
+/// Error when listing workers from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct ListWorkersError(#[source] pub metadata_db::Error);
+
+/// Error when getting a worker by ID from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetWorkerError(#[source] pub metadata_db::Error);

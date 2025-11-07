@@ -28,8 +28,8 @@
 use std::{sync::Arc, time::Duration};
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetJobError, JobScheduler, ListJobsError,
-    ScheduleJobError, StopJobError,
+    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsError,
+    ListWorkersError, ScheduleJobError, SchedulerJobs, SchedulerWorkers, StopJobError,
 };
 use async_trait::async_trait;
 use common::{
@@ -38,9 +38,11 @@ use common::{
     config::Config,
 };
 use dump::EndBlock;
-use metadata_db::{Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb};
+use metadata_db::{
+    Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb, Worker,
+};
 use rand::seq::IndexedRandom as _;
-use worker::{JobDescriptor, JobId, JobNotification};
+use worker::{JobDescriptor, JobId, JobNotification, NodeId};
 
 /// A worker is considered active if it has sent a heartbeat in this period
 ///
@@ -213,7 +215,7 @@ impl Scheduler {
 }
 
 #[async_trait]
-impl JobScheduler for Scheduler {
+impl SchedulerJobs for Scheduler {
     async fn schedule_dataset_sync_job(
         &self,
         dataset: Arc<Dataset>,
@@ -274,5 +276,20 @@ impl JobScheduler for Scheduler {
         metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Failed])
             .await
             .map_err(DeleteJobsByStatusError)
+    }
+}
+
+#[async_trait]
+impl SchedulerWorkers for Scheduler {
+    async fn list_workers(&self) -> Result<Vec<Worker>, ListWorkersError> {
+        metadata_db::workers::list(&self.metadata_db)
+            .await
+            .map_err(ListWorkersError)
+    }
+
+    async fn get_worker_by_id(&self, node_id: &NodeId) -> Result<Option<Worker>, GetWorkerError> {
+        metadata_db::workers::get_by_id(&self.metadata_db, node_id)
+            .await
+            .map_err(GetWorkerError)
     }
 }
