@@ -1354,7 +1354,7 @@
           "workers"
         ],
         "summary": "Handler for the `GET /workers` endpoint",
-        "description": "Retrieves and returns a list of all workers from the metadata database.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_LIST_ERROR`: Failed to retrieve workers list from database\n\nThis handler:\n- Fetches all workers from the metadata database\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
+        "description": "Retrieves and returns a list of all workers from the scheduler.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Scheduler query error\n\n## Error Codes\n- `SCHEDULER_LIST_WORKERS_ERROR`: Failed to retrieve workers list from scheduler\n\nThis handler:\n- Fetches all workers from the scheduler\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
         "operationId": "workers_list",
         "responses": {
           "200": {
@@ -1386,7 +1386,7 @@
           "workers"
         ],
         "summary": "Handler for the `GET /workers/{id}` endpoint",
-        "description": "Retrieves and returns a specific worker by its node ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique node identifier of the worker to retrieve\n\n## Response\n- **200 OK**: Returns the worker information as JSON with detailed metadata\n- **400 Bad Request**: Invalid node ID format (not parseable as NodeId)\n- **404 Not Found**: Worker with the given node ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier\n- `WORKER_NOT_FOUND`: No worker exists with the given node ID\n- `METADATA_DB_GET_BY_ID_ERROR`: Failed to retrieve worker from database",
+        "description": "Retrieves and returns a specific worker by its node ID from the scheduler.\n\n## Path Parameters\n- `id`: The unique node identifier of the worker to retrieve\n\n## Response\n- **200 OK**: Returns the worker information as JSON with detailed metadata\n- **400 Bad Request**: Invalid node ID format (not parseable as NodeId)\n- **404 Not Found**: Worker with the given node ID does not exist\n- **500 Internal Server Error**: Scheduler query error\n\n## Error Codes\n- `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier\n- `WORKER_NOT_FOUND`: No worker exists with the given node ID\n- `SCHEDULER_GET_WORKER_ERROR`: Failed to retrieve worker from scheduler",
         "operationId": "workers_get",
         "parameters": [
           {
