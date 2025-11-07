@@ -12,7 +12,7 @@ use dataset_store::{
 };
 use metadata_db::MetadataDb;
 use tokio::task::JoinHandle;
-use worker::{NodeId, RuntimeError as WorkerRuntimeError};
+use worker::{node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///

@@ -10,7 +10,7 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use worker::JobId;
+use worker::job::JobId;
 
 use crate::{args::GlobalArgs, client};
 

@@ -10,7 +10,7 @@ use axum::{
 };
 use common::catalog::JobLabels;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
-use worker::JobId;
+use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,

@@ -12,7 +12,7 @@
 //! - After: `--after` flag for cursor-based pagination
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use worker::JobId;
+use worker::job::JobId;
 
 use crate::{args::GlobalArgs, client};
 

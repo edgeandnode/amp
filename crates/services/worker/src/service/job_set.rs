@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use common::BoxError;
 use tokio::task::{AbortHandle, Id as TaskId, JoinSet};
 
-use crate::jobs::{Job, JobId};
+use super::job_impl::Job;
+use crate::job::JobId;
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].
 ///

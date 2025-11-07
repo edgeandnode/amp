@@ -2,7 +2,7 @@
 //!
 //! Provides methods for interacting with the `/jobs` endpoints of the admin API.
 
-use worker::JobId;
+use worker::job::JobId;
 
 use super::{
     Client,

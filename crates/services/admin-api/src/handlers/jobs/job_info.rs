@@ -1,6 +1,6 @@
 //! Job information types for API responses
 
-use worker::JobId;
+use worker::job::JobId;
 
 /// Represents job information for the API response
 ///

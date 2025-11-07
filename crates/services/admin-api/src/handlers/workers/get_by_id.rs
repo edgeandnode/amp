@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::{NodeId, WorkerInfo};
+use worker::{info::WorkerInfo, node_id::NodeId};
 
 use crate::{
     ctx::Ctx,

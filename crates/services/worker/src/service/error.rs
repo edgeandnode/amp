@@ -3,7 +3,7 @@
 //! This module provides fine-grained error types for each major operation,
 //! enabling better error tracing and debugging without losing context.
 
-use crate::JobId;
+use crate::job::JobId;
 
 /// Errors that can occur during worker initialization (Phase 1).
 ///

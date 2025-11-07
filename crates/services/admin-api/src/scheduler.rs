@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use common::{BoxError, Dataset, catalog::JobLabels};
 use dump::EndBlock;
 use metadata_db::{Job, JobStatus, Worker};
-use worker::{JobId, NodeId};
+use worker::{job::JobId, node_id::NodeId};
 
 /// Combined trait for scheduler functionality
 ///

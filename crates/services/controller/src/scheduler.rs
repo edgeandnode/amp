@@ -42,7 +42,10 @@ use metadata_db::{
     Error as MetadataDbError, Job, JobStatus, JobStatusUpdateError, MetadataDb, Worker,
 };
 use rand::seq::IndexedRandom as _;
-use worker::{JobDescriptor, JobId, JobNotification, NodeId};
+use worker::{
+    job::{JobDescriptor, JobId, JobNotification},
+    node_id::NodeId,
+};
 
 /// A worker is considered active if it has sent a heartbeat in this period
 ///

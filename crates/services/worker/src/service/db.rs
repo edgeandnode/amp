@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use metadata_db::{Error as MetadataDbError, MetadataDb, WorkerNotifListener as NotifListener};
 pub use metadata_db::{Job as JobMeta, JobStatus};
 
-use crate::{JobId, NodeId, WorkerInfo};
+use crate::{info::WorkerInfo, job::JobId, node_id::NodeId};
 
 /// Extension trait for `MetadataDb` that adds retry logic to database operations.
 ///
