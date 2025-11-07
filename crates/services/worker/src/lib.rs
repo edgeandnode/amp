@@ -16,9 +16,8 @@ pub mod service;
 
 pub use self::{
     error::{
-        AbortJobError, BootstrapError, Error, HeartbeatSetupError, HeartbeatTaskError,
-        JobCreationError, JobResultError, MainLoopError, NotificationError, NotificationSetupError,
-        ReconcileError, RegistrationError, SpawnJobError, StartActionError,
+        AbortJobError, HeartbeatTaskError, InitError, JobCreationError, JobResultError,
+        NotificationError, ReconcileError, RuntimeError, SpawnJobError, StartActionError,
     },
     info::WorkerInfo,
     jobs::{
