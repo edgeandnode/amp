@@ -26,6 +26,9 @@ export class Context {
    */
   functionSource(relativePath: string): Model.FunctionSource {
     const baseDir = path.dirname(this.definitionPath)
+    if (relativePath.includes("..")) {
+      throw new Error(`Invalid path: directory traversal not allowed`)
+    }
     const fullPath = path.join(baseDir, relativePath)
 
     let source: string
@@ -176,6 +179,9 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
       ]
 
       const find = Effect.fnUntraced(function*(cwd: string = ".") {
+        if (cwd.includes("..")) {
+          throw new Error("Invalid directory path: directory traversal not allowed")
+        }
         const candidates = CANDIDATE_CONFIG_FILES.map((fileName) => {
           const filePath = path.resolve(cwd, fileName)
           return Effect.as(fs.exists(filePath), filePath)
@@ -195,6 +201,9 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
         ConfigLoaderError | E,
         R
       > => {
+        if (file.includes("..")) {
+          throw new Error("Invalid file path: directory traversal not allowed")
+        }
         const resolved = path.resolve(file)
         const open = load(resolved).pipe(
           Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
