@@ -29,6 +29,8 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           repository: config.repository,
           description: config.description,
           keywords: config.keywords,
+          license: config.license,
+          visibility: config.private ? "private" : "public",
         })
 
         // Build manifest tables

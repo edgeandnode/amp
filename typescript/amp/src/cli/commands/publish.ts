@@ -1,48 +1,18 @@
 import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
-import * as HttpBody from "@effect/platform/HttpBody"
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
+import * as Prompt from "@effect/cli/Prompt"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as AmpRegistry from "../../AmpRegistry.ts"
 import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 import { adminUrl, configFile } from "../common.ts"
-
-const AMP_REGISTRY_API_URL_BASE = new URL("https://registry.amp.staging.edgeandnode.com")
-
-class AmpRegistryInsertDatasetVersionDto
-  extends Schema.Class<AmpRegistryInsertDatasetVersionDto>("AmpCli/Models/AmpRegistryInsertDatasetVersionDto")({
-    status: Schema.Literal("draft", "published"),
-    changelog: Schema.String.pipe(Schema.optionalWith({ nullable: true })),
-    version_tag: Model.DatasetRevision,
-    manifest: Model.DatasetManifest,
-    kind: Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose"),
-    ancestors: Schema.Array(Model.DatasetReference),
-  })
-{}
-class AmpRegistryInsertDatasetDto
-  extends Schema.Class<AmpRegistryInsertDatasetDto>("AmpCli/Models/AmpRegistryInsertDatasetDto")({
-    namespace: Model.DatasetNamespace.pipe(Schema.optionalWith({ nullable: true })),
-    name: Model.DatasetName,
-    description: Model.DatasetDescription.pipe(Schema.optionalWith({ nullable: true })),
-    keywords: Schema.Array(Model.DatasetKeyword).pipe(Schema.optionalWith({ nullable: true })),
-    indexing_chains: Schema.Array(Schema.String),
-    source: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
-    readme: Model.DatasetReadme.pipe(Schema.optionalWith({ nullable: true })),
-    visibility: Schema.Literal("public", "private"),
-    repository_url: Model.DatasetRepository.pipe(Schema.optionalWith({ nullable: true })),
-    license: Model.DatasetLicense.pipe(Schema.optionalWith({ nullable: true })),
-    version: AmpRegistryInsertDatasetVersionDto,
-  })
-{}
 
 export const publish = Command.make("publish", {
   args: {
@@ -51,6 +21,15 @@ export const publish = Command.make("publish", {
       Args.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
       Args.optional,
     ),
+    changelog: Options.text("changelog").pipe(
+      Options.withDescription(
+        "Provide changelog details of what was changed or developed in this version. Helpful for users of your dataset to understand what changed with this version",
+      ),
+      Options.withFallbackPrompt(
+        Prompt.text({ message: "Provide a changelog of what was introduced or changed with this dataset version" }),
+      ),
+      Options.optional,
+    ),
     configFile: configFile.pipe(Options.optional),
     adminUrl,
   },
@@ -58,60 +37,54 @@ export const publish = Command.make("publish", {
   Command.withDescription("Publish a Dataset to the public registry"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
-      const client = yield* HttpClient.HttpClient
       const context = yield* ManifestContext.ManifestContext
       const auth = yield* Auth.AuthService
+      const ampRegistry = yield* AmpRegistry.AmpRegistryService
 
       const maybeAccessToken = yield* auth.get()
       if (Option.isNone(maybeAccessToken)) {
         return yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
       }
-      const accessToken = maybeAccessToken.value.accessToken
+      const accessToken = maybeAccessToken.value
 
-      // If tag is not provided or is "dev", register without version tag (bumps dev tag)
-      // Otherwise, register with the specified semantic version
-      const version = Option.match(args.tag, {
-        onNone: () => Option.none(),
-        onSome: (tag) => (Schema.is(Model.DatasetDevTag)(tag) ? Option.none() : Option.some(tag)),
-      })
+      // Determine version tag (handle optional, default to "dev")
+      const versionTag = Option.getOrElse(args.tag, () => "dev" as const)
 
-      const publishDatasetToRegistry = Effect.fn("PublishDatasetToRegistry")(function*(
-        ctx: ManifestContext.DatasetContext,
-        token: string,
-      ) {
-        const body = yield* HttpBody.json(AmpRegistryInsertDatasetDto.make({
-          namespace: ctx.metadata.namespace,
-          name: ctx.metadata.name,
-          description: ctx.metadata.description,
-          keywords: ctx.metadata.keywords,
-          indexing_chains: [],
-          source: [],
-          readme: ctx.metadata.readme,
-          visibility: "public",
-          repository_url: ctx.metadata.repository,
-          license: ctx.metadata.license,
-          version: {
-            version_tag: "1.0.0",
-            status: Option.isSome(version) && version.value === "dev" ? "draft" : "published",
-            manifest: ctx.manifest,
-            kind: ctx.manifest.kind,
-            ancestors: [],
-          },
-        }))
-        const req = HttpClientRequest.post(new URL("api/v1/owners/@me/datasets", AMP_REGISTRY_API_URL_BASE)).pipe(
-          HttpClientRequest.acceptJson,
-          HttpClientRequest.bearerToken(accessToken),
-          HttpClientRequest.setHeaders({
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-          }),
-          HttpClientRequest.setBody(body),
-        )
-      })
+      // Determine status based on tag
+      const status = versionTag === "dev" ? "draft" : "published"
+
+      // Publish dataset/version
+      yield* ampRegistry.publishFlow({
+        auth: accessToken,
+        context,
+        versionTag,
+        changelog: Option.getOrUndefined(args.changelog),
+        status,
+      }).pipe(
+        Effect.tap((result) => Console.log(`Published ${result.namespace}/${result.name}@${result.revision}`)),
+        Effect.catchTags({
+          "Amp/Registry/Errors/DatasetOwnershipError": (err) =>
+            Console.error(`Cannot publish to ${err.namespace}/${err.name}`).pipe(
+              Effect.zipRight(Console.error("Dataset already exists.")),
+              Effect.zipRight(Effect.fail(err)),
+            ),
+          "Amp/Registry/Errors/VersionAlreadyExistsError": (err) =>
+            Console.error(`Version ${err.versionTag} already exists for ${err.namespace}/${err.name}`).pipe(
+              Effect.zipRight(Console.error(`Choose a different version tag or update the existing version`)),
+              Effect.zipRight(Effect.fail(err)),
+            ),
+          "Amp/Registry/Errors/RegistryApiError": (err) =>
+            Console.error(`Registry API error (${err.status}): ${err.errorCode}`).pipe(
+              Effect.zipRight(Console.error(`${err.message}`)),
+              Effect.zipRight(err.requestId ? Console.error(`Request ID: ${err.requestId}`) : Effect.void),
+              Effect.zipRight(Effect.fail(err)),
+            ),
+        }),
+      )
     })
   ),
   Command.provide(Auth.layer),
-  Command.provide(FetchHttpClient.layer),
+  Command.provide(AmpRegistry.layer),
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.configFile)
       .pipe(

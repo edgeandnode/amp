@@ -22,6 +22,7 @@ import { codegen } from "./commands/codegen.ts"
 import { deploy } from "./commands/deploy.ts"
 import { dev } from "./commands/dev.ts"
 import { proxy } from "./commands/proxy.ts"
+import { publish } from "./commands/publish.ts"
 import { query } from "./commands/query.ts"
 import { register } from "./commands/register.ts"
 import { studio } from "./commands/studio.ts"
@@ -37,7 +38,7 @@ const amp = Command.make("amp", {
   },
 }).pipe(
   Command.withDescription("The Amp Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, deploy, query, proxy, register, studio, auth]),
+  Command.withSubcommands([build, dev, codegen, deploy, query, proxy, register, publish, studio, auth]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 

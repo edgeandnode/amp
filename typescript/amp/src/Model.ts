@@ -1,12 +1,15 @@
 import * as Effect from "effect/Effect"
 import type * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
+import { isAddress } from "viem"
 
 export class TableDefinition extends Schema.Class<TableDefinition>(
   "TableDefinition",
 )({
   sql: Schema.String,
 }) {}
+
+export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
 export const DEFAULT_NAMESPACE = "_"
 
@@ -228,7 +231,6 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   visibility: Schema.Literal("public", "private").pipe(Schema.optional),
-  status: Schema.Literal("draft", "published").pipe(Schema.optional),
 }) {}
 
 export class DatasetConfig extends Schema.Class<DatasetConfig>(
@@ -243,7 +245,6 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   private: Schema.Boolean.pipe(Schema.optional),
-  draft: Schema.Boolean.pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
