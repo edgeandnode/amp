@@ -9,6 +9,7 @@ pub mod error;
 pub mod jobs;
 pub mod manifests;
 pub mod providers;
+pub mod workers;
 
 use url::Url;
 
@@ -78,6 +79,11 @@ impl Client {
     /// Get a jobs client for jobs-related operations.
     pub fn jobs(&self) -> jobs::JobsClient<'_> {
         jobs::JobsClient::new(self)
+    }
+
+    /// Get a workers client for workers-related operations.
+    pub fn workers(&self) -> workers::WorkersClient<'_> {
+        workers::WorkersClient::new(self)
     }
 }
 
