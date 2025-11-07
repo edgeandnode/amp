@@ -66,9 +66,27 @@ jobs:
                 }
                 latestRun = buildRun;
               } else {
-                // For workflow_dispatch, try to match by SHA first, then use most recent
-                const matchingRun = runs.data.workflow_runs.find(run => run.head_sha === currentSha);
+                // For workflow_dispatch, try to match by SHA first, then by branch/ref, then use most recent
+                // Extract branch name from ref (e.g., "refs/heads/feature-branch" -> "feature-branch")
+                const currentBranch = currentRef.startsWith('refs/heads/')
+                  ? currentRef.replace('refs/heads/', '')
+                  : null;
+
+                let matchingRun = runs.data.workflow_runs.find(run => run.head_sha === currentSha);
+
+                // If no SHA match and we have a branch, try matching by branch
+                if (!matchingRun && currentBranch) {
+                  matchingRun = runs.data.workflow_runs.find(run =>
+                    run.head_branch === currentBranch || run.head_ref === currentBranch
+                  );
+                }
+
                 latestRun = matchingRun || runs.data.workflow_runs[0];
+
+                // Warn if we're using a fallback that might not match the current branch
+                if (!matchingRun && currentBranch && latestRun.head_branch !== currentBranch) {
+                  core.warning(`No build run found for current branch "${currentBranch}" (${currentSha}). Using most recent build from "${latestRun.head_branch || latestRun.head_ref || 'unknown'}" branch.`);
+                }
               }
 
               // Get jobs for this workflow run
