@@ -10,7 +10,7 @@ use dataset_store::DatasetKind;
 use datasets_common::manifest::TableSchema;
 use reqwest::Client;
 
-use crate::{config::Config, sql};
+use crate::{config::SyncConfig, sql};
 
 /// Generic manifest that extracts table schemas from any dataset kind.
 ///
@@ -199,7 +199,7 @@ impl FetchManifestError {
 /// - Response JSON cannot be parsed (malformed manifest)
 /// - Arrow schema conversion fails (unsupported types)
 /// - Manifest validation fails (no tables, invalid names)
-pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestError> {
+pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManifestError> {
     let url = format!(
         "{}/datasets/{}/versions/{}/manifest",
         config.amp_admin_api_addr, config.dataset_name, config.dataset_version
