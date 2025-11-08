@@ -10,7 +10,7 @@ use axum::{
 };
 use common::catalog::JobLabels;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
-use worker::job::JobId;
+use worker::{job::JobId, node_id::NodeId};
 
 use crate::{
     ctx::Ctx,
@@ -35,6 +35,7 @@ use crate::{
 /// - `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store
 /// - `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash
 /// - `GET_DATASET_ERROR`: Failed to load dataset from store
+/// - `WORKER_NOT_AVAILABLE`: Specified worker not found or inactive
 /// - `SCHEDULER_ERROR`: Failed to schedule extraction job
 ///
 /// ## Behavior
@@ -90,6 +91,7 @@ pub async fn handler(
     let DeployRequest {
         end_block,
         parallelism,
+        worker_id,
     } = match json {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -104,6 +106,7 @@ pub async fn handler(
         revision=%revision,
         end_block=%end_block,
         parallelism=%parallelism,
+        worker_id=?worker_id,
         "deploying dataset"
     );
 
@@ -124,7 +127,13 @@ pub async fn handler(
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
-        .schedule_dataset_sync_job(dataset, end_block.into(), parallelism, job_labels)
+        .schedule_dataset_sync_job(
+            dataset,
+            end_block.into(),
+            parallelism,
+            job_labels,
+            worker_id,
+        )
         .await
         .map_err(|err| {
             tracing::error!(
@@ -193,6 +202,16 @@ pub struct DeployRequest {
     /// Defaults to 1 if not specified.
     #[serde(default = "default_parallelism")]
     pub parallelism: u16,
+
+    /// Optional worker ID to assign the job to
+    ///
+    /// If specified, the job will be assigned to this specific worker.
+    /// If not specified, a worker will be selected randomly from available workers.
+    ///
+    /// The worker must be active (has sent heartbeats recently) for the deployment to succeed.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub worker_id: Option<NodeId>,
 }
 
 fn default_parallelism() -> u16 {
@@ -281,7 +300,10 @@ impl IntoErrorResponse for Error {
             Error::ListVersionTags(_) => "LIST_VERSION_TAGS_ERROR",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
-            Error::Scheduler(_) => "SCHEDULER_ERROR",
+            Error::Scheduler(err) => match err {
+                ScheduleJobError::WorkerNotAvailable(_) => "WORKER_NOT_AVAILABLE",
+                _ => "SCHEDULER_ERROR",
+            },
         }
     }
 
@@ -293,7 +315,10 @@ impl IntoErrorResponse for Error {
             Error::ListVersionTags(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::Scheduler(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Scheduler(err) => match err {
+                ScheduleJobError::WorkerNotAvailable(_) => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            },
         }
     }
 }
