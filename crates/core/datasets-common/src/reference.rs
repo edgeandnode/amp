@@ -185,7 +185,7 @@ impl<'de> serde::Deserialize<'de> for Reference {
     where
         D: serde::Deserializer<'de>,
     {
-        let s = <&'de str>::deserialize(deserializer)?;
+        let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
     }
 }
