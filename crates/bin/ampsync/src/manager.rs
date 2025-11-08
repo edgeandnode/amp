@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::{config::Config, engine::Engine, manifest::Manifest, task::StreamTask};
+use crate::{config::SyncConfig, engine::Engine, manifest::Manifest, task::StreamTask};
 
 /// Maximum number of restart attempts per table
 const MAX_RESTART_ATTEMPTS: u32 = 10;
@@ -46,7 +46,7 @@ impl StreamManager {
     /// * `pool` - PostgreSQL connection pool
     pub fn spawn_all(
         manifest: &Manifest,
-        config: &Config,
+        config: &SyncConfig,
         engine: Engine,
         client: AmpClient,
         pool: PgPool,
