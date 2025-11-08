@@ -12,7 +12,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile } from "../common.ts"
+import { adminUrl, configFile, ExitCode } from "../common.ts"
 
 export const publish = Command.make("publish", {
   args: {
@@ -41,9 +41,19 @@ export const publish = Command.make("publish", {
       const auth = yield* Auth.AuthService
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
 
+      // if the adminUrl is localhost, don't publish, inform the user
+      const localhostPatterns = ["localhost", "0.0.0.0", "127.0.0.1"]
+      if (localhostPatterns.includes(args.adminUrl.hostname)) {
+        yield* Console.warn("Cannot publish dataset: your local Amp instance isn't connected to the public registry.")
+        yield* Console.info("To publish publicly, rerun with the public admin URL:")
+        yield* Console.info(`    amp publish --admin-url https://gateway.amp.staging.edgeandnode.com`)
+        return yield* ExitCode.NonZero
+      }
+
       const maybeAccessToken = yield* auth.get()
       if (Option.isNone(maybeAccessToken)) {
-        return yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
+        yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
+        return yield* ExitCode.NonZero
       }
       const accessToken = maybeAccessToken.value
 
@@ -83,6 +93,7 @@ export const publish = Command.make("publish", {
       yield* Console.log(
         `Visit https://registry.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
       )
+      return yield* ExitCode.Zero
     })
   ),
   Command.provide(Auth.layer),

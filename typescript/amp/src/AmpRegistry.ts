@@ -54,8 +54,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Option.some(dataset) if found, Option.none() if not found
      */
     const getDataset = (namespace: Model.DatasetNamespace, name: Model.DatasetName) =>
-      HttpClientRequest.get(buildUrl(`api/v1/datasets/${namespace}/${name}`)).pipe(
-        HttpClientRequest.acceptJson,
+      HttpClientRequest.get(buildUrl(`api/v1/datasets/${namespace}/${name}`), { acceptJson: true }).pipe(
         client.execute,
         Effect.flatMap((response) =>
           Effect.if(response.status === 404, {
@@ -77,17 +76,15 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      */
     const publishDataset = (auth: Auth.AuthStorageSchema, dto: AmpRegistryInsertDatasetDto) =>
       Effect.gen(function*() {
-        const body = yield* Schema.encode(AmpRegistryInsertDatasetDto)(dto).pipe(
-          Effect.flatMap((data) => HttpBody.json(data)),
-        )
-
-        return yield* HttpClientRequest.post(buildUrl("api/v1/owners/@me/datasets/publish")).pipe(
-          HttpClientRequest.bearerToken(auth.accessToken),
-          HttpClientRequest.acceptJson,
-          HttpClientRequest.setBody(body),
-          HttpClientRequest.setHeaders({
+        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetDto)(dto)
+        return yield* HttpClientRequest.post(buildUrl("api/v1/owners/@me/datasets/publish"), {
+          acceptJson: true,
+          headers: {
             "Content-Type": "application/json",
-          }),
+          },
+        }).pipe(
+          HttpClientRequest.bearerToken(auth.accessToken),
+          HttpClientRequest.setBody(body),
           client.execute,
           Effect.flatMap((response) =>
             response.status !== 201
@@ -120,19 +117,18 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       dto: AmpRegistryInsertDatasetVersionDto,
     ) =>
       Effect.gen(function*() {
-        const body = yield* Schema.encode(AmpRegistryInsertDatasetVersionDto)(dto).pipe(
-          Effect.flatMap((data) => HttpBody.json(data)),
-        )
-
+        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetVersionDto)(dto)
         return yield* HttpClientRequest.post(
           buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}/versions/publish`),
+          {
+            acceptJson: true,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
         ).pipe(
           HttpClientRequest.bearerToken(auth.accessToken),
-          HttpClientRequest.acceptJson,
           HttpClientRequest.setBody(body),
-          HttpClientRequest.setHeaders({
-            "Content-Type": "application/json",
-          }),
           client.execute,
           Effect.flatMap((response) =>
             response.status !== 201
@@ -367,6 +363,7 @@ export class AmpRegistryInsertDatasetVersionDto
     ancestors: Schema.Array(Model.DatasetReferenceStr),
   })
 {}
+
 export class AmpRegistryInsertDatasetDto
   extends Schema.Class<AmpRegistryInsertDatasetDto>("Amp/Registry/Models/AmpRegistryInsertDatasetDto")({
     namespace: Model.DatasetNamespace.pipe(Schema.optionalWith({ nullable: true })),

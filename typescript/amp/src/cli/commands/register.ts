@@ -13,7 +13,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile } from "../common.ts"
+import { adminUrl, configFile, ExitCode } from "../common.ts"
 
 export const register = Command.make("register", {
   args: {
@@ -27,7 +27,6 @@ export const register = Command.make("register", {
       Options.withDescription(
         "If present, will also publish the Dataset to the public registry (must be authenticated)",
       ),
-      Options.optional,
     ),
     configFile: configFile.pipe(Options.optional),
     adminUrl,
@@ -55,16 +54,24 @@ export const register = Command.make("register", {
         context.manifest,
       )
 
-      const publish = args.publish.pipe(Option.getOrElse(() => false))
-      if (!publish) {
+      if (!args.publish) {
         return yield* Console.log(result)
+      }
+
+      // if the adminUrl is localhost, don't publish, inform the user
+      const localhostPatterns = ["localhost", "0.0.0.0", "127.0.0.1"]
+      if (localhostPatterns.includes(args.adminUrl.hostname)) {
+        yield* Console.warn("Cannot publish dataset: your local Amp instance isn't connected to the public registry.")
+        yield* Console.info("To publish publicly, rerun with the public admin URL:")
+        yield* Console.info(`    amp register --admin-url https://gateway.amp.staging.edgeandnode.com`)
+        return yield* ExitCode.NonZero
       }
 
       const maybeAccessToken = yield* auth.get()
       if (Option.isNone(maybeAccessToken)) {
         yield* Console.warn(`To publish your Dataset, you must be authenticated. Run "amp auth login"`)
-        yield* Console.log("Your Dataset was successfully registered", result)
-        return
+        yield* Console.log("Your Dataset was successfully registered")
+        return yield* ExitCode.NonZero
       }
 
       yield* Console.log("Dataset successfully registered. Working to publish now")
@@ -109,6 +116,7 @@ export const register = Command.make("register", {
       yield* Console.log(
         `Visit https://registry.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
       )
+      return yield* ExitCode.Zero
     }),
   ),
   Command.provide(Auth.layer),
