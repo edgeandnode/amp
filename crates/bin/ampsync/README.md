@@ -18,16 +18,16 @@ Run `ampsync --help` for full documentation.
 ampsync [OPTIONS]
 
 Options:
-  -d, --dataset-name <NAME>              Dataset to sync (required)
-      --database-url <URL>               PostgreSQL connection URL (required)
-  -v, --dataset-version <VERSION>        Dataset version (default: "latest")
-      --amp-flight-addr <ADDR>           Amp Flight server (default: http://localhost:1602)
-      --amp-admin-api-addr <ADDR>        Amp Admin API (default: http://localhost:1610)
-      --max-db-connections <N>           Max connections (default: 10, range: 1-1000)
-      --retention-blocks <N>             Retention blocks (default: 128, min: 64)
-      --manifest-fetch-max-retries <N>   Max retries (default: 5, range: 1-20)
-  -h, --help                             Print help
-  -V, --version                          Print version
+  -d, --dataset-name <NAME>                    Dataset to sync (required)
+      --database-url <URL>                     PostgreSQL connection URL (required)
+  -v, --dataset-version <VERSION>              Dataset version (default: "latest")
+      --amp-flight-addr <ADDR>                 Amp Flight server (default: http://localhost:1602)
+      --amp-admin-api-addr <ADDR>              Amp Admin API (default: http://localhost:1610)
+      --max-db-connections <N>                 Max connections (default: 10, range: 1-1000)
+      --retention-blocks <N>                   Retention blocks (default: 128, min: 64)
+      --manifest-fetch-max-backoff-secs <N>    Max backoff for manifest retries (default: 60)
+  -h, --help                                   Print help
+  -V, --version                                Print version
 ```
 
 ### Environment Variables
@@ -43,7 +43,7 @@ All CLI arguments can also be set via environment variables:
 - **`AMP_ADMIN_API_ADDR`** (default: `http://localhost:1610`): Amp Admin API server
 - **`MAX_DB_CONNECTIONS`** (default: `10`): Database connection pool size (valid range: 1-1000)
 - **`RETENTION_BLOCKS`** (default: `128`): Watermark retention window (must be >= 64)
-- **`MANIFEST_FETCH_MAX_RETRIES`** (default: `5`): Maximum retry attempts for manifest fetch (valid range: 1-20)
+- **`MANIFEST_FETCH_MAX_BACKOFF_SECS`** (default: `60`): Maximum backoff duration in seconds for manifest fetch retries. Transient errors (network issues, HTTP status errors) will retry indefinitely with exponential backoff capped at this value. Fatal errors (validation failures) fail immediately.
 
 ## Running
 

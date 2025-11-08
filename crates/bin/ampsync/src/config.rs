@@ -52,9 +52,10 @@ pub struct Config {
     #[arg(long, env = "RETENTION_BLOCKS", default_value_t = 128, value_parser = clap::value_parser!(u64).range(64..))]
     pub retention_blocks: u64,
 
-    /// Maximum retry attempts for manifest fetch (default: 5, valid range: 1-20)
+    /// Maximum backoff duration in seconds for manifest fetch retries (default: 60)
     ///
-    /// Can also be set via MANIFEST_FETCH_MAX_RETRIES environment variable
-    #[arg(long, env = "MANIFEST_FETCH_MAX_RETRIES", default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=20))]
-    pub manifest_fetch_max_retries: u32,
+    /// Retries continue indefinitely for transient errors, but backoff is capped at this value.
+    /// Can also be set via MANIFEST_FETCH_MAX_BACKOFF_SECS environment variable
+    #[arg(long, env = "MANIFEST_FETCH_MAX_BACKOFF_SECS", default_value_t = 60)]
+    pub manifest_fetch_max_backoff_secs: u64,
 }

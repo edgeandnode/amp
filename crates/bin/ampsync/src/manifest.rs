@@ -3,7 +3,7 @@
 //! The manifest contains table definitions with Arrow schemas that are used
 //! to create PostgreSQL tables.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
@@ -72,8 +72,6 @@ impl HasTables for datasets_derived::manifest::Manifest {
 /// Deserializes only the `kind` field upfront, keeping the rest as validated
 /// but unparsed JSON. Once we know the kind, we deserialize the full manifest
 /// directly to the appropriate type.
-///
-/// This avoids the expensive clone() operation and intermediate Value allocation.
 #[derive(serde::Deserialize)]
 struct ManifestEnvelope {
     kind: String,
@@ -113,10 +111,6 @@ fn validate_table_name(name: &str) -> Result<(), FetchManifestError> {
 /// Errors that occur when fetching or parsing manifests
 #[derive(Debug, thiserror::Error)]
 pub enum FetchManifestError {
-    /// Failed to create HTTP client
-    #[error("Failed to create HTTP client")]
-    CreateClient(#[source] reqwest::Error),
-
     /// Failed to fetch manifest from Admin API
     #[error("Failed to fetch manifest from Admin API at '{url}' after retries")]
     FetchFromApi {
@@ -161,17 +155,35 @@ pub enum FetchManifestError {
     InvalidTableName { name: String, reason: String },
 }
 
+impl FetchManifestError {
+    /// Classify error as retryable or fatal.
+    ///
+    /// Retryable errors will retry indefinitely with exponential backoff (capped).
+    /// Fatal errors fail immediately without retries.
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Network errors
+            Self::FetchFromApi { .. } => true,
+
+            // Http response errors
+            Self::ApiStatusError { .. } => true,
+
+            // Json parse errors
+            Self::ParseJsonHttp { .. } => true,
+
+            // Schema/validation errors
+            Self::ParseJsonSerde { .. } => false,
+            Self::InvalidArrowType { .. } => false,
+            Self::InvalidTableName { .. } => false,
+            Self::NoTables => false,
+        }
+    }
+}
+
 /// Fetch dataset manifest from Admin API with retry logic.
 ///
 /// This function fetches the table schemas for a dataset from the Admin API,
 /// with automatic retry on transient failures.
-///
-/// # Retry Behavior
-///
-/// - **Retryable errors**: Network errors, 5xx server errors (max 5 attempts)
-/// - **Non-retryable errors**: 4xx client errors (fail immediately)
-/// - **Backoff strategy**: Exponential with jitter
-/// - Each retry is logged with timing information
 ///
 /// # Arguments
 ///
@@ -184,11 +196,9 @@ pub enum FetchManifestError {
 /// # Errors
 ///
 /// Returns error if:
-/// - Network request fails after all retries
-/// - Admin API returns 4xx status (e.g., 404 Not Found)
-/// - Admin API returns 5xx status after all retries
-/// - Response JSON cannot be parsed
+/// - Response JSON cannot be parsed (malformed manifest)
 /// - Arrow schema conversion fails (unsupported types)
+/// - Manifest validation fails (no tables, invalid names)
 pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestError> {
     let url = format!(
         "{}/datasets/{}/versions/{}/manifest",
@@ -275,16 +285,19 @@ pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestEr
         Ok(manifest)
     };
 
-    // Retry with exponential backoff
+    // Retry with exponential backoff, jitter, and error classification
     let manifest = fetch
         .retry(
             ExponentialBuilder::default()
-                .with_max_times(config.manifest_fetch_max_retries as usize),
+                .with_jitter() // Prevent thundering herd
+                .with_max_delay(Duration::from_secs(config.manifest_fetch_max_backoff_secs)),
         )
+        .when(FetchManifestError::is_retryable) // Only retry retryable errors
         .notify(|err, duration| {
             tracing::warn!(
                 error = %err,
                 retry_after_ms = duration.as_millis(),
+                retryable = err.is_retryable(),
                 "manifest_fetch_failed_retrying"
             );
         })
