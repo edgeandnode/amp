@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
-use datasets_common::manifest::{Manifest as CommonManifest, TableSchema};
+use datasets_common::manifest::TableSchema;
 use reqwest::Client;
 
 use crate::{config::Config, sql};
@@ -67,16 +67,30 @@ impl HasTables for datasets_derived::manifest::Manifest {
     }
 }
 
-/// Parse manifest from JSON value and extract table schemas.
+/// Envelope for two-phase manifest deserialization.
+///
+/// Deserializes only the `kind` field upfront, keeping the rest as validated
+/// but unparsed JSON. Once we know the kind, we deserialize the full manifest
+/// directly to the appropriate type.
+///
+/// This avoids the expensive clone() operation and intermediate Value allocation.
+#[derive(serde::Deserialize)]
+struct ManifestEnvelope {
+    kind: String,
+    #[serde(flatten)]
+    rest: Box<serde_json::value::RawValue>,
+}
+
+/// Parse manifest from JSON string and extract table schemas.
 fn parse_manifest<T>(
-    json_value: serde_json::Value,
+    json_str: &str,
     kind_name: &str,
 ) -> Result<BTreeMap<String, TableSchema>, FetchManifestError>
 where
     T: serde::de::DeserializeOwned + HasTables,
 {
     let manifest: T =
-        serde_json::from_value(json_value).map_err(|e| FetchManifestError::ParseJsonSerde {
+        serde_json::from_str(json_str).map_err(|e| FetchManifestError::ParseJsonSerde {
             message: format!("Failed to parse {} manifest: {}", kind_name, e),
             source: e,
         })?;
@@ -192,77 +206,74 @@ pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestEr
     let client = Client::new();
 
     // Create retry-able fetch function
-    let fetch =
-        || async {
-            // Fetch response
-            let response =
-                client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| FetchManifestError::FetchFromApi {
-                        url: url.clone(),
-                        source: e,
-                    })?;
-
-            // Check for HTTP errors
-            let status = response.status();
-            if !status.is_success() {
-                return Err(FetchManifestError::ApiStatusError {
-                    status,
+    let fetch = || async {
+        // Fetch response
+        let response =
+            client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| FetchManifestError::FetchFromApi {
                     url: url.clone(),
-                });
-            }
-
-            // Parse JSON response
-            let json_value: serde_json::Value =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| FetchManifestError::ParseJsonHttp {
-                        message: "Failed to parse JSON response".to_string(),
-                        source: e,
-                    })?;
-
-            // Parse common manifest to determine dataset kind
-            let common_manifest: CommonManifest = serde_json::from_value(json_value.clone())
-                .map_err(|e| FetchManifestError::ParseJsonSerde {
-                    message: format!("Failed to parse common manifest fields: {}", e),
                     source: e,
                 })?;
 
-            // Parse the dataset kind
-            let kind: DatasetKind = common_manifest.kind.parse().map_err(
-                |e: dataset_store::UnsupportedKindError| FetchManifestError::InvalidArrowType {
-                    message: format!("Unsupported dataset kind: {}", e.kind),
-                },
-            )?;
+        // Check for HTTP errors
+        let status = response.status();
+        if !status.is_success() {
+            return Err(FetchManifestError::ApiStatusError {
+                status,
+                url: url.clone(),
+            });
+        }
 
-            // Parse the full manifest based on the kind and extract tables
-            let tables = match kind {
-                DatasetKind::EvmRpc => {
-                    parse_manifest::<evm_rpc_datasets::Manifest>(json_value, "EVM-RPC")?
-                }
-                DatasetKind::EthBeacon => {
-                    parse_manifest::<eth_beacon_datasets::Manifest>(json_value, "Eth-Beacon")?
-                }
-                DatasetKind::Firehose => {
-                    parse_manifest::<firehose_datasets::dataset::Manifest>(json_value, "Firehose")?
-                }
-                DatasetKind::Derived => {
-                    parse_manifest::<datasets_derived::manifest::Manifest>(json_value, "Derived")?
-                }
-            };
+        // Deserialize envelope with kind + raw JSON remainder
+        let envelope: ManifestEnvelope =
+            response
+                .json()
+                .await
+                .map_err(|e| FetchManifestError::ParseJsonHttp {
+                    message: "Failed to parse JSON response".to_string(),
+                    source: e,
+                })?;
 
-            let manifest = Manifest { kind, tables };
+        // Parse the dataset kind from envelope
+        let kind: DatasetKind =
+            envelope
+                .kind
+                .parse()
+                .map_err(|e: dataset_store::UnsupportedKindError| {
+                    FetchManifestError::InvalidArrowType {
+                        message: format!("Unsupported dataset kind: {}", e.kind),
+                    }
+                })?;
 
-            // Validate manifest has tables
-            if manifest.tables.is_empty() {
-                return Err(FetchManifestError::NoTables);
+        // Deserialize full manifest based on kind
+        let json_str = envelope.rest.get();
+        let tables = match kind {
+            DatasetKind::EvmRpc => {
+                parse_manifest::<evm_rpc_datasets::Manifest>(json_str, "EVM-RPC")?
             }
-
-            Ok(manifest)
+            DatasetKind::EthBeacon => {
+                parse_manifest::<eth_beacon_datasets::Manifest>(json_str, "Eth-Beacon")?
+            }
+            DatasetKind::Firehose => {
+                parse_manifest::<firehose_datasets::dataset::Manifest>(json_str, "Firehose")?
+            }
+            DatasetKind::Derived => {
+                parse_manifest::<datasets_derived::manifest::Manifest>(json_str, "Derived")?
+            }
         };
+
+        let manifest = Manifest { kind, tables };
+
+        // Validate manifest has tables
+        if manifest.tables.is_empty() {
+            return Err(FetchManifestError::NoTables);
+        }
+
+        Ok(manifest)
+    };
 
     // Retry with exponential backoff
     let manifest = fetch
