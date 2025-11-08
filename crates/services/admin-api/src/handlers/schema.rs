@@ -22,7 +22,7 @@ use crate::{
 /// 2. **Loading Datasets**: Retrieves actual dataset definitions from the registry
 /// 3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets
 /// 4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution
-/// 5. **Special Fields**: Optionally prepends `SPECIAL_BLOCK_NUM` field for SQL datasets
+/// 5. **Special Fields**: Prepends `SPECIAL_BLOCK_NUM` field to the schema
 /// 6. **Network Extraction**: Identifies which blockchain networks the query references
 ///
 /// The validation works with real registered datasets and their actual schemas,
@@ -31,7 +31,6 @@ use crate::{
 ///
 /// ## Request Body
 /// - `sql_query`: The SQL query to analyze
-/// - `is_sql_dataset`: (optional) Whether this is a SQL dataset (affects block number field inclusion)
 ///
 /// ## Response
 /// - **200 OK**: Returns the schema and networks used by the query
@@ -60,10 +59,7 @@ use crate::{
 )]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    Json(OutputSchemaRequest {
-        sql_query,
-        is_sql_dataset,
-    }): Json<OutputSchemaRequest>,
+    Json(OutputSchemaRequest { sql_query }): Json<OutputSchemaRequest>,
 ) -> Result<Json<OutputSchemaResponse>, ErrorResponse> {
     let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParse)?;
 
@@ -76,12 +72,8 @@ pub async fn handler(
         .await
         .map_err(Error::Planning)?;
 
-    let schema = if is_sql_dataset {
-        // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
-        prepend_special_block_num_field(&schema)
-    } else {
-        schema
-    };
+    // Always prepend the `SPECIAL_BLOCK_NUM` field to the schema.
+    let schema = prepend_special_block_num_field(&schema);
 
     let mut networks: Vec<String> = query_ctx
         .catalog()
@@ -99,19 +91,13 @@ pub async fn handler(
 
 /// Request payload for output schema analysis
 ///
-/// Contains the SQL query to analyze and optional configuration flags.
+/// Contains the SQL query to analyze.
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct OutputSchemaRequest {
     /// The SQL query to analyze for output schema determination
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     sql_query: NonEmptyString,
-    /// Whether this is a SQL dataset (affects block number field inclusion)
-    ///
-    /// When true, a special block number field is prepended to the schema.
-    /// This field tracks the block number for each row in SQL datasets.
-    #[serde(default)]
-    is_sql_dataset: bool,
 }
 
 /// Response returned by the output schema endpoint

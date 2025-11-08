@@ -47,7 +47,7 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Amp/Sche
 
     const fromSql = Effect.fn(function*(sql: string, name = "Table") {
       const schema = yield* api
-        .getOutputSchema(sql, { isSqlDataset: true })
+        .getOutputSchema(sql)
         .pipe(Effect.mapError((cause) => new SchemaGeneratorError({ cause, message: cause.message })))
 
       const output: Array<string> = []

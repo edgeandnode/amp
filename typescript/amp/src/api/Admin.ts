@@ -227,7 +227,6 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .setPayload(
     Schema.Struct({
       sqlQuery: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("sql_query")),
-      isSqlDataset: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("is_sql_dataset")),
     }),
   )
 
@@ -287,18 +286,6 @@ export interface DumpDatasetOptions {
    * The block up to which to dump.
    */
   readonly endBlock?: number | undefined
-}
-
-/**
- * Options for schema retrieval.
- */
-export interface GetSchemaOptions {
-  /**
-   * Whether this is a sql dataset.
-   *
-   * @default true
-   */
-  readonly isSqlDataset?: boolean | undefined
 }
 
 /**
@@ -401,12 +388,10 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * Gets the schema of a dataset.
    *
    * @param sql - The SQL query to get the schema for.
-   * @param options - Options for the schema retrieval.
    * @returns An effect that resolves to the table schema.
    */
   readonly getOutputSchema: (
     sql: string,
-    options?: GetSchemaOptions,
   ) => Effect.Effect<Model.OutputSchema, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
@@ -564,11 +549,10 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string, options?: GetSchemaOptions) {
+  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string) {
     const request = client.schema.getOutputSchema({
       payload: {
         sqlQuery: sql,
-        isSqlDataset: options?.isSqlDataset ?? true,
       },
     })
 
