@@ -1,4 +1,4 @@
-//! Type definitions for worker jobs
+//! Internal job implementation for the worker service.
 
 use std::sync::Arc;
 
@@ -6,176 +6,166 @@ use common::{
     BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
 };
-use datasets_common::{
-    hash::Hash, name::Name, namespace::Namespace, reference::Reference, revision::Revision,
-};
-pub use dump::Ctx;
-use dump::{
-    EndBlock,
-    metrics::{self, MetricsRegistry},
-};
-use tracing::instrument;
+use datasets_common::{hash::Hash, reference::Reference, revision::Revision};
+use dump::{Ctx, metrics::MetricsRegistry};
 
-use crate::{job::JobId, service::JobCreationError};
+use crate::job::{JobDescriptor, JobId};
 
-/// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
-/// metadata DB table.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum Descriptor {
-    Dump {
-        end_block: EndBlock,
-        #[serde(default = "default_max_writers")]
-        max_writers: u16,
-
-        dataset_namespace: Namespace,
-        dataset_name: Name,
-        manifest_hash: datasets_common::hash::Hash,
-    },
-}
-
-fn default_max_writers() -> u16 {
-    1
-}
-
-/// The kind of job is inferred from the location and associated dataset information.
+/// Create and run a worker job that dumps tables from a dataset.
 ///
-/// Three kinds of jobs are expected to exist:
-/// - Raw Datasets, that read from an adapter and often write to all their tables at once.
-/// - Views, which write the output of a SQL query to a single table.
-/// - Stream Handlers, which run stateful user code over an ordered input stream, potentially writing
-///   to multiple tables.
-#[derive(Clone)]
-pub enum Job {
-    DumpTables {
-        ctx: Ctx,
-        /// All tables must belong to the same dataset.
-        tables: Vec<Arc<PhysicalTable>>,
-        /// The end block configuration for the dump.
-        end_block: EndBlock,
-        /// Number of parallel writers to run.
-        max_writers: u16,
-        /// Metrics.
-        metrics: Option<Arc<MetricsRegistry>>,
-    },
-}
+/// This function performs initialization (fetching metadata and building physical tables)
+/// and returns a future that executes the dump operation.
+pub(super) async fn new(
+    ctx: Ctx,
+    job_id: JobId,
+    job_desc: JobDescriptor,
+) -> Result<impl Future<Output = Result<(), BoxError>>, JobInitError> {
+    let (end_block, max_writers, dataset_namespace, dataset_name, manifest_hash) = match job_desc {
+        JobDescriptor::Dump {
+            end_block,
+            max_writers,
+            dataset_namespace,
+            dataset_name,
+            manifest_hash,
+        } => (
+            end_block,
+            max_writers,
+            dataset_namespace,
+            dataset_name,
+            manifest_hash,
+        ),
+    };
 
-impl Job {
-    /// Try to build a job from a job ID and descriptor.
-    #[instrument(skip(ctx, job_desc, meter), err)]
-    pub async fn try_from_descriptor(
-        ctx: Ctx,
-        job_id: JobId,
-        job_desc: Descriptor,
-        meter: Option<monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Job, JobCreationError> {
-        let output_locations = metadata_db::physical_table::get_by_job_id(&ctx.metadata_db, job_id)
+    let output_locations = metadata_db::physical_table::get_by_job_id(&ctx.metadata_db, job_id)
+        .await
+        .map_err(JobInitError::FetchOutputLocations)?;
+
+    let job_labels = JobLabels {
+        dataset_namespace: dataset_namespace.clone(),
+        dataset_name: dataset_name.clone(),
+        manifest_hash: manifest_hash.clone(),
+    };
+    let metrics = ctx
+        .meter
+        .as_ref()
+        .map(|m| Arc::new(MetricsRegistry::new(m, job_labels.clone())));
+
+    let mut tables = vec![];
+    for location in output_locations {
+        let hash: Hash = location.manifest_hash.into();
+
+        let dataset = ctx
+            .dataset_store
+            .get_by_hash(&hash)
             .await
-            .map_err(JobCreationError::OutputLocationsFetchFailed)?;
+            .map_err(|err| JobInitError::FetchDataset {
+                hash: hash.clone(),
+                source: err,
+            })?
+            .ok_or_else(|| JobInitError::DatasetNotFound { hash: hash.clone() })?;
 
-        match job_desc {
-            Descriptor::Dump {
-                end_block,
-                max_writers,
-                dataset_namespace,
-                dataset_name,
-                manifest_hash,
-            } => {
-                let job_labels = JobLabels {
-                    dataset_namespace: dataset_namespace.clone(),
-                    dataset_name: dataset_name.clone(),
-                    manifest_hash: manifest_hash.clone(),
-                };
-                let metrics = meter
-                    .as_ref()
-                    .map(|m| metrics::MetricsRegistry::new(m, job_labels.clone()));
+        let dataset_ref = Reference::new(
+            dataset_namespace.clone(),
+            dataset_name.clone(),
+            Revision::Hash(manifest_hash.clone()),
+        );
+        let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
+        let Some(table) = resolved_tables.find(|t| t.name() == location.table_name) else {
+            return Err(JobInitError::TableNotFound {
+                table_name: location.table_name,
+                dataset_hash: hash,
+            });
+        };
 
-                let mut tables = vec![];
-                for location in output_locations {
-                    let hash: Hash = location.manifest_hash.into();
-                    let hash_str = hash.to_string();
-
-                    let dataset = ctx
-                        .dataset_store
-                        .get_by_hash(&hash)
-                        .await
-                        .map_err(JobCreationError::DatasetFetchFailed)?
-                        .ok_or_else(|| JobCreationError::DatasetNotFound {
-                            dataset: hash_str.clone(),
-                        })?;
-
-                    let dataset_ref = Reference::new(
-                        dataset_namespace.clone(),
-                        dataset_name.clone(),
-                        Revision::Hash(manifest_hash.clone()),
-                    );
-                    let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
-                    let Some(table) = resolved_tables.find(|t| t.name() == location.table_name)
-                    else {
-                        return Err(JobCreationError::TableNotFound {
-                            table: location.table_name,
-                            dataset: hash_str,
-                        });
-                    };
-
-                    tables.push(
-                        PhysicalTable::new(
-                            table.clone(),
-                            location.url,
-                            location.id,
-                            ctx.metadata_db.clone(),
-                            job_labels.clone(),
-                        )
-                        .map_err(JobCreationError::PhysicalTableCreationFailed)?
-                        .into(),
-                    );
-                }
-
-                Ok(Job::DumpTables {
-                    ctx,
-                    tables,
-                    end_block,
-                    max_writers,
-                    metrics: metrics.map(Arc::new),
-                })
-            }
-        }
+        tables.push(
+            PhysicalTable::new(
+                table.clone(),
+                location.url,
+                location.id,
+                ctx.metadata_db.clone(),
+                job_labels.clone(),
+            )
+            .map_err(|err| JobInitError::CreatePhysicalTable {
+                table_name: table.name().to_string(),
+                source: err,
+            })?
+            .into(),
+        );
     }
 
-    pub async fn run(self) -> Result<(), BoxError> {
-        match self {
-            Job::DumpTables {
-                ctx,
-                tables,
-                end_block,
-                max_writers,
-                metrics,
-            } => {
-                dump::dump_tables(
-                    ctx.clone(),
-                    &tables,
-                    max_writers,
-                    ctx.config.microbatch_max_interval,
-                    end_block,
-                    metrics,
-                )
-                .await
-            }
-        }
-    }
+    let microbatch_max_interval = ctx.config.microbatch_max_interval;
+    let fut = async move {
+        dump::dump_tables(
+            ctx,
+            &tables,
+            max_writers,
+            microbatch_max_interval,
+            end_block,
+            metrics,
+        )
+        .await
+    };
+    Ok(fut)
 }
 
-impl std::fmt::Display for Job {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Job::DumpTables { tables, .. } => {
-                write!(f, "DumpTables({})", tables.len())
-            }
-        }
-    }
-}
+/// Errors that occur during job initialization
+///
+/// This error type is used by the job initialization phase which fetches
+/// metadata and builds physical tables before starting the actual dump.
+#[derive(Debug, thiserror::Error)]
+pub enum JobInitError {
+    /// Failed to fetch output locations from metadata database
+    ///
+    /// This error occurs when querying the physical_table records associated
+    /// with a job ID fails, typically due to database connection issues or
+    /// the job not having any registered output locations.
+    #[error("Failed to fetch output locations from metadata database")]
+    FetchOutputLocations(#[source] metadata_db::Error),
 
-impl std::fmt::Debug for Job {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
-    }
+    /// Failed to fetch dataset from dataset store
+    ///
+    /// This error occurs when retrieving a dataset by its manifest hash fails.
+    /// The dataset store may be unavailable or the manifest may not be cached.
+    ///
+    /// Note: This wraps BoxError because dataset_store::get_by_hash currently
+    /// returns BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to fetch dataset with hash '{hash}'")]
+    FetchDataset {
+        hash: Hash,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Dataset not found in dataset store
+    ///
+    /// This error occurs when a manifest hash referenced in the output locations
+    /// does not correspond to any dataset in the store. This indicates a data
+    /// inconsistency between the metadata database and the dataset store.
+    #[error("Dataset not found: {hash}")]
+    DatasetNotFound { hash: Hash },
+
+    /// Table not found in dataset
+    ///
+    /// This error occurs when a table name from the output locations does not
+    /// match any table defined in the dataset manifest. This indicates a
+    /// mismatch between the job's expected outputs and the actual dataset schema.
+    #[error("Table '{table_name}' not found in dataset '{dataset_hash}'")]
+    TableNotFound {
+        table_name: String,
+        dataset_hash: Hash,
+    },
+
+    /// Failed to create physical table
+    ///
+    /// This error occurs when constructing a PhysicalTable instance fails,
+    /// typically due to invalid URL parsing or object store configuration issues.
+    ///
+    /// Note: This wraps BoxError because PhysicalTable::new currently returns
+    /// BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to create physical table for '{table_name}'")]
+    CreatePhysicalTable {
+        table_name: String,
+        #[source]
+        source: BoxError,
+    },
 }

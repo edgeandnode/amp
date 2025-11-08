@@ -111,7 +111,7 @@ pub async fn handler(
         })?;
 
     // Determine next cursor (ID of the last job in this page)
-    let next_cursor = jobs.last().map(|job| job.id.into());
+    let next_cursor = jobs.last().map(|job| job.id);
     let jobs = jobs
         .into_iter()
         .take(limit)

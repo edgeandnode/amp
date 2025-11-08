@@ -1,9 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    future::Future,
+};
 
 use common::BoxError;
 use tokio::task::{AbortHandle, Id as TaskId, JoinSet};
 
-use super::job_impl::Job;
 use crate::job::JobId;
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].
@@ -29,13 +31,17 @@ pub struct JobSet {
 
 impl JobSet {
     /// Spawn a new job and register it in the set
-    pub fn spawn(&mut self, job_id: JobId, job: Job) {
+    pub fn spawn(
+        &mut self,
+        job_id: JobId,
+        job_fut: impl Future<Output = Result<(), BoxError>> + Send + 'static,
+    ) {
         if self.job_id_to_handle.contains_key(&job_id) {
             tracing::debug!(%job_id, "Job already spawned, skipping.");
             return;
         }
 
-        let handle = self.jobs.spawn(job.run());
+        let handle = self.jobs.spawn(job_fut);
 
         // Register the IDs and the handle
         let old_task_id = self.task_id_to_job_id.insert(handle.id(), job_id);

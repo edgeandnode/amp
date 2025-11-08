@@ -16,6 +16,7 @@ use dataset_store::{DatasetKind, DatasetStore};
 use datasets_derived::DerivedDatasetKind;
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
+use monitoring::telemetry::metrics::Meter;
 use object_store::ObjectMeta;
 
 use crate::metrics;
@@ -181,6 +182,8 @@ pub struct Ctx {
     pub data_store: Arc<DataStore>,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    /// Optional meter for job metrics
+    pub meter: Option<Meter>,
 }
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will

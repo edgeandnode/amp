@@ -198,7 +198,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 run_every_mins,
                 location,
                 fresh,
-                metrics_meter.as_ref(),
+                metrics_meter,
             )
             .await;
 

@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::job::JobId;
+use worker::job::{JobId, JobStatus};
 
 use crate::{
     ctx::Ctx,
@@ -149,7 +149,7 @@ pub enum Error {
         /// The job ID that cannot be deleted
         id: JobId,
         /// The current status of the job
-        status: metadata_db::JobStatus,
+        status: JobStatus,
     },
 
     /// Failed to retrieve job from scheduler
