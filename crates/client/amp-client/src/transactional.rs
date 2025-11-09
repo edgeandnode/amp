@@ -610,7 +610,7 @@ impl IntoFuture for TransactionalStreamBuilder {
                 self.retention,
                 |resume: Option<ResumeWatermark>| async move {
                     self.client
-                        .request(&self.sql, resume.as_ref())
+                        .request(&self.sql, resume.as_ref(), true)
                         .await
                         .map(|s| s.boxed())
                 },

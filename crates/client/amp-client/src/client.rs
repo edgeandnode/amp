@@ -284,7 +284,7 @@ impl AmpClient {
     /// }
     /// ```
     pub async fn query<S: ToString>(&mut self, sql: S) -> Result<BatchStream, Error> {
-        let inner = self.request(sql, None).await?;
+        let inner = self.request(sql, None, false).await?;
         Ok(BatchStream { inner })
     }
 
@@ -295,10 +295,12 @@ impl AmpClient {
     /// # Arguments
     /// - `sql`: SQL query string
     /// - `watermark`: Optional watermark for resuming a stream
+    /// - `streaming`: Whether to enable streaming mode
     pub async fn request<S: ToString>(
         &mut self,
         sql: S,
         watermark: Option<&ResumeWatermark>,
+        streaming: bool,
     ) -> Result<RawStream, Error> {
         self.client.set_header(
             "amp-resume",
@@ -307,11 +309,16 @@ impl AmpClient {
                 .unwrap_or_default(),
         );
 
+        // Set amp-stream header to control streaming behavior
+        self.client
+            .set_header("amp-stream", if streaming { "true" } else { "" });
+
         let result = self.client.execute(sql.to_string(), None).await;
 
-        // Unset the amp-resume header after GetFlightInfo, since otherwise it gets
+        // Unset headers after GetFlightInfo, since otherwise they get
         // retained for subsequent requests.
         self.client.set_header("amp-resume", "");
+        self.client.set_header("amp-stream", "");
 
         let flight_info = match result {
             Ok(flight_info) => flight_info,
@@ -402,8 +409,8 @@ impl IntoFuture for StreamBuilder {
 
     fn into_future(mut self) -> Self::IntoFuture {
         Box::pin(async move {
-            // Get raw response stream
-            let raw = self.client.request(&self.sql, None).await?.boxed();
+            // Get raw response stream with streaming enabled
+            let raw = self.client.request(&self.sql, None, true).await?.boxed();
 
             // Create protocol stream (with reorg detection)
             Ok(ProtocolStream::new(raw, Vec::new()))
@@ -422,7 +429,7 @@ impl IntoFuture for RawStreamBuilder {
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(mut self) -> Self::IntoFuture {
-        Box::pin(async move { self.client.request(&self.sql, None).await })
+        Box::pin(async move { self.client.request(&self.sql, None, true).await })
     }
 }
 
