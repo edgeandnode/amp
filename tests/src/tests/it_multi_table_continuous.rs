@@ -125,9 +125,11 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     assert!(!logs.is_empty(), "logs table should exist and be queryable");
 
     let blocks_count = blocks[0]["count"].as_i64().expect("count should be i64");
+
+    // Verify continuous mode processed the new blocks (5 initial + 3 additional = 8)
     assert!(
-        blocks_count > 0,
-        "blocks table should have data, got {}",
+        blocks_count >= 8,
+        "blocks table should have at least 8 rows (5 initial + 3 new), got {}",
         blocks_count
     );
 
