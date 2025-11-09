@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
-use datasets_common::manifest::TableSchema;
+use datasets_common::{manifest::TableSchema, reference::Reference};
 use monitoring::logging;
 use reqwest::Client;
 
@@ -25,6 +25,9 @@ pub struct Manifest {
 
     /// Tables in this dataset, mapping table name to table schema
     pub tables: BTreeMap<String, TableSchema>,
+
+    /// Fully resolved dataset reference
+    pub reference: Reference,
 }
 
 /// Helper trait for extracting table schemas from manifests.
@@ -102,6 +105,7 @@ where
 /// # Arguments
 ///
 /// - `text`: JSON text of the manifest
+/// - `reference`: Fully resolved dataset reference
 ///
 /// # Returns
 ///
@@ -114,7 +118,10 @@ where
 /// - `kind` field is missing or unsupported
 /// - Manifest deserialization fails
 /// - Manifest contains no tables
-fn parse_manifest_from_text(text: &str) -> Result<Manifest, FetchManifestError> {
+fn parse_manifest_from_text(
+    text: &str,
+    reference: Reference,
+) -> Result<Manifest, FetchManifestError> {
     // Extract the kind field first to determine manifest type
     let envelope: ManifestEnvelope =
         serde_json::from_str(text).map_err(|e| FetchManifestError::ParseJsonSerde {
@@ -147,7 +154,11 @@ fn parse_manifest_from_text(text: &str) -> Result<Manifest, FetchManifestError> 
         }
     };
 
-    let manifest = Manifest { kind, tables };
+    let manifest = Manifest {
+        kind,
+        tables,
+        reference,
+    };
 
     // Validate manifest has tables
     if manifest.tables.is_empty() {
@@ -262,14 +273,19 @@ impl FetchManifestError {
 /// - Arrow schema conversion fails (unsupported types)
 /// - Manifest validation fails (no tables, invalid names)
 pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManifestError> {
+    // Convert PartialReference to full Reference by filling in defaults
+    let dataset = config.dataset.to_full_reference();
+
     let url = format!(
-        "{}/datasets/{}/versions/{}/manifest",
-        config.amp_admin_api_addr, config.dataset_name, config.dataset_version
+        "{}/datasets/{}/{}/versions/{}/manifest",
+        config.amp_admin_api_addr,
+        dataset.namespace(),
+        dataset.name(),
+        dataset.revision()
     );
 
     tracing::info!(
-        dataset = %config.dataset_name,
-        version = %config.dataset_version,
+        dataset = %config.dataset,
         url = %url,
         "fetching_manifest"
     );
@@ -309,7 +325,7 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
             })?;
 
         // Parse the manifest from the text
-        parse_manifest_from_text(&text)
+        parse_manifest_from_text(&text, dataset.clone())
     };
 
     // Retry with exponential backoff, jitter, and error classification
@@ -331,7 +347,7 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
         .await?;
 
     tracing::info!(
-        dataset = %config.dataset_name,
+        dataset = %config.dataset,
         tables = manifest.tables.len(),
         "manifest_fetched_successfully"
     );
@@ -346,6 +362,10 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+
     use super::*;
 
     const DERIVED_MANIFEST: &str =
@@ -356,10 +376,18 @@ mod tests {
     const FIREHOSE_MANIFEST: &str =
         include_str!("../../../../tests/config/manifests/eth_firehose.json");
 
+    fn test_reference() -> Reference {
+        Reference::new(
+            Namespace::from_str("_").unwrap(),
+            Name::try_from("test".to_string()).unwrap(),
+            Revision::Latest,
+        )
+    }
+
     #[test]
     fn test_parse_derived_manifest() {
-        let manifest =
-            parse_manifest_from_text(DERIVED_MANIFEST).expect("Failed to parse manifest");
+        let manifest = parse_manifest_from_text(DERIVED_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
 
         assert_eq!(manifest.kind, DatasetKind::Derived);
         assert_eq!(manifest.tables.len(), 1);
@@ -374,8 +402,8 @@ mod tests {
 
     #[test]
     fn test_parse_evm_rpc_manifest() {
-        let manifest =
-            parse_manifest_from_text(EVM_RPC_MANIFEST).expect("Failed to parse manifest");
+        let manifest = parse_manifest_from_text(EVM_RPC_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
 
         assert_eq!(manifest.kind, DatasetKind::EvmRpc);
         assert!(manifest.tables.contains_key("blocks"));
@@ -385,8 +413,8 @@ mod tests {
 
     #[test]
     fn test_parse_eth_beacon_manifest() {
-        let manifest =
-            parse_manifest_from_text(ETH_BEACON_MANIFEST).expect("Failed to parse manifest");
+        let manifest = parse_manifest_from_text(ETH_BEACON_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
 
         assert_eq!(manifest.kind, DatasetKind::EthBeacon);
         assert!(manifest.tables.contains_key("blocks"));
@@ -394,8 +422,8 @@ mod tests {
 
     #[test]
     fn test_parse_firehose_manifest() {
-        let manifest =
-            parse_manifest_from_text(FIREHOSE_MANIFEST).expect("Failed to parse manifest");
+        let manifest = parse_manifest_from_text(FIREHOSE_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
 
         assert_eq!(manifest.kind, DatasetKind::Firehose);
         assert!(manifest.tables.contains_key("blocks"));
@@ -410,7 +438,7 @@ mod tests {
             "tables": {}
         }"#;
 
-        let result = parse_manifest_from_text(json);
+        let result = parse_manifest_from_text(json, test_reference());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -427,7 +455,7 @@ mod tests {
             "tables": {}
         }"#;
 
-        let result = parse_manifest_from_text(json);
+        let result = parse_manifest_from_text(json, test_reference());
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), FetchManifestError::NoTables));
     }
@@ -439,7 +467,7 @@ mod tests {
             "tables": {
         "#;
 
-        let result = parse_manifest_from_text(json);
+        let result = parse_manifest_from_text(json, test_reference());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -461,7 +489,7 @@ mod tests {
             }
         }"#;
 
-        let result = parse_manifest_from_text(json);
+        let result = parse_manifest_from_text(json, test_reference());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
