@@ -1,6 +1,7 @@
 //! Workers get all handler
 
 use axum::{Json, extract::State, http::StatusCode};
+use monitoring::logging;
 use worker::node_id::NodeId;
 
 use crate::{
@@ -40,7 +41,7 @@ use crate::{
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<WorkersResponse>, ErrorResponse> {
     // Fetch all workers from scheduler
     let workers = ctx.scheduler.list_workers().await.map_err(|err| {
-        tracing::debug!(error=?err, "failed to list workers");
+        tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list workers");
         Error::SchedulerListWorkers(err)
     })?;
 

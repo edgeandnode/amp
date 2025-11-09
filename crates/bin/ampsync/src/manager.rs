@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use amp_client::AmpClient;
+use monitoring::logging;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -116,7 +117,7 @@ impl StreamManager {
                             if restart_count >= MAX_RESTART_ATTEMPTS {
                                 error!(
                                     table = %task_table_name,
-                                    error = %err,
+                                    error = %err, error_source = logging::error_source(&err),
                                     restart_count = restart_count,
                                     "max_restart_attempts_reached"
                                 );
@@ -128,7 +129,7 @@ impl StreamManager {
 
                             warn!(
                                 table = %task_table_name,
-                                error = %err,
+                                error = %err, error_source = logging::error_source(&err),
                                 restart_count = restart_count,
                                 backoff_secs = backoff_duration.as_secs(),
                                 "task_failed_restarting"

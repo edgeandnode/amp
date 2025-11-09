@@ -11,7 +11,7 @@ use metadata_db::{
     Error as MetadataDbError, MetadataDb, WorkerNotifListener as NotifListener,
     notification_multiplexer,
 };
-use monitoring::telemetry::metrics::Meter;
+use monitoring::{logging, telemetry::metrics::Meter};
 use tokio::time::MissedTickBehavior;
 use tokio_util::task::AbortOnDropHandle;
 
@@ -183,12 +183,12 @@ pub async fn new(
                             continue;
                         }
                         Err(NotificationError::DeserializationFailed(err)) => {
-                            tracing::error!(node_id=%worker.node_id, error=%err, "job notification deserialization failed, skipping");
+                            tracing::error!(node_id=%worker.node_id, error=%err, error_source = logging::error_source(&err), "job notification deserialization failed, skipping");
                             continue;
                         }
                         // These should never occur from the stream itself
                         Err(err) => {
-                            tracing::error!(node_id=%worker.node_id, error=%err, "unexpected notification error");
+                            tracing::error!(node_id=%worker.node_id, error=%err, error_source = logging::error_source(&err), "unexpected notification error");
                             continue;
                         }
                     };
@@ -325,7 +325,7 @@ impl Worker {
                 })?;
             }
             Err(JobSetJoinError::Panicked(err)) => {
-                tracing::error!(node_id=%self.node_id, %job_id, error=%err, "job panicked");
+                tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&*err), "job panicked");
 
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
@@ -355,7 +355,7 @@ impl Worker {
             Err(err) => {
                 // If any error occurs while fetching active jobs, we consider the worker to be
                 // in a degraded state and we skip the reconciliation
-                tracing::warn!(node_id=%self.node_id, error=%err, "failed to fetch active jobs");
+                tracing::warn!(node_id=%self.node_id, error=%err, error_source = logging::error_source(&err), "failed to fetch active jobs");
                 return Ok(());
             }
         };
@@ -447,7 +447,7 @@ async fn register_worker_with_retry(
         .notify(|err, dur| {
             tracing::warn!(
                 node_id = %node_id,
-                error = %err,
+                error = %err, error_source = logging::error_source(&err),
                 "Connection error while registering worker. Retrying in {:.1}s",
                 dur.as_secs_f32()
             );
@@ -471,7 +471,7 @@ async fn worker_heartbeat_loop_with_retry(
         .notify(|err, dur| {
             tracing::warn!(
                 node_id = %node_id_str,
-                error = %err,
+                error = %err, error_source = logging::error_source(&err),
                 "Worker heartbeat connection establishment failed. Retrying in {:.1}s",
                 dur.as_secs_f32()
             );
@@ -498,7 +498,7 @@ async fn listen_for_job_notifications_with_retry(
     .notify(|err, dur| {
         tracing::warn!(
             node_id = %node_id,
-            error = %err,
+            error = %err, error_source = logging::error_source(&err),
             "Failed to establish connection to listen for job notifications. Retrying in {:.1}s",
             dur.as_secs_f32()
         );

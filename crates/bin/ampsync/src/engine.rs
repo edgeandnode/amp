@@ -18,6 +18,7 @@ use arrow_to_postgres::ArrowToPostgresBinaryEncoder;
 use backon::{ExponentialBuilder, Retryable};
 // Import TableSchema from datasets_common
 use datasets_common::manifest::TableSchema;
+use monitoring::logging;
 use sqlx::PgPool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -367,7 +368,7 @@ impl Engine {
             let elapsed = start_time.elapsed();
             if elapsed >= max_duration {
                 tracing::error!(
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     elapsed_secs = elapsed.as_secs(),
                     max_duration_secs = max_duration.as_secs(),
                     "db_operation_circuit_breaker_triggered"
@@ -463,7 +464,7 @@ impl Engine {
             .notify(|err: &sqlx::Error, duration: Duration| {
                 tracing::warn!(
                     table = table_name_owned.as_str(),
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_create_table_retry"
                 );
@@ -663,7 +664,7 @@ impl Engine {
             .notify(|err: &sqlx::Error, duration: Duration| {
                 tracing::warn!(
                     table = table_name,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_insert_retry"
                 );
@@ -732,7 +733,7 @@ impl Engine {
                     table = table_name_owned.as_str(),
                     start = start,
                     end = end,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_delete_retry"
                 );

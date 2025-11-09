@@ -7,6 +7,7 @@ use axum::{
 };
 use dataset_store::manifests::ManifestContent;
 use datasets_common::hash::Hash;
+use monitoring::logging;
 use serde_json::value::RawValue as JsonRawValue;
 
 use crate::{
@@ -67,7 +68,7 @@ pub async fn handler(
     let hash = match path {
         Ok(Path(hash)) => hash,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid manifest hash in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid manifest hash in path");
             return Err(Error::InvalidHash(err).into());
         }
     };
@@ -90,7 +91,7 @@ pub async fn handler(
         Err(dataset_store::GetManifestError::MetadataDbQueryPath(err)) => {
             tracing::error!(
                 manifest_hash=%hash,
-                error=?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to query manifest path from metadata database"
             );
             return Err(Error::MetadataDbQueryError(err).into());
@@ -98,7 +99,7 @@ pub async fn handler(
         Err(dataset_store::GetManifestError::ObjectStoreError(err)) => {
             tracing::error!(
                 manifest_hash=%hash,
-                error=?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to retrieve manifest from object store"
             );
             return Err(Error::ObjectStoreReadError(err).into());

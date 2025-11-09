@@ -31,6 +31,7 @@ use firehose_datasets::dataset::{
     Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig,
 };
 use metadata_db::{DatasetVersion, MetadataDb};
+use monitoring::logging;
 use parking_lot::RwLock;
 use rand::seq::SliceRandom as _;
 use tracing::instrument;
@@ -919,7 +920,7 @@ impl DatasetStore {
                         provider_name = %provider.name,
                         provider_kind = %kind,
                         provider_network = %network,
-                        error = %err,
+                        error = %err, error_source = logging::error_source(&err),
                         "environment variable substitution failed for provider, trying next"
                     );
                     continue 'try_find_provider;

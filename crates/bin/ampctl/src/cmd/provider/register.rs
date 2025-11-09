@@ -19,6 +19,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
+use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 
 use crate::args::GlobalArgs;
@@ -97,7 +98,7 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
                 path: provider_path.to_string(),
             }
         } else {
-            tracing::error!(path = %provider_path, error = %err, "Failed to read provider");
+            tracing::error!(path = %provider_path, error = %err, error_source = logging::error_source(&err), "Failed to read provider");
             Error::ProviderReadError {
                 path: provider_path.to_string(),
                 source: err,
@@ -117,13 +118,13 @@ async fn register_provider(
 ) -> Result<(), Error> {
     // Parse TOML content
     let toml_value: toml::Value = toml::from_str(provider_toml).map_err(|err| {
-        tracing::error!(error = %err, "Failed to parse provider TOML");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse provider TOML");
         Error::TomlParseError { source: err }
     })?;
 
     // Convert TOML to JSON for API request
     let json_value: serde_json::Value = serde_json::to_value(&toml_value).map_err(|err| {
-        tracing::error!(error = %err, "Failed to convert TOML to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to convert TOML to JSON");
         Error::TomlToJsonConversion { source: err }
     })?;
 

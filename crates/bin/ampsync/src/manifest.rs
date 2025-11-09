@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, time::Duration};
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
 use datasets_common::manifest::TableSchema;
+use monitoring::logging;
 use reqwest::Client;
 
 use crate::{config::SyncConfig, sql};
@@ -321,7 +322,7 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
         .when(FetchManifestError::is_retryable) // Only retry retryable errors
         .notify(|err, duration| {
             tracing::warn!(
-                error = %err,
+                error = %err, error_source = logging::error_source(&err),
                 retry_after_ms = duration.as_millis(),
                 retryable = err.is_retryable(),
                 "manifest_fetch_failed_retrying"

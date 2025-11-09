@@ -102,6 +102,23 @@ fn env_filter_and_log_level() -> (EnvFilter, String) {
     (env_filter, log_level)
 }
 
+/// Serialize the error source chain as a JSON array of strings.
+///
+/// Walks the `.source()` chain of the provided error and collects each source's
+/// Display representation into a JSON array. Returns an empty array "[]" if the
+/// error has no source chain.
+pub fn error_source(err: &dyn std::error::Error) -> String {
+    let mut sources = Vec::new();
+    let mut current = err.source();
+
+    while let Some(curr) = current {
+        sources.push(curr.to_string());
+        current = curr.source();
+    }
+
+    serde_json::to_string(&sources).expect("Failed to serialize error sources to JSON")
+}
+
 /// If this fails, just update the above `AMP_CRATES` to match reality.
 #[test]
 fn assert_amp_crates() {

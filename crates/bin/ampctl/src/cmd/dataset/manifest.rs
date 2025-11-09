@@ -11,6 +11,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::reference::Reference;
+use monitoring::logging;
 
 use crate::{args::GlobalArgs, client};
 
@@ -39,7 +40,7 @@ pub async fn run(Args { global, reference }: Args) -> Result<(), Error> {
     let manifest = get_manifest(&global, &reference).await?;
 
     let json = serde_json::to_string_pretty(&manifest).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize manifest to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize manifest to JSON");
         Error::JsonFormattingError(err)
     })?;
     println!("{}", json);
@@ -62,7 +63,7 @@ async fn get_manifest(
         .get_manifest(reference)
         .await
         .map_err(|err| {
-            tracing::error!(error = %err, "Failed to get manifest");
+            tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to get manifest");
             Error::ClientError(err)
         })?;
 

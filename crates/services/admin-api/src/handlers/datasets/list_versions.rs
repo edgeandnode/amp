@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, namespace::Namespace, version::Version};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -61,7 +62,7 @@ pub async fn handler(
     let (namespace, name) = match path {
         Ok(Path((namespace, name))) => (namespace, name),
         Err(err) => {
-            tracing::debug!(error=?err, "invalid path parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid path parameters");
             return Err(Error::InvalidPath(err).into());
         }
     };

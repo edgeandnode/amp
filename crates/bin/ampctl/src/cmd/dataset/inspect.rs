@@ -11,6 +11,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::reference::Reference;
+use monitoring::logging;
 
 use crate::{args::GlobalArgs, client};
 
@@ -39,7 +40,7 @@ pub async fn run(Args { global, reference }: Args) -> Result<(), Error> {
     let dataset = get_dataset(&global, &reference).await?;
 
     let json = serde_json::to_string_pretty(&dataset).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize dataset to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize dataset to JSON");
         Error::JsonFormattingError(err)
     })?;
     println!("{}", json);
@@ -58,7 +59,7 @@ async fn get_dataset(
     let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let dataset = client.datasets().get(reference).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to get dataset");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to get dataset");
         Error::ClientError(err)
     })?;
 
