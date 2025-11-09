@@ -1302,7 +1302,7 @@
           "schema"
         ],
         "summary": "Handler for the `/schema` endpoint that provides SQL schema analysis.",
-        "description": "This endpoint performs comprehensive SQL validation and schema inference by:\n1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser\n2. **Loading Datasets**: Retrieves actual dataset definitions from the registry\n3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets\n4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution\n5. **Special Fields**: Optionally prepends `SPECIAL_BLOCK_NUM` field for SQL datasets\n6. **Network Extraction**: Identifies which blockchain networks the query references\n\nThe validation works with real registered datasets and their actual schemas,\nensuring datasets exist, tables are valid, and column references are correct.\nThis enables accurate schema introspection for query builders and dataset development tools.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n- `is_sql_dataset`: (optional) Whether this is a SQL dataset (affects block number field inclusion)\n\n## Response\n- **200 OK**: Returns the schema and networks used by the query\n- **400 Bad Request**: SQL parse error\n- **500 Internal Server Error**: Dataset store or planning error\n\n## Error Codes\n- `SQL_PARSE_ERROR`: Failed to parse the SQL query\n- `DATASET_STORE_ERROR`: Failed to load datasets from store\n- `PLANNING_ERROR`: Failed to determine output schema",
+        "description": "This endpoint performs comprehensive SQL validation and schema inference by:\n1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser\n2. **Loading Datasets**: Retrieves actual dataset definitions from the registry\n3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets\n4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution\n5. **Special Fields**: Prepends `SPECIAL_BLOCK_NUM` field to the schema\n6. **Network Extraction**: Identifies which blockchain networks the query references\n\nThe validation works with real registered datasets and their actual schemas,\nensuring datasets exist, tables are valid, and column references are correct.\nThis enables accurate schema introspection for query builders and dataset development tools.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n\n## Response\n- **200 OK**: Returns the schema and networks used by the query\n- **400 Bad Request**: SQL parse error\n- **500 Internal Server Error**: Dataset store or planning error\n\n## Error Codes\n- `SQL_PARSE_ERROR`: Failed to parse the SQL query\n- `DATASET_STORE_ERROR`: Failed to load datasets from store\n- `PLANNING_ERROR`: Failed to determine output schema",
         "operationId": "schema_analyze",
         "requestBody": {
           "content": {
@@ -1758,15 +1758,11 @@
       },
       "OutputSchemaRequest": {
         "type": "object",
-        "description": "Request payload for output schema analysis\n\nContains the SQL query to analyze and optional configuration flags.",
+        "description": "Request payload for output schema analysis\n\nContains the SQL query to analyze.",
         "required": [
           "sql_query"
         ],
         "properties": {
-          "is_sql_dataset": {
-            "type": "boolean",
-            "description": "Whether this is a SQL dataset (affects block number field inclusion)\n\nWhen true, a special block number field is prepended to the schema.\nThis field tracks the block number for each row in SQL datasets."
-          },
           "sql_query": {
             "type": "string",
             "description": "The SQL query to analyze for output schema determination"
