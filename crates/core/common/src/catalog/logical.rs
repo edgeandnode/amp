@@ -9,7 +9,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{partial_reference::PartialReference, reference::Reference};
+use datasets_common::{
+    partial_reference::PartialReference, reference::Reference, table_name::TableName,
+};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -81,7 +83,7 @@ impl Dataset {
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
 pub struct Table {
     /// Bare table name.
-    name: String,
+    name: TableName,
     schema: SchemaRef,
     network: String,
     sorted_by: BTreeSet<String>,
@@ -89,12 +91,11 @@ pub struct Table {
 
 impl Table {
     pub fn new(
-        name: String,
+        name: TableName,
         schema: SchemaRef,
         network: String,
         sorted_by: Vec<String>,
     ) -> Result<Self, BoxError> {
-        validate_name(&name)?;
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
         sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
         Ok(Self {
@@ -105,7 +106,7 @@ impl Table {
         })
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &TableName {
         &self.name
     }
 
@@ -159,7 +160,7 @@ impl ResolvedTable {
     }
 
     /// Bare table name
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &TableName {
         &self.table.name
     }
 
@@ -191,21 +192,6 @@ pub struct Function {
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,
-}
-
-fn validate_name(name: &str) -> Result<(), BoxError> {
-    if let Some(c) = name
-        .chars()
-        .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
-    {
-        return Err(format!(
-            "names must be lowercase and contain only letters, underscores, and numbers, \
-             the name: '{name}' is not allowed because it contains the character '{c}'"
-        )
-        .into());
-    }
-
-    Ok(())
 }
 
 #[derive(Clone, Debug)]

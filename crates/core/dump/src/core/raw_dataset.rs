@@ -94,6 +94,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
+use datasets_common::table_name::TableName;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
@@ -156,7 +157,7 @@ pub async fn dump(
             continue;
         }
 
-        let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
+        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
             Default::default();
         for table in tables {
             let end = match end {
@@ -164,7 +165,7 @@ pub async fn dump(
                 Some(end) => BlockNum::min(end, latest_block),
             };
             let missing_ranges = table.missing_ranges(start..=end).await?;
-            missing_ranges_by_table.insert(table.table().name().to_string(), missing_ranges);
+            missing_ranges_by_table.insert(table.table().name().clone(), missing_ranges);
         }
 
         // Use the union of missing table block ranges.
@@ -362,7 +363,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The Parquet writer properties
     parquet_opts: Arc<WriterProperties>,
     /// The missing block ranges by table
-    missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
+    missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
     /// The partition ID
     id: u32,
     /// Metrics registry
@@ -412,7 +413,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         };
 
         // limit the missing table ranges to the partition range
-        let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
+        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
             Default::default();
         for (table, ranges) in &self.missing_ranges_by_table {
             let entry = missing_ranges_by_table.entry(table.clone()).or_default();
@@ -438,7 +439,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             for table_rows in dataset_rows {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                    let table_name = table_rows.table.name().to_string();
+                    let table_name = table_rows.table.name();
                     let block_num = table_rows.block_num();
                     let physical_table = self
                         .catalog
@@ -448,9 +449,9 @@ impl<S: BlockStreamer> DumpPartition<S> {
                         .expect("table should exist");
                     let location_id = *physical_table.location_id();
                     // Record rows only (bytes tracked separately in writer)
-                    metrics.record_ingestion_rows(num_rows, table_name.clone(), location_id);
+                    metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
                     // Update latest block gauge
-                    metrics.set_latest_block(block_num, table_name, location_id);
+                    metrics.set_latest_block(block_num, table_name.to_string(), location_id);
                 }
 
                 writer.write(table_rows).await?;

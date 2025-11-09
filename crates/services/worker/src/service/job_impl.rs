@@ -6,7 +6,9 @@ use common::{
     BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
 };
-use datasets_common::{hash::Hash, reference::Reference, revision::Revision};
+use datasets_common::{
+    hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
+};
 use dump::{Ctx, metrics::MetricsRegistry};
 
 use crate::job::{JobDescriptor, JobId};
@@ -72,7 +74,7 @@ pub(super) async fn new(
         let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
         let Some(table) = resolved_tables.find(|t| t.name() == location.table_name) else {
             return Err(JobInitError::TableNotFound {
-                table_name: location.table_name,
+                table_name: location.table_name.into(),
                 dataset_hash: hash,
             });
         };
@@ -86,7 +88,7 @@ pub(super) async fn new(
                 job_labels.clone(),
             )
             .map_err(|err| JobInitError::CreatePhysicalTable {
-                table_name: table.name().to_string(),
+                table_name: table.name().clone(),
                 source: err,
             })?
             .into(),
@@ -151,7 +153,7 @@ pub enum JobInitError {
     /// mismatch between the job's expected outputs and the actual dataset schema.
     #[error("Table '{table_name}' not found in dataset '{dataset_hash}'")]
     TableNotFound {
-        table_name: String,
+        table_name: TableName,
         dataset_hash: Hash,
     },
 
@@ -164,7 +166,7 @@ pub enum JobInitError {
     /// BoxError. This should be replaced with a concrete error type.
     #[error("Failed to create physical table for '{table_name}'")]
     CreatePhysicalTable {
-        table_name: String,
+        table_name: TableName,
         #[source]
         source: BoxError,
     },
