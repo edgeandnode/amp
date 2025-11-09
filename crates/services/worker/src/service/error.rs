@@ -205,15 +205,15 @@ pub enum SpawnJobError {
     #[error("failed to parse job descriptor: {0}")]
     DescriptorParseFailed(#[source] serde_json::Error),
 
-    /// Failed to create job instance.
+    /// Failed to initialize job.
     ///
-    /// This occurs when constructing the job instance from the parsed descriptor fails.
-    /// Job creation involves resolving datasets, tables, and other resources needed
-    /// for job execution.
+    /// This occurs during the job initialization phase when fetching metadata
+    /// and building physical tables before starting the actual dump. This is the
+    /// modern, guidelines-compliant error type that replaces `JobCreationFailed`.
     ///
-    /// See [`JobCreationError`] for specific job creation failure modes.
-    #[error("failed to create job instance: {0}")]
-    JobCreationFailed(#[source] JobCreationError),
+    /// See [`super::job_impl::JobInitError`] for specific initialization failure modes.
+    #[error("failed to initialize job: {0}")]
+    JobInitializationFailed(#[source] super::job_impl::JobInitError),
 }
 
 /// Errors that can occur when aborting a job.

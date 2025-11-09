@@ -3,14 +3,14 @@
 //! The manifest contains table definitions with Arrow schemas that are used
 //! to create PostgreSQL tables.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
-use datasets_common::manifest::{Manifest as CommonManifest, TableSchema};
+use datasets_common::manifest::TableSchema;
 use reqwest::Client;
 
-use crate::{config::Config, sql};
+use crate::{config::SyncConfig, sql};
 
 /// Generic manifest that extracts table schemas from any dataset kind.
 ///
@@ -67,16 +67,28 @@ impl HasTables for datasets_derived::manifest::Manifest {
     }
 }
 
-/// Parse manifest from JSON value and extract table schemas.
+/// Envelope for two-phase manifest deserialization.
+///
+/// Deserializes only the `kind` field upfront, keeping the rest as validated
+/// but unparsed JSON. Once we know the kind, we deserialize the full manifest
+/// directly to the appropriate type.
+#[derive(serde::Deserialize)]
+struct ManifestEnvelope {
+    kind: String,
+    #[serde(flatten)]
+    rest: Box<serde_json::value::RawValue>,
+}
+
+/// Parse manifest from JSON string and extract table schemas.
 fn parse_manifest<T>(
-    json_value: serde_json::Value,
+    json_str: &str,
     kind_name: &str,
 ) -> Result<BTreeMap<String, TableSchema>, FetchManifestError>
 where
     T: serde::de::DeserializeOwned + HasTables,
 {
     let manifest: T =
-        serde_json::from_value(json_value).map_err(|e| FetchManifestError::ParseJsonSerde {
+        serde_json::from_str(json_str).map_err(|e| FetchManifestError::ParseJsonSerde {
             message: format!("Failed to parse {} manifest: {}", kind_name, e),
             source: e,
         })?;
@@ -99,10 +111,6 @@ fn validate_table_name(name: &str) -> Result<(), FetchManifestError> {
 /// Errors that occur when fetching or parsing manifests
 #[derive(Debug, thiserror::Error)]
 pub enum FetchManifestError {
-    /// Failed to create HTTP client
-    #[error("Failed to create HTTP client")]
-    CreateClient(#[source] reqwest::Error),
-
     /// Failed to fetch manifest from Admin API
     #[error("Failed to fetch manifest from Admin API at '{url}' after retries")]
     FetchFromApi {
@@ -147,17 +155,35 @@ pub enum FetchManifestError {
     InvalidTableName { name: String, reason: String },
 }
 
+impl FetchManifestError {
+    /// Classify error as retryable or fatal.
+    ///
+    /// Retryable errors will retry indefinitely with exponential backoff (capped).
+    /// Fatal errors fail immediately without retries.
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Network errors
+            Self::FetchFromApi { .. } => true,
+
+            // Http response errors
+            Self::ApiStatusError { .. } => true,
+
+            // Json parse errors
+            Self::ParseJsonHttp { .. } => true,
+
+            // Schema/validation errors
+            Self::ParseJsonSerde { .. } => false,
+            Self::InvalidArrowType { .. } => false,
+            Self::InvalidTableName { .. } => false,
+            Self::NoTables => false,
+        }
+    }
+}
+
 /// Fetch dataset manifest from Admin API with retry logic.
 ///
 /// This function fetches the table schemas for a dataset from the Admin API,
 /// with automatic retry on transient failures.
-///
-/// # Retry Behavior
-///
-/// - **Retryable errors**: Network errors, 5xx server errors (max 5 attempts)
-/// - **Non-retryable errors**: 4xx client errors (fail immediately)
-/// - **Backoff strategy**: Exponential with jitter
-/// - Each retry is logged with timing information
 ///
 /// # Arguments
 ///
@@ -170,12 +196,10 @@ pub enum FetchManifestError {
 /// # Errors
 ///
 /// Returns error if:
-/// - Network request fails after all retries
-/// - Admin API returns 4xx status (e.g., 404 Not Found)
-/// - Admin API returns 5xx status after all retries
-/// - Response JSON cannot be parsed
+/// - Response JSON cannot be parsed (malformed manifest)
 /// - Arrow schema conversion fails (unsupported types)
-pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestError> {
+/// - Manifest validation fails (no tables, invalid names)
+pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManifestError> {
     let url = format!(
         "{}/datasets/{}/versions/{}/manifest",
         config.amp_admin_api_addr, config.dataset_name, config.dataset_version
@@ -192,88 +216,88 @@ pub async fn fetch_manifest(config: &Config) -> Result<Manifest, FetchManifestEr
     let client = Client::new();
 
     // Create retry-able fetch function
-    let fetch =
-        || async {
-            // Fetch response
-            let response =
-                client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| FetchManifestError::FetchFromApi {
-                        url: url.clone(),
-                        source: e,
-                    })?;
-
-            // Check for HTTP errors
-            let status = response.status();
-            if !status.is_success() {
-                return Err(FetchManifestError::ApiStatusError {
-                    status,
+    let fetch = || async {
+        // Fetch response
+        let response =
+            client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| FetchManifestError::FetchFromApi {
                     url: url.clone(),
-                });
-            }
-
-            // Parse JSON response
-            let json_value: serde_json::Value =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| FetchManifestError::ParseJsonHttp {
-                        message: "Failed to parse JSON response".to_string(),
-                        source: e,
-                    })?;
-
-            // Parse common manifest to determine dataset kind
-            let common_manifest: CommonManifest = serde_json::from_value(json_value.clone())
-                .map_err(|e| FetchManifestError::ParseJsonSerde {
-                    message: format!("Failed to parse common manifest fields: {}", e),
                     source: e,
                 })?;
 
-            // Parse the dataset kind
-            let kind: DatasetKind = common_manifest.kind.parse().map_err(
-                |e: dataset_store::UnsupportedKindError| FetchManifestError::InvalidArrowType {
-                    message: format!("Unsupported dataset kind: {}", e.kind),
-                },
-            )?;
+        // Check for HTTP errors
+        let status = response.status();
+        if !status.is_success() {
+            return Err(FetchManifestError::ApiStatusError {
+                status,
+                url: url.clone(),
+            });
+        }
 
-            // Parse the full manifest based on the kind and extract tables
-            let tables = match kind {
-                DatasetKind::EvmRpc => {
-                    parse_manifest::<evm_rpc_datasets::Manifest>(json_value, "EVM-RPC")?
-                }
-                DatasetKind::EthBeacon => {
-                    parse_manifest::<eth_beacon_datasets::Manifest>(json_value, "Eth-Beacon")?
-                }
-                DatasetKind::Firehose => {
-                    parse_manifest::<firehose_datasets::dataset::Manifest>(json_value, "Firehose")?
-                }
-                DatasetKind::Derived => {
-                    parse_manifest::<datasets_derived::manifest::Manifest>(json_value, "Derived")?
-                }
-            };
+        // Deserialize envelope with kind + raw JSON remainder
+        let envelope: ManifestEnvelope =
+            response
+                .json()
+                .await
+                .map_err(|e| FetchManifestError::ParseJsonHttp {
+                    message: "Failed to parse JSON response".to_string(),
+                    source: e,
+                })?;
 
-            let manifest = Manifest { kind, tables };
+        // Parse the dataset kind from envelope
+        let kind: DatasetKind =
+            envelope
+                .kind
+                .parse()
+                .map_err(|e: dataset_store::UnsupportedKindError| {
+                    FetchManifestError::InvalidArrowType {
+                        message: format!("Unsupported dataset kind: {}", e.kind),
+                    }
+                })?;
 
-            // Validate manifest has tables
-            if manifest.tables.is_empty() {
-                return Err(FetchManifestError::NoTables);
+        // Deserialize full manifest based on kind
+        let json_str = envelope.rest.get();
+        let tables = match kind {
+            DatasetKind::EvmRpc => {
+                parse_manifest::<evm_rpc_datasets::Manifest>(json_str, "EVM-RPC")?
             }
-
-            Ok(manifest)
+            DatasetKind::EthBeacon => {
+                parse_manifest::<eth_beacon_datasets::Manifest>(json_str, "Eth-Beacon")?
+            }
+            DatasetKind::Firehose => {
+                parse_manifest::<firehose_datasets::dataset::Manifest>(json_str, "Firehose")?
+            }
+            DatasetKind::Derived => {
+                parse_manifest::<datasets_derived::manifest::Manifest>(json_str, "Derived")?
+            }
         };
 
-    // Retry with exponential backoff
+        let manifest = Manifest { kind, tables };
+
+        // Validate manifest has tables
+        if manifest.tables.is_empty() {
+            return Err(FetchManifestError::NoTables);
+        }
+
+        Ok(manifest)
+    };
+
+    // Retry with exponential backoff, jitter, and error classification
     let manifest = fetch
         .retry(
             ExponentialBuilder::default()
-                .with_max_times(config.manifest_fetch_max_retries as usize),
+                .with_jitter() // Prevent thundering herd
+                .with_max_delay(Duration::from_secs(config.manifest_fetch_max_backoff_secs)),
         )
+        .when(FetchManifestError::is_retryable) // Only retry retryable errors
         .notify(|err, duration| {
             tracing::warn!(
                 error = %err,
                 retry_after_ms = duration.as_millis(),
+                retryable = err.is_retryable(),
                 "manifest_fetch_failed_retrying"
             );
         })
