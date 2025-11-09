@@ -7,7 +7,7 @@ use common::{
     BoxError, ParquetFooterCache, catalog::physical::PhysicalTable, metadata::Generation,
 };
 use dataset_store::DatasetStore;
-use datasets_common::{name::Name, partial_reference::PartialReference, reference::Reference};
+use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
@@ -22,8 +22,9 @@ async fn sql_dataset_input_batch_size() {
     let test = TestCtx::setup("sql_dataset_input_batch_size").await;
 
     // 2. First dump eth_rpc dependency on the spot
-    let eth_rpc_ref =
-        PartialReference::new(None, Name::try_from("eth_rpc".to_string()).unwrap(), None);
+    let eth_rpc_ref: Reference = "_/eth_rpc@latest"
+        .parse()
+        .expect("should be valid reference");
     let start = test
         .dataset_store()
         .get_dataset(eth_rpc_ref)

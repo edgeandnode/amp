@@ -3,6 +3,9 @@
 //! This module provides the `Namespace` type for validated namespaces that enforce
 //! naming conventions and constraints required across the system.
 
+/// The global namespace string constant.
+const GLOBAL_NAMESPACE: &str = "_";
+
 /// A validated namespace that enforces naming conventions and constraints.
 ///
 /// Namespaces must follow strict rules to ensure compatibility across systems,
@@ -25,6 +28,14 @@ pub struct Namespace(
 );
 
 impl Namespace {
+    /// Returns the global namespace (`"_"`).
+    ///
+    /// This represents the default global namespace used throughout the system
+    /// when no specific namespace is provided.
+    pub fn global() -> Namespace {
+        Namespace(GLOBAL_NAMESPACE.to_string())
+    }
+
     /// Returns a reference to the inner string value
     pub fn as_str(&self) -> &str {
         &self.0

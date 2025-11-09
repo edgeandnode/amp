@@ -1178,7 +1178,7 @@ pub struct VersionsResponse {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct VersionInfo {
     pub version: Version,
-    pub manifest_hash: String,
+    pub manifest_hash: Hash,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1189,7 +1189,7 @@ pub struct SpecialTags {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest: Option<Version>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dev: Option<String>,
+    pub dev: Option<Hash>,
 }
 
 /// Errors that can occur when listing all datasets.
