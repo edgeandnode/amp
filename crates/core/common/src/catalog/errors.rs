@@ -1,3 +1,5 @@
+use datasets_common::name::Name;
+
 use crate::BoxError;
 
 #[derive(Debug, thiserror::Error)]
@@ -123,7 +125,7 @@ pub enum GetLogicalCatalogError {
     /// This occurs when creating the eth_call user-defined function for an EVM RPC dataset
     /// fails, typically due to invalid provider configuration or connection issues.
     #[error("Failed to create ETH call UDF for dataset '{dataset}': {source}")]
-    EthCallUdfCreation { dataset: String, source: BoxError },
+    EthCallUdfCreation { dataset: Name, source: BoxError },
 }
 
 /// Errors that occur when extracting dataset names and versions from table references.

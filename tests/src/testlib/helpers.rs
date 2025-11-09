@@ -19,7 +19,9 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use datasets_common::{name::Name, partial_reference::PartialReference, reference::Reference};
+use datasets_common::{
+    name::Name, partial_reference::PartialReference, reference::Reference, table_name::TableName,
+};
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 
@@ -142,11 +144,11 @@ pub async fn get_table_block_ranges(table: &Arc<PhysicalTable>) -> Vec<BlockRang
 ///
 /// Panics if block ranges don't match between snapshots.
 pub async fn assert_snapshot_block_ranges_eq(left: &SnapshotContext, right: &SnapshotContext) {
-    let mut right_block_ranges: BTreeMap<String, Vec<BlockRange>> = BTreeMap::new();
+    let mut right_block_ranges: BTreeMap<TableName, Vec<BlockRange>> = BTreeMap::new();
 
     for table in right.physical_tables() {
         let ranges = get_table_block_ranges(table).await;
-        right_block_ranges.insert(table.table_name().to_string(), ranges);
+        right_block_ranges.insert(table.table_name().clone(), ranges);
     }
 
     for table in left.physical_tables() {

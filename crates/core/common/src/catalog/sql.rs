@@ -134,7 +134,7 @@ async fn get_logical_catalog(
             .eth_call_for_dataset(&partial_ref.to_string(), &dataset)
             .await
             .map_err(|err| GetLogicalCatalogError::EthCallUdfCreation {
-                dataset: partial_ref.name.to_string(),
+                dataset: partial_ref.name.clone(),
                 source: err,
             })?;
         if let Some(udf) = udf {

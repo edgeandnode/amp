@@ -63,7 +63,7 @@ impl HasTables for datasets_derived::manifest::Manifest {
     fn into_tables(self) -> BTreeMap<String, TableSchema> {
         self.tables
             .into_iter()
-            .map(|(name, table)| (name, table.schema))
+            .map(|(name, table)| (name.to_string(), table.schema))
             .collect()
     }
 }

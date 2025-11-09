@@ -8,7 +8,10 @@
 use sqlx::{Executor, Postgres, types::JsonValue};
 use url::Url;
 
-use super::{LocationId, LocationWithDetails, PhysicalTable};
+use super::{
+    LocationId, LocationWithDetails, PhysicalTable,
+    name::{Name, NameOwned},
+};
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, JobStatus,
     ManifestHashOwned,
@@ -22,7 +25,7 @@ use crate::{
 pub async fn insert<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,
-    table_name: &str,
+    table_name: Name<'_>,
     dataset_namespace: DatasetNamespace<'_>,
     dataset_name: DatasetName<'_>,
     bucket: Option<&str>,
@@ -115,7 +118,7 @@ where
     struct Row {
         id: LocationId,
         manifest_hash: ManifestHashOwned,
-        table_name: String,
+        table_name: NameOwned,
         #[sqlx(try_from = "&'a str")]
         url: Url,
         active: bool,
@@ -177,7 +180,7 @@ where
 pub async fn get_active_physical_table<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,
-    table_name: &str,
+    table_name: Name<'_>,
 ) -> Result<Option<PhysicalTable>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -201,7 +204,7 @@ where
 pub async fn mark_inactive_by_table_id<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,
-    table_name: &str,
+    table_name: Name<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -224,7 +227,7 @@ where
 pub async fn mark_active_by_id<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,
-    table_name: &str,
+    table_name: Name<'_>,
     location_id: LocationId,
 ) -> Result<(), sqlx::Error>
 where

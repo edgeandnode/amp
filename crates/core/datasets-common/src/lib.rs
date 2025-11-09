@@ -11,4 +11,5 @@ pub mod namespace;
 pub mod partial_reference;
 pub mod reference;
 pub mod revision;
+pub mod table_name;
 pub mod version;

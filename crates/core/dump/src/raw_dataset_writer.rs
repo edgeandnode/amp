@@ -6,6 +6,7 @@ use common::{
     metadata::{Generation, segments::BlockRange},
     parquet::file::metadata::ParquetMetaData,
 };
+use datasets_common::table_name::TableName;
 use metadata_db::MetadataDb;
 
 use crate::{
@@ -19,7 +20,7 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
 /// Only used for raw datasets.
 pub struct RawDatasetWriter {
-    writers: BTreeMap<String, RawTableWriter>,
+    writers: BTreeMap<TableName, RawTableWriter>,
 
     metadata_db: MetadataDb,
 }
@@ -31,7 +32,7 @@ impl RawDatasetWriter {
         catalog: Catalog,
         metadata_db: MetadataDb,
         opts: Arc<WriterProperties>,
-        missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
+        missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
@@ -44,7 +45,7 @@ impl RawDatasetWriter {
                 .build();
             let writer =
                 RawTableWriter::new(table.clone(), cache, opts.clone(), ranges, metrics.clone())?;
-            writers.insert(table_name.to_string(), writer);
+            writers.insert(table_name.clone(), writer);
         }
         Ok(RawDatasetWriter {
             writers,

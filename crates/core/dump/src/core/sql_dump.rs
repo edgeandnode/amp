@@ -143,7 +143,7 @@ pub async fn dump_table(
     // Get the table definition from the manifest
     let table_def = manifest
         .tables
-        .get(&table_name)
+        .get(table.table_name())
         .ok_or_else(|| format!("table `{}` not found in dataset", table_name))?;
 
     // Extract SQL query from the table input

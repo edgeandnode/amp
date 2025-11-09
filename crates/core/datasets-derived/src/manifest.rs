@@ -11,7 +11,7 @@ use std::{
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{manifest::DataType, reference::Reference};
+use datasets_common::{manifest::DataType, reference::Reference, table_name::TableName};
 
 use crate::dataset_kind::DerivedDatasetKind;
 
@@ -32,7 +32,7 @@ pub struct Manifest {
     pub dependencies: BTreeMap<String, Reference>,
     /// Table definitions mapped by table name
     #[serde(default)]
-    pub tables: BTreeMap<String, Table>,
+    pub tables: BTreeMap<TableName, Table>,
     /// User-defined function definitions mapped by function name
     #[serde(default)]
     pub functions: BTreeMap<String, Function>,

@@ -7,10 +7,12 @@ use url::Url;
 
 pub mod events;
 mod location_id;
+mod name;
 pub(crate) mod sql;
 
-pub use self::location_id::{
-    LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+pub use self::{
+    location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
+    name::{Name as TableName, NameOwned as TableNameOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
@@ -263,7 +265,20 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
     pub manifest_hash: ManifestHash<'a>,
-    pub table: &'a str,
+    pub table: TableName<'a>,
+}
+
+impl<'a> TableId<'a> {
+    /// Create a new TableId with flexible parameter types
+    pub fn new(
+        manifest_hash: impl Into<ManifestHash<'a>>,
+        table: impl Into<TableName<'a>>,
+    ) -> Self {
+        Self {
+            manifest_hash: manifest_hash.into(),
+            table: table.into(),
+        }
+    }
 }
 
 /// Basic location information from the database
@@ -279,7 +294,7 @@ pub struct PhysicalTable {
     pub dataset_name: DatasetNameOwned,
 
     /// Name of the table within the dataset
-    pub table_name: String,
+    pub table_name: TableNameOwned,
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
