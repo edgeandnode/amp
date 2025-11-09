@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace, version::Version};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -61,7 +62,7 @@ pub async fn handler(
     let hash = match path {
         Ok(Path(hash)) => hash,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid manifest hash in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid manifest hash in path");
             return Err(Error::InvalidHash(err).into());
         }
     };

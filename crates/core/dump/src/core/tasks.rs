@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use common::BoxError;
+use monitoring::logging;
 use tokio::task::{JoinError, JoinSet};
 
 /// A wrapper around [`JoinSet`] that implements fail-fast semantics.
@@ -67,7 +68,7 @@ where
                 // One of the tasks panicked, abort the rest of the tasks and
                 // wait for them to stop, then return the error
                 Err(err) => {
-                    tracing::error!(error=?err, "task {} panicked", err.id());
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "task {} panicked", err.id());
                     self.0.shutdown().await;
                     return Err(TryWaitAllError::Panic(err));
                 }

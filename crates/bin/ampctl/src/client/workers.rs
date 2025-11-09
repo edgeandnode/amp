@@ -2,6 +2,7 @@
 //!
 //! Provides methods for interacting with the `/workers` endpoints of the admin API.
 
+use monitoring::logging;
 use worker::node_id::NodeId;
 
 use super::{
@@ -74,7 +75,7 @@ impl<'a> WorkersClient<'a> {
         match status.as_u16() {
             200 => {
                 let worker: WorkerDetailResponse = response.json().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse worker response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse worker response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -88,7 +89,7 @@ impl<'a> WorkersClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -96,7 +97,7 @@ impl<'a> WorkersClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -163,7 +164,7 @@ impl<'a> WorkersClient<'a> {
         match status.as_u16() {
             200 => {
                 let workers_response = response.json::<WorkersResponse>().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse workers response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse workers response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -173,7 +174,7 @@ impl<'a> WorkersClient<'a> {
             }
             500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -181,7 +182,7 @@ impl<'a> WorkersClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),

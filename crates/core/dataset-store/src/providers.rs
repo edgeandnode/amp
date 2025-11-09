@@ -17,6 +17,7 @@ use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use common::BoxError;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
+use monitoring::logging;
 use object_store::ObjectStore;
 use parking_lot::RwLock;
 
@@ -71,7 +72,7 @@ where
             Ok(stream) => stream,
             Err(err) => {
                 tracing::error!(
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Failed to enumerate provider configurations from store, leaving cache empty"
                 );
 
@@ -96,7 +97,7 @@ where
                     failed_count += 1;
                     tracing::warn!(
                         file = %err.path(),
-                        error = %err,
+                        error = %err, error_source = logging::error_source(&err),
                         "Failed to load and parse provider configuration file, skipping"
                     );
                 }

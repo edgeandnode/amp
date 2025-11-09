@@ -19,6 +19,8 @@
 //! - Status filter: Optional `--status` flag (terminal, completed, stopped, error)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
+
 use crate::{
     args::GlobalArgs,
     client::{self, Client},
@@ -68,7 +70,7 @@ async fn prune_jobs(
     tracing::debug!("Pruning jobs via admin API");
 
     client.jobs().delete(status).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to prune jobs");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to prune jobs");
         Error::DeleteError(err)
     })?;
 

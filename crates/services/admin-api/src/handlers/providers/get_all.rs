@@ -1,6 +1,7 @@
 //! Providers get all handler
 
 use axum::{Json, extract::State};
+use monitoring::logging;
 
 use super::provider_info::ProviderInfo;
 use crate::ctx::Ctx;
@@ -49,7 +50,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Json<ProvidersResponse> {
                 Err(err) => {
                     tracing::warn!(
                         provider_name = %name,
-                        error = %err,
+                        error = %err, error_source = logging::error_source(&err),
                         "failed to convert provider config to info, skipping"
                     );
                     None

@@ -5,6 +5,7 @@ use axum::{
 use dataset_store::DeleteManifestError;
 use datasets_common::{name::Name, namespace::Namespace};
 use futures::stream::{FuturesUnordered, StreamExt};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -59,7 +60,7 @@ pub async fn handler(
     let (namespace, name) = match path {
         Ok(Path((namespace, name))) => (namespace, name),
         Err(err) => {
-            tracing::debug!(error=?err, "invalid path parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid path parameters");
             return Err(Error::InvalidPath(err).into());
         }
     };
@@ -109,35 +110,35 @@ pub async fn handler(
                     DeleteManifestError::TransactionBegin(err) => {
                         tracing::warn!(
                             manifest_hash=%hash,
-                            error=%err,
+                            error=%err, error_source = logging::error_source(&err),
                             "Failed to begin transaction for manifest deletion"
                         );
                     }
                     DeleteManifestError::MetadataDbCheckLinks(err) => {
                         tracing::warn!(
                             manifest_hash=%hash,
-                            error=%err,
+                            error=%err, error_source = logging::error_source(&err),
                             "Failed to check remaining manifest links"
                         );
                     }
                     DeleteManifestError::MetadataDbDelete(err) => {
                         tracing::warn!(
                             manifest_hash=%hash,
-                            error=%err,
+                            error=%err, error_source = logging::error_source(&err),
                             "Failed to delete manifest from metadata database"
                         );
                     }
                     DeleteManifestError::ObjectStoreError(err) => {
                         tracing::warn!(
                             manifest_hash=%hash,
-                            error=%err,
+                            error=%err, error_source = logging::error_source(&err),
                             "Failed to delete manifest file from object store, keeping in database"
                         );
                     }
                     DeleteManifestError::TransactionCommit(err) => {
                         tracing::warn!(
                             manifest_hash=%hash,
-                            error=%err,
+                            error=%err, error_source = logging::error_source(&err),
                             "Failed to commit manifest deletion transaction"
                         );
                     }

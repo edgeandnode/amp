@@ -5,6 +5,7 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
+use monitoring::logging;
 use serde::{Deserialize, Serialize};
 use worker::job::JobId;
 
@@ -80,7 +81,7 @@ pub async fn handler(
     let query = match query {
         Ok(Query(query)) => query,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid query parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid query parameters");
             return Err(Error::InvalidQueryParams { err }.into());
         }
     };
@@ -106,7 +107,7 @@ pub async fn handler(
         )
         .await
         .map_err(|err| {
-            tracing::debug!(error=?err, "failed to list jobs");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list jobs");
             Error::ListJobs(err)
         })?;
 

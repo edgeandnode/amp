@@ -3,6 +3,7 @@
 use amp_client::{AmpClient, PostgresStateStore, TransactionEvent};
 use common::BlockNum;
 use futures::StreamExt;
+use monitoring::logging;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
@@ -204,12 +205,12 @@ impl StreamTask {
                     match event_result {
                         Some(Ok((event, commit))) => {
                             if let Err(e) = self.handle_event(event, commit).await {
-                                error!(error = %e, "event_handling_failed");
+                                error!(error = %e, error_source = logging::error_source(&e), "event_handling_failed");
                                 return Err(e);
                             }
                         }
                         Some(Err(e)) => {
-                            error!(error = %e, "stream_error");
+                            error!(error = %e, error_source = logging::error_source(&e), "stream_error");
                             return Err(StreamTaskError::StreamError(e));
                         }
                         None => {

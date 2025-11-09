@@ -12,6 +12,7 @@
 //! - After: `--after` flag for cursor-based pagination
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
 use worker::job::JobId;
 
 use crate::{args::GlobalArgs, client};
@@ -51,7 +52,7 @@ pub async fn run(
     let jobs_response = get_jobs(&global, limit, after).await?;
 
     let json = serde_json::to_string_pretty(&jobs_response).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize jobs to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize jobs to JSON");
         Error::JsonFormattingError { source: err }
     })?;
     println!("{}", json);
@@ -71,7 +72,7 @@ async fn get_jobs(
     let client = global.build_client()?;
 
     let jobs_response = client.jobs().list(limit, after).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to list jobs");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list jobs");
         Error::ClientError { source: err }
     })?;
 

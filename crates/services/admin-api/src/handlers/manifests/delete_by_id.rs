@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::hash::Hash;
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -73,7 +74,7 @@ pub async fn handler(
     let hash = match path {
         Ok(Path(hash)) => hash,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid manifest hash in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid manifest hash in path");
             return Err(Error::InvalidHash(err).into());
         }
     };
@@ -96,7 +97,7 @@ pub async fn handler(
         Err(dataset_store::DeleteManifestError::TransactionBegin(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to begin transaction"
             );
             return Err(Error::TransactionBeginError(err).into());
@@ -104,7 +105,7 @@ pub async fn handler(
         Err(dataset_store::DeleteManifestError::MetadataDbCheckLinks(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to check if manifest is linked"
             );
             return Err(Error::CheckLinksError(err).into());
@@ -112,7 +113,7 @@ pub async fn handler(
         Err(dataset_store::DeleteManifestError::MetadataDbDelete(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to delete manifest from metadata database"
             );
             return Err(Error::MetadataDbDeleteError(err).into());
@@ -120,7 +121,7 @@ pub async fn handler(
         Err(dataset_store::DeleteManifestError::ObjectStoreError(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to delete manifest from object store"
             );
             return Err(Error::ObjectStoreDeleteError(err).into());
@@ -128,7 +129,7 @@ pub async fn handler(
         Err(dataset_store::DeleteManifestError::TransactionCommit(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to commit transaction"
             );
             return Err(Error::TransactionCommitError(err).into());

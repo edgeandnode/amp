@@ -10,6 +10,8 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
+
 use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `provider inspect` command.
@@ -65,7 +67,7 @@ async fn get_provider(global: &GlobalArgs, name: &str) -> Result<String, Error> 
 
     // Pretty-print the provider JSON
     let pretty_json = serde_json::to_string_pretty(&provider_value).map_err(|err| {
-        tracing::error!(error = %err, "Failed to pretty-print provider JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to pretty-print provider JSON");
         Error::JsonFormattingError { source: err }
     })?;
 
