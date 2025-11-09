@@ -69,14 +69,11 @@ impl HasTables for datasets_derived::manifest::Manifest {
 
 /// Envelope for two-phase manifest deserialization.
 ///
-/// Deserializes only the `kind` field upfront, keeping the rest as validated
-/// but unparsed JSON. Once we know the kind, we deserialize the full manifest
-/// directly to the appropriate type.
+/// Deserializes only the `kind` field upfront to determine which manifest
+/// type to use for full deserialization.
 #[derive(serde::Deserialize)]
 struct ManifestEnvelope {
     kind: String,
-    #[serde(flatten)]
-    rest: Box<serde_json::value::RawValue>,
 }
 
 /// Parse manifest from JSON string and extract table schemas.
@@ -93,6 +90,70 @@ where
             source: e,
         })?;
     Ok(manifest.into_tables())
+}
+
+/// Parse manifest JSON text into a Manifest with table schemas.
+///
+/// This function performs two-phase deserialization:
+/// 1. Extract the `kind` field to determine the manifest type
+/// 2. Deserialize the full JSON into the appropriate manifest type
+///
+/// # Arguments
+///
+/// - `text`: JSON text of the manifest
+///
+/// # Returns
+///
+/// The parsed manifest with kind and table schemas.
+///
+/// # Errors
+///
+/// Returns error if:
+/// - JSON is malformed
+/// - `kind` field is missing or unsupported
+/// - Manifest deserialization fails
+/// - Manifest contains no tables
+fn parse_manifest_from_text(text: &str) -> Result<Manifest, FetchManifestError> {
+    // Extract the kind field first to determine manifest type
+    let envelope: ManifestEnvelope =
+        serde_json::from_str(text).map_err(|e| FetchManifestError::ParseJsonSerde {
+            message: "Failed to parse manifest envelope".to_string(),
+            source: e,
+        })?;
+
+    // Parse the dataset kind from envelope
+    let kind: DatasetKind =
+        envelope
+            .kind
+            .parse()
+            .map_err(|e: dataset_store::UnsupportedKindError| {
+                FetchManifestError::InvalidArrowType {
+                    message: format!("Unsupported dataset kind: {}", e.kind),
+                }
+            })?;
+
+    // Deserialize full manifest based on kind
+    let tables = match kind {
+        DatasetKind::EvmRpc => parse_manifest::<evm_rpc_datasets::Manifest>(text, "EVM-RPC")?,
+        DatasetKind::EthBeacon => {
+            parse_manifest::<eth_beacon_datasets::Manifest>(text, "Eth-Beacon")?
+        }
+        DatasetKind::Firehose => {
+            parse_manifest::<firehose_datasets::dataset::Manifest>(text, "Firehose")?
+        }
+        DatasetKind::Derived => {
+            parse_manifest::<datasets_derived::manifest::Manifest>(text, "Derived")?
+        }
+    };
+
+    let manifest = Manifest { kind, tables };
+
+    // Validate manifest has tables
+    if manifest.tables.is_empty() {
+        return Err(FetchManifestError::NoTables);
+    }
+
+    Ok(manifest)
 }
 
 /// Validate table name using the centralized SQL validation module.
@@ -237,52 +298,17 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
             });
         }
 
-        // Deserialize envelope with kind + raw JSON remainder
-        let envelope: ManifestEnvelope =
-            response
-                .json()
-                .await
-                .map_err(|e| FetchManifestError::ParseJsonHttp {
-                    message: "Failed to parse JSON response".to_string(),
-                    source: e,
-                })?;
+        // Get the full response text so we can parse it based on the kind
+        let text = response
+            .text()
+            .await
+            .map_err(|e| FetchManifestError::ParseJsonHttp {
+                message: "Failed to read response text".to_string(),
+                source: e,
+            })?;
 
-        // Parse the dataset kind from envelope
-        let kind: DatasetKind =
-            envelope
-                .kind
-                .parse()
-                .map_err(|e: dataset_store::UnsupportedKindError| {
-                    FetchManifestError::InvalidArrowType {
-                        message: format!("Unsupported dataset kind: {}", e.kind),
-                    }
-                })?;
-
-        // Deserialize full manifest based on kind
-        let json_str = envelope.rest.get();
-        let tables = match kind {
-            DatasetKind::EvmRpc => {
-                parse_manifest::<evm_rpc_datasets::Manifest>(json_str, "EVM-RPC")?
-            }
-            DatasetKind::EthBeacon => {
-                parse_manifest::<eth_beacon_datasets::Manifest>(json_str, "Eth-Beacon")?
-            }
-            DatasetKind::Firehose => {
-                parse_manifest::<firehose_datasets::dataset::Manifest>(json_str, "Firehose")?
-            }
-            DatasetKind::Derived => {
-                parse_manifest::<datasets_derived::manifest::Manifest>(json_str, "Derived")?
-            }
-        };
-
-        let manifest = Manifest { kind, tables };
-
-        // Validate manifest has tables
-        if manifest.tables.is_empty() {
-            return Err(FetchManifestError::NoTables);
-        }
-
-        Ok(manifest)
+        // Parse the manifest from the text
+        parse_manifest_from_text(&text)
     };
 
     // Retry with exponential backoff, jitter, and error classification
@@ -315,4 +341,130 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
     }
 
     Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DERIVED_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/register_test_dataset__1_0_0.json");
+    const EVM_RPC_MANIFEST: &str = include_str!("../../../../tests/config/manifests/eth_rpc.json");
+    const ETH_BEACON_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/eth_beacon.json");
+    const FIREHOSE_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/eth_firehose.json");
+
+    #[test]
+    fn test_parse_derived_manifest() {
+        let manifest =
+            parse_manifest_from_text(DERIVED_MANIFEST).expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::Derived);
+        assert_eq!(manifest.tables.len(), 1);
+        assert!(manifest.tables.contains_key("erc20_transfers"));
+
+        let table = &manifest.tables["erc20_transfers"];
+        assert_eq!(table.arrow.fields.len(), 5);
+        assert_eq!(table.arrow.fields[0].name, "_block_num");
+        assert_eq!(table.arrow.fields[1].name, "block_num");
+        assert_eq!(table.arrow.fields[2].name, "miner");
+    }
+
+    #[test]
+    fn test_parse_evm_rpc_manifest() {
+        let manifest =
+            parse_manifest_from_text(EVM_RPC_MANIFEST).expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::EvmRpc);
+        assert!(manifest.tables.contains_key("blocks"));
+        assert!(manifest.tables.contains_key("transactions"));
+        assert!(manifest.tables.contains_key("logs"));
+    }
+
+    #[test]
+    fn test_parse_eth_beacon_manifest() {
+        let manifest =
+            parse_manifest_from_text(ETH_BEACON_MANIFEST).expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::EthBeacon);
+        assert!(manifest.tables.contains_key("blocks"));
+    }
+
+    #[test]
+    fn test_parse_firehose_manifest() {
+        let manifest =
+            parse_manifest_from_text(FIREHOSE_MANIFEST).expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::Firehose);
+        assert!(manifest.tables.contains_key("blocks"));
+        assert!(manifest.tables.contains_key("transactions"));
+        assert!(manifest.tables.contains_key("logs"));
+    }
+
+    #[test]
+    fn test_parse_manifest_unsupported_kind() {
+        let json = r#"{
+            "kind": "unknown-kind",
+            "tables": {}
+        }"#;
+
+        let result = parse_manifest_from_text(json);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::InvalidArrowType { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_manifest_no_tables() {
+        let json = r#"{
+            "kind": "manifest",
+            "dependencies": {},
+            "functions": {},
+            "tables": {}
+        }"#;
+
+        let result = parse_manifest_from_text(json);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FetchManifestError::NoTables));
+    }
+
+    #[test]
+    fn test_parse_manifest_malformed_json() {
+        let json = r#"{
+            "kind": "manifest",
+            "tables": {
+        "#;
+
+        let result = parse_manifest_from_text(json);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::ParseJsonSerde { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_manifest_missing_kind() {
+        let json = r#"{
+            "tables": {
+                "test": {
+                    "schema": {
+                        "arrow": {
+                            "fields": []
+                        }
+                    }
+                }
+            }
+        }"#;
+
+        let result = parse_manifest_from_text(json);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::ParseJsonSerde { .. }
+        ));
+    }
 }
