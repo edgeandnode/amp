@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use datasets_common::partial_reference::PartialReference;
 
 #[derive(Parser, Debug)]
 #[command(name = "ampsync")]
@@ -17,17 +18,23 @@ pub enum Command {
 
 #[derive(Args, Debug, Clone)]
 pub struct SyncConfig {
-    /// Dataset name to sync (required)
+    /// Dataset reference to sync
     ///
-    /// Can also be set via DATASET_NAME environment variable
-    #[arg(short = 'd', long, env = "DATASET_NAME", required = true)]
-    pub dataset_name: String,
-
-    /// Dataset version to sync (default: "latest")
+    /// Supports flexible formats:
+    ///   - Full: namespace/name@revision (e.g., _/eth_rpc@1.0.0)
+    ///   - No namespace: name@revision (e.g., eth_rpc@1.0.0, defaults to _ namespace)
+    ///   - No revision: namespace/name (e.g., _/eth_rpc, defaults to latest)
+    ///   - Minimal: name (e.g., eth_rpc, defaults to _/eth_rpc@latest)
     ///
-    /// Can also be set via DATASET_VERSION environment variable
-    #[arg(short = 'v', long, env = "DATASET_VERSION", default_value = "latest")]
-    pub dataset_version: String,
+    /// Revision can be:
+    ///   - Semantic version (e.g., 1.0.0)
+    ///   - Hash (64-character hex string)
+    ///   - 'latest' (resolves to latest version)
+    ///   - 'dev' (resolves to development version)
+    ///
+    /// Can also be set via DATASET environment variable
+    #[arg(short = 'd', long, env = "DATASET", required = true)]
+    pub dataset: PartialReference,
 
     /// PostgreSQL connection URL (required)
     ///

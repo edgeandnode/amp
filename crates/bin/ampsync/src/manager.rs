@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::{config::SyncConfig, engine::Engine, manifest::Manifest, task::StreamTask};
+use crate::{config::SyncConfig, engine::Engine, manifest::Manifest, sql, task::StreamTask};
 
 /// Maximum number of restart attempts per table
 const MAX_RESTART_ATTEMPTS: u32 = 10;
@@ -56,17 +56,14 @@ impl StreamManager {
         let mut tasks = Vec::new();
 
         for table_name in manifest.tables.keys() {
-            // Build streaming query
-            let query = format!(
-                "SELECT * FROM \"{}\".\"{}\" SETTINGS stream = true",
-                config.dataset_name, table_name
-            );
+            // Build streaming query with proper identifier escaping
+            let query = sql::streaming_query(&manifest.reference, table_name);
 
             info!("Creating stream for table: {}", table_name);
 
             // Clone data needed for task restart loop
             let task_table_name = table_name.clone();
-            let task_dataset_name = config.dataset_name.clone();
+            let task_dataset = manifest.reference.clone();
             let task_query = query.clone();
             let task_engine = engine.clone();
             let task_client = client.clone();
@@ -91,7 +88,7 @@ impl StreamManager {
                     // Create new task instance for each attempt
                     let task = StreamTask::new(
                         task_table_name.clone(),
-                        task_dataset_name.clone(),
+                        task_dataset.clone(),
                         task_query.clone(),
                         task_engine.clone(),
                         task_client.clone(),

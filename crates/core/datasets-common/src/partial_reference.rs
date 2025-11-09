@@ -69,6 +69,25 @@ impl PartialReference {
             .clone()
             .unwrap_or_else(|| Namespace::from_str(GLOBAL_NAMESPACE).unwrap())
     }
+
+    /// Convert this partial reference to a full `Reference` by filling in defaults.
+    ///
+    /// - Missing namespace defaults to `_` (global namespace)
+    /// - Missing revision defaults to `latest`
+    ///
+    /// # Example
+    /// ```ignore
+    /// let partial = "my_dataset@1.0.0".parse::<PartialReference>().unwrap();
+    /// let full = partial.to_full_reference();
+    /// // full is now: _/my_dataset@1.0.0
+    /// ```
+    pub fn to_full_reference(&self) -> crate::reference::Reference {
+        crate::reference::Reference::new(
+            self.namespace_or_global(),
+            self.name.clone(),
+            self.revision_or_latest().clone(),
+        )
+    }
 }
 
 impl From<Reference> for PartialReference {
