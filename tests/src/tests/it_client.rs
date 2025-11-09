@@ -228,7 +228,7 @@ async fn stream_blocks(
     );
 
     let mut stream = client
-        .request(query, resume_watermark)
+        .request(query, resume_watermark, true)
         .await
         .expect("Failed to create client query stream");
     let mut records: Vec<BlockRow> = Default::default();
