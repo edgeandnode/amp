@@ -186,68 +186,19 @@ pub async fn dump(
             }
             continue;
         }
-        tracing::info!(
-            "dumping ranges {}",
-            missing_dataset_ranges
-                .iter()
-                .map(|r| format!("[{}-{}]", r.start(), r.end()))
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
 
-        // Split them across the target number of writers as to balance the number of blocks per writer.
-        let missing_dataset_ranges =
-            split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
-
-        let total_blocks_to_cover = missing_dataset_ranges
-            .iter()
-            .flatten()
-            .map(|r| r.clone().count())
-            .sum::<usize>();
-
-        let progress_reporter = Arc::new(ProgressReporter {
-            overall_blocks_covered: AtomicUsize::new(0),
-            total_blocks_to_cover,
-            last_log_time: RwLock::new(Instant::now()),
-        });
-
-        let writers = missing_dataset_ranges
-            .into_iter()
-            .enumerate()
-            .map(|(i, ranges)| DumpPartition {
-                block_streamer: client.clone(),
-                metadata_db: ctx.metadata_db.clone(),
-                catalog: catalog.clone(),
-                ranges,
-                parquet_opts: parquet_opts.clone(),
-                missing_ranges_by_table: missing_ranges_by_table.clone(),
-                id: i as u32,
-                metrics: metrics.clone(),
-                progress_reporter: progress_reporter.clone(),
-            });
-
-        // Spawn the writers, starting them with a 1 second delay between each.
-        // Note that tasks spawned in the join set start executing immediately in parallel
-        let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
-        for writer in writers {
-            let span = tracing::info_span!("dump_partition", partition_id = writer.id);
-            join_set.spawn(writer.run().instrument(span));
-        }
-
-        // Wait for all the writers to finish, returning an error if any writer panics or fails.
-        if let Err(err) = join_set.try_wait_all().await {
-            tracing::error!(error=%err, "dataset dump failed");
-
-            // Record error metrics
-            if let Some(ref metrics) = metrics {
-                for table in tables {
-                    let table_name = table.table_name().to_string();
-                    metrics.record_dump_error(table_name);
-                }
-            }
-
-            return Err(err.into_box_error());
-        }
+        dump_ranges(
+            missing_dataset_ranges,
+            max_writers,
+            &client,
+            &ctx,
+            &catalog,
+            parquet_opts.clone(),
+            missing_ranges_by_table,
+            metrics.as_ref(),
+            tables,
+        )
+        .await?;
 
         if let Some(end) = end
             && latest_block >= end
@@ -264,6 +215,86 @@ pub async fn dump(
             return Ok(());
         }
     }
+}
+
+/// Dumps block ranges by partitioning them across multiple parallel workers.
+#[instrument(skip_all, err)]
+#[expect(clippy::too_many_arguments)]
+async fn dump_ranges<S: BlockStreamer + Send + Sync>(
+    missing_dataset_ranges: Vec<RangeInclusive<BlockNum>>,
+    max_writers: u16,
+    client: &S,
+    ctx: &Ctx,
+    catalog: &Catalog,
+    parquet_opts: Arc<WriterProperties>,
+    missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
+    metrics: Option<&Arc<metrics::MetricsRegistry>>,
+    tables: &[Arc<PhysicalTable>],
+) -> Result<(), BoxError> {
+    tracing::info!(
+        "dumping ranges {}",
+        missing_dataset_ranges
+            .iter()
+            .map(|r| format!("[{}-{}]", r.start(), r.end()))
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
+
+    // Split them across the target number of writers as to balance the number of blocks per writer.
+    let missing_dataset_ranges =
+        split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
+
+    let total_blocks_to_cover = missing_dataset_ranges
+        .iter()
+        .flatten()
+        .map(|r| r.clone().count())
+        .sum::<usize>();
+
+    let progress_reporter = Arc::new(ProgressReporter {
+        overall_blocks_covered: AtomicUsize::new(0),
+        total_blocks_to_cover,
+        last_log_time: RwLock::new(Instant::now()),
+    });
+
+    let writers = missing_dataset_ranges
+        .into_iter()
+        .enumerate()
+        .map(|(i, ranges)| DumpPartition {
+            block_streamer: client.clone(),
+            metadata_db: ctx.metadata_db.clone(),
+            catalog: catalog.clone(),
+            ranges,
+            parquet_opts: parquet_opts.clone(),
+            missing_ranges_by_table: missing_ranges_by_table.clone(),
+            id: i as u32,
+            metrics: metrics.cloned(),
+            progress_reporter: progress_reporter.clone(),
+        });
+
+    // Spawn the writers, starting them with a 1 second delay between each.
+    // Note that tasks spawned in the join set start executing immediately in parallel
+    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
+    for writer in writers {
+        let span = tracing::info_span!("dump_partition", partition_id = writer.id);
+        join_set.spawn(writer.run().instrument(span));
+    }
+
+    // Wait for all the writers to finish, returning an error if any writer panics or fails.
+    if let Err(err) = join_set.try_wait_all().await {
+        tracing::error!(error=%err, "dataset dump failed");
+
+        // Record error metrics
+        if let Some(metrics) = metrics {
+            for table in tables {
+                let table_name = table.table_name().to_string();
+                metrics.record_dump_error(table_name);
+            }
+        }
+
+        return Err(err.into_box_error());
+    }
+
+    Ok(())
 }
 
 struct ProgressReporter {
