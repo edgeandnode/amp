@@ -414,7 +414,7 @@ impl_encode!(
 pub struct Decimal128Encoder<'a> {
     arr: &'a arrow_array::Decimal128Array,
     /// Field name - included for consistency with other encoders but not currently used
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     field: String,
 }
 

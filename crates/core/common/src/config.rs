@@ -385,7 +385,6 @@ impl ConfigFile {
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 
 #[derive(Error, Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum ConfigError {
     #[error("IO error at {0}: {1}")]
     Io(PathBuf, std::io::Error),
@@ -570,7 +569,7 @@ impl Default for Addrs {
 }
 
 impl Addrs {
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err)]
     pub fn from_config_file(
         config_file: &ConfigFile,
         default_addrs: Addrs,

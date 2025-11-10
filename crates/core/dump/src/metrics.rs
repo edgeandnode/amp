@@ -242,7 +242,6 @@ impl MetricsRegistry {
     ///
     /// Note: Compaction ratio can be calculated in Prometheus as:
     /// `compaction_bytes_written_total / compaction_bytes_read_total`
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_compaction(
         &self,
         table: String,
