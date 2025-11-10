@@ -82,7 +82,7 @@ pub async fn list_all<'c, E>(exe: E) -> Result<Vec<ManifestSummary>, Error>
 where
     E: Executor<'c>,
 {
-    sql::list_all(exe).await.map_err(Into::into)
+    sql::list_all(exe).await.map_err(Error::DbError)
 }
 
 /// Count dataset links and lock rows to prevent concurrent modifications
