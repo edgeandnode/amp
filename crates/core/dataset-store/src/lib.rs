@@ -53,9 +53,10 @@ pub use self::{
     error::{
         DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError, GetAllDatasetsError,
         GetClientError, GetDatasetByHashError, GetDatasetError, GetDerivedManifestError,
-        GetManifestError, LinkManifestError, ListAllDatasetsError, ListDatasetsUsingManifestError,
-        ListOrphanedManifestsError, ListVersionTagsError, RegisterManifestError,
-        ResolveRevisionError, SetVersionTagError, UnlinkDatasetManifestsError,
+        GetManifestError, LinkManifestError, ListAllDatasetsError, ListAllManifestsError,
+        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
+        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
+        UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
 };
@@ -299,6 +300,21 @@ impl DatasetStore {
             .await
             .map(|hashes| hashes.into_iter().map(Into::into).collect())
             .map_err(ListOrphanedManifestsError)
+    }
+
+    /// List all registered manifests with metadata
+    ///
+    /// Returns all manifests in the system with:
+    /// - Content-addressable hash
+    /// - Number of datasets using the manifest
+    ///
+    /// Results are ordered by hash.
+    pub async fn list_all_manifests(
+        &self,
+    ) -> Result<Vec<metadata_db::manifests::ManifestSummary>, error::ListAllManifestsError> {
+        metadata_db::manifests::list_all(&self.metadata_db)
+            .await
+            .map_err(error::ListAllManifestsError)
     }
 }
 

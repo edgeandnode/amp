@@ -98,3 +98,41 @@ where
 
     sqlx::query_scalar(query).fetch_all(exe).await
 }
+
+/// Manifest summary information
+#[derive(Debug, Clone)]
+pub struct ManifestSummary {
+    pub hash: HashOwned,
+    pub dataset_count: i64,
+}
+
+impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ManifestSummary {
+    fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(Self {
+            hash: row.try_get("hash")?,
+            dataset_count: row.try_get("dataset_count")?,
+        })
+    }
+}
+
+/// List all manifests with metadata
+///
+/// Returns a vector of manifest summaries including hash and dataset link count,
+/// ordered by hash.
+pub(crate) async fn list_all<'c, E>(exe: E) -> Result<Vec<ManifestSummary>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            mf.hash,
+            COALESCE(COUNT(dm.hash), 0) AS dataset_count
+        FROM manifest_files mf
+        LEFT JOIN dataset_manifests dm ON mf.hash = dm.hash
+        GROUP BY mf.hash
+        ORDER BY mf.hash
+    "#};
+
+    sqlx::query_as(query).fetch_all(exe).await
+}
