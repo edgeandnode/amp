@@ -88,6 +88,7 @@ impl AmpCli {
 
         // Add optional tag (positional argument must come last)
         if let Some(tag_str) = tag {
+            args.push("--tag");
             args.push(tag_str);
         }
 
@@ -122,6 +123,7 @@ impl AmpCli {
 
         // Add optional dataset reference (positional argument)
         if let Some(ref_str) = reference {
+            args.push("--reference");
             args.push(ref_str);
         }
 

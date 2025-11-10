@@ -10,18 +10,18 @@
     "test": "vitest -c vitest.config.ts"
   },
   "devDependencies": {
+    "@edgeandnode/amp": "workspace:*",
     "@effect/eslint-plugin": "^0.3.2",
-    "@effect/language-service": "^0.55.2",
+    "@effect/language-service": "^0.55.3",
     "@eslint/js": "^9.39.1",
     "eslint": "^9.39.1",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.1",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-sort-destructure-keys": "^2.0.0",
-    "@edgeandnode/amp": "workspace:*",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.3",
-    "vitest": "^4.0.7"
+    "vitest": "^4.0.8"
   }
 }
