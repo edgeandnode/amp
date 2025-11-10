@@ -9,28 +9,28 @@ pub enum Error {
     ConnectionError(sqlx::Error),
 
     #[error("Error running migrations: {0}")]
-    MigrationError(#[from] sqlx::migrate::MigrateError),
+    MigrationError(#[source] sqlx::migrate::MigrateError),
 
     #[error("Error executing database query: {0}")]
-    DbError(#[from] sqlx::Error),
+    DbError(#[source] sqlx::Error),
 
     #[error("Error sending job notification: {0}")]
-    JobNotificationSendError(#[from] crate::workers::events::NotifSendError),
+    JobNotificationSendError(#[source] crate::workers::events::NotifSendError),
 
     #[error("Error receiving job notification: {0}")]
-    JobNotificationRecvError(#[from] crate::workers::events::NotifRecvError),
+    JobNotificationRecvError(#[source] crate::workers::events::NotifRecvError),
 
     #[error("Error sending location notification: {0}")]
-    LocationNotificationSendError(#[from] LocationNotifSendError),
+    LocationNotificationSendError(#[source] LocationNotifSendError),
 
     #[error("Multiple active locations found for manifest_hash={0}, table={1}: {2:?}")]
     MultipleActiveLocations(String, String, Vec<String>),
 
     #[error("Error parsing URL: {0}")]
-    UrlParseError(#[from] url::ParseError),
+    UrlParseError(#[source] url::ParseError),
 
     #[error("Job status update error: {0}")]
-    JobStatusUpdateError(#[from] crate::jobs::JobStatusUpdateError),
+    JobStatusUpdateError(#[source] crate::jobs::JobStatusUpdateError),
 }
 
 impl Error {

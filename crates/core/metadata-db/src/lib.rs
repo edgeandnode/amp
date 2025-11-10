@@ -261,12 +261,13 @@ impl MetadataDb {
     ) -> Result<Vec<FileMetadata>, Error> {
         match last_file_id {
             Some(file_id) => {
-                Ok(
-                    files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
-                        .await?,
-                )
+                files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
+                    .await
+                    .map_err(Error::DbError)
             }
-            None => Ok(files::pagination::list_first_page(&*self.pool, location_id, limit).await?),
+            None => files::pagination::list_first_page(&*self.pool, location_id, limit)
+                .await
+                .map_err(Error::DbError),
         }
     }
 
@@ -323,7 +324,11 @@ impl MetadataDb {
          WHERE id = $1;
         ";
 
-        sqlx::query(sql).bind(file_id).execute(&*self.pool).await?;
+        sqlx::query(sql)
+            .bind(file_id)
+            .execute(&*self.pool)
+            .await
+            .map_err(Error::DbError)?;
 
         Ok(())
     }
@@ -338,10 +343,11 @@ impl MetadataDb {
         RETURNING id;
         ";
 
-        Ok(sqlx::query_scalar(sql)
+        sqlx::query_scalar(sql)
             .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
             .fetch_all(&*self.pool)
-            .await?)
+            .await
+            .map_err(Error::DbError)
     }
 
     /// Inserts or updates the GC manifest for the given file IDs.
@@ -374,7 +380,8 @@ impl MetadataDb {
             .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
             .bind(interval)
             .execute(&*self.pool)
-            .await?;
+            .await
+            .map_err(Error::DbError)?;
 
         Ok(())
     }

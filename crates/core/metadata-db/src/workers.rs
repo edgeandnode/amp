@@ -39,7 +39,7 @@ where
 {
     sql::register(exe, node_id.into(), info.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::DbError)
 }
 
 /// Get worker by node ID
@@ -56,7 +56,7 @@ where
 {
     sql::get_by_id(exe, node_id.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::DbError)
 }
 
 /// List all workers
@@ -68,7 +68,7 @@ pub async fn list<'c, E>(exe: E) -> Result<Vec<Worker>, Error>
 where
     E: Executor<'c>,
 {
-    sql::list(exe).await.map_err(Into::into)
+    sql::list(exe).await.map_err(Error::DbError)
 }
 
 /// List active workers
@@ -81,7 +81,9 @@ pub async fn list_active<'c, E>(exe: E, interval: Duration) -> Result<Vec<Worker
 where
     E: Executor<'c>,
 {
-    sql::list_active(exe, interval).await.map_err(Into::into)
+    sql::list_active(exe, interval)
+        .await
+        .map_err(Error::DbError)
 }
 
 /// Establish a dedicated connection to the metadata DB, and return a future that loops
@@ -100,7 +102,9 @@ pub async fn heartbeat_loop(
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            sql::update_heartbeat(&mut conn, node_id.clone()).await?;
+            sql::update_heartbeat(&mut conn, node_id.clone())
+                .await
+                .map_err(Error::DbError)?;
         }
     };
 
@@ -121,7 +125,9 @@ pub async fn listen_for_job_notif(
 ) -> Result<NotifListener, Error> {
     events::listen_url(&metadata_db.url, node_id.into())
         .await
-        .map_err(Into::into)
+        .map_err(|err| {
+            Error::JobNotificationRecvError(crate::workers::events::NotifRecvError::DbError(err))
+        })
 }
 
 /// Send a job notification to a worker.
@@ -143,7 +149,7 @@ where
 {
     events::notify(exe, node_id.into(), payload)
         .await
-        .map_err(Into::into)
+        .map_err(Error::JobNotificationSendError)
 }
 
 /// Represents a worker node in the metadata database.

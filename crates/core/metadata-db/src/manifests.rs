@@ -35,7 +35,7 @@ where
 {
     sql::insert(exe, hash.into(), path.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::DbError)
 }
 
 /// Retrieve manifest file path by content hash
@@ -52,7 +52,7 @@ where
 {
     sql::get_path_by_hash(exe, hash.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::DbError)
 }
 
 /// List all orphaned manifests (manifests with no dataset links)
@@ -67,7 +67,7 @@ pub async fn list_orphaned<'c, E>(exe: E) -> Result<Vec<ManifestHashOwned>, Erro
 where
     E: Executor<'c>,
 {
-    sql::list_orphaned(exe).await.map_err(Into::into)
+    sql::list_orphaned(exe).await.map_err(Error::DbError)
 }
 
 /// List all registered manifests with metadata
@@ -104,7 +104,7 @@ where
 {
     sql::count_dataset_links_for_update(exe, hash.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::DbError)
 }
 
 /// Delete a manifest from the database
@@ -122,5 +122,5 @@ pub async fn delete<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::delete(exe, hash.into()).await.map_err(Into::into)
+    sql::delete(exe, hash.into()).await.map_err(Error::DbError)
 }
