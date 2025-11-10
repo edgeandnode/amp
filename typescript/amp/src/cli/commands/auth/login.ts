@@ -11,6 +11,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Fn from "effect/Function"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
@@ -140,10 +141,7 @@ const checkAlreadyAuthenticated = Effect.gen(function*() {
 export const login = Command.make("login").pipe(
   Command.withDescription("Performs the login flow for authenticating the cli"),
   Command.withHandler(handleCommand),
-  Command.provide(Auth.layer),
-  Command.provide(FetchHttpClient.layer),
-  Command.provide(NodeFileSystem.layer),
-  Command.provide(NodePath.layer),
+  Command.provide(Layer.mergeAll(Auth.layer, FetchHttpClient.layer, NodeFileSystem.layer, NodePath.layer)),
 )
 
 function handleCommand() {

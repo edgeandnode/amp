@@ -32,7 +32,8 @@
     "build:studio": "cd ../studio && pnpm run build",
     "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
     "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
-    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio"
+    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio",
+    "amp": "bun ./src/cli/bun.ts"
   },
   "publishConfig": {
     "bin": {

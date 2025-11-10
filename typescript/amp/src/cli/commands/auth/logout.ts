@@ -4,6 +4,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Auth from "../../../Auth.ts"
 
 const confirm = Prompt.confirm({
@@ -27,7 +28,5 @@ export const logout = Command.prompt("logout", Prompt.all([confirm]), ([confirm]
     )
   })).pipe(
     Command.withDescription("Logs the authenticated user out of the cli"),
-    Command.provide(Auth.layer),
-    Command.provide(NodeFileSystem.layer),
-    Command.provide(NodePath.layer),
+    Command.provide(Layer.mergeAll(Auth.layer, NodeFileSystem.layer, NodePath.layer)),
   )

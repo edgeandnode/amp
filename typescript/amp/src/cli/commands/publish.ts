@@ -96,12 +96,13 @@ export const publish = Command.make("publish", {
       return yield* ExitCode.Zero
     })
   ),
-  Command.provide(Auth.layer),
-  Command.provide(AmpRegistry.layer),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.configFile)
-      .pipe(
-        Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
-      )
+    Layer.mergeAll(
+      Auth.layer,
+      AmpRegistry.layer,
+      ManifestContext.layerFromConfigFile(args.configFile),
+    ).pipe(
+      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
+    )
   ),
 )
