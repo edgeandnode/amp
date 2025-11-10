@@ -6,8 +6,11 @@ use common::{
     BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
 };
-use datasets_common::{hash::Hash, reference::Reference, revision::Revision};
+use datasets_common::{
+    hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
+};
 use dump::{Ctx, metrics::MetricsRegistry};
+use tracing::{Instrument, info_span};
 
 use crate::job::{JobDescriptor, JobId};
 
@@ -40,6 +43,12 @@ pub(super) async fn new(
         .await
         .map_err(JobInitError::FetchOutputLocations)?;
 
+    let dataset_ref = Reference::new(
+        dataset_namespace.clone(),
+        dataset_name.clone(),
+        Revision::Hash(manifest_hash.clone()),
+    );
+
     let job_labels = JobLabels {
         dataset_namespace: dataset_namespace.clone(),
         dataset_name: dataset_name.clone(),
@@ -56,7 +65,7 @@ pub(super) async fn new(
 
         let dataset = ctx
             .dataset_store
-            .get_by_hash(&hash)
+            .get_dataset_by_hash(&hash)
             .await
             .map_err(|err| JobInitError::FetchDataset {
                 hash: hash.clone(),
@@ -64,15 +73,10 @@ pub(super) async fn new(
             })?
             .ok_or_else(|| JobInitError::DatasetNotFound { hash: hash.clone() })?;
 
-        let dataset_ref = Reference::new(
-            dataset_namespace.clone(),
-            dataset_name.clone(),
-            Revision::Hash(manifest_hash.clone()),
-        );
-        let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
+        let mut resolved_tables = dataset.resolved_tables(dataset_ref.clone().into());
         let Some(table) = resolved_tables.find(|t| t.name() == location.table_name) else {
             return Err(JobInitError::TableNotFound {
-                table_name: location.table_name,
+                table_name: location.table_name.into(),
                 dataset_hash: hash,
             });
         };
@@ -86,7 +90,7 @@ pub(super) async fn new(
                 job_labels.clone(),
             )
             .map_err(|err| JobInitError::CreatePhysicalTable {
-                table_name: table.name().to_string(),
+                table_name: table.name().clone(),
                 source: err,
             })?
             .into(),
@@ -103,6 +107,7 @@ pub(super) async fn new(
             end_block,
             metrics,
         )
+        .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref))
         .await
     };
     Ok(fut)
@@ -133,7 +138,7 @@ pub enum JobInitError {
     FetchDataset {
         hash: Hash,
         #[source]
-        source: BoxError,
+        source: dataset_store::GetDatasetByHashError,
     },
 
     /// Dataset not found in dataset store
@@ -151,7 +156,7 @@ pub enum JobInitError {
     /// mismatch between the job's expected outputs and the actual dataset schema.
     #[error("Table '{table_name}' not found in dataset '{dataset_hash}'")]
     TableNotFound {
-        table_name: String,
+        table_name: TableName,
         dataset_hash: Hash,
     },
 
@@ -164,7 +169,7 @@ pub enum JobInitError {
     /// BoxError. This should be replaced with a concrete error type.
     #[error("Failed to create physical table for '{table_name}'")]
     CreatePhysicalTable {
-        table_name: String,
+        table_name: TableName,
         #[source]
         source: BoxError,
     },

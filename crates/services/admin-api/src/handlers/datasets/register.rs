@@ -16,6 +16,7 @@ use datasets_derived::manifest::DependencyValidationError;
 use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
+use monitoring::logging;
 use serde_json::value::RawValue;
 
 use crate::{
@@ -168,7 +169,7 @@ pub async fn handler(
                         namespace = %namespace,
                         name = %name,
                         version = ?version,
-                        error = ?err,
+                        error = %err, error_source = logging::error_source(&err),
                         "Failed to parse common manifest JSON"
                     );
                     Error::InvalidManifest(err)
@@ -214,7 +215,7 @@ pub async fn handler(
                         name = %name,
                         manifest_hash = %manifest_hash,
                         kind = %dataset_kind,
-                        error = ?err,
+                        error = %err, error_source = logging::error_source(&err),
                         "Failed to register manifest"
                     );
                     Error::ManifestRegistrationError(err)
@@ -251,7 +252,7 @@ pub async fn handler(
                     namespace = %namespace,
                     name = %name,
                     manifest_hash = %manifest_hash,
-                    error = ?err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Failed to link manifest to dataset"
                 );
                 Error::ManifestLinkingError(err)
@@ -276,7 +277,7 @@ pub async fn handler(
                     name = %name,
                     version = %version,
                     manifest_hash = %manifest_hash,
-                    error = ?err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Failed to set version tag"
                 );
                 Error::VersionTaggingError(err)

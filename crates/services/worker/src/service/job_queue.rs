@@ -6,6 +6,7 @@
 
 use backon::{ExponentialBuilder, Retryable};
 use metadata_db::{Error as MetadataDbError, MetadataDb};
+use monitoring::logging;
 
 use crate::{
     job::{Job, JobId},
@@ -44,7 +45,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     node_id = %node_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while getting scheduled jobs. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -72,7 +73,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     node_id = %node_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while getting active jobs. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -99,7 +100,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while getting job. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -124,7 +125,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while marking job as running. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -147,7 +148,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while marking job as stopping. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -170,7 +171,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while marking job as stopped. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -193,7 +194,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while marking job as completed. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );
@@ -216,7 +217,7 @@ impl JobQueue {
             .notify(|err, dur| {
                 tracing::warn!(
                     job_id = %job_id,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     "Connection error while marking job as failed. Retrying in {:.1}s",
                     dur.as_secs_f32()
                 );

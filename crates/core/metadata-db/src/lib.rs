@@ -211,7 +211,7 @@ impl MetadataDb {
     ///
     /// Creates a new file metadata entry with the provided information. Uses
     /// ON CONFLICT DO NOTHING to make the operation idempotent.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn register_file(
         &self,
         location_id: LocationId,

@@ -1,7 +1,9 @@
+use datafusion::error::DataFusionError;
+use datasets_common::{reference::Reference, table_name::TableName};
+
 use crate::BoxError;
 
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum CatalogForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -32,40 +34,153 @@ pub enum CatalogForSqlError {
 }
 
 /// Errors specific to planning_ctx_for_sql operations
+///
+/// This error type is used exclusively by `planning_ctx_for_sql()` to create
+/// a planning context for SQL queries without requiring physical data to exist.
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum PlanningCtxForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
-    /// This occurs when:
+    /// This occurs when DataFusion's table reference resolver encounters issues:
     /// - The SQL statement contains invalid table references
     /// - Table names cannot be parsed or extracted
     /// - The SQL syntax is malformed for table resolution
-    #[error("Failed to resolve table references from SQL: {source}")]
-    TableReferenceResolution { source: BoxError },
+    #[error("Failed to resolve table references from SQL")]
+    TableReferenceResolution(#[source] DataFusionError),
 
     /// Failed to extract function names from the SQL statement.
     ///
-    /// This occurs when:
-    /// - The SQL statement contains invalid function calls
-    /// - Function names cannot be parsed or extracted
-    /// - The SQL syntax is malformed for function analysis
-    #[error("Failed to extract function names from SQL: {source}")]
-    FunctionNameExtraction { source: BoxError },
+    /// This occurs when analyzing the SQL AST to find function calls:
+    /// - The SQL statement contains invalid function syntax
+    /// - Function names cannot be traversed from the AST
+    /// - DML statements are encountered (which are not supported)
+    #[error("Failed to extract function names from SQL")]
+    FunctionNameExtraction(#[source] BoxError),
 
-    /// Failed to get the logical catalog for the resolved tables and functions.
+    /// Table reference is catalog-qualified.
     ///
-    /// This wraps errors from `get_logical_catalog`, which can occur when:
-    /// - Dataset names cannot be extracted from table references or function names
-    /// - Dataset retrieval fails
-    /// - UDF creation fails
-    #[error("Failed to get logical catalog: {0}")]
-    GetLogicalCatalog(#[source] GetLogicalCatalogError),
+    /// This occurs when a table reference includes a catalog qualifier.
+    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
+    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
+    #[error(
+        "Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
+    )]
+    CatalogQualifiedTable { table_ref: String },
+
+    /// Table is not qualified with a schema/dataset name.
+    ///
+    /// All tables must be qualified with a dataset reference in the schema portion.
+    /// Unqualified tables (e.g., just `table_name`) are not allowed.
+    #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
+    UnqualifiedTable { table_ref: String },
+
+    /// Table name is invalid.
+    ///
+    /// This occurs when the table name portion of a table reference does not
+    /// conform to SQL identifier rules (must start with letter/underscore,
+    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
+    #[error("Invalid table name '{table_name}' in table reference '{table_ref}'")]
+    InvalidTableName {
+        table_name: String,
+        table_ref: String,
+        #[source]
+        source: datasets_common::table_name::TableNameError,
+    },
+
+    /// Failed to parse schema portion of table reference as PartialReference.
+    ///
+    /// This occurs when the schema portion of a table reference cannot be parsed
+    /// as a valid dataset reference (namespace/name@version format).
+    #[error("Invalid schema reference '{schema}' in table reference")]
+    InvalidSchemaReference {
+        schema: String,
+        #[source]
+        source: datasets_common::partial_reference::PartialReferenceError,
+    },
+
+    /// Failed to resolve dataset reference to a hash.
+    ///
+    /// This occurs when the dataset store cannot resolve a reference to its
+    /// corresponding content hash, typically due to:
+    /// - Storage backend errors
+    /// - Invalid reference format
+    #[error("Failed to resolve dataset reference '{reference}' to hash")]
+    ResolveHash {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Dataset reference could not be found.
+    ///
+    /// This occurs when the dataset store successfully processed the reference
+    /// but no matching dataset exists:
+    /// - Dataset does not exist in the store
+    /// - Version not found
+    #[error("Dataset reference '{reference}' not found")]
+    DatasetNotFound { reference: Reference },
+
+    /// Failed to retrieve a dataset from the dataset store.
+    ///
+    /// This occurs when loading a dataset definition fails:
+    /// - Dataset does not exist in the store
+    /// - Dataset manifest is invalid or corrupted
+    /// - Unsupported dataset kind
+    /// - Storage backend errors when reading the dataset
+    #[error("Failed to retrieve dataset '{reference}'")]
+    GetDataset {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to create ETH call UDF for an EVM RPC dataset.
+    ///
+    /// This occurs when creating the eth_call user-defined function for a dataset:
+    /// - Invalid provider configuration for the dataset
+    /// - Provider connection issues
+    /// - Dataset is not an EVM RPC dataset but eth_call was requested
+    #[error("Failed to create ETH call UDF for dataset '{reference}'")]
+    EthCallUdfCreation {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to parse dataset qualifier in function name.
+    ///
+    /// This occurs when a qualified function name's dataset portion cannot be parsed
+    /// as a valid dataset reference.
+    #[error("Invalid function reference '{function}', could not parse dataset qualifier")]
+    InvalidFunctionReference {
+        function: String,
+        #[source]
+        source: datasets_common::partial_reference::PartialReferenceError,
+    },
+
+    /// Table not found in dataset.
+    ///
+    /// This occurs when the table name is referenced in the SQL query but the
+    /// dataset does not contain a table with that name.
+    #[error("Table '{table_name}' not found in dataset '{reference}'")]
+    TableNotFoundInDataset {
+        table_name: TableName,
+        reference: Reference,
+    },
+
+    /// Function name has invalid format.
+    ///
+    /// Function names must be either:
+    /// - Unqualified (assumed to be DataFusion built-in): `function_name`
+    /// - Dataset-qualified: `dataset.function_name`
+    ///
+    /// This error occurs when a function has more than two parts.
+    #[error("Invalid function format '{function}', expected 'dataset.function' or 'function'")]
+    InvalidFunctionFormat { function: String },
 }
 
 /// Errors specific to get_physical_catalog operations
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum GetPhysicalCatalogError {
     /// Failed to get the logical catalog.
     ///
@@ -95,112 +210,116 @@ pub enum GetPhysicalCatalogError {
 
 /// Errors specific to get_logical_catalog operations
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum GetLogicalCatalogError {
-    /// Failed to extract dataset names and versions from table references.
+    /// Table reference is catalog-qualified.
     ///
-    /// This occurs when parsing table references to extract dataset information fails,
-    /// typically due to invalid table reference formats or naming convention violations.
-    #[error("Failed to extract datasets from table references: {0}")]
-    ExtractDatasetFromTableRefs(#[source] ExtractDatasetFromTableRefsError),
-
-    /// Failed to extract dataset names and versions from function names.
-    ///
-    /// This occurs when parsing qualified function names to extract dataset information fails,
-    /// typically due to invalid function name formats or naming convention violations.
-    #[error("Failed to extract datasets from function names: {0}")]
-    ExtractDatasetFromFunctionNames(#[source] ExtractDatasetFromFunctionNamesError),
-
-    /// Failed to get a dataset.
-    ///
-    /// This wraps errors from `get_dataset`, which can occur when:
-    /// - The manifest is invalid
-    /// - The dataset kind is unsupported
-    #[error("Failed to get dataset: {0}")]
-    GetDataset(#[source] BoxError),
-
-    /// Failed to create ETH call UDF for a dataset.
-    ///
-    /// This occurs when creating the eth_call user-defined function for an EVM RPC dataset
-    /// fails, typically due to invalid provider configuration or connection issues.
-    #[error("Failed to create ETH call UDF for dataset '{dataset}': {source}")]
-    EthCallUdfCreation { dataset: String, source: BoxError },
-}
-
-/// Errors that occur when extracting dataset names and versions from table references.
-///
-/// This error type is used by the `dataset_versions_from_table_refs` function when
-/// parsing table references from SQL queries to extract dataset information.
-#[derive(Debug, thiserror::Error)]
-pub enum ExtractDatasetFromTableRefsError {
-    /// Table is qualified with a catalog, which is not supported.
-    ///
-    /// Only dataset-qualified tables are allowed (e.g., `dataset.table`).
+    /// This occurs when a table reference includes a catalog qualifier.
+    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
     /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
     #[error(
-        "Found table qualified with catalog '{table}', tables must only be qualified with a dataset name"
+        "Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
     )]
-    CatalogQualifiedTable { table: String },
+    CatalogQualifiedTable { table_ref: String },
 
-    /// Table is not qualified with a dataset name.
+    /// Table is not qualified with a schema/dataset name.
     ///
-    /// All tables must be qualified with a dataset name (e.g., `dataset.table`).
-    /// Unqualified tables (e.g., just `table`) are not allowed.
-    #[error("Found unqualified table '{table}', all tables must be qualified with a dataset name")]
-    UnqualifiedTable { table: String },
+    /// All tables must be qualified with a dataset reference in the schema portion.
+    /// Unqualified tables (e.g., just `table_name`) are not allowed.
+    #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
+    UnqualifiedTable { table_ref: String },
 
-    /// Failed to parse the dataset reference from the table schema.
+    /// Table name is invalid.
     ///
-    /// This occurs when the schema portion contains an invalid reference format.
-    /// Expected format: `namespace/name@version` or `namespace/name`
-    #[error("Failed to parse dataset reference '{schema}': {source}")]
-    ReferenceParse {
+    /// This occurs when the table name portion of a table reference does not
+    /// conform to SQL identifier rules (must start with letter/underscore,
+    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
+    #[error("Invalid table name '{table_name}' in table reference '{table_ref}'")]
+    InvalidTableName {
+        table_name: String,
+        table_ref: String,
+        #[source]
+        source: datasets_common::table_name::TableNameError,
+    },
+
+    /// Failed to parse schema portion of table reference as PartialReference.
+    ///
+    /// This occurs when the schema portion of a table reference cannot be parsed
+    /// as a valid dataset reference (namespace/name@version format).
+    #[error("Invalid schema reference '{schema}' in table reference")]
+    InvalidSchemaReference {
         schema: String,
         #[source]
         source: datasets_common::partial_reference::PartialReferenceError,
     },
 
-    /// The version string in the dataset schema is invalid.
+    /// Failed to resolve dataset reference to a hash.
     ///
-    /// This occurs when the revision is not a semantic version (e.g., hash, latest, dev).
-    #[error(
-        "Invalid version '{version}' in dataset schema '{schema}', only semantic versions are supported"
-    )]
-    InvalidVersion { version: String, schema: String },
-}
+    /// This occurs when the dataset store cannot resolve a reference to its
+    /// corresponding content hash, typically due to:
+    /// - Storage backend errors
+    /// - Invalid reference format
+    #[error("Failed to resolve dataset reference '{reference}' to hash")]
+    ResolveHash {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
 
-/// Errors that occur when extracting dataset names and versions from function names.
-///
-/// This error type is used by the `dataset_versions_from_function_names` function when
-/// parsing qualified function names from SQL queries to extract dataset information.
-#[derive(Debug, thiserror::Error)]
-pub enum ExtractDatasetFromFunctionNamesError {
-    /// Function name has an invalid format.
+    /// Dataset reference could not be found.
     ///
-    /// Function names can be:
-    /// - Simple names (no qualifier) - assumed to be built-in DataFusion functions
-    /// - Two-part names: `dataset.function` or `dataset__x_y_z.function`
-    ///
-    /// This error occurs when a function has more than two parts (e.g., `a.b.c.function`).
-    #[error(
-        "Invalid function format '{function}', expected either 'function' or 'dataset.function'"
-    )]
-    InvalidFunctionFormat { function: String },
+    /// This occurs when the dataset store successfully processed the reference
+    /// but no matching dataset exists:
+    /// - Dataset does not exist in the store
+    /// - Version not found
+    #[error("Dataset reference '{reference}' not found")]
+    DatasetNotFound { reference: Reference },
 
-    /// Failed to parse the dataset reference from the function qualifier.
+    /// Failed to retrieve a dataset from the dataset store.
     ///
-    /// This occurs when the qualifier portion contains an invalid reference format.
-    /// Expected format: `namespace/name@version` or `namespace/name`
-    #[error("Failed to parse dataset reference from function '{function}': {source}")]
-    ReferenceParse {
+    /// This occurs when loading a dataset definition fails:
+    /// - Dataset does not exist in the store
+    /// - Dataset manifest is invalid or corrupted
+    /// - Unsupported dataset kind
+    /// - Storage backend errors when reading the dataset
+    #[error("Failed to retrieve dataset '{reference}'")]
+    GetDataset {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to create ETH call UDF for an EVM RPC dataset.
+    ///
+    /// This occurs when creating the eth_call user-defined function for a dataset:
+    /// - Invalid provider configuration for the dataset
+    /// - Provider connection issues
+    /// - Dataset is not an EVM RPC dataset but eth_call was requested
+    #[error("Failed to create ETH call UDF for dataset '{reference}'")]
+    EthCallUdfCreation {
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to parse dataset qualifier in function name.
+    ///
+    /// This occurs when a qualified function name's dataset portion cannot be parsed
+    /// as a valid dataset reference.
+    #[error("Invalid function reference '{function}', could not parse dataset qualifier")]
+    InvalidFunctionReference {
         function: String,
+        #[source]
         source: datasets_common::partial_reference::PartialReferenceError,
     },
 
-    /// The version string in the function qualifier is invalid.
+    /// Function name has invalid format.
     ///
-    /// This occurs when the revision is not a semantic version (e.g., hash, latest, dev).
-    #[error(
-        "Invalid version '{version}' in function '{function}', only semantic versions are supported"
-    )]
-    InvalidVersion { version: String, function: String },
+    /// Function names must be either:
+    /// - Unqualified (assumed to be DataFusion built-in): `function_name`
+    /// - Dataset-qualified: `dataset.function_name`
+    ///
+    /// This error occurs when a function has more than two parts.
+    #[error("Invalid function format '{function}', expected 'dataset.function' or 'function'")]
+    InvalidFunctionFormat { function: String },
 }

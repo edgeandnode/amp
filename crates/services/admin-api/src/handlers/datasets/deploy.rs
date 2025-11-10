@@ -10,6 +10,7 @@ use axum::{
 };
 use common::catalog::JobLabels;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use monitoring::logging;
 use worker::{job::JobId, node_id::NodeId};
 
 use crate::{
@@ -83,7 +84,7 @@ pub async fn handler(
     let (namespace, name, revision) = match path {
         Ok(Path((namespace, name, revision))) => (namespace, name, revision),
         Err(err) => {
-            tracing::debug!(error=?err, "invalid path parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid path parameters");
             return Err(Error::InvalidPath(err).into());
         }
     };
@@ -95,7 +96,7 @@ pub async fn handler(
     } = match json {
         Ok(Json(request)) => request,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid request body");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid request body");
             return Err(Error::InvalidBody(err).into());
         }
     };
@@ -138,7 +139,7 @@ pub async fn handler(
         .map_err(|err| {
             tracing::error!(
                 dataset_reference=%reference,
-                error=?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to schedule dataset deployment"
             );
             Error::Scheduler(err)

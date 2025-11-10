@@ -38,7 +38,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           Object.entries(config.tables ?? {}),
           ([name, table]) =>
             Effect.gen(function*() {
-              const schema = yield* client.getOutputSchema(table.sql, { isSqlDataset: true }).pipe(
+              const schema = yield* client.getOutputSchema(table.sql).pipe(
                 Effect.catchAll((cause) =>
                   new ManifestBuilderError({ cause, message: "Failed to get schema", table: name })
                 ),

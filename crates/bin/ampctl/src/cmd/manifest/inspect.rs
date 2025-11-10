@@ -11,6 +11,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::hash::Hash;
+use monitoring::logging;
 
 use crate::args::GlobalArgs;
 
@@ -70,7 +71,7 @@ async fn get_manifest(global: &GlobalArgs, hash: &Hash) -> Result<String, Error>
 
     // Pretty-print the manifest JSON
     let pretty_json = serde_json::to_string_pretty(&manifest).map_err(|err| {
-        tracing::error!(error = %err, "Failed to pretty-print manifest JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to pretty-print manifest JSON");
         Error::JsonFormattingError { source: err }
     })?;
 

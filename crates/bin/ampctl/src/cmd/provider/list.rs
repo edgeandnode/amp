@@ -10,6 +10,8 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
+
 use crate::{args::GlobalArgs, client};
 
 /// Command-line arguments for the `provider ls` command.
@@ -33,7 +35,7 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     let providers = get_providers(&global).await?;
 
     let json = serde_json::to_string_pretty(&providers).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize providers to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize providers to JSON");
         Error::JsonFormattingError { source: err }
     })?;
     println!("{}", json);
@@ -49,7 +51,7 @@ async fn get_providers(global: &GlobalArgs) -> Result<Vec<client::providers::Pro
     let client = global.build_client()?;
 
     let providers = client.providers().list().await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to list providers");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list providers");
         Error::ClientError { source: err }
     })?;
 

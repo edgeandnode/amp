@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -32,8 +32,7 @@
     "build:studio": "cd ../studio && pnpm run build",
     "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
     "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
-    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio",
-    "@edgeandnode/amp": "bun ./src/cli/bun.ts"
+    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio"
   },
   "publishConfig": {
     "bin": {
@@ -48,10 +47,10 @@
     }
   },
   "dependencies": {
-    "@effect/cli": "^0.72.0",
+    "@effect/cli": "^0.72.1",
     "abitype": "^1.1.1",
-    "date-fns": "^4.1.0",
     "jiti": "^2.6.1",
+    "jose": "^6.1.1",
     "js-toml": "^1.0.2",
     "minimatch": "^10.1.1",
     "open": "^10.2.0",
@@ -61,26 +60,25 @@
     "@bufbuild/protobuf": "2.6.3",
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
-    "@effect/cluster": "^0.52.5",
-    "@effect/experimental": "^0.57.0",
+    "@effect/cluster": "^0.52.8",
     "@effect/platform": "^0.93.0",
     "@effect/platform-node": "^0.100.0",
     "apache-arrow": "^21.1.0",
-    "effect": "^3.19.2"
+    "effect": "^3.19.3"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.58.0",
-    "@bufbuild/protoc-gen-es": "^2.7.0",
+    "@bufbuild/buf": "^1.59.0",
+    "@bufbuild/protoc-gen-es": "^2.10.0",
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
-    "@effect/cluster": "^0.52.5",
+    "@effect/cluster": "^0.52.8",
     "@effect/platform": "^0.93.0",
     "@effect/platform-node": "^0.100.0",
     "@effect/vitest": "^0.27.0",
     "@types/node": "^24.10.0",
     "apache-arrow": "^21.1.0",
-    "effect": "^3.19.2",
+    "effect": "^3.19.3",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.7"
+    "vitest": "^4.0.8"
   }
 }

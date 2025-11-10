@@ -234,6 +234,7 @@ impl Service {
         &self,
         descriptor: FlightDescriptor,
         resume_watermark: Option<ResumeWatermark>,
+        streaming_override: Option<bool>,
     ) -> Result<FlightInfo, Error> {
         let (ticket, schema) = match DescriptorType::try_from(descriptor.r#type)
             .map_err(|e| Error::PbDecodeError(e.to_string()))?
@@ -255,7 +256,8 @@ impl Service {
                     let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
                         .await
                         .map_err(Error::PlanningCtxForSqlError)?;
-                    let is_streaming = common::stream_helpers::is_streaming(&query);
+                    let is_streaming = streaming_override
+                        .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
                     let schema = plan_ctx.sql_output_schema(query).await?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
@@ -394,8 +396,22 @@ impl FlightService for Service {
             .metadata()
             .get("amp-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
+
+        // Parse amp-stream header to allow controlling streaming via header instead of SQL
+        let streaming_override = request
+            .metadata()
+            .get("amp-stream")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| match s.to_lowercase().as_str() {
+                "true" | "1" => Some(true),
+                "false" | "0" => Some(false),
+                _ => None,
+            });
+
         let descriptor = request.into_inner();
-        let info = self.get_flight_info(descriptor, resume_watermark).await?;
+        let info = self
+            .get_flight_info(descriptor, resume_watermark, streaming_override)
+            .await?;
         Ok(Response::new(info))
     }
 
@@ -731,7 +747,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub fn encode_record_batch(
     batch: RecordBatch,
     app_metadata: Option<&serde_json::Value>,
@@ -801,7 +817,7 @@ fn split_batch_for_grpc_response(
 
 /// Errors that can occur during query execution
 #[derive(Error, Debug)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),

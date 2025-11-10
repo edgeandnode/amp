@@ -10,7 +10,8 @@ use common::{
 };
 
 pub fn table(network: String) -> Table {
-    Table::new("blocks".to_string(), schema().into(), network, vec![]).expect("table name is valid")
+    let name = "blocks".parse().expect("table name is valid");
+    Table::new(name, schema().into(), network, vec![]).expect("table creation succeeds")
 }
 
 pub fn schema() -> Schema {

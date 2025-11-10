@@ -27,7 +27,6 @@ mod sql_dump;
 mod tasks;
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
-#[allow(clippy::too_many_arguments)]
 pub async fn dump_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
@@ -136,6 +135,7 @@ pub async fn dump_user_tables(
     let opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env()?;
 
+    // Pre-check all tables for consistency and validate dataset kinds before spawning tasks
     for table in tables {
         consistency_check(table).await?;
 
@@ -149,26 +149,47 @@ pub async fn dump_user_tables(
             )
             .into());
         }
+    }
 
-        let manifest = ctx
-            .dataset_store
-            .get_derived_manifest(dataset.manifest_hash())
+    // Process all tables in parallel using FailFastJoinSet
+    let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
+
+    for table in tables {
+        let ctx = ctx.clone();
+        let env = env.clone();
+        let table = table.clone();
+        let opts = opts.clone();
+        let metrics = metrics.clone();
+
+        join_set.spawn(async move {
+            let dataset = table.table().dataset();
+            let manifest = ctx
+                .dataset_store
+                .get_derived_manifest(dataset.manifest_hash())
+                .await?;
+
+            sql_dump::dump_table(
+                ctx,
+                manifest,
+                &env,
+                table.clone(),
+                &opts,
+                microbatch_max_interval,
+                end,
+                metrics,
+            )
             .await?;
 
-        sql_dump::dump_table(
-            ctx.clone(),
-            manifest,
-            &env,
-            table.clone(),
-            &opts,
-            microbatch_max_interval,
-            end,
-            metrics.clone(),
-        )
-        .await?;
-
-        tracing::info!("dump of `{}` completed successfully", table.table_name());
+            tracing::info!("dump of `{}` completed successfully", table.table_name());
+            Ok(())
+        });
     }
+
+    // Wait for all tables to complete with fail-fast behavior
+    join_set
+        .try_wait_all()
+        .await
+        .map_err(|err| err.into_box_error())?;
 
     Ok(())
 }

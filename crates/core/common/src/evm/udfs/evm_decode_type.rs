@@ -175,7 +175,7 @@ impl EvmDecodeType {
                     Err(e) => {
                         tracing::trace!(
                             sol_ty=%sol_ty,
-                            error=?e,
+                            error = %e,
                             "failed to decode Solidity value"
                         );
                         append_null_value_to_builder(&mut builder, &ty)?;

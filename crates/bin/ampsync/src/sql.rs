@@ -24,6 +24,7 @@
 //! As recommended by Leo: "if you want to validate that your string is a SQL identifier,
 //! the best thing you can do is use sqlparser to parse it as an identifier"
 
+use datasets_common::reference::Reference;
 use pg_escape::quote_identifier;
 use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 
@@ -243,6 +244,25 @@ pub fn column_definition(column_name: &str, pg_type: &str, nullable: bool) -> St
     let quoted_name = quote_identifier(column_name);
     let nullability = if nullable { "" } else { " NOT NULL" };
     format!("{} {}{}", quoted_name, pg_type, nullability)
+}
+
+/// Build a DataFusion streaming query for a fully qualified dataset table.
+///
+/// This constructs a query in the format:
+/// `SELECT * FROM "namespace/name@revision".table`
+///
+/// The dataset reference (namespace/name@revision) is quoted as a single identifier
+/// because it contains special characters (`/` and `@`) that would otherwise cause
+/// SQL parsing errors. This format is then parsed by the catalog layer which extracts
+/// the dataset reference from the schema portion.
+///
+/// **Safety**: Both the dataset reference and table name are properly quoted using
+/// `pg_escape::quote_identifier()` for SQL safety.
+pub fn streaming_query(dataset: &Reference, table: &str) -> String {
+    let schema = format!("{}@{}", dataset.as_fqn(), dataset.revision());
+    let quoted_schema = quote_identifier(&schema);
+    let quoted_table = quote_identifier(table);
+    format!("SELECT * FROM {}.{}", quoted_schema, quoted_table)
 }
 
 #[cfg(test)]

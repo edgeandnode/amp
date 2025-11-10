@@ -18,6 +18,7 @@ use arrow_to_postgres::ArrowToPostgresBinaryEncoder;
 use backon::{ExponentialBuilder, Retryable};
 // Import TableSchema from datasets_common
 use datasets_common::manifest::TableSchema;
+use monitoring::logging;
 use sqlx::PgPool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -367,7 +368,7 @@ impl Engine {
             let elapsed = start_time.elapsed();
             if elapsed >= max_duration {
                 tracing::error!(
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     elapsed_secs = elapsed.as_secs(),
                     max_duration_secs = max_duration.as_secs(),
                     "db_operation_circuit_breaker_triggered"
@@ -416,11 +417,10 @@ impl Engine {
             .collect();
 
         // Build schema with system columns prepended
-        // System columns: _tx_id, _row_index, _block_num
+        // System columns: _tx_id, _row_index
         let mut fields = vec![
             Arc::new(Field::new("_tx_id", DataType::Int64, false)),
             Arc::new(Field::new("_row_index", DataType::Int32, false)),
-            Arc::new(Field::new("_block_num", DataType::UInt64, false)),
         ];
         fields.extend(user_fields);
         let full_schema = Schema::new(fields);
@@ -463,7 +463,7 @@ impl Engine {
             .notify(|err: &sqlx::Error, duration: Duration| {
                 tracing::warn!(
                     table = table_name_owned.as_str(),
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_create_table_retry"
                 );
@@ -663,7 +663,7 @@ impl Engine {
             .notify(|err: &sqlx::Error, duration: Duration| {
                 tracing::warn!(
                     table = table_name,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_insert_retry"
                 );
@@ -732,7 +732,7 @@ impl Engine {
                     table = table_name_owned.as_str(),
                     start = start,
                     end = end,
-                    error = %err,
+                    error = %err, error_source = logging::error_source(&err),
                     retry_after = ?duration,
                     "db_delete_retry"
                 );
@@ -759,7 +759,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use arrow_array::{Int32Array, Int64Array, UInt64Array};
+    use arrow_array::{Int32Array, Int64Array};
     use arrow_schema::{DataType, Field, Schema};
     use datasets_common::manifest::{ArrowSchema, Field as ManifestField, TableSchema};
 
@@ -805,7 +805,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.0, 5); // _tx_id, _row_index, _block_num, id, name
+        assert_eq!(result.0, 4); // _tx_id, _row_index, id, name
     }
 
     #[tokio::test]
@@ -833,19 +833,17 @@ mod tests {
             .await
             .unwrap();
 
-        // Create batch with system columns (_tx_id, _row_index, _block_num) + user columns
+        // Create batch with system columns (_tx_id, _row_index) + user columns
         let num_rows = 3;
         let batch_with_meta = RecordBatch::try_new(
             Arc::new(Schema::new(vec![
                 Field::new("_tx_id", DataType::Int64, false),
                 Field::new("_row_index", DataType::Int32, false),
-                Field::new("_block_num", DataType::UInt64, false),
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
                 Arc::new(Int64Array::from(vec![42i64; num_rows])), // _tx_id
                 Arc::new(Int32Array::from(vec![0i32, 1i32, 2i32])), // _row_index
-                Arc::new(UInt64Array::from(vec![1000u64; num_rows])), // _block_num
                 Arc::new(Int64Array::from(vec![100, 200, 300])),   // value
             ],
         )
@@ -903,19 +901,17 @@ mod tests {
             .await
             .unwrap();
 
-        // Create batch with system columns (_tx_id, _row_index, _block_num) + user columns
+        // Create batch with system columns (_tx_id, _row_index) + user columns
         let batch_with_meta = RecordBatch::try_new(
             Arc::new(Schema::new(vec![
                 Field::new("_tx_id", DataType::Int64, false),
                 Field::new("_row_index", DataType::Int32, false),
-                Field::new("_block_num", DataType::UInt64, false),
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
-                Arc::new(Int64Array::from(vec![42i64])),    // _tx_id
-                Arc::new(Int32Array::from(vec![0i32])),     // _row_index
-                Arc::new(UInt64Array::from(vec![1000u64])), // _block_num
-                Arc::new(Int64Array::from(vec![100])),      // value
+                Arc::new(Int64Array::from(vec![42i64])), // _tx_id
+                Arc::new(Int32Array::from(vec![0i32])),  // _row_index
+                Arc::new(Int64Array::from(vec![100])),   // value
             ],
         )
         .unwrap();
@@ -1080,13 +1076,11 @@ mod tests {
             Arc::new(Schema::new(vec![
                 Field::new("_tx_id", DataType::Int64, false),
                 Field::new("_row_index", DataType::Int32, false),
-                Field::new("_block_num", DataType::UInt64, false),
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
                 Arc::new(Int64Array::from(vec![1i64; num_rows])), // _tx_id
                 Arc::new(Int32Array::from(row_indices)),          // _row_index
-                Arc::new(UInt64Array::from(vec![1000u64; num_rows])), // _block_num
                 Arc::new(Int64Array::from(values)),               // value
             ],
         )

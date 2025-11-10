@@ -4,6 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
+use monitoring::logging;
 use worker::job::{JobId, JobStatus};
 
 use crate::{
@@ -81,14 +82,14 @@ pub async fn handler(
     let id = match path {
         Ok(Path(id)) => id,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid job ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid job ID in path");
             return Err(Error::InvalidId { err }.into());
         }
     };
 
     // First, check if the job exists and get its status
     let job = ctx.scheduler.get_job(id).await.map_err(|err| {
-        tracing::debug!(job_id=%id, error=?err, "failed to get job");
+        tracing::debug!(job_id=%id, error = %err, error_source = logging::error_source(&err), "failed to get job");
         Error::GetJob(err)
     })?;
 
@@ -110,7 +111,7 @@ pub async fn handler(
 
     // Attempt to delete the job
     let deleted = ctx.scheduler.delete_job(id).await.map_err(|err| {
-        tracing::error!(job_id=%id, error=?err, "failed to delete job");
+        tracing::error!(job_id=%id, error = %err, error_source = logging::error_source(&err), "failed to delete job");
         Error::DeleteJob(err)
     })?;
 

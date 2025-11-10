@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
+use monitoring::logging;
 use worker::{info::WorkerInfo, node_id::NodeId};
 
 use crate::{
@@ -55,7 +56,7 @@ pub async fn handler(
     let id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid worker node ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid worker node ID in path");
             return Err(Error::InvalidId(err).into());
         }
     };
@@ -64,7 +65,7 @@ pub async fn handler(
         Ok(Some(worker)) => Ok(Json(worker.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {
-            tracing::debug!(error=?err, worker_id=?id, "failed to get worker by ID");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), worker_id=?id, "failed to get worker by ID");
             Err(Error::SchedulerGetWorker(err).into())
         }
     }

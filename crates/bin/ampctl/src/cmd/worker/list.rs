@@ -10,6 +10,8 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
+
 use crate::{args::GlobalArgs, client};
 
 /// Command-line arguments for the `worker list` command.
@@ -33,7 +35,7 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     let workers_response = get_workers(&global).await?;
 
     let json = serde_json::to_string_pretty(&workers_response).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize workers to JSON");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize workers to JSON");
         Error::JsonFormattingError { source: err }
     })?;
     println!("{}", json);
@@ -49,7 +51,7 @@ async fn get_workers(global: &GlobalArgs) -> Result<client::workers::WorkersResp
     let client = global.build_client()?;
 
     let workers_response = client.workers().list().await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to list workers");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list workers");
         Error::ClientError { source: err }
     })?;
 

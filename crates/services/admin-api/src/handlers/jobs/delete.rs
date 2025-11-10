@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
 };
 use common::BoxError;
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -89,7 +90,7 @@ pub async fn handler(
     let query = match query {
         Ok(Query(query)) => query,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid query parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid query parameters");
             return Err(Error::InvalidQueryParam { err }.into());
         }
     };

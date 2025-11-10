@@ -17,6 +17,7 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
+use datasets_common::table_name::TableName;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, physical_table::TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
@@ -215,10 +216,7 @@ impl PhysicalTable {
         job_labels: &JobLabels,
     ) -> Result<Self, BoxError> {
         let manifest_hash = table.dataset().manifest_hash();
-        let table_id = TableId {
-            manifest_hash: manifest_hash.into(),
-            table: table.name(),
-        };
+        let table_id = TableId::new(manifest_hash, table.name());
 
         let path = make_location_path(job_labels, table.name());
         let url = data_store.url().join(&path)?;
@@ -269,10 +267,7 @@ impl PhysicalTable {
         job_labels: &JobLabels,
     ) -> Result<Option<Self>, BoxError> {
         let manifest_hash = table.dataset().manifest_hash();
-        let table_id = TableId {
-            manifest_hash: manifest_hash.into(),
-            table: table.name(),
-        };
+        let table_id = TableId::new(manifest_hash, table.name());
 
         let prefix = location_prefix(job_labels, table.name());
         let url = data_store.url().join(&prefix)?;
@@ -297,11 +292,8 @@ impl PhysicalTable {
         table: &ResolvedTable,
         metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
-        let manifest_hash = table.dataset().manifest_hash().into();
-        let table_id = TableId {
-            manifest_hash,
-            table: table.name(),
-        };
+        let manifest_hash = table.dataset().manifest_hash();
+        let table_id = TableId::new(manifest_hash, table.name());
 
         let Some(physical_table) =
             metadata_db::physical_table::get_active_physical_table(&metadata_db, table_id).await?
@@ -363,7 +355,7 @@ impl PhysicalTable {
     }
 
     /// Restore a location from the data store and register it in the metadata database.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn restore(
         table: &ResolvedTable,
         table_id: &TableId<'_>,
@@ -470,7 +462,7 @@ impl PhysicalTable {
         self.table.dataset()
     }
 
-    pub fn table_name(&self) -> &str {
+    pub fn table_name(&self) -> &TableName {
         self.table.name()
     }
 
@@ -713,7 +705,7 @@ impl TableProvider for TableSnapshot {
 // We use the job labels for a more human-readable path hierarchy in object storage.
 //
 // The path format is: `<dataset>/<table>/<UUIDv7>/`
-pub fn make_location_path(job_labels: &JobLabels, table: &str) -> String {
+pub fn make_location_path(job_labels: &JobLabels, table: &TableName) -> String {
     let mut path = location_prefix(job_labels, table);
 
     // Add UUIDv7
@@ -724,7 +716,7 @@ pub fn make_location_path(job_labels: &JobLabels, table: &str) -> String {
     path
 }
 
-pub fn location_prefix(job_labels: &JobLabels, table: &str) -> String {
+pub fn location_prefix(job_labels: &JobLabels, table: &TableName) -> String {
     let mut prefix = String::new();
 
     // Add dataset

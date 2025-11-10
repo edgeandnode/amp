@@ -1,4 +1,3 @@
-import * as Anvil from "@edgeandnode/amp/Anvil"
 import * as Admin from "@edgeandnode/amp/api/Admin"
 import * as Errors from "@edgeandnode/amp/api/Error"
 import * as JsonLines from "@edgeandnode/amp/api/JsonLines"
@@ -10,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Struct from "effect/Struct"
+import * as Anvil from "./utils/Anvil.ts"
 import * as Fixtures from "./utils/Fixtures.ts"
 import * as Testing from "./utils/Testing.ts"
 
@@ -17,11 +17,13 @@ Testing.layer((it) => {
   it.effect(
     "run the counter script",
     Effect.fn(function*() {
+      const anvil = yield* Anvil.Anvil
+
       // Run the counter script to deploy the `Counter.sol` contract and generate some events.
-      yield* Anvil.script("DeployCounter.s.sol:DeployCounterScript")
-      yield* Anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
-      yield* Anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
-      yield* Anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
+      yield* anvil.script("DeployCounter.s.sol:DeployCounterScript")
+      yield* anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
+      yield* anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
+      yield* anvil.script("IncrementCounter.s.sol:IncrementCounterScript")
     }),
   )
 
@@ -33,13 +35,13 @@ Testing.layer((it) => {
       // Register and dump the root dataset.
       const namespace = "_"
       const name = "anvil"
-      const version = "0.1.0"
+      const version = "0.0.1"
 
       yield* admin.registerDataset(
         namespace,
         name,
-        Option.some(version),
         Anvil.dataset,
+        version,
       )
       const job = yield* admin.deployDataset(
         namespace,
@@ -76,7 +78,7 @@ Testing.layer((it) => {
     "can fetch the manifest for an evm-rpc dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetManifest("_", "anvil", "0.1.0")
+      const result = yield* api.getDatasetManifest("_", "anvil", "0.0.1")
       assertEquals(result.kind, "evm-rpc")
       assertEquals(result.network, "anvil")
       deepStrictEqual(typeof result.tables, "object")
@@ -101,14 +103,14 @@ Testing.layer((it) => {
       // Register and dump the example manifest.
       const namespace = Model.DEFAULT_NAMESPACE
       const name = "example"
-      const version = "0.1.0"
+      const version = "0.0.1"
 
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetDerived)
       yield* admin.registerDataset(
         namespace,
         name,
-        Option.some(version),
         dataset,
+        version,
       )
 
       const job = yield* admin.deployDataset(

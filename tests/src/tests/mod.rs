@@ -7,6 +7,7 @@ mod it_dump;
 mod it_functions;
 mod it_gen_manifest;
 mod it_joins;
+mod it_multi_table_continuous;
 mod it_non_incremental;
 mod it_reorg;
 mod it_sql;

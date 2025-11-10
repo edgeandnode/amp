@@ -16,7 +16,7 @@ use metadata_db::{MetadataDb, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use static_assertions::const_assert;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn run(
     mut config: Config,
     metadata_db: MetadataDb,
@@ -62,7 +62,7 @@ pub async fn run(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,
@@ -126,7 +126,11 @@ pub async fn dump(
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
-            let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
+            let table_names: Vec<String> = dataset
+                .tables
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect();
             tracing::info!(
                 "Table dump order for dataset {}: {:?}",
                 dataset_ref,

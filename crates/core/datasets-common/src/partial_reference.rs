@@ -4,16 +4,12 @@
 //! where the namespace and/or revision may be omitted. This is useful for parsing
 //! user input where these components are optional.
 
-use std::str::FromStr;
-
 use crate::{
     name::{Name, NameError},
     namespace::{Namespace, NamespaceError},
     reference::Reference,
     revision::{Revision, RevisionParseError},
 };
-
-const GLOBAL_NAMESPACE: &str = "_";
 
 /// A partial dataset reference with optional namespace and revision.
 ///
@@ -38,36 +34,58 @@ const GLOBAL_NAMESPACE: &str = "_";
 /// eth_rpc@1.0.0           (no namespace)
 /// eth_rpc                 (only name)
 /// ```
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct PartialReference {
-    pub namespace: Option<Namespace>,
-    pub name: Name,
-    pub revision: Option<Revision>,
+    namespace: Option<Namespace>,
+    name: Name,
+    revision: Option<Revision>,
 }
 
 impl PartialReference {
     /// Create a new partial reference from components.
-    pub fn new(namespace: Option<Namespace>, name: Name, revision: Option<Revision>) -> Self {
+    pub fn new(
+        namespace: impl Into<Option<Namespace>>,
+        name: Name,
+        revision: impl Into<Option<Revision>>,
+    ) -> Self {
         Self {
-            namespace,
+            namespace: namespace.into(),
             name,
-            revision,
+            revision: revision.into(),
         }
     }
 
+    /// Access the namespace component if present.
+    pub fn namespace(&self) -> Option<&Namespace> {
+        self.namespace.as_ref()
+    }
+
+    /// Access the name component.
     pub fn name(&self) -> &Name {
         &self.name
     }
 
-    pub fn revision_or_latest(&self) -> &Revision {
-        self.revision.as_ref().unwrap_or(&Revision::Latest)
+    /// Access the revision component if present.
+    pub fn revision(&self) -> Option<&Revision> {
+        self.revision.as_ref()
     }
 
-    /// Returns the namespace if present, or the global namespace otherwise.
-    pub fn namespace_or_global(&self) -> Namespace {
-        self.namespace
-            .clone()
-            .unwrap_or_else(|| Namespace::from_str(GLOBAL_NAMESPACE).unwrap())
+    /// Consume the partial reference and return the inner components.
+    pub fn into_parts(self) -> (Option<Namespace>, Name, Option<Revision>) {
+        (self.namespace, self.name, self.revision)
+    }
+
+    /// Convert this partial reference to a full `Reference` by filling in defaults.
+    ///
+    /// - Missing namespace defaults to global namespace (`_`).
+    /// - Missing revision defaults to latest version (`latest`).
+    pub fn to_full_reference(&self) -> Reference {
+        let namespace = self.namespace.clone().unwrap_or_else(Namespace::global);
+        let name = self.name.clone();
+        let revision = self.revision.clone().unwrap_or(Revision::Latest);
+        Reference::new(namespace, name, revision)
     }
 }
 
@@ -82,9 +100,11 @@ impl From<Reference> for PartialReference {
     }
 }
 
-impl From<&Reference> for PartialReference {
-    fn from(value: &Reference) -> Self {
-        Self::from(value.clone())
+impl From<PartialReference> for Reference {
+    fn from(value: PartialReference) -> Self {
+        let namespace = value.namespace.unwrap_or_else(Namespace::global);
+        let revision = value.revision.unwrap_or(Revision::Latest);
+        Self::new(namespace, value.name, revision)
     }
 }
 

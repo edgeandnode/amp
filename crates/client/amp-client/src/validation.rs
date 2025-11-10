@@ -6,7 +6,7 @@
 
 use common::metadata::segments::BlockRange;
 
-use crate::error::Error;
+use crate::error::{Error, ValidationError};
 
 /// Validate network consistency: no duplicates within batch, and stability across batches.
 ///
@@ -20,16 +20,17 @@ use crate::error::Error;
 ///
 /// # Returns
 /// * `Ok(())` if networks are valid and stable
-/// * `Err(Error::ProtocolInvariantViolation)` if duplicates or instability detected
+/// * `Err(Error::Validation(ValidationError::DuplicateNetwork))` if duplicates detected
+/// * `Err(Error::Validation(ValidationError::NetworkCountChanged))` if network count differs
+/// * `Err(Error::Validation(ValidationError::UnexpectedNetwork))` if new network appears
 pub fn validate_networks(previous: &[BlockRange], incoming: &[BlockRange]) -> Result<(), Error> {
     // Check for duplicates in incoming batch (O(n²) for small n)
     for i in 0..incoming.len() {
         for j in (i + 1)..incoming.len() {
             if incoming[i].network == incoming[j].network {
-                return Err(Error::ProtocolInvariantViolation(format!(
-                    "duplicate network '{}' in batch",
-                    incoming[i].network
-                )));
+                return Err(Error::Validation(ValidationError::DuplicateNetwork {
+                    network: incoming[i].network.clone(),
+                }));
             }
         }
     }
@@ -38,20 +39,18 @@ pub fn validate_networks(previous: &[BlockRange], incoming: &[BlockRange]) -> Re
     if !previous.is_empty() {
         // Fast path: count must match
         if previous.len() != incoming.len() {
-            return Err(Error::ProtocolInvariantViolation(format!(
-                "network count changed: expected {}, got {}",
-                previous.len(),
-                incoming.len()
-            )));
+            return Err(Error::Validation(ValidationError::NetworkCountChanged {
+                expected: previous.len(),
+                actual: incoming.len(),
+            }));
         }
 
         // Verify all incoming networks exist in previous (no allocations)
         for incoming_range in incoming {
             if !previous.iter().any(|p| p.network == incoming_range.network) {
-                return Err(Error::ProtocolInvariantViolation(format!(
-                    "network set changed: unexpected network '{}'",
-                    incoming_range.network
-                )));
+                return Err(Error::Validation(ValidationError::UnexpectedNetwork {
+                    network: incoming_range.network.clone(),
+                }));
             }
         }
     }
@@ -75,7 +74,7 @@ pub fn validate_networks(previous: &[BlockRange], incoming: &[BlockRange]) -> Re
 ///
 /// # Returns
 /// * `Ok(())` if ranges are consecutive (or reorg detected)
-/// * `Err(Error::ProtocolInvariantViolation)` if consecutiveness broken
+/// * `Err(Error::Validation(ValidationError::NonConsecutiveBlocks))` if consecutiveness broken
 pub fn validate_consecutiveness(
     previous: &[BlockRange],
     incoming: &[BlockRange],
@@ -96,13 +95,12 @@ pub fn validate_consecutiveness(
 
             if !is_consecutive && !is_identical {
                 let expected_start = prev_range.end() + 1;
-                return Err(Error::ProtocolInvariantViolation(format!(
-                    "non-consecutive blocks for network '{}': previous ended at {}, incoming starts at {} (expected {} or matching range)",
-                    incoming_range.network,
-                    prev_range.end(),
-                    incoming_range.start(),
-                    expected_start
-                )));
+                return Err(Error::Validation(ValidationError::NonConsecutiveBlocks {
+                    network: incoming_range.network.clone(),
+                    prev_end: prev_range.end(),
+                    incoming_start: incoming_range.start(),
+                    expected_start,
+                }));
             }
 
             // Note: We don't validate hash chain continuity here because:
@@ -210,8 +208,11 @@ mod tests {
             );
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(error, Error::ProtocolInvariantViolation(_)),
-                "Expected ProtocolInvariantViolation, got {:?}",
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::DuplicateNetwork { .. })
+                ),
+                "Expected ValidationError::DuplicateNetwork, got {:?}",
                 error
             );
         }
@@ -251,8 +252,11 @@ mod tests {
             );
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(error, Error::ProtocolInvariantViolation(_)),
-                "Expected ProtocolInvariantViolation, got {:?}",
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::NetworkCountChanged { .. })
+                ),
+                "Expected ValidationError::NetworkCountChanged, got {:?}",
                 error
             );
         }
@@ -273,8 +277,11 @@ mod tests {
             assert!(result.is_err(), "validation should fail with added network");
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(error, Error::ProtocolInvariantViolation(_)),
-                "Expected ProtocolInvariantViolation, got {:?}",
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::NetworkCountChanged { .. })
+                ),
+                "Expected ValidationError::NetworkCountChanged, got {:?}",
                 error
             );
         }
@@ -319,8 +326,11 @@ mod tests {
             assert!(result.is_err(), "validation should fail with block gap");
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(error, Error::ProtocolInvariantViolation(_)),
-                "Expected ProtocolInvariantViolation, got {:?}",
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::NonConsecutiveBlocks { .. })
+                ),
+                "Expected ValidationError::NonConsecutiveBlocks, got {:?}",
                 error
             );
         }
@@ -341,8 +351,11 @@ mod tests {
             );
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(error, Error::ProtocolInvariantViolation(_)),
-                "Expected ProtocolInvariantViolation, got {:?}",
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::NonConsecutiveBlocks { .. })
+                ),
+                "Expected ValidationError::NonConsecutiveBlocks, got {:?}",
                 error
             );
         }

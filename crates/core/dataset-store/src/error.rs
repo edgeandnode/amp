@@ -1,5 +1,5 @@
 use common::BoxError;
-use datasets_common::{hash::Hash, name::NameError, partial_reference::PartialReference};
+use datasets_common::{hash::Hash, name::NameError, reference::Reference};
 
 use crate::{
     DatasetKind,
@@ -153,6 +153,58 @@ pub enum SetVersionTagError {
 #[error("Failed to query metadata database")]
 pub struct ResolveRevisionError(#[source] pub metadata_db::Error);
 
+/// Errors that occur when loading a dataset by its manifest hash
+#[derive(Debug, thiserror::Error)]
+pub enum GetDatasetByHashError {
+    /// Failed to query manifest path from metadata database
+    ///
+    /// This occurs when attempting to retrieve the manifest file path associated
+    /// with the given hash from the metadata database.
+    #[error("Failed to query manifest path from metadata database")]
+    QueryManifestPath(#[source] metadata_db::Error),
+
+    /// Failed to load manifest content from object store
+    ///
+    /// This occurs when the object store operation to fetch the manifest file fails,
+    /// which could be due to network issues, permissions, or storage backend problems.
+    #[error("Failed to load manifest content from object store")]
+    LoadManifestContent(#[source] crate::manifests::GetError),
+
+    /// Failed to parse manifest to extract kind field
+    ///
+    /// This occurs when parsing the manifest file to extract the `kind` field.
+    /// The manifest may contain invalid JSON/TOML syntax or be missing the kind field.
+    #[error("Failed to parse manifest to extract kind field")]
+    ParseManifestForKind(#[source] ManifestParseError),
+
+    /// Dataset kind is not supported
+    ///
+    /// This occurs when the `kind` field in the manifest contains a value that
+    /// doesn't match any supported dataset type (evm-rpc, eth-beacon, firehose, derived).
+    #[error("Unsupported dataset kind: {0}")]
+    UnsupportedKind(String),
+
+    /// Failed to parse kind-specific manifest
+    ///
+    /// This occurs when parsing the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived).
+    /// The manifest structure may not match the expected schema for the dataset kind.
+    #[error("Failed to parse {kind} manifest")]
+    ParseManifest {
+        kind: DatasetKind,
+        #[source]
+        source: ManifestParseError,
+    },
+
+    /// Failed to create derived dataset instance
+    ///
+    /// This occurs when creating a derived dataset from its manifest, which may fail due to:
+    /// - Invalid SQL queries in the dataset definition
+    /// - Dependency resolution issues (referenced datasets not found)
+    /// - Logical errors in the dataset definition
+    #[error("Failed to create derived dataset")]
+    CreateDerivedDataset(#[source] BoxError),
+}
+
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetDatasetError {
@@ -174,16 +226,32 @@ pub enum GetDatasetError {
         source: metadata_db::Error,
     },
 
-    /// Failed to retrieve the manifest file from the manifest store.
+    /// Failed to resolve dataset revision to manifest hash.
     ///
-    /// This occurs when the object store operation to fetch the manifest file fails,
-    /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest for dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
-    ManifestRetrievalError {
-        namespace: String,
-        name: String,
-        version: Option<String>,
-        source: BoxError,
+    /// This occurs when attempting to resolve a revision (version tag, hash, or special tags
+    /// like "latest" or "dev") to a concrete manifest hash. The resolution involves querying
+    /// the metadata database and may fail due to connection issues, database unavailability,
+    /// or permission problems.
+    #[error("Failed to resolve revision for dataset '{reference}': {source}")]
+    ResolveRevision {
+        reference: Reference,
+        #[source]
+        source: ResolveRevisionError,
+    },
+
+    /// Failed to load dataset by manifest hash.
+    ///
+    /// This occurs when attempting to load a dataset from the manifest store and may fail due to:
+    /// - Database query failures when retrieving the manifest path
+    /// - Object store failures when fetching the manifest content
+    /// - Manifest parsing errors (invalid JSON/TOML, schema mismatches)
+    /// - Dataset kind parsing errors
+    /// - Derived dataset creation errors
+    #[error("Failed to load dataset '{reference}' by manifest hash: {source}")]
+    LoadDatasetByHash {
+        reference: Reference,
+        #[source]
+        source: GetDatasetByHashError,
     },
 
     /// Failed to parse the manifest file content.
@@ -231,7 +299,7 @@ pub enum GetDatasetError {
 
     /// Dataset not found.
     #[error("Dataset '{0}' not found")]
-    DatasetNotFound(PartialReference),
+    DatasetNotFound(Reference),
 }
 
 /// Errors that occur when getting all datasets from the dataset store
@@ -268,12 +336,19 @@ pub enum GetDerivedManifestError {
     #[error("Invalid dataset name '{name}': {source}")]
     InvalidDatasetName { name: String, source: NameError },
 
-    /// Failed to retrieve the manifest file from the manifest store.
+    /// Failed to query manifest path from metadata database
+    ///
+    /// This occurs when attempting to retrieve the manifest file path associated
+    /// with the given hash from the metadata database.
+    #[error("Failed to query manifest path from metadata database")]
+    QueryManifestPath(#[source] metadata_db::Error),
+
+    /// Failed to load manifest content from object store
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
     /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest': {source}")]
-    ManifestRetrievalError { source: BoxError },
+    #[error("Failed to load manifest content from object store")]
+    LoadManifestContent(#[source] crate::manifests::GetError),
 
     /// Failed to parse the manifest file content.
     ///
@@ -281,8 +356,8 @@ pub enum GetDerivedManifestError {
     /// - The manifest file contains invalid JSON or TOML syntax
     /// - The manifest structure doesn't match the expected schema
     /// - Required fields are missing or have incorrect types
-    #[error("Failed to parse manifest: {source}")]
-    ManifestParseError { source: ManifestParseError },
+    #[error("Failed to parse manifest")]
+    ManifestParseError(#[source] ManifestParseError),
 
     /// The dataset kind is not SQL or Derived.
     ///
@@ -295,21 +370,28 @@ pub enum GetDerivedManifestError {
     UnsupportedKind { kind: String },
 
     #[error("Manifest {0} is not registered")]
-    ManifestNotRegistered(datasets_common::hash::Hash),
+    ManifestNotRegistered(Hash),
 
     #[error("Manifest {0} not found in the manifest store")]
-    ManifestNotFound(datasets_common::hash::Hash),
+    ManifestNotFound(Hash),
 }
 
 /// Errors specific to getting client operations for raw datasets
 #[derive(Debug, thiserror::Error)]
 pub enum GetClientError {
-    /// Failed to retrieve the manifest file from the manifest store.
+    /// Failed to query manifest path from metadata database
+    ///
+    /// This occurs when attempting to retrieve the manifest file path associated
+    /// with the given hash from the metadata database.
+    #[error("Failed to query manifest path from metadata database")]
+    QueryManifestPath(#[source] metadata_db::Error),
+
+    /// Failed to load manifest content from object store
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
     /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to retrieve manifest: {source}")]
-    ManifestRetrievalError { source: BoxError },
+    #[error("Failed to load manifest content from object store")]
+    LoadManifestContent(#[source] crate::manifests::GetError),
 
     /// Failed to parse the common manifest file content.
     ///
@@ -317,8 +399,8 @@ pub enum GetClientError {
     /// - The manifest file contains invalid JSON or TOML syntax
     /// - The manifest structure doesn't match the expected schema
     /// - Required fields are missing or have incorrect types
-    #[error("Failed to parse common manifest for dataset: {source}")]
-    CommonManifestParseError { source: ManifestParseError },
+    #[error("Failed to parse common manifest for dataset")]
+    CommonManifestParseError(#[source] ManifestParseError),
 
     /// The dataset kind is not a raw dataset type.
     ///
@@ -380,10 +462,10 @@ pub enum GetClientError {
     },
 
     #[error("Manifest {0} is not registered")]
-    ManifestNotRegistered(datasets_common::hash::Hash),
+    ManifestNotRegistered(Hash),
 
     #[error("Manifest {0} not found in the manifest store")]
-    ManifestNotFound(datasets_common::hash::Hash),
+    ManifestNotFound(Hash),
 }
 
 /// Errors that occur when creating an ETH call UDF for a dataset.

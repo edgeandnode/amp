@@ -2,7 +2,9 @@
 
 use amp_client::{AmpClient, PostgresStateStore, TransactionEvent};
 use common::BlockNum;
+use datasets_common::reference::Reference;
 use futures::StreamExt;
+use monitoring::logging;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
@@ -92,7 +94,7 @@ pub enum StreamTaskError {
 /// it stops processing new events and allows the current event to complete.
 pub struct StreamTask {
     table_name: String,
-    dataset_name: String,
+    dataset: Reference,
     query: String,
     engine: Engine,
     client: AmpClient,
@@ -106,17 +108,17 @@ impl StreamTask {
     ///
     /// # Arguments
     /// - `table_name`: Target table name
-    /// - `dataset_name`: Dataset name (for stream ID)
+    /// - `dataset`: Fully resolved dataset reference (for stream ID)
     /// - `query`: SQL query to stream
     /// - `engine`: Database engine for insert/delete operations
     /// - `client`: AmpClient instance
     /// - `pool`: Database connection pool (for creating state store)
     /// - `retention`: Retention window in blocks
     /// - `shutdown`: Cancellation token for graceful shutdown
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_name: String,
-        dataset_name: String,
+        dataset: Reference,
         query: String,
         engine: Engine,
         client: AmpClient,
@@ -126,7 +128,7 @@ impl StreamTask {
     ) -> Self {
         Self {
             table_name,
-            dataset_name,
+            dataset,
             query,
             engine,
             client,
@@ -159,12 +161,12 @@ impl StreamTask {
     /// - Stream creation fails (invalid query, connection error)
     /// - Event processing fails (database operation error)
     /// - State commit fails (PostgreSQL connection error)
-    #[instrument(skip(self), fields(table = %self.table_name, dataset = %self.dataset_name))]
+    #[instrument(skip(self), fields(table = %self.table_name, dataset = %self.dataset))]
     pub async fn run(self) -> Result<(), StreamTaskError> {
         info!("starting_task");
 
-        // Create state store for this table
-        let stream_id = format!("{}:{}", self.dataset_name, self.table_name);
+        // Create state store for this table using fully qualified dataset reference
+        let stream_id = format!("{}:{}", self.dataset, self.table_name);
         info!(stream_id = %stream_id, "creating_state_store");
         let store = PostgresStateStore::new(self.pool.clone(), &stream_id)
             .await
@@ -204,12 +206,12 @@ impl StreamTask {
                     match event_result {
                         Some(Ok((event, commit))) => {
                             if let Err(e) = self.handle_event(event, commit).await {
-                                error!(error = %e, "event_handling_failed");
+                                error!(error = %e, error_source = logging::error_source(&e), "event_handling_failed");
                                 return Err(e);
                             }
                         }
                         Some(Err(e)) => {
-                            error!(error = %e, "stream_error");
+                            error!(error = %e, error_source = logging::error_source(&e), "stream_error");
                             return Err(StreamTaskError::StreamError(e));
                         }
                         None => {

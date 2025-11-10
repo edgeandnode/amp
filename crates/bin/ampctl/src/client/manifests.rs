@@ -3,6 +3,7 @@
 //! Provides methods for interacting with the `/manifests` endpoints of the admin API.
 
 use datasets_common::hash::Hash;
+use monitoring::logging;
 
 use super::{
     Client,
@@ -95,7 +96,7 @@ impl<'a> ManifestsClient<'a> {
                         .json::<RegisterManifestResponse>()
                         .await
                         .map_err(|err| {
-                            tracing::error!(error = %err, "Failed to parse success response");
+                            tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse success response");
                             RegisterError::UnexpectedResponse {
                                 status: status.as_u16(),
                                 message: format!("Failed to parse response: {}", err),
@@ -105,7 +106,7 @@ impl<'a> ManifestsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -113,7 +114,7 @@ impl<'a> ManifestsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -199,7 +200,7 @@ impl<'a> ManifestsClient<'a> {
             200 => {
                 let manifest_response =
                     response.json::<ManifestResponse>().await.map_err(|err| {
-                        tracing::error!(error = %err, "Failed to parse manifest response");
+                        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse manifest response");
                         GetError::UnexpectedResponse {
                             status: status.as_u16(),
                             message: format!("Failed to parse response: {}", err),
@@ -214,7 +215,7 @@ impl<'a> ManifestsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -222,7 +223,7 @@ impl<'a> ManifestsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -297,7 +298,7 @@ impl<'a> ManifestsClient<'a> {
             }
             400 | 409 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -305,7 +306,7 @@ impl<'a> ManifestsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -386,7 +387,7 @@ impl<'a> ManifestsClient<'a> {
         match status.as_u16() {
             200 => {
                 let prune_response = response.json::<PruneResponse>().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse prune response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse prune response");
                     PruneError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -396,7 +397,7 @@ impl<'a> ManifestsClient<'a> {
             }
             500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     PruneError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -404,7 +405,7 @@ impl<'a> ManifestsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     PruneError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),

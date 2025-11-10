@@ -8,7 +8,6 @@ import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
@@ -220,6 +219,11 @@ export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.Met
  * The output schema endpoint (POST /schema).
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
+  .addError(Error.UnqualifiedTable)
+  .addError(Error.CatalogQualifiedTable)
+  .addError(Error.InvalidTableName)
+  .addError(Error.InvalidSchemaReference)
+  .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
   .addError(Error.PlanningError)
   .addError(Error.CatalogForSqlError)
@@ -227,18 +231,30 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .setPayload(
     Schema.Struct({
       sqlQuery: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("sql_query")),
-      isSqlDataset: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("is_sql_dataset")),
     }),
   )
 
 /**
  * Error type for the `getOutputSchema` endpoint.
  *
+ * - UnqualifiedTable: Table reference is not qualified with a dataset.
+ * - CatalogQualifiedTable: Table reference includes a catalog qualifier.
+ * - InvalidTableName: Table name does not conform to SQL identifier rules.
+ * - InvalidSchemaReference: Schema portion of table reference is not a valid dataset reference.
+ * - DatasetNotFound: The referenced dataset does not exist in the store.
  * - DatasetStoreError: Failure in dataset storage operations.
  * - PlanningError: Query planning or schema inference failure.
  * - CatalogForSqlError: Failed to build catalog for SQL query.
  */
-export type GetOutputSchemaError = Error.DatasetStoreError | Error.PlanningError | Error.CatalogForSqlError
+export type GetOutputSchemaError =
+  | Error.UnqualifiedTable
+  | Error.CatalogQualifiedTable
+  | Error.InvalidTableName
+  | Error.InvalidSchemaReference
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.PlanningError
+  | Error.CatalogForSqlError
 
 /**
  * The api group for the dataset endpoints.
@@ -290,18 +306,6 @@ export interface DumpDatasetOptions {
 }
 
 /**
- * Options for schema retrieval.
- */
-export interface GetSchemaOptions {
-  /**
-   * Whether this is a sql dataset.
-   *
-   * @default true
-   */
-  readonly isSqlDataset?: boolean | undefined
-}
-
-/**
  * Service definition for the admin api.
  */
 export class Admin extends Context.Tag("Amp/Admin")<Admin, {
@@ -317,8 +321,8 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   readonly registerDataset: (
     namespace: Model.DatasetNamespace,
     name: Model.DatasetName,
-    version: Option.Option<Model.DatasetVersion>,
     manifest: Model.DatasetManifest,
+    version?: Model.DatasetVersion | undefined,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
@@ -401,12 +405,10 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * Gets the schema of a dataset.
    *
    * @param sql - The SQL query to get the schema for.
-   * @param options - Options for the schema retrieval.
    * @returns An effect that resolves to the table schema.
    */
   readonly getOutputSchema: (
     sql: string,
-    options?: GetSchemaOptions,
   ) => Effect.Effect<Model.OutputSchema, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
@@ -425,15 +427,15 @@ export const make = Effect.fn(function*(url: string) {
     function*(
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
-      version: Option.Option<Model.DatasetVersion>,
       manifest: Model.DatasetManifest,
+      version?: Model.DatasetVersion | undefined,
     ) {
       const request = client.dataset.registerDataset({
         payload: {
           namespace,
           name,
-          version: Option.getOrUndefined(version),
           manifest,
+          version,
         },
       })
 
@@ -564,11 +566,10 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string, options?: GetSchemaOptions) {
+  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string) {
     const request = client.schema.getOutputSchema({
       payload: {
         sqlQuery: sql,
-        isSqlDataset: options?.isSqlDataset ?? true,
       },
     })
 

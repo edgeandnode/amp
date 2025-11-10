@@ -1,4 +1,3 @@
-import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as Prompt from "@effect/cli/Prompt"
@@ -17,10 +16,10 @@ import { adminUrl, configFile, ExitCode } from "../common.ts"
 
 export const register = Command.make("register", {
   args: {
-    tag: Args.text({ name: "tag" }).pipe(
-      Args.withDescription("Dataset version (semver) or 'dev' tag"),
-      Args.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
-      Args.optional,
+    tag: Options.text("tag").pipe(
+      Options.withDescription("Dataset version (semver) or 'dev' tag"),
+      Options.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
+      Options.optional,
     ),
     publish: Options.boolean("publish", { ifPresent: true }).pipe(
       Options.withAlias("p"),
@@ -40,18 +39,11 @@ export const register = Command.make("register", {
       const auth = yield* Auth.AuthService
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
 
-      // If tag is not provided or is "dev", register without version tag (bumps dev tag)
-      // Otherwise, register with the specified semantic version
-      const version = Option.match(args.tag, {
-        onNone: () => Option.none(),
-        onSome: (tag) => (Schema.is(Model.DatasetDevTag)(tag) ? Option.none() : Option.some(tag)),
-      })
-
       const result = yield* client.registerDataset(
         context.metadata.namespace,
         context.metadata.name,
-        version,
         context.manifest,
+        Option.getOrUndefined(args.tag),
       )
 
       if (!args.publish) {
@@ -122,9 +114,6 @@ export const register = Command.make("register", {
   Command.provide(Auth.layer),
   Command.provide(AmpRegistry.layer),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.configFile)
-      .pipe(
-        Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
-      )
+    ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(Admin.layer(`${args.adminUrl}`)))
   ),
 )

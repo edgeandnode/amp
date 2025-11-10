@@ -14,10 +14,10 @@ pub enum V8Value<'s> {
     BigInt(Local<'s, BigInt>),
     Object(Local<'s, Object>),
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     Array(Local<'s, Array>),
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     TypedArray(Local<'s, TypedArray>),
 }
 

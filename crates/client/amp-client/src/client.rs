@@ -21,7 +21,7 @@ use tonic::{Streaming, transport::Endpoint};
 use crate::{
     cdc::CdcStreamBuilder,
     decode,
-    error::Error,
+    error::{Error, ProtocolError},
     store::{BatchStore, StateStore},
     transactional::TransactionalStreamBuilder,
     validation::{validate_consecutiveness, validate_networks},
@@ -216,8 +216,8 @@ impl AmpClient {
     /// # Arguments
     /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602")
     pub async fn from_endpoint(endpoint: &str) -> Result<Self, Error> {
-        let endpoint: Endpoint = endpoint.parse()?;
-        let channel = endpoint.connect().await?;
+        let endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
+        let channel = endpoint.connect().await.map_err(Error::Transport)?;
         let client = FlightSqlServiceClient::new(channel);
         Ok(Self { client })
     }
@@ -284,7 +284,7 @@ impl AmpClient {
     /// }
     /// ```
     pub async fn query<S: ToString>(&mut self, sql: S) -> Result<BatchStream, Error> {
-        let inner = self.request(sql, None).await?;
+        let inner = self.request(sql, None, false).await?;
         Ok(BatchStream { inner })
     }
 
@@ -295,10 +295,12 @@ impl AmpClient {
     /// # Arguments
     /// - `sql`: SQL query string
     /// - `watermark`: Optional watermark for resuming a stream
+    /// - `streaming`: Whether to enable streaming mode
     pub async fn request<S: ToString>(
         &mut self,
         sql: S,
         watermark: Option<&ResumeWatermark>,
+        streaming: bool,
     ) -> Result<RawStream, Error> {
         self.client.set_header(
             "amp-resume",
@@ -307,23 +309,25 @@ impl AmpClient {
                 .unwrap_or_default(),
         );
 
+        // Set amp-stream header to control streaming behavior
+        self.client
+            .set_header("amp-stream", if streaming { "true" } else { "" });
+
         let result = self.client.execute(sql.to_string(), None).await;
 
-        // Unset the amp-resume header after GetFlightInfo, since otherwise it gets
+        // Unset headers after GetFlightInfo, since otherwise they get
         // retained for subsequent requests.
         self.client.set_header("amp-resume", "");
+        self.client.set_header("amp-stream", "");
 
-        let flight_info = match result {
-            Ok(flight_info) => flight_info,
-            Err(err) => return Err(err.into()),
-        };
+        let flight_info = result.map_err(Error::Arrow)?;
 
         let ticket = flight_info
             .endpoint
             .into_iter()
             .next()
             .and_then(|endpoint| endpoint.ticket)
-            .ok_or_else(|| Error::Server("FlightInfo missing ticket".to_string()))?;
+            .ok_or(Error::Protocol(ProtocolError::MissingFlightTicket))?;
 
         let flight_data = self.client.inner_mut().do_get(ticket).await?.into_inner();
         let decoder = decode::FlightDataDecoder::new(flight_data);
@@ -402,8 +406,8 @@ impl IntoFuture for StreamBuilder {
 
     fn into_future(mut self) -> Self::IntoFuture {
         Box::pin(async move {
-            // Get raw response stream
-            let raw = self.client.request(&self.sql, None).await?.boxed();
+            // Get raw response stream with streaming enabled
+            let raw = self.client.request(&self.sql, None, true).await?.boxed();
 
             // Create protocol stream (with reorg detection)
             Ok(ProtocolStream::new(raw, Vec::new()))
@@ -422,7 +426,7 @@ impl IntoFuture for RawStreamBuilder {
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(mut self) -> Self::IntoFuture {
-        Box::pin(async move { self.client.request(&self.sql, None).await })
+        Box::pin(async move { self.client.request(&self.sql, None, true).await })
     }
 }
 

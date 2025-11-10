@@ -468,3 +468,10 @@ export class DeployRequest extends Schema.Class<DeployRequest>("DeployRequest")(
 export class DeployResponse extends Schema.Class<DeployResponse>("DeployResponse")({
   jobId: JobId.pipe(Schema.propertySignature, Schema.fromKey("job_id")),
 }) {}
+
+export const GenrateTokenDuration = Schema.String.pipe(
+  Schema.pattern(
+    /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
+  ),
+)
+export type GenrateTokenDuration = typeof GenrateTokenDuration.Type

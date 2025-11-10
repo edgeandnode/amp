@@ -10,6 +10,7 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use monitoring::logging;
 use worker::job::JobId;
 
 use crate::{args::GlobalArgs, client};
@@ -36,7 +37,7 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
     tracing::debug!("Stopping job via admin API");
 
     client.jobs().stop(&id).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to stop job");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to stop job");
         match err {
             client::jobs::StopError::NotFound(_) => Error::JobNotFound { id },
             _ => Error::StopJobError { source: err },

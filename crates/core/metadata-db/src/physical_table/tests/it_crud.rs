@@ -8,7 +8,7 @@ use crate::{
     db::Connection,
     jobs::{self, JobId},
     manifests::ManifestHash,
-    physical_table::{self, LocationId, TableId},
+    physical_table::{self, LocationId, TableId, TableName},
     workers,
 };
 
@@ -34,7 +34,7 @@ async fn insert_creates_location_and_returns_id() {
 
     let table = TableId {
         manifest_hash: hash,
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let bucket = Some("test-bucket");
     let path = "/test/path/file.parquet";
@@ -70,7 +70,7 @@ async fn insert_creates_location_and_returns_id() {
         row_manifest_hash,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     );
-    assert_eq!(row_table_name, "test-table");
+    assert_eq!(row_table_name, "test_table");
     assert_eq!(row_bucket, Some("test-bucket".to_string()));
     assert_eq!(row_path, "/test/path/file.parquet");
     assert_eq!(row_url, url.as_str());
@@ -96,7 +96,7 @@ async fn insert_on_conflict_returns_existing_id() {
 
     let table = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let url = Url::parse("s3://test-bucket/unique-file.parquet")
         .expect("Failed to parse unique file URL");
@@ -152,7 +152,7 @@ async fn url_to_location_id_finds_existing_location() {
 
     let table = TableId {
         manifest_hash: hash,
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let url = Url::parse("s3://test-bucket/find-me.parquet").expect("Failed to parse find-me URL");
 
@@ -220,15 +220,15 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 
     let table = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let table2 = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table2",
+        table: TableName::from_ref_unchecked("test_table2"),
     };
     let other_table = TableId {
         manifest_hash: hash.clone(),
-        table: "other-table",
+        table: TableName::from_ref_unchecked("other_table"),
     };
 
     // Create active location for target table
@@ -335,15 +335,15 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 
     let table = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let table2 = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table2",
+        table: TableName::from_ref_unchecked("test_table2"),
     };
     let other_table = TableId {
         manifest_hash: hash.clone(),
-        table: "other-table",
+        table: TableName::from_ref_unchecked("other_table"),
     };
 
     // Create active location for first target table
@@ -452,7 +452,7 @@ async fn mark_active_by_id_activates_specific_location() {
 
     let table = TableId {
         manifest_hash: hash,
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
 
     let url1 =
@@ -535,15 +535,15 @@ async fn get_by_job_id_returns_locations_written_by_job() {
 
     let table1 = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table1",
+        table: TableName::from_ref_unchecked("test_table1"),
     };
     let table2 = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table2",
+        table: TableName::from_ref_unchecked("test_table2"),
     };
     let table3 = TableId {
         manifest_hash: hash.clone(),
-        table: "test-table3",
+        table: TableName::from_ref_unchecked("test_table3"),
     };
 
     // Create locations and assign them to the job
@@ -613,7 +613,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     // Verify location details
     for location in &job_locations {
         assert_eq!(location.dataset_name, "test-dataset");
-        assert!(location.table_name == "test-table1" || location.table_name == "test-table2");
+        assert!(location.table_name == "test_table1" || location.table_name == "test_table2");
         assert!(location.active);
     }
 }
@@ -651,7 +651,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     let table = TableId {
         manifest_hash: hash,
-        table: "output-table",
+        table: TableName::from_ref_unchecked("output_table"),
     };
 
     // Create locations to assign
@@ -761,7 +761,7 @@ async fn get_by_id_returns_existing_location() {
 
     let table = TableId {
         manifest_hash: hash,
-        table: "test-table",
+        table: TableName::from_ref_unchecked("test_table"),
     };
     let url = Url::parse("s3://bucket/get-by-id.parquet").expect("Failed to parse URL");
 
@@ -790,7 +790,7 @@ async fn get_by_id_returns_existing_location() {
     let location = location.unwrap();
     assert_eq!(location.id(), inserted_id);
     assert_eq!(location.table.dataset_name, "test-dataset");
-    assert_eq!(location.table.table_name, "test-table");
+    assert_eq!(location.table.table_name, "test_table");
     assert_eq!(location.url(), &url);
     assert!(location.active());
 }

@@ -2,7 +2,6 @@ import { createGrpcTransport } from "@connectrpc/connect-node"
 import * as Admin from "@edgeandnode/amp/api/Admin"
 import * as ArrowFlight from "@edgeandnode/amp/api/ArrowFlight"
 import * as JsonLines from "@edgeandnode/amp/api/JsonLines"
-import * as EvmRpc from "@edgeandnode/amp/evm/EvmRpc"
 import type * as Model from "@edgeandnode/amp/Model"
 import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as Vitest from "@effect/vitest"
@@ -12,6 +11,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
+import * as Anvil from "./Anvil.ts"
 import * as Fixtures from "./Fixtures.ts"
 
 class JobIncompleteError extends Data.TaggedError("JobIncompleteError")<{
@@ -84,9 +84,9 @@ export const layer = Vitest.layer(
     const flight = ArrowFlight.layer(createGrpcTransport({ baseUrl: flightUrl }))
     const jsonl = JsonLines.layer(jsonlUrl)
     const admin = Admin.layer(adminUrl)
-    const rpc = EvmRpc.layer(anvilRpcUrl)
+    const anvil = Anvil.layer(anvilRpcUrl)
 
-    return Layer.mergeAll(admin, jsonl, flight, rpc)
+    return Layer.mergeAll(admin, jsonl, flight, anvil)
   }).pipe(
     Layer.unwrapEffect,
     Layer.merge(Fixtures.layer),

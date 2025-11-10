@@ -18,7 +18,7 @@ pub use postgres::PostgresStateStore;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::Error,
+    error::{Error, SerializationError},
     transactional::{Commit, TransactionId},
 };
 
@@ -195,13 +195,13 @@ pub fn serialize_batch(batch: &RecordBatch) -> Result<Vec<u8>, Error> {
 
     let mut buf = Vec::new();
     let mut writer = StreamWriter::try_new(&mut buf, &batch.schema())
-        .map_err(|e| Error::InvalidBatch(format!("Failed to create writer: {}", e)))?;
+        .map_err(|err| Error::Serialization(SerializationError::WriterCreation(err)))?;
     writer
         .write(batch)
-        .map_err(|e| Error::InvalidBatch(format!("Failed to write batch: {}", e)))?;
+        .map_err(|err| Error::Serialization(SerializationError::BatchWrite(err)))?;
     writer
         .finish()
-        .map_err(|e| Error::InvalidBatch(format!("Failed to finish writer: {}", e)))?;
+        .map_err(|err| Error::Serialization(SerializationError::WriterFinish(err)))?;
     Ok(buf)
 }
 
@@ -218,9 +218,9 @@ pub fn deserialize_batch(bytes: &[u8]) -> Result<RecordBatch, Error> {
     use common::arrow::ipc::reader::StreamReader;
 
     let mut reader = StreamReader::try_new(bytes, None)
-        .map_err(|e| Error::InvalidBatch(format!("Failed to create reader: {}", e)))?;
+        .map_err(|err| Error::Serialization(SerializationError::ReaderCreation(err)))?;
     reader
         .next()
-        .ok_or_else(|| Error::InvalidBatch("Empty batch stream".to_string()))?
-        .map_err(|e| Error::InvalidBatch(format!("Failed to read batch: {}", e)))
+        .ok_or(Error::Serialization(SerializationError::EmptyBatchStream))?
+        .map_err(|err| Error::Serialization(SerializationError::BatchRead(err)))
 }

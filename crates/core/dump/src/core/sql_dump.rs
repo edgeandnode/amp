@@ -121,7 +121,7 @@ use crate::{
 
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(table = %table.table_name()), err)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn dump_table(
     ctx: Ctx,
     manifest: DerivedManifest,
@@ -143,7 +143,7 @@ pub async fn dump_table(
     // Get the table definition from the manifest
     let table_def = manifest
         .tables
-        .get(&table_name)
+        .get(table.table_name())
         .ok_or_else(|| format!("table `{}` not found in dataset", table_name))?;
 
     // Extract SQL query from the table input
@@ -243,7 +243,7 @@ pub async fn dump_table(
 }
 
 #[instrument(skip_all, err)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn dump_sql_query(
     ctx: &Ctx,
     env: &QueryEnv,
