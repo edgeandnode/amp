@@ -211,7 +211,7 @@ impl CompactionGroup {
         writer
             .close(range, parent_ids, generation)
             .await
-            .map_err(|err| CompactorError::FileWriteError { err })
+            .map_err(CompactorError::FileWrite)
     }
 
     #[tracing::instrument(skip_all, fields(files = self.len(), start = self.range().start(), end = self.range().end()))]
