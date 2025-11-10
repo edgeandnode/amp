@@ -9,7 +9,7 @@ use sqlx::{PgPool, postgres::PgQueryResult};
 
 use super::{StateSnapshot, StateStore};
 use crate::{
-    error::Error,
+    error::{Error, PostgresError, StateStoreError},
     transactional::{Commit, TransactionId},
 };
 
@@ -83,7 +83,11 @@ impl PostgresStateStore {
         sqlx::migrate!("./migrations")
             .run(pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to run migrations: {}", e)))
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(PostgresError::MigrationFailed(
+                    err,
+                )))
+            })
     }
 
     /// Initialize the state row if it doesn't exist.
@@ -101,7 +105,11 @@ impl PostgresStateStore {
             .bind(&self.stream_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to initialize state: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(
+                    PostgresError::StateInitialization(err),
+                ))
+            })?;
 
         Ok(())
     }
@@ -122,12 +130,15 @@ impl StateStore for PostgresStateStore {
             .bind(next as i64)
             .execute(&self.pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to advance next: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(PostgresError::AdvanceNext(err)))
+            })?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::Store(format!(
-                "Stream not found: {}",
-                self.stream_id
+            return Err(Error::StateStore(StateStoreError::Postgres(
+                PostgresError::StreamNotFound {
+                    stream_id: self.stream_id.clone(),
+                },
             )));
         }
 
@@ -146,18 +157,22 @@ impl StateStore for PostgresStateStore {
             .bind(from as i64)
             .execute(&self.pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to truncate buffer: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(PostgresError::BufferTruncate(
+                    err,
+                )))
+            })?;
 
         Ok(())
     }
 
     async fn commit(&mut self, commit: Commit) -> Result<(), Error> {
         // Begin a transaction to ensure atomicity of all operations
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| Error::Store(format!("Failed to begin transaction: {}", e)))?;
+        let mut tx = self.pool.begin().await.map_err(|err| {
+            Error::StateStore(StateStoreError::Postgres(PostgresError::TransactionBegin(
+                err,
+            )))
+        })?;
 
         // Delete pruned entries (all entries <= prune transaction id)
         if let Some(prune) = commit.prune {
@@ -172,7 +187,11 @@ impl StateStore for PostgresStateStore {
                 .bind(prune as i64)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::Store(format!("Failed to delete pruned entries: {}", e)))?;
+                .map_err(|err| {
+                    Error::StateStore(StateStoreError::Postgres(
+                        PostgresError::PrunedEntriesDelete(err),
+                    ))
+                })?;
         }
 
         // Insert new watermarks
@@ -183,8 +202,11 @@ impl StateStore for PostgresStateStore {
                 ON CONFLICT (stream_id, transaction_id) DO NOTHING
             "#;
 
-            let block_ranges_json = serde_json::to_value(block_ranges)
-                .map_err(|e| Error::Store(format!("Failed to serialize block ranges: {}", e)))?;
+            let block_ranges_json = serde_json::to_value(block_ranges).map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(
+                    PostgresError::BlockRangesSerialization(err),
+                ))
+            })?;
 
             sqlx::query(insert_entry)
                 .bind(&self.stream_id)
@@ -192,13 +214,19 @@ impl StateStore for PostgresStateStore {
                 .bind(block_ranges_json)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::Store(format!("Failed to insert buffer entry: {}", e)))?;
+                .map_err(|err| {
+                    Error::StateStore(StateStoreError::Postgres(PostgresError::BufferEntryInsert(
+                        err,
+                    )))
+                })?;
         }
 
         // Commit the transaction
-        tx.commit()
-            .await
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|err| {
+            Error::StateStore(StateStoreError::Postgres(PostgresError::TransactionCommit(
+                err,
+            )))
+        })?;
 
         Ok(())
     }
@@ -215,7 +243,11 @@ impl StateStore for PostgresStateStore {
             .bind(&self.stream_id)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to load next transaction id: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(
+                    PostgresError::NextTransactionIdLoad(err),
+                ))
+            })?;
 
         // Load buffer entries ordered by transaction id
         let buffer_query = r#"
@@ -229,13 +261,20 @@ impl StateStore for PostgresStateStore {
             .bind(&self.stream_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Store(format!("Failed to load buffer entries: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(PostgresError::BufferEntriesLoad(
+                    err,
+                )))
+            })?;
 
         // Reconstruct the buffer
         let mut buffer = VecDeque::with_capacity(rows.len());
         for (transaction_id, block_ranges_json) in rows {
-            let block_ranges = serde_json::from_value(block_ranges_json)
-                .map_err(|e| Error::Store(format!("Failed to deserialize block ranges: {}", e)))?;
+            let block_ranges = serde_json::from_value(block_ranges_json).map_err(|err| {
+                Error::StateStore(StateStoreError::Postgres(
+                    PostgresError::BlockRangesDeserialization(err),
+                ))
+            })?;
 
             buffer.push_back((transaction_id as TransactionId, block_ranges));
         }

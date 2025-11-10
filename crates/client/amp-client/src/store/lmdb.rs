@@ -10,7 +10,7 @@ use heed::{
 
 use super::{BatchStore, StateSnapshot, StateStore, deserialize_batch, serialize_batch};
 use crate::{
-    error::Error,
+    error::{Error, LmdbError, StateStoreError},
     transactional::{Commit, TransactionId},
 };
 
@@ -36,15 +36,16 @@ pub fn open_lmdb_env_with_options(
     map_size: usize,
     max_dbs: u32,
 ) -> Result<Arc<Env>, Error> {
-    std::fs::create_dir_all(&path)
-        .map_err(|e| Error::Store(format!("Failed to create LMDB directory: {}", e)))?;
+    std::fs::create_dir_all(&path).map_err(|err| {
+        Error::StateStore(StateStoreError::Lmdb(LmdbError::DirectoryCreation(err)))
+    })?;
 
     let env = unsafe {
         EnvOpenOptions::new()
             .map_size(map_size)
             .max_dbs(max_dbs)
             .open(path)
-            .map_err(|e| Error::Store(format!("Failed to open LMDB environment: {}", e)))?
+            .map_err(|err| Error::StateStore(StateStoreError::Lmdb(LmdbError::EnvOpen(err))))?
     };
 
     Ok(Arc::new(env))
@@ -78,29 +79,31 @@ impl LmdbStateStore {
     /// # Arguments
     /// * `env` - Shared LMDB environment
     pub fn new(env: Arc<Env>) -> Result<Self, Error> {
-        let mut wtxn = env
-            .write_txn()
-            .map_err(|e| Error::Store(format!("Failed to create write transaction: {}", e)))?;
+        let mut wtxn = env.write_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::WriteTransactionBegin(err)))
+        })?;
         let db = env
             .create_database(&mut wtxn, Some("state"))
-            .map_err(|e| Error::Store(format!("Failed to create database: {}", e)))?;
-        wtxn.commit()
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Lmdb(LmdbError::DatabaseCreation(err)))
+            })?;
+        wtxn.commit().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::TransactionCommit(err)))
+        })?;
 
         Ok(Self { env, db })
     }
 
     /// Read the current state snapshot from storage.
     fn read_state(&self) -> Result<StateSnapshot, Error> {
-        let rtxn = self
-            .env
-            .read_txn()
-            .map_err(|e| Error::Store(format!("Failed to create read transaction: {}", e)))?;
+        let rtxn = self.env.read_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::ReadTransactionBegin(err)))
+        })?;
 
         match self
             .db
             .get(&rtxn, "snapshot")
-            .map_err(|e| Error::Store(format!("Failed to read state: {}", e)))?
+            .map_err(|err| Error::StateStore(StateStoreError::Lmdb(LmdbError::StateRead(err))))?
         {
             Some(bytes) => serde_json::from_slice(bytes).map_err(Error::Json),
             None => Ok(StateSnapshot::default()),
@@ -111,15 +114,15 @@ impl LmdbStateStore {
     fn write_state(&mut self, state: &StateSnapshot) -> Result<(), Error> {
         let bytes = serde_json::to_vec(state).map_err(Error::Json)?;
 
-        let mut wtxn = self
-            .env
-            .write_txn()
-            .map_err(|e| Error::Store(format!("Failed to create write transaction: {}", e)))?;
+        let mut wtxn = self.env.write_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::WriteTransactionBegin(err)))
+        })?;
         self.db
             .put(&mut wtxn, "snapshot", &bytes)
-            .map_err(|e| Error::Store(format!("Failed to write state: {}", e)))?;
-        wtxn.commit()
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|err| Error::StateStore(StateStoreError::Lmdb(LmdbError::StateWrite(err))))?;
+        wtxn.commit().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::TransactionCommit(err)))
+        })?;
 
         Ok(())
     }
@@ -193,14 +196,17 @@ impl LmdbBatchStore {
     /// # Arguments
     /// * `env` - Shared LMDB environment
     pub fn new(env: Arc<Env>) -> Result<Self, Error> {
-        let mut wtxn = env
-            .write_txn()
-            .map_err(|e| Error::Store(format!("Failed to create write transaction: {}", e)))?;
+        let mut wtxn = env.write_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::WriteTransactionBegin(err)))
+        })?;
         let db = env
             .create_database(&mut wtxn, Some("batches"))
-            .map_err(|e| Error::Store(format!("Failed to create database: {}", e)))?;
-        wtxn.commit()
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|err| {
+                Error::StateStore(StateStoreError::Lmdb(LmdbError::DatabaseCreation(err)))
+            })?;
+        wtxn.commit().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::TransactionCommit(err)))
+        })?;
 
         Ok(Self { env, db })
     }
@@ -216,10 +222,11 @@ fn encode_id(id: TransactionId) -> [u8; 8] {
 
 /// Decode 8-byte big-endian key back to TransactionId.
 fn decode_id(bytes: &[u8]) -> Result<TransactionId, Error> {
-    bytes
-        .try_into()
-        .map(u64::from_be_bytes)
-        .map_err(|_| Error::Store("Invalid transaction ID key length".to_string()))
+    bytes.try_into().map(u64::from_be_bytes).map_err(|_| {
+        Error::StateStore(StateStoreError::Lmdb(
+            LmdbError::InvalidTransactionIdKeyLength,
+        ))
+    })
 }
 
 #[async_trait::async_trait]
@@ -228,15 +235,15 @@ impl BatchStore for LmdbBatchStore {
         let serialized = serialize_batch(&batch)?;
         let key = encode_id(id);
 
-        let mut wtxn = self
-            .env
-            .write_txn()
-            .map_err(|e| Error::Store(format!("Failed to create write transaction: {}", e)))?;
+        let mut wtxn = self.env.write_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::WriteTransactionBegin(err)))
+        })?;
         self.db
             .put(&mut wtxn, &key, &serialized)
-            .map_err(|e| Error::Store(format!("Failed to write batch: {}", e)))?;
-        wtxn.commit()
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|err| Error::StateStore(StateStoreError::Lmdb(LmdbError::BatchWrite(err))))?;
+        wtxn.commit().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::TransactionCommit(err)))
+        })?;
 
         Ok(())
     }
@@ -245,24 +252,23 @@ impl BatchStore for LmdbBatchStore {
         &self,
         range: RangeInclusive<TransactionId>,
     ) -> Result<Vec<TransactionId>, Error> {
-        let rtxn = self
-            .env
-            .read_txn()
-            .map_err(|e| Error::Store(format!("Failed to create read transaction: {}", e)))?;
+        let rtxn = self.env.read_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::ReadTransactionBegin(err)))
+        })?;
 
         let start_key = encode_id(*range.start());
         let end_key = encode_id(*range.end());
 
         let mut ids = Vec::new();
-        let iter = self
-            .db
-            .iter(&rtxn)
-            .map_err(|e| Error::Store(format!("Failed to create iterator: {}", e)))?;
+        let iter = self.db.iter(&rtxn).map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::IteratorCreation(err)))
+        })?;
 
         // Seek to start of range
         for result in iter {
-            let (key, _) =
-                result.map_err(|e| Error::Store(format!("Failed to iterate batches: {}", e)))?;
+            let (key, _) = result.map_err(|err| {
+                Error::StateStore(StateStoreError::Lmdb(LmdbError::BatchIteration(err)))
+            })?;
 
             // Skip keys before range start
             if key < start_key.as_slice() {
@@ -281,16 +287,15 @@ impl BatchStore for LmdbBatchStore {
     }
 
     async fn load(&self, id: TransactionId) -> Result<Option<RecordBatch>, Error> {
-        let rtxn = self
-            .env
-            .read_txn()
-            .map_err(|e| Error::Store(format!("Failed to create read transaction: {}", e)))?;
+        let rtxn = self.env.read_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::ReadTransactionBegin(err)))
+        })?;
 
         let key = encode_id(id);
         match self
             .db
             .get(&rtxn, &key)
-            .map_err(|e| Error::Store(format!("Failed to read batch: {}", e)))?
+            .map_err(|err| Error::StateStore(StateStoreError::Lmdb(LmdbError::BatchRead(err))))?
         {
             Some(bytes) => Ok(Some(deserialize_batch(bytes)?)),
             None => Ok(None), // Not an error - batch might not exist (e.g., watermark event)
@@ -298,24 +303,23 @@ impl BatchStore for LmdbBatchStore {
     }
 
     async fn prune(&mut self, cutoff: TransactionId) -> Result<(), Error> {
-        let mut wtxn = self
-            .env
-            .write_txn()
-            .map_err(|e| Error::Store(format!("Failed to create write transaction: {}", e)))?;
+        let mut wtxn = self.env.write_txn().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::WriteTransactionBegin(err)))
+        })?;
 
         let cutoff_key = encode_id(cutoff);
 
         // Collect keys to delete first to avoid iterator invalidation
         let mut keys_to_delete = Vec::new();
         {
-            let iter = self
-                .db
-                .iter(&wtxn)
-                .map_err(|e| Error::Store(format!("Failed to create iterator: {}", e)))?;
+            let iter = self.db.iter(&wtxn).map_err(|err| {
+                Error::StateStore(StateStoreError::Lmdb(LmdbError::IteratorCreation(err)))
+            })?;
 
             for result in iter {
-                let (key, _) = result
-                    .map_err(|e| Error::Store(format!("Failed to iterate batches: {}", e)))?;
+                let (key, _) = result.map_err(|err| {
+                    Error::StateStore(StateStoreError::Lmdb(LmdbError::BatchIteration(err)))
+                })?;
 
                 if key <= cutoff_key.as_slice() {
                     keys_to_delete.push(key.to_vec());
@@ -327,13 +331,14 @@ impl BatchStore for LmdbBatchStore {
 
         // Delete collected keys
         for key in keys_to_delete {
-            self.db
-                .delete(&mut wtxn, &key)
-                .map_err(|e| Error::Store(format!("Failed to delete batch: {}", e)))?;
+            self.db.delete(&mut wtxn, &key).map_err(|err| {
+                Error::StateStore(StateStoreError::Lmdb(LmdbError::BatchDelete(err)))
+            })?;
         }
 
-        wtxn.commit()
-            .map_err(|e| Error::Store(format!("Failed to commit transaction: {}", e)))?;
+        wtxn.commit().map_err(|err| {
+            Error::StateStore(StateStoreError::Lmdb(LmdbError::TransactionCommit(err)))
+        })?;
 
         Ok(())
     }

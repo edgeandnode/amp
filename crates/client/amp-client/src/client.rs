@@ -21,7 +21,7 @@ use tonic::{Streaming, transport::Endpoint};
 use crate::{
     cdc::CdcStreamBuilder,
     decode,
-    error::Error,
+    error::{Error, ProtocolError},
     store::{BatchStore, StateStore},
     transactional::TransactionalStreamBuilder,
     validation::{validate_consecutiveness, validate_networks},
@@ -216,8 +216,8 @@ impl AmpClient {
     /// # Arguments
     /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602")
     pub async fn from_endpoint(endpoint: &str) -> Result<Self, Error> {
-        let endpoint: Endpoint = endpoint.parse()?;
-        let channel = endpoint.connect().await?;
+        let endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
+        let channel = endpoint.connect().await.map_err(Error::Transport)?;
         let client = FlightSqlServiceClient::new(channel);
         Ok(Self { client })
     }
@@ -320,17 +320,14 @@ impl AmpClient {
         self.client.set_header("amp-resume", "");
         self.client.set_header("amp-stream", "");
 
-        let flight_info = match result {
-            Ok(flight_info) => flight_info,
-            Err(err) => return Err(err.into()),
-        };
+        let flight_info = result.map_err(Error::Arrow)?;
 
         let ticket = flight_info
             .endpoint
             .into_iter()
             .next()
             .and_then(|endpoint| endpoint.ticket)
-            .ok_or_else(|| Error::Server("FlightInfo missing ticket".to_string()))?;
+            .ok_or(Error::Protocol(ProtocolError::MissingFlightTicket))?;
 
         let flight_data = self.client.inner_mut().do_get(ticket).await?.into_inner();
         let decoder = decode::FlightDataDecoder::new(flight_data);
