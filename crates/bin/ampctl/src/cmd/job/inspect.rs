@@ -52,7 +52,9 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
 /// Creates a client and uses the job get method.
 #[tracing::instrument(skip_all)]
 async fn get_job(global: &GlobalArgs, id: JobId) -> Result<client::jobs::JobInfo, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
 
     let job = client.jobs().get(&id).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to get job");
@@ -71,7 +73,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 

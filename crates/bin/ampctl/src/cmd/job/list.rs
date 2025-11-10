@@ -69,7 +69,9 @@ async fn get_jobs(
     limit: Option<usize>,
     after: Option<JobId>,
 ) -> Result<client::jobs::JobsResponse, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
 
     let jobs_response = client.jobs().list(limit, after).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list jobs");
@@ -85,7 +87,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 

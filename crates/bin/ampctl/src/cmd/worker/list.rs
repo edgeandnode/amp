@@ -48,7 +48,9 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
 /// Creates a client and uses the workers list method.
 #[tracing::instrument(skip_all)]
 async fn get_workers(global: &GlobalArgs) -> Result<client::workers::WorkersResponse, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
 
     let workers_response = client.workers().list().await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list workers");
@@ -64,7 +66,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 

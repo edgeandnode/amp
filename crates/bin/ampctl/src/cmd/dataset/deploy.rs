@@ -111,7 +111,9 @@ async fn deploy_dataset(
     parallelism: u16,
     worker_id: Option<NodeId>,
 ) -> Result<JobId, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
     let job_id = client
         .datasets()
         .deploy(dataset_ref, end_block, parallelism, worker_id)
@@ -127,7 +129,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 

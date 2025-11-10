@@ -45,7 +45,9 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
 /// DELETEs to `/manifests` endpoint using the admin API client.
 #[tracing::instrument(skip_all)]
 async fn prune_manifests(global: &GlobalArgs) -> Result<usize, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
 
     let response = match client.manifests().prune().await {
         Ok(response) => response,
@@ -67,7 +69,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 

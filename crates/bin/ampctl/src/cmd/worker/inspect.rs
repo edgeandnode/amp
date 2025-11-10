@@ -56,7 +56,9 @@ async fn get_worker(
     global: &GlobalArgs,
     node_id: &NodeId,
 ) -> Result<client::workers::WorkerDetailResponse, Error> {
-    let client = global.build_client()?;
+    let client = global
+        .build_client()
+        .map_err(|source| Error::ClientBuildError { source })?;
 
     let worker = client.workers().get(node_id).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to get worker");
@@ -77,7 +79,7 @@ pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
     ClientBuildError {
-        #[from]
+        #[source]
         source: crate::args::BuildClientError,
     },
 
