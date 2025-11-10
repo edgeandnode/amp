@@ -104,6 +104,9 @@ importers:
       jiti:
         specifier: ^2.6.1
         version: 2.6.1
+      jose:
+        specifier: ^6.1.1
+        version: 6.1.1
       js-toml:
         specifier: ^1.0.2
         version: 1.0.2
@@ -2964,6 +2967,9 @@ packages:
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
     hasBin: true
+
+  jose@6.1.1:
+    resolution: {integrity: sha512-GWSqjfOPf4cWOkBzw5THBjtGPhXKqYnfRBzh4Ni+ArTrQQ9unvmsA3oFLqaYKoKe5sjWmGu5wVKg9Ft1i+LQfg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -6945,6 +6951,8 @@ snapshots:
       ws: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
 
   jiti@2.6.1: {}
+
+  jose@6.1.1: {}
 
   js-tokens@4.0.0: {}
 
