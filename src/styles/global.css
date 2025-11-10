@@ -1,1 +1,261 @@
-@import "tailwindcss";
+@import "@graphprotocol/gds-css";
+
+@source "../pages/**/*.astro";
+@source "../**/*.astro";
+
+@plugin "@graphprotocol/gds-css/tailwind-plugin";
+
+:root {
+  /* Fonts */
+  --sl-font: var(--font-sans);
+  --sl-font-system: var(--font-sans);
+  --sl-font-system-mono: var(--font-mono);
+
+  --sl-text-2xs: var(--text-14);
+  --sl-text-sm: var(--text-16);
+  --sl-text-base: var(--text-18);
+  --sl-text-lg: var(--text-20);
+  --sl-text-xl: var(--text-24);
+  --sl-text-2xl: var(--text-28);
+  --sl-text-4xl: var(--text-32);
+  --sl-text-5xl: var(--text-40);
+  --sl-text-6xl: var(--text-48);
+
+  --sl-text-h1: var(--text-40);
+  --sl-text-h2: var(--text-32);
+  --sl-text-h3: var(--text-24);
+  --sl-text-h4: var(--text-20);
+  --sl-text-h5: var(--text-20);
+  --sl-text-h6: var(--text-20);
+
+  --sl-color-blue: var(--color-galactic-500);
+  --sl-color-blue-low: var(--color-galactic-300);
+  --sl-color-blue-high: var(--color-galactic-700);
+
+  --sl-color-green: var(--color-starfield-500);
+  --sl-color-green-low: var(--color-starfield-300);
+  --sl-color-green-high: var(--color-starfield-700);
+
+  /* TODO: rethink later */
+  --sl-color-orange: var(--color-solar-500);
+  --sl-color-orange-low: var(--color-solar-300);
+  --sl-color-orange-high: var(--color-solar-700);
+
+  --sl-color-red: var(--color-sonja-500);
+  --sl-color-red-low: var(--color-sonja-300);
+  --sl-color-red-high: var(--color-sonja-700);
+
+  --sl-color-purple: var(--color-brand-500);
+  --sl-color-purple-low: var(--color-brand-300);
+  --sl-color-purple-high: var(--color-brand-700);
+
+  --sl-color-text: var(--color-fg-elevated);
+  --sl-color-text-accent: var(--color-bg-brand-default);
+
+  --sl-color-bg: var(--color-bg-canvas);
+  --sl-color-bg-nav: var(--color-bg-subtle);
+  --sl-color-bg-inline-code: var(--color-bg-code);
+
+  --sl-color-hairline-light: var(--color-border-subtle);
+  --sl-color-hairline: var(--color-border-muted);
+  --sl-color-hairline-shade: var(--color-border-subtle);
+}
+
+.page {
+  /* Base Typography */
+  :is(h1, h2, h3, h4, h5, h6) {
+    @apply font-medium;
+  }
+
+  /* Links */
+  a {
+    @apply text-fg-link-idle hover:text-fg-link-hover;
+  }
+
+  /* Tables */
+  th,
+  td {
+    @apply border-border-muted;
+  }
+
+  /* Inline Code */
+  :not(pre) > code {
+    @apply bg-bg-code text-fg-code px-1.5 py-0.5 rounded-4 border border-border-code text-[calc(1em*0.75)];
+  }
+}
+
+/* Sidebar styling */
+.sidebar-pane {
+  @apply bg-bg-canvas border-r border-border-muted font-regular;
+}
+
+.sidebar-pane :is(a, .group-label .large) {
+  @apply font-regular py-2 hover:bg-bg-muted my-1 text-14 rounded-4;
+}
+
+.sidebar-pane :is(a, .group-label .large):not([aria-current="page"]) {
+  @apply text-fg-muted hover:text-fg-default;
+}
+
+.sidebar-pane a[aria-current="page"] {
+  @apply bg-bg-muted text-fg-default;
+}
+
+/* Pagination styling */
+.pagination-links a {
+  @apply border-none p-0 text-fg-muted hover:text-fg-default text-14 shadow-none;
+
+  & .link-title {
+    @apply text-20 text-fg-muted;
+  }
+
+  &:hover .link-title {
+    @apply text-fg-default;
+  }
+}
+
+/* CodeBlock styling */
+.expressive-code .frame {
+  @apply shadow-none border border-border-subtle rounded-8 overflow-clip;
+}
+
+.expressive-code .copy button {
+  @apply bg-button-bg-secondary-idle text-button-fg-secondary hover:bg-button-bg-secondary-hover border border-button-border-secondary-idle outline-none;
+}
+
+.expressive-code .copy button::before,
+.expressive-code .copy button div {
+  @apply border-none bg-transparent;
+}
+
+.expressive-code .copy .feedback {
+  @apply bg-bg-brand-default text-white rounded-4 px-3 py-1.5 text-12;
+  --tooltip-bg: var(--color-bg-brand-default);
+}
+
+.expressive-code .copy button .label {
+  @apply bg-bg-elevated border border-border-muted text-fg-default rounded-4 px-2 py-1 text-12;
+}
+
+/* MDX/Markdown content styling */
+.sl-markdown-content {
+  & :is(h2, h3) {
+    @apply mt-12;
+  }
+
+  & :is(h2, h3, h4, h5, h6):not(:last-child) {
+    @apply mb-3;
+  }
+
+  & :is(h4, h5, h6) {
+    @apply mt-8;
+  }
+
+  & :is(p, ul, ol):not(:last-child, :is(ul, ol) *) {
+    @apply mb-6;
+  }
+
+  & :is(ul, ol) :is(ul, ol, p + p) {
+    @apply mt-2;
+  }
+
+  & :is(ul, ol) {
+    @apply flex flex-col gap-2 ps-5;
+  }
+
+  & hr {
+    @apply h-px bg-border-muted;
+  }
+
+  & ol {
+    @apply list-decimal;
+  }
+
+  & li {
+    @apply ps-1.5 relative;
+  }
+
+  & :is(b, strong) {
+    @apply text-fg-elevated font-medium;
+  }
+
+  & :is(h1, h2, h3, h4, h5, h6) {
+    @apply text-fg-strong;
+  }
+
+  & ul > li::after {
+    @apply absolute -start-4.5 top-[calc(0.5lh-1px)] h-0.5 w-3 bg-border-default content-[''];
+  }
+}
+
+/* TOC styling */
+.right-sidebar {
+  @apply border-none ml-20;
+}
+
+.right-sidebar-panel {
+  @apply bg-bg-canvas px-0 font-regular;
+
+  h2 {
+    @apply text-14 text-fg-strong;
+  }
+
+  & a {
+    @apply text-fg-muted hover:text-fg-default text-14 border-l border-l-border-muted rounded-none py-1;
+    padding-left: calc((var(--depth, 0) * 0.5rem) + 1rem);
+  }
+
+  & a[aria-current="true"] {
+    @apply text-fg-default border-l-bg-brand-default;
+  }
+}
+
+.main-pane .content-panel {
+  @apply border-none;
+}
+
+.main-pane .imain {
+  @apply border-none;
+}
+
+/* TOC (Mobile) styling */
+mobile-starlight-toc {
+  @apply border-b border-border-subtle;
+}
+
+mobile-starlight-toc summary {
+  @apply bg-bg-subtle text-fg-default py-3 px-4;
+}
+
+mobile-starlight-toc .toggle {
+  @apply text-fg-muted bg-button-bg-secondary-idle hover:bg-button-bg-secondary-hover border border-button-border-secondary-idle hover:border-button-border-secondary-hover;
+}
+
+mobile-starlight-toc .display-current {
+  @apply text-fg-default text-14;
+}
+
+mobile-starlight-toc .dropdown {
+  @apply bg-bg-muted border-t border-border-subtle;
+}
+
+mobile-starlight-toc li > a > span {
+  padding-left: calc((var(--depth, 0) * 0.25rem));
+}
+
+mobile-starlight-toc a {
+  @apply text-fg-muted hover:text-fg-default text-14 block;
+}
+
+mobile-starlight-toc a[aria-current="true"] {
+  @apply text-fg-default;
+}
+
+/* Search bar styling */
+site-search > button {
+  @apply bg-transparent border-form-border-idle hover:border-form-border-hover;
+}
+
+.site-title > span {
+  @apply text-fg-default -ml-4 font-regular;
+}
