@@ -10,6 +10,13 @@ use super::{
     error::{ApiError, ErrorResponse},
 };
 
+/// Build URL path for listing all manifests.
+///
+/// GET `/manifests`
+fn manifests_list() -> &'static str {
+    "manifests"
+}
+
 /// Build URL path for registering a manifest.
 ///
 /// POST `/manifests`
@@ -350,6 +357,90 @@ impl<'a> ManifestsClient<'a> {
         }
     }
 
+    /// List all registered manifests.
+    ///
+    /// GETs from `/manifests` endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ListAllError`] for network errors, API errors (500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self))]
+    pub async fn list_all(&self) -> Result<ManifestsResponse, ListAllError> {
+        let url = self
+            .client
+            .base_url()
+            .join(manifests_list())
+            .expect("valid URL");
+
+        tracing::debug!("Sending list all manifests request");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| ListAllError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let manifests_response =
+                    response.json::<ManifestsResponse>().await.map_err(|err| {
+                        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse manifests response");
+                        ListAllError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: format!("Failed to parse response: {}", err),
+                        }
+                    })?;
+                Ok(manifests_response)
+            }
+            500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    ListAllError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    ListAllError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "LIST_ALL_MANIFESTS_ERROR" => {
+                        Err(ListAllError::ListAllManifestsError(error_response.into()))
+                    }
+                    _ => Err(ListAllError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(ListAllError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
     /// Prune all orphaned manifests (not linked to any datasets).
     ///
     /// DELETEs to `/manifests` endpoint.
@@ -657,6 +748,40 @@ pub enum DeleteError {
 pub struct PruneResponse {
     /// Number of orphaned manifests deleted
     pub deleted_count: usize,
+}
+
+/// Response from GET /manifests endpoint.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ManifestsResponse {
+    pub manifests: Vec<ManifestSummary>,
+}
+
+/// Summary information for a single manifest.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ManifestSummary {
+    pub hash: Hash,
+    pub dataset_count: u64,
+}
+
+/// Errors that can occur when listing all manifests.
+#[derive(Debug, thiserror::Error)]
+pub enum ListAllError {
+    /// Failed to list all manifests (500, LIST_ALL_MANIFESTS_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to query manifests from the metadata database
+    /// - Database connection issues
+    /// - Internal database errors
+    #[error("list all manifests error")]
+    ListAllManifestsError(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
 }
 
 /// Errors that can occur when pruning orphaned manifests.

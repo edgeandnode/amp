@@ -855,6 +855,36 @@
       }
     },
     "/manifests": {
+      "get": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `GET /manifests` endpoint",
+        "description": "Returns all registered manifests in the system.\n\n## Response\n- **200 OK**: Successfully retrieved all manifests\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `LIST_ALL_MANIFESTS_ERROR`: Failed to list all manifests from metadata database\n\n## Behavior\nThis handler returns a comprehensive list of all manifests registered in the system.\nFor each manifest, it includes:\n- The content-addressable hash (SHA-256)\n- The object store path where the manifest is stored\n\nResults are ordered by hash (lexicographical).",
+        "operationId": "list_all_manifests",
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved all manifests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "manifests"
@@ -1762,9 +1792,45 @@
           }
         }
       },
+      "ManifestInfo": {
+        "type": "object",
+        "description": "Summary information for a single manifest",
+        "required": [
+          "hash",
+          "dataset_count"
+        ],
+        "properties": {
+          "dataset_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of datasets using this manifest",
+            "minimum": 0
+          },
+          "hash": {
+            "type": "string",
+            "description": "Content-addressable hash (SHA-256)"
+          }
+        }
+      },
       "ManifestResponse": {
         "type": "object",
         "description": "Response wrapper for manifest content"
+      },
+      "ManifestsResponse": {
+        "type": "object",
+        "description": "Response for listing all manifests",
+        "required": [
+          "manifests"
+        ],
+        "properties": {
+          "manifests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManifestInfo"
+            },
+            "description": "List of all manifests in the system"
+          }
+        }
       },
       "OutputSchemaRequest": {
         "type": "object",

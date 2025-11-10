@@ -15,6 +15,7 @@ pub(crate) mod sql;
 pub use self::{
     hash::{Hash as ManifestHash, HashOwned as ManifestHashOwned},
     path::{Path as ManifestPath, PathOwned as ManifestPathOwned},
+    sql::ManifestSummary,
 };
 use crate::{db::Executor, error::Error};
 
@@ -67,6 +68,21 @@ where
     E: Executor<'c>,
 {
     sql::list_orphaned(exe).await.map_err(Into::into)
+}
+
+/// List all registered manifests with metadata
+///
+/// Queries for all manifests in the `manifest_files` table, returning:
+/// - Hash (content-addressable identifier)
+/// - Dataset count (number of datasets using this manifest)
+///
+/// Results are ordered by hash.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_all<'c, E>(exe: E) -> Result<Vec<ManifestSummary>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_all(exe).await.map_err(Into::into)
 }
 
 /// Count dataset links and lock rows to prevent concurrent modifications
