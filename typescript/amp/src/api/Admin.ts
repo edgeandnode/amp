@@ -220,6 +220,11 @@ export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.Met
  * The output schema endpoint (POST /schema).
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
+  .addError(Error.UnqualifiedTable)
+  .addError(Error.CatalogQualifiedTable)
+  .addError(Error.InvalidTableName)
+  .addError(Error.InvalidSchemaReference)
+  .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
   .addError(Error.PlanningError)
   .addError(Error.CatalogForSqlError)
@@ -233,11 +238,24 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
 /**
  * Error type for the `getOutputSchema` endpoint.
  *
+ * - UnqualifiedTable: Table reference is not qualified with a dataset.
+ * - CatalogQualifiedTable: Table reference includes a catalog qualifier.
+ * - InvalidTableName: Table name does not conform to SQL identifier rules.
+ * - InvalidSchemaReference: Schema portion of table reference is not a valid dataset reference.
+ * - DatasetNotFound: The referenced dataset does not exist in the store.
  * - DatasetStoreError: Failure in dataset storage operations.
  * - PlanningError: Query planning or schema inference failure.
  * - CatalogForSqlError: Failed to build catalog for SQL query.
  */
-export type GetOutputSchemaError = Error.DatasetStoreError | Error.PlanningError | Error.CatalogForSqlError
+export type GetOutputSchemaError =
+  | Error.UnqualifiedTable
+  | Error.CatalogQualifiedTable
+  | Error.InvalidTableName
+  | Error.InvalidSchemaReference
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.PlanningError
+  | Error.CatalogForSqlError
 
 /**
  * The api group for the dataset endpoints.

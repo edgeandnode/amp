@@ -58,7 +58,7 @@ pub(super) async fn new(
 
         let dataset = ctx
             .dataset_store
-            .get_by_hash(&hash)
+            .get_dataset_by_hash(&hash)
             .await
             .map_err(|err| JobInitError::FetchDataset {
                 hash: hash.clone(),
@@ -135,7 +135,7 @@ pub enum JobInitError {
     FetchDataset {
         hash: Hash,
         #[source]
-        source: BoxError,
+        source: dataset_store::GetDatasetByHashError,
     },
 
     /// Dataset not found in dataset store

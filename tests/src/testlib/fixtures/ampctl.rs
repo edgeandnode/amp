@@ -5,7 +5,7 @@
 //! the ampctl admin API client for direct programmatic access.
 
 use common::BoxError;
-use datasets_common::reference::Reference;
+use datasets_common::{hash::Hash, reference::Reference};
 use serde_json::value::RawValue;
 use url::Url;
 
@@ -111,5 +111,37 @@ impl Ampctl {
             .register(provider_name, &json_value)
             .await
             .map_err(Into::into)
+    }
+
+    /// Get the manifest hash for the latest version of a dataset.
+    ///
+    /// Takes a dataset reference (namespace/name) and retrieves the manifest hash
+    /// for the first (latest) version from the versions list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The network request fails
+    /// - The API returns an error response
+    /// - No versions are found for the dataset
+    /// - The manifest hash cannot be parsed
+    pub async fn get_latest_manifest_hash(
+        &self,
+        dataset_ref: &Reference,
+    ) -> Result<Hash, BoxError> {
+        let fqn = dataset_ref.as_fqn();
+
+        let versions_response = self
+            .client
+            .datasets()
+            .list_versions(fqn)
+            .await
+            .map_err(|err| format!("Failed to list dataset versions: {}", err))?;
+
+        versions_response
+            .versions
+            .first()
+            .map(|v| v.manifest_hash.clone())
+            .ok_or("No versions found for dataset".into())
     }
 }

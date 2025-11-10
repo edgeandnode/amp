@@ -1301,8 +1301,8 @@
         "tags": [
           "schema"
         ],
-        "summary": "Handler for the `/schema` endpoint that provides SQL schema analysis.",
-        "description": "This endpoint performs comprehensive SQL validation and schema inference by:\n1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser\n2. **Loading Datasets**: Retrieves actual dataset definitions from the registry\n3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets\n4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution\n5. **Special Fields**: Prepends `SPECIAL_BLOCK_NUM` field to the schema\n6. **Network Extraction**: Identifies which blockchain networks the query references\n\nThe validation works with real registered datasets and their actual schemas,\nensuring datasets exist, tables are valid, and column references are correct.\nThis enables accurate schema introspection for query builders and dataset development tools.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n\n## Response\n- **200 OK**: Returns the schema and networks used by the query\n- **400 Bad Request**: SQL parse error\n- **500 Internal Server Error**: Dataset store or planning error\n\n## Error Codes\n- `SQL_PARSE_ERROR`: Failed to parse the SQL query\n- `DATASET_STORE_ERROR`: Failed to load datasets from store\n- `PLANNING_ERROR`: Failed to determine output schema",
+        "summary": "Handler for the `POST /schema` endpoint",
+        "description": "Analyzes SQL queries and returns the output schema without executing the query.\nPerforms comprehensive validation and schema inference using real registered datasets\nand their actual schemas.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n\n## Response\n- **200 OK**: Returns the inferred schema and networks referenced by the query\n- **400 Bad Request**: Invalid SQL syntax, table references, or function format\n- **404 Not Found**: Referenced dataset does not exist\n- **500 Internal Server Error**: Dataset store, planning, or internal errors\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or missing required fields\n- `SQL_PARSE_ERROR`: SQL query has invalid syntax or uses unsupported features\n- `UNQUALIFIED_TABLE`: Table reference missing dataset qualifier (must use `dataset.table`)\n- `CATALOG_QUALIFIED_TABLE`: Catalog-qualified table not supported (use `dataset.table` not `catalog.schema.table`)\n- `INVALID_TABLE_NAME`: Table name does not conform to SQL identifier rules\n- `INVALID_SCHEMA_REFERENCE`: Dataset reference format is invalid (expected `namespace/name@version`)\n- `INVALID_FUNCTION_REFERENCE`: Function's dataset qualifier cannot be parsed as valid dataset reference\n- `INVALID_FUNCTION_FORMAT`: Function must be unqualified or dataset-qualified (expected `dataset.function` or `function`)\n- `DATASET_NOT_FOUND`: Referenced dataset does not exist in the store\n- `TABLE_NOT_FOUND_IN_DATASET`: Referenced table does not exist in the dataset\n- `TABLE_REFERENCE_RESOLUTION_ERROR`: Failed to resolve table references from SQL statement\n- `FUNCTION_NAME_EXTRACTION_ERROR`: Failed to extract function names from SQL AST\n- `RESOLVE_HASH_ERROR`: Failed to resolve dataset reference to content hash\n- `GET_DATASET_ERROR`: Failed to retrieve dataset from store (manifest corrupted, unsupported kind, or storage error)\n- `ETH_CALL_UDF_CREATION_ERROR`: Failed to create eth_call UDF (invalid provider config or connection issue)\n- `PLANNING_ERROR`: Query planning failed (type inference, schema determination, or invalid references)\n\n## Schema Analysis Process\n1. **Parse SQL**: Validates syntax using DataFusion's SQL parser\n2. **Load Datasets**: Retrieves dataset definitions from the registry for all referenced datasets\n3. **Create Planning Context**: Builds planning context with real table schemas from stored datasets\n4. **Infer Schema**: Uses DataFusion's query planner to determine output schema without executing the query\n5. **Prepend Special Fields**: Adds `SPECIAL_BLOCK_NUM` field to the output schema\n6. **Extract Networks**: Identifies which blockchain networks are referenced by the query",
         "operationId": "schema_analyze",
         "requestBody": {
           "content": {
@@ -1326,7 +1326,17 @@
             }
           },
           "400": {
-            "description": "SQL parse error",
+            "description": "Client error: Invalid SQL, table references, or function syntax",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1336,7 +1346,7 @@
             }
           },
           "500": {
-            "description": "Dataset store or planning error",
+            "description": "Server error: Dataset store, planning, or internal failures",
             "content": {
               "application/json": {
                 "schema": {

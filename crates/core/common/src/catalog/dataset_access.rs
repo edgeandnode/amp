@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use datafusion::logical_expr::ScalarUDF;
-use datasets_common::partial_reference::PartialReference;
+use datasets_common::{hash::Hash, reference::Reference};
 
 use crate::{BoxError, Dataset};
 
@@ -10,11 +10,23 @@ use crate::{BoxError, Dataset};
 /// This trait provides the minimal interface required for SQL catalog building,
 /// abstracting over the dataset store implementation.
 pub trait DatasetAccess {
-    /// Get a dataset by its reference (namespace/name@version).
-    fn get_dataset(
+    /// Resolve a dataset reference to its content hash.
+    ///
+    /// This method resolves a dataset reference (which may contain a version, "latest", etc.)
+    /// to the actual content hash of the dataset manifest.
+    fn resolve_dataset_reference(
         &self,
-        reference: impl Into<PartialReference> + Send,
-    ) -> impl Future<Output = Result<Arc<Dataset>, BoxError>> + Send;
+        reference: impl AsRef<Reference> + Send,
+    ) -> impl Future<Output = Result<Option<Hash>, BoxError>> + Send;
+
+    /// Get a dataset by its content hash.
+    ///
+    /// This is more efficient than `get_dataset` when you already have the hash,
+    /// as it bypasses reference resolution.
+    fn get_dataset_by_hash(
+        &self,
+        hash: &Hash,
+    ) -> impl Future<Output = Result<Option<Arc<Dataset>>, BoxError>> + Send;
 
     /// Create an eth_call UDF for the given dataset if applicable.
     ///
