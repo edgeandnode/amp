@@ -50,14 +50,14 @@ where
                         } else {
                             match serde_json::from_slice(&decoded.metadata) {
                                 Ok(metadata) => metadata,
-                                Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                                Err(err) => return Poll::Ready(Some(Err(Error::Json(err)))),
                             }
                         };
                         let data = decoded.data;
                         return Poll::Ready(Some(Ok(ResponseBatch { data, metadata })));
                     }
                     Ok(None) => continue,
-                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                    Err(err) => return Poll::Ready(Some(Err(Error::Arrow(err)))),
                 },
                 Some(Err(status)) => return Poll::Ready(Some(Err(status.into()))),
                 None => return Poll::Ready(None),

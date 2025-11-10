@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     client::{AmpClient, InvalidationRange, ProtocolMessage, ProtocolStream, ResponseBatch},
-    error::Error,
+    error::{Error, ReorgError},
     store::StateStore,
 };
 
@@ -461,7 +461,7 @@ impl StateActor {
                                 } else {
                                     // No recovery point with a non-empty buffer means all buffered watermarks
                                     // are affected by the reorg. This is not recoverable.
-                                    Err(Error::UnrecoverableReorg)
+                                    Err(Error::Reorg(ReorgError::Unrecoverable))
                                 }
                             }
                             Some((tx, ref ranges)) => {
@@ -480,7 +480,7 @@ impl StateActor {
                                     if let Some(inv) = inv {
                                         let point = inv.numbers.start();
                                         if range.start() < *point && *point <= range.end() {
-                                            return Err(Error::PartialReorg);
+                                            return Err(Error::Reorg(ReorgError::Partial));
                                         }
                                     }
                                 }
