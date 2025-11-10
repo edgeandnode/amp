@@ -7,6 +7,13 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "Amp",
+      customCss: ["./src/styles/global.css"],
+      expressiveCode: {
+        themes: ["material-theme-ocean", "material-theme-lighter"],
+      },
+      logo: {
+        src: "./public/logo.svg",
+      }
     }),
   ],
   vite: {
