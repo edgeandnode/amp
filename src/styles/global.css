@@ -1,4 +1,4 @@
-@import "@graphprotocol/gds-css/tailwind.css";
+@import "@graphprotocol/gds-css";
 
 @source "../pages/**/*.astro";
 @source "../**/*.astro";
@@ -63,23 +63,23 @@
 
 .page {
   /* Base Typography */
-  & :is(h1, h2, h3, h4, h5, h6) {
+  :is(h1, h2, h3, h4, h5, h6) {
     @apply font-medium;
   }
 
   /* Links */
-  & a {
+  a {
     @apply text-fg-link-idle hover:text-fg-link-hover;
   }
 
   /* Tables */
-  & th,
-  & td {
+  th,
+  td {
     @apply border-border-muted;
   }
 
   /* Inline Code */
-  & :not(pre) > code {
+  :not(pre) > code {
     @apply bg-bg-code text-fg-code px-1.5 py-0.5 rounded-4 border border-border-code text-[calc(1em*0.75)];
   }
 }
