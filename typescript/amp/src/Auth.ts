@@ -5,8 +5,6 @@ import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
 import { addSeconds } from "date-fns/addSeconds"
-import * as Cause from "effect/Cause"
-import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -304,7 +302,6 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
               }),
           }),
         ),
-        Effect.tapErrorCause((e) => Console.error("failure refreshing access token", Cause.pretty(e))),
         // Return None on any error during refresh
         Effect.orElse(() => Effect.succeed(Option.none<AuthStorageSchema>())),
       )
