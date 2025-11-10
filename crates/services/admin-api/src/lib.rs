@@ -53,7 +53,9 @@ pub fn router(ctx: Ctx) -> Router<()> {
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .route(
             "/manifests",
-            post(manifests::register::handler).delete(manifests::prune::handler),
+            get(manifests::list_all::handler)
+                .post(manifests::register::handler)
+                .delete(manifests::prune::handler),
         )
         .route(
             "/manifests/{hash}",
@@ -96,6 +98,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::delete::handler,
         handlers::datasets::delete_version::handler,
         // Manifest endpoints
+        handlers::manifests::list_all::handler,
         handlers::manifests::register::handler,
         handlers::manifests::get_by_id::handler,
         handlers::manifests::delete_by_id::handler,
@@ -124,6 +127,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Common schemas
         handlers::error::ErrorResponse,
         // Manifest schemas
+        handlers::manifests::list_all::ManifestsResponse,
+        handlers::manifests::list_all::ManifestInfo,
         handlers::manifests::register::RegisterManifestResponse,
         handlers::manifests::list_datasets::ManifestDatasetsResponse,
         handlers::manifests::list_datasets::Dataset,

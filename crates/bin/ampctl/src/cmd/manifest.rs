@@ -2,6 +2,7 @@
 
 pub mod generate;
 pub mod inspect;
+pub mod list;
 pub mod prune;
 pub mod register;
 pub mod remove;
@@ -21,6 +22,10 @@ pub enum Commands {
     /// Register a manifest with content-addressable storage
     #[command(after_help = include_str!("manifest/register__after_help.md"))]
     Register(register::Args),
+
+    /// List all registered manifests
+    #[command(after_help = include_str!("manifest/list__after_help.md"))]
+    List(list::Args),
 
     /// Inspect a manifest by its hash
     #[command(alias = "get")]
@@ -42,6 +47,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
     match command {
         Commands::Generate(args) => generate::run(args).await?,
         Commands::Register(args) => register::run(args).await?,
+        Commands::List(args) => list::run(args).await?,
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Rm(args) => remove::run(args).await?,
         Commands::Prune(args) => prune::run(args).await?,
