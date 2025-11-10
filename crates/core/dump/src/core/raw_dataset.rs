@@ -146,7 +146,7 @@ pub async fn dump(
 
     let mut timer = tokio::time::interval(ctx.config.poll_interval);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
+    'outer: loop {
         timer.tick().await;
 
         let Some(latest_block) = client.latest_block(finalized_blocks_only).await? else {
@@ -157,64 +157,69 @@ pub async fn dump(
             continue;
         }
 
-        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
-            Default::default();
-        for table in tables {
-            let end = match end {
-                None => latest_block,
-                Some(end) => BlockNum::min(end, latest_block),
-            };
-            let missing_ranges = table.missing_ranges(start..=end).await?;
-            missing_ranges_by_table.insert(table.table().name().clone(), missing_ranges);
-        }
+        // In order to resolve reorgs in the same block as they are detected, we loop the `dump_ranges` procedure
+        // until there are no gaps to fill.
+        loop {
+            let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
+                Default::default();
 
-        // Use the union of missing table block ranges.
-        let missing_dataset_ranges = {
-            let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
-                .values()
-                .flatten()
-                .cloned()
-                .collect();
-            merge_ranges(ranges)
-        };
-        if missing_dataset_ranges.is_empty() {
-            if let Some(end) = end
-                && end <= latest_block
-            {
-                tracing::info!("no blocks to dump");
-                return Ok(());
+            for table in tables {
+                let end = match end {
+                    None => latest_block,
+                    Some(end) => BlockNum::min(end, latest_block),
+                };
+                let missing_ranges = table.missing_ranges(start..=end).await?;
+                missing_ranges_by_table.insert(table.table().name().clone(), missing_ranges);
             }
-            continue;
-        }
 
-        dump_ranges(
-            missing_dataset_ranges,
-            max_writers,
-            &client,
-            &ctx,
-            &catalog,
-            parquet_opts.clone(),
-            missing_ranges_by_table,
-            metrics.as_ref(),
-            tables,
-        )
-        .await?;
+            // Use the union of missing table block ranges.
+            let missing_dataset_ranges = {
+                let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
+                    .values()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                merge_ranges(ranges)
+            };
 
-        if let Some(end) = end
-            && latest_block >= end
-        {
-            // Record dump duration on successful completion
-            if let Some(ref metrics) = metrics {
-                let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-                for table in tables {
-                    let table_name = table.table_name().to_string();
-                    let job_id = table_name.clone();
-                    metrics.record_dump_duration(duration_millis, table_name, job_id);
+            if missing_dataset_ranges.is_empty() {
+                if let Some(end) = end
+                    && end <= latest_block
+                {
+                    // If we've reached the configured end block, stop completely and return.
+                    break 'outer;
+                } else {
+                    // Otherwise, keep listening for new blocks.
+                    break;
                 }
             }
-            return Ok(());
+
+            dump_ranges(
+                missing_dataset_ranges,
+                max_writers,
+                &client,
+                &ctx,
+                &catalog,
+                parquet_opts.clone(),
+                missing_ranges_by_table,
+                metrics.as_ref(),
+                tables,
+            )
+            .await?;
         }
     }
+
+    // Record dump duration on successful completion
+    if let Some(ref metrics) = metrics {
+        let duration_millis = dump_start_time.elapsed().as_millis() as f64;
+        for table in tables {
+            let table_name = table.table_name().to_string();
+            let job_id = table_name.clone();
+            metrics.record_dump_duration(duration_millis, table_name, job_id);
+        }
+    }
+
+    Ok(())
 }
 
 /// Dumps block ranges by partitioning them across multiple parallel workers.
