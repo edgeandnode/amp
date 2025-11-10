@@ -21,17 +21,17 @@ pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("HTTP/2 connection error: {0}")]
-    Connection(#[from] tonic::transport::Error),
+    Connection(#[source] tonic::transport::Error),
     #[error("gRPC call error: {0}")]
-    Call(#[from] tonic::Status),
+    Call(#[source] tonic::Status),
     #[error("ProtocolBuffers decoding error: {0}")]
-    PbDecodeError(#[from] prost::DecodeError),
+    PbDecodeError(#[source] prost::DecodeError),
     #[error("Assertion failure: {0}")]
     AssertFail(BoxError),
     #[error("URL parse error: {0}")]
-    UriParse(#[from] InvalidUri),
+    UriParse(#[source] InvalidUri),
     #[error("invalid auth token: {0}")]
-    Utf8(#[from] InvalidMetadataValue),
+    Utf8(#[source] InvalidMetadataValue),
     #[error("store error: {0}")]
-    StoreError(#[from] StoreError),
+    StoreError(#[source] StoreError),
 }
