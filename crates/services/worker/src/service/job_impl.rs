@@ -10,6 +10,7 @@ use datasets_common::{
     hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
 };
 use dump::{Ctx, metrics::MetricsRegistry};
+use tracing::{Instrument, info_span};
 
 use crate::job::{JobDescriptor, JobId};
 
@@ -42,6 +43,12 @@ pub(super) async fn new(
         .await
         .map_err(JobInitError::FetchOutputLocations)?;
 
+    let dataset_ref = Reference::new(
+        dataset_namespace.clone(),
+        dataset_name.clone(),
+        Revision::Hash(manifest_hash.clone()),
+    );
+
     let job_labels = JobLabels {
         dataset_namespace: dataset_namespace.clone(),
         dataset_name: dataset_name.clone(),
@@ -66,12 +73,7 @@ pub(super) async fn new(
             })?
             .ok_or_else(|| JobInitError::DatasetNotFound { hash: hash.clone() })?;
 
-        let dataset_ref = Reference::new(
-            dataset_namespace.clone(),
-            dataset_name.clone(),
-            Revision::Hash(manifest_hash.clone()),
-        );
-        let mut resolved_tables = dataset.resolved_tables(dataset_ref.into());
+        let mut resolved_tables = dataset.resolved_tables(dataset_ref.clone().into());
         let Some(table) = resolved_tables.find(|t| t.name() == location.table_name) else {
             return Err(JobInitError::TableNotFound {
                 table_name: location.table_name.into(),
@@ -105,6 +107,7 @@ pub(super) async fn new(
             end_block,
             metrics,
         )
+        .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref))
         .await
     };
     Ok(fut)
