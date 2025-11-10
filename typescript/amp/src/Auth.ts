@@ -4,10 +4,11 @@ import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
-import { addSeconds } from "date-fns/addSeconds"
 import * as Data from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fn from "effect/Function"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -187,12 +188,14 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         )
       }
 
+      const now = yield* DateTime.now
+      const expiry = Fn.pipe(now, DateTime.add({ seconds: tokenResponse.expires_in }), DateTime.toEpochMillis)
       const refreshedAuth = AuthStorageSchema.make({
         accessToken: tokenResponse.token,
         refreshToken: tokenResponse.refresh_token ?? refreshToken,
         userId: tokenResponse.user.id,
         accounts: tokenResponse.user.accounts,
-        expiry: addSeconds(Date.now(), tokenResponse.expires_in).getTime(),
+        expiry,
       })
       yield* kv.set(AUTH_TOKEN_STORAGE_KEY, refreshedAuth)
 

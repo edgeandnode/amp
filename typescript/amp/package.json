@@ -50,7 +50,6 @@
   "dependencies": {
     "@effect/cli": "^0.72.0",
     "abitype": "^1.1.1",
-    "date-fns": "^4.1.0",
     "jiti": "^2.6.1",
     "jose": "^6.1.1",
     "js-toml": "^1.0.2",
