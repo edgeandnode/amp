@@ -355,7 +355,7 @@ impl PhysicalTable {
     }
 
     /// Restore a location from the data store and register it in the metadata database.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn restore(
         table: &ResolvedTable,
         table_id: &TableId<'_>,

@@ -173,7 +173,7 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     #[instrument(skip_all, err)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn spawn(
         query_env: QueryEnv,
         catalog: Catalog,

@@ -16,7 +16,7 @@ use metadata_db::{MetadataDb, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use static_assertions::const_assert;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn run(
     mut config: Config,
     metadata_db: MetadataDb,
@@ -62,7 +62,7 @@ pub async fn run(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,

@@ -4,7 +4,6 @@ use datasets_common::{reference::Reference, table_name::TableName};
 use crate::BoxError;
 
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum CatalogForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -39,7 +38,6 @@ pub enum CatalogForSqlError {
 /// This error type is used exclusively by `planning_ctx_for_sql()` to create
 /// a planning context for SQL queries without requiring physical data to exist.
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum PlanningCtxForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
@@ -183,7 +181,6 @@ pub enum PlanningCtxForSqlError {
 
 /// Errors specific to get_physical_catalog operations
 #[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum GetPhysicalCatalogError {
     /// Failed to get the logical catalog.
     ///

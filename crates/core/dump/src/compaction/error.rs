@@ -20,7 +20,7 @@ use crate::{ConsistencyCheckError, WriterProperties};
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum CompactorError {
     /// Catching errors while building the canonical chain for a table

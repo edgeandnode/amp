@@ -1195,7 +1195,7 @@ mod tests {
 
     #[test]
     fn dependency_sort_order() {
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
             (&[("a", &["b"]), ("b", &["a"])], None),
             (&[("a", &["b"])], Some(&["b", "a"])),
