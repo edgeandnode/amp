@@ -12,7 +12,10 @@ import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile, ExitCode } from "../common.ts"
+import { configFile, ExitCode } from "../common.ts"
+
+// const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.edgeandnode.com")
+const CLUSTER_ADMIN_URL = new URL("http://localhost:1610")
 
 export const publish = Command.make("publish", {
   args: {
@@ -31,7 +34,6 @@ export const publish = Command.make("publish", {
       Options.optional,
     ),
     configFile: configFile.pipe(Options.optional),
-    adminUrl,
   },
 }).pipe(
   Command.withDescription("Publish a Dataset to the public registry"),
@@ -40,15 +42,7 @@ export const publish = Command.make("publish", {
       const context = yield* ManifestContext.ManifestContext
       const auth = yield* Auth.AuthService
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
-
-      // if the adminUrl is localhost, don't publish, inform the user
-      const localhostPatterns = ["localhost", "0.0.0.0", "127.0.0.1"]
-      if (localhostPatterns.includes(args.adminUrl.hostname)) {
-        yield* Console.warn("Cannot publish dataset: your local Amp instance isn't connected to the public registry.")
-        yield* Console.info("To publish publicly, rerun with the public admin URL:")
-        yield* Console.info(`    amp publish --admin-url https://gateway.amp.staging.edgeandnode.com`)
-        return yield* ExitCode.NonZero
-      }
+      const client = yield* Admin.Admin
 
       const maybeAccessToken = yield* auth.get()
       if (Option.isNone(maybeAccessToken)) {
@@ -61,6 +55,21 @@ export const publish = Command.make("publish", {
       const versionTag = Option.getOrElse(args.tag, () => "dev" as const)
       const status = versionTag === "dev" ? "draft" : "published"
 
+      const metadata = context.metadata
+
+      yield* Console.info("Registering your Dataset with Amp")
+      yield* client.registerDataset(metadata.namespace, metadata.name, context.manifest).pipe(
+        Effect.tap(() => Console.info("Dataset successfully registered with Amp")),
+      )
+
+      yield* Console.info(
+        `Deploying your Dataset to Amp ${metadata.namespace}/${metadata.name}@${versionTag}. This will start indexing`,
+      )
+      yield* client.deployDataset(metadata.namespace, metadata.name, versionTag).pipe(
+        Effect.tap(() => Console.info("Dataset successfully deployed to Amp")),
+      )
+
+      yield* Console.info("Publishing your Dataset to the registry")
       const publishResult = yield* ampRegistry.publishFlow({
         auth: accessToken,
         context,
@@ -102,7 +111,7 @@ export const publish = Command.make("publish", {
       AmpRegistry.layer,
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
-      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
+      Layer.provideMerge(Admin.layer(`${CLUSTER_ADMIN_URL}`)),
     )
   ),
 )

@@ -1,18 +1,14 @@
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as Prompt from "@effect/cli/Prompt"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as String from "effect/String"
-import * as AmpRegistry from "../../AmpRegistry.ts"
 import * as Admin from "../../api/Admin.ts"
-import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile, ExitCode } from "../common.ts"
+import { adminUrl, configFile } from "../common.ts"
 
 export const register = Command.make("register", {
   args: {
@@ -20,12 +16,6 @@ export const register = Command.make("register", {
       Options.withDescription("Dataset version (semver) or 'dev' tag"),
       Options.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
       Options.optional,
-    ),
-    publish: Options.boolean("publish", { ifPresent: true }).pipe(
-      Options.withAlias("p"),
-      Options.withDescription(
-        "If present, will also publish the Dataset to the public registry (must be authenticated)",
-      ),
     ),
     configFile: configFile.pipe(Options.optional),
     adminUrl,
@@ -36,8 +26,6 @@ export const register = Command.make("register", {
     Effect.fn(function*({ args }) {
       const context = yield* ManifestContext.ManifestContext
       const client = yield* Admin.Admin
-      const auth = yield* Auth.AuthService
-      const ampRegistry = yield* AmpRegistry.AmpRegistryService
 
       const result = yield* client.registerDataset(
         context.metadata.namespace,
@@ -45,74 +33,9 @@ export const register = Command.make("register", {
         context.manifest,
         Option.getOrUndefined(args.tag),
       )
-
-      if (!args.publish) {
-        return yield* Console.log(result)
-      }
-
-      // if the adminUrl is localhost, don't publish, inform the user
-      const localhostPatterns = ["localhost", "0.0.0.0", "127.0.0.1"]
-      if (localhostPatterns.includes(args.adminUrl.hostname)) {
-        yield* Console.warn("Cannot publish dataset: your local Amp instance isn't connected to the public registry.")
-        yield* Console.info("To publish publicly, rerun with the public admin URL:")
-        yield* Console.info(`    amp register --admin-url https://gateway.amp.staging.edgeandnode.com`)
-        return yield* ExitCode.NonZero
-      }
-
-      const maybeAccessToken = yield* auth.get()
-      if (Option.isNone(maybeAccessToken)) {
-        yield* Console.warn(`To publish your Dataset, you must be authenticated. Run "amp auth login"`)
-        yield* Console.log("Your Dataset was successfully registered")
-        return yield* ExitCode.NonZero
-      }
-
-      yield* Console.log("Dataset successfully registered. Working to publish now")
-
-      const accessToken = maybeAccessToken.value
-
-      const versionTag = Option.getOrElse(args.tag, () => "dev" as const)
-      const status = versionTag === "dev" ? "draft" : "published"
-      const changelog = yield* Prompt.text({
-        message: "Provide a changelog of what was introduced or changed with this dataset version",
-      })
-
-      const publishResult = yield* ampRegistry.publishFlow({
-        auth: accessToken,
-        context,
-        versionTag,
-        changelog: String.isEmpty(changelog) ? undefined : changelog,
-        status,
-      }).pipe(
-        Effect.tap((result) => Console.log(`Published ${result.namespace}/${result.name}@${result.revision}`)),
-        Effect.catchTags({
-          "Amp/Registry/Errors/DatasetOwnershipError": (err) =>
-            Console.error(`Cannot publish to ${err.namespace}/${err.name}`).pipe(
-              Effect.zipRight(Console.error("Dataset already exists.")),
-              Effect.zipRight(Effect.fail(err)),
-            ),
-          "Amp/Registry/Errors/VersionAlreadyExistsError": (err) =>
-            Console.error(`Version ${err.versionTag} already exists for ${err.namespace}/${err.name}`).pipe(
-              Effect.zipRight(Console.error(`Choose a different version tag or update the existing version`)),
-              Effect.zipRight(Effect.fail(err)),
-            ),
-          "Amp/Registry/Errors/RegistryApiError": (err) =>
-            Console.error(`Registry API error (${err.status}): ${err.errorCode}`).pipe(
-              Effect.zipRight(Console.error(`${err.message}`)),
-              Effect.zipRight(err.requestId ? Console.error(`Request ID: ${err.requestId}`) : Effect.void),
-              Effect.zipRight(Effect.fail(err)),
-            ),
-        }),
-      )
-
-      yield* Console.log("Dataset successfully published!")
-      yield* Console.log(
-        `Visit https://registry.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
-      )
-      return yield* ExitCode.Zero
+      yield* Console.log(result)
     }),
   ),
-  Command.provide(Auth.layer),
-  Command.provide(AmpRegistry.layer),
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(Admin.layer(`${args.adminUrl}`)))
   ),
