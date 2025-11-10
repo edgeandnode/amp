@@ -8,7 +8,6 @@ import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
@@ -322,8 +321,8 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   readonly registerDataset: (
     namespace: Model.DatasetNamespace,
     name: Model.DatasetName,
-    version: Option.Option<Model.DatasetVersion>,
     manifest: Model.DatasetManifest,
+    version?: Model.DatasetVersion | undefined,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
@@ -428,15 +427,15 @@ export const make = Effect.fn(function*(url: string) {
     function*(
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
-      version: Option.Option<Model.DatasetVersion>,
       manifest: Model.DatasetManifest,
+      version?: Model.DatasetVersion | undefined,
     ) {
       const request = client.dataset.registerDataset({
         payload: {
           namespace,
           name,
-          version: Option.getOrUndefined(version),
           manifest,
+          version,
         },
       })
 

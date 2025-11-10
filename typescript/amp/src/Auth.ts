@@ -48,6 +48,7 @@ export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>("Am
     description: "The user the access token belongs to",
   }),
 }) {}
+
 export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/models/auth/AuthStorageSchema")({
   accessToken: Schema.NonEmptyTrimmedString,
   refreshToken: Schema.NonEmptyTrimmedString,
