@@ -110,7 +110,7 @@ pub struct JsonRpcClient {
 }
 
 impl JsonRpcClient {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         url: Url,
         network: String,
@@ -136,7 +136,7 @@ impl JsonRpcClient {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new_ipc(
         path: std::path::PathBuf,
         network: String,
@@ -162,7 +162,7 @@ impl JsonRpcClient {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new_ws(
         url: Url,
         network: String,

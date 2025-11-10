@@ -26,7 +26,7 @@ use crate::{
 ///
 /// This operation is idempotent - if a location with the same URL already exists,
 /// its manifest_hash will be updated and the existing location ID will be returned.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,

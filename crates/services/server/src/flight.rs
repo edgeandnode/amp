@@ -747,7 +747,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub fn encode_record_batch(
     batch: RecordBatch,
     app_metadata: Option<&serde_json::Value>,
@@ -817,7 +817,7 @@ fn split_batch_for_grpc_response(
 
 /// Errors that can occur during query execution
 #[derive(Error, Debug)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),

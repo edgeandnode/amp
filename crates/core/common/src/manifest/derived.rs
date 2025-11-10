@@ -118,7 +118,7 @@ pub fn sort_tables_by_dependencies(
             match (table_ref.schema(), table_ref.table()) {
                 (None, table) if table != table_name => {
                     // Unqualified reference is assumed to be to a table in the same dataset
-                    #[allow(clippy::collapsible_if)]
+                    #[expect(clippy::collapsible_if)]
                     if let Ok(dep_name) = table.parse::<TableName>() {
                         if table_map.contains_key(&dep_name) {
                             table_deps.push(dep_name);

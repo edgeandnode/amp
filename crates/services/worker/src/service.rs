@@ -391,7 +391,7 @@ impl Worker {
     /// This method is called when a job is started by the user or the scheduler.
     /// It marks the job as RUNNING and spawns the job in the job set.
     async fn spawn_job(&mut self, job: Job) -> Result<(), SpawnJobError> {
-        tracing::info!(node_id=%self.node_id, %job.id, "job start requested");
+        tracing::debug!(node_id=%self.node_id, %job.id, "job start requested");
 
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {

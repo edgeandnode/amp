@@ -147,6 +147,12 @@ impl std::str::FromStr for Reference {
     }
 }
 
+impl AsRef<Reference> for Reference {
+    fn as_ref(&self) -> &Reference {
+        self
+    }
+}
+
 /// Parse reference parts from a string in the format `<namespace>/<name>@<revision>`.
 fn parse_reference_parts(s: &str) -> Result<Reference, ReferenceError> {
     // Split by '@' to separate revision

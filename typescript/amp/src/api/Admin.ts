@@ -8,7 +8,6 @@ import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
@@ -220,6 +219,11 @@ export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.Met
  * The output schema endpoint (POST /schema).
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
+  .addError(Error.UnqualifiedTable)
+  .addError(Error.CatalogQualifiedTable)
+  .addError(Error.InvalidTableName)
+  .addError(Error.InvalidSchemaReference)
+  .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
   .addError(Error.PlanningError)
   .addError(Error.CatalogForSqlError)
@@ -233,11 +237,24 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
 /**
  * Error type for the `getOutputSchema` endpoint.
  *
+ * - UnqualifiedTable: Table reference is not qualified with a dataset.
+ * - CatalogQualifiedTable: Table reference includes a catalog qualifier.
+ * - InvalidTableName: Table name does not conform to SQL identifier rules.
+ * - InvalidSchemaReference: Schema portion of table reference is not a valid dataset reference.
+ * - DatasetNotFound: The referenced dataset does not exist in the store.
  * - DatasetStoreError: Failure in dataset storage operations.
  * - PlanningError: Query planning or schema inference failure.
  * - CatalogForSqlError: Failed to build catalog for SQL query.
  */
-export type GetOutputSchemaError = Error.DatasetStoreError | Error.PlanningError | Error.CatalogForSqlError
+export type GetOutputSchemaError =
+  | Error.UnqualifiedTable
+  | Error.CatalogQualifiedTable
+  | Error.InvalidTableName
+  | Error.InvalidSchemaReference
+  | Error.DatasetNotFound
+  | Error.DatasetStoreError
+  | Error.PlanningError
+  | Error.CatalogForSqlError
 
 /**
  * The api group for the dataset endpoints.
@@ -304,8 +321,8 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   readonly registerDataset: (
     namespace: Model.DatasetNamespace,
     name: Model.DatasetName,
-    version: Option.Option<Model.DatasetVersion>,
     manifest: Model.DatasetManifest,
+    version?: Model.DatasetVersion | undefined,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
@@ -410,15 +427,15 @@ export const make = Effect.fn(function*(url: string) {
     function*(
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
-      version: Option.Option<Model.DatasetVersion>,
       manifest: Model.DatasetManifest,
+      version?: Model.DatasetVersion | undefined,
     ) {
       const request = client.dataset.registerDataset({
         payload: {
           namespace,
           name,
-          version: Option.getOrUndefined(version),
           manifest,
+          version,
         },
       })
 

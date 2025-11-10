@@ -115,7 +115,7 @@ impl StreamTask {
     /// - `pool`: Database connection pool (for creating state store)
     /// - `retention`: Retention window in blocks
     /// - `shutdown`: Cancellation token for graceful shutdown
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_name: String,
         dataset: Reference,

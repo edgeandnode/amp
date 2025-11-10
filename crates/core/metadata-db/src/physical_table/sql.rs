@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// Insert a physical table location into the database and return its ID (idempotent operation)
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn insert<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,

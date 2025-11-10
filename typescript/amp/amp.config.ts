@@ -13,12 +13,17 @@ const count = event("Count(uint256 count)")
 
 export default defineDataset(() => ({
   name: "example",
-  version: "0.0.1",
   network: "anvil",
   dependencies: {
     anvil: "_/anvil@0.0.1",
   },
   tables: {
+    blocks: {
+      sql: `
+        SELECT hash, block_num
+        FROM anvil.blocks
+      `,
+    },
     counts: {
       sql: `
         SELECT c.block_hash, c.tx_hash, c.address, c.block_num, c.timestamp, c.event['count'] as count
