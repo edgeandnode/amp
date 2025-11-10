@@ -16,6 +16,7 @@ import * as jose from "jose"
 import * as os from "node:os"
 import * as path from "node:path"
 import { isAddress } from "viem"
+import type * as Model from "./Model.ts"
 
 export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
 const JWKS = jose.createRemoteJWKSet(new URL("/.well-known/jwks.json", AUTH_PLATFORM_URL))
@@ -205,7 +206,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     const generateAccessToken = Effect.fn("GenerateAccessToken")(function*(
       args: Readonly<{
         storedAuth: AuthStorageSchema
-        exp: string | number | Date | null | undefined
+        exp: Model.GenrateTokenDuration | undefined
         audience: ReadonlyArray<string> | null | undefined
       }>,
     ) {

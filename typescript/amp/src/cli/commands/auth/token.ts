@@ -4,22 +4,16 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import * as Schema from "effect/Schema"
 import * as Auth from "../../../Auth.ts"
+import * as Model from "../../../Model.ts"
 import { ExitCode } from "../../common.ts"
 
-export const generate = Command.make("generate-token", {
+export const token = Command.make("token", {
   args: {
     duration: Options.text("duration").pipe(
       Options.withAlias("d"),
       Options.withDescription("Duration of the generated access token before it expires"),
-      Options.withSchema(
-        Schema.String.pipe(
-          Schema.pattern(
-            /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
-          ),
-        ),
-      ),
+      Options.withSchema(Model.GenrateTokenDuration),
       Options.withDefault("1 hour"),
     ),
     audience: Options.text("audience").pipe(
