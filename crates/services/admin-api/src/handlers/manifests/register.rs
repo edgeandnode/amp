@@ -198,7 +198,7 @@ pub enum Error {
     /// - Required manifest fields (name, kind, version, etc.) are missing or invalid
     /// - JSON serialization/deserialization fails during canonicalization
     #[error("invalid manifest: {0}")]
-    InvalidManifest(#[from] serde_json::Error),
+    InvalidManifest(#[source] serde_json::Error),
 
     /// Dependency validation error for derived datasets
     ///
@@ -207,7 +207,7 @@ pub enum Error {
     /// - SQL queries reference datasets not declared in the dependencies section
     /// - Dependency resolution fails during validation
     #[error("manifest dependency error: {0}")]
-    DependencyValidationError(#[from] DependencyValidationError),
+    DependencyValidationError(#[source] DependencyValidationError),
 
     /// Unsupported dataset kind
     ///

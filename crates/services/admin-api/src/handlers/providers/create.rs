@@ -154,7 +154,7 @@ pub enum Error {
     /// such as filesystem errors, serialization failures, or
     /// other store-level issues.
     #[error("failed to store provider configuration: {0}")]
-    StoreError(#[from] RegisterError),
+    StoreError(#[source] RegisterError),
 }
 
 impl IntoErrorResponse for Error {

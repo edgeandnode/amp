@@ -418,7 +418,7 @@ pub enum Error {
     /// - Manifest structure doesn't match expected schema
     /// - Required manifest fields are missing or invalid
     #[error("invalid manifest: {0}")]
-    InvalidManifest(#[from] serde_json::Error),
+    InvalidManifest(#[source] serde_json::Error),
 
     /// Dependency validation error
     ///
@@ -426,7 +426,7 @@ pub enum Error {
     /// - SQL queries are invalid
     /// - SQL queries reference datasets not declared in dependencies
     #[error("Manifest dependency error: {0}")]
-    DependencyValidationError(#[from] DependencyValidationError),
+    DependencyValidationError(#[source] DependencyValidationError),
 
     /// Failed to register manifest in the system
     ///
@@ -435,7 +435,7 @@ pub enum Error {
     /// - Registry information extraction failed
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
-    ManifestRegistrationError(#[from] RegisterManifestError),
+    ManifestRegistrationError(#[source] RegisterManifestError),
 
     /// Failed to link manifest to dataset
     ///
@@ -443,7 +443,7 @@ pub enum Error {
     /// - Error during manifest linking in metadata database
     /// - Error updating dev tag
     #[error("Failed to link manifest to dataset: {0}")]
-    ManifestLinkingError(#[from] LinkManifestError),
+    ManifestLinkingError(#[source] LinkManifestError),
 
     /// Failed to tag version for the dataset
     ///
@@ -452,7 +452,7 @@ pub enum Error {
     /// - Invalid semantic version format
     /// - Error updating latest tag
     #[error("Failed to set version tag: {0}")]
-    VersionTaggingError(#[from] SetVersionTagError),
+    VersionTaggingError(#[source] SetVersionTagError),
 
     /// Unsupported dataset kind
     ///
