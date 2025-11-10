@@ -676,3 +676,13 @@ pub enum ListDatasetsUsingManifestError {
     #[error("Failed to list dataset tags from metadata database")]
     MetadataDbListTags(#[source] metadata_db::Error),
 }
+
+/// Error when checking if a manifest is linked to a dataset
+///
+/// This error type is used by `DatasetStore::is_manifest_linked()`.
+///
+/// This occurs when the database query to check manifest linkage fails,
+/// typically due to database connection issues, unavailability, or permission problems.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to check if manifest is linked to dataset")]
+pub struct IsManifestLinkedError(#[source] pub metadata_db::Error);

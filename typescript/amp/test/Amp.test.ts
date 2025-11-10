@@ -89,8 +89,13 @@ Testing.layer((it) => {
     "can fetch the output schema of a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getOutputSchema("SELECT * FROM anvil.transactions")
-      assertInstanceOf(result, Model.OutputSchema)
+      const request = new Model.SchemaRequest({
+        tables: { query: "SELECT * FROM anvil.transactions" },
+        dependencies: { anvil: "_/anvil@0.0.1" },
+      })
+      const result = yield* api.getOutputSchema(request)
+      assertInstanceOf(result, Model.SchemaResponse)
+      assertInstanceOf(result.schemas.query, Model.TableSchemaWithNetworks)
     }),
   )
 

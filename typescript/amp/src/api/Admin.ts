@@ -219,42 +219,68 @@ export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.Met
  * The output schema endpoint (POST /schema).
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
-  .addError(Error.UnqualifiedTable)
+  .addError(Error.InvalidPayloadFormat)
+  .addError(Error.EmptyTablesAndFunctions)
+  .addError(Error.InvalidTableSql)
+  .addError(Error.TableReferenceResolution)
+  .addError(Error.FunctionReferenceResolution)
+  .addError(Error.DependencyNotFound)
+  .addError(Error.DependencyResolution)
   .addError(Error.CatalogQualifiedTable)
+  .addError(Error.UnqualifiedTable)
   .addError(Error.InvalidTableName)
-  .addError(Error.InvalidSchemaReference)
   .addError(Error.DatasetNotFound)
-  .addError(Error.DatasetStoreError)
-  .addError(Error.PlanningError)
-  .addError(Error.CatalogForSqlError)
-  .addSuccess(Model.OutputSchema)
-  .setPayload(
-    Schema.Struct({
-      sqlQuery: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("sql_query")),
-    }),
-  )
+  .addError(Error.GetDatasetError)
+  .addError(Error.EthCallUdfCreationError)
+  .addError(Error.TableNotFoundInDataset)
+  .addError(Error.FunctionNotFoundInDataset)
+  .addError(Error.EthCallNotAvailable)
+  .addError(Error.DependencyAliasNotFound)
+  .addError(Error.SchemaInference)
+  .addSuccess(Model.SchemaResponse)
+  .setPayload(Model.SchemaRequest)
 
 /**
  * Error type for the `getOutputSchema` endpoint.
  *
- * - UnqualifiedTable: Table reference is not qualified with a dataset.
- * - CatalogQualifiedTable: Table reference includes a catalog qualifier.
+ * - InvalidPayloadFormat: Request JSON is malformed or missing required fields.
+ * - EmptyTablesAndFunctions: No tables or functions provided (at least one required).
+ * - InvalidTableSql: SQL query has invalid syntax.
+ * - TableReferenceResolution: Failed to resolve table references in SQL.
+ * - FunctionReferenceResolution: Failed to resolve function references in SQL.
+ * - DependencyNotFound: Referenced dependency does not exist.
+ * - DependencyResolution: Failed to resolve dependency to hash.
+ * - CatalogQualifiedTable: Table reference includes catalog qualifier (not supported).
+ * - UnqualifiedTable: Table reference is not qualified with dataset.
  * - InvalidTableName: Table name does not conform to SQL identifier rules.
- * - InvalidSchemaReference: Schema portion of table reference is not a valid dataset reference.
- * - DatasetNotFound: The referenced dataset does not exist in the store.
- * - DatasetStoreError: Failure in dataset storage operations.
- * - PlanningError: Query planning or schema inference failure.
- * - CatalogForSqlError: Failed to build catalog for SQL query.
+ * - DatasetNotFound: Referenced dataset does not exist in the store.
+ * - GetDatasetError: Failed to retrieve dataset from store.
+ * - EthCallUdfCreationError: Failed to create ETH call UDF.
+ * - TableNotFoundInDataset: Referenced table does not exist in dataset.
+ * - FunctionNotFoundInDataset: Referenced function does not exist in dataset.
+ * - EthCallNotAvailable: eth_call function not available for dataset.
+ * - DependencyAliasNotFound: Table or function reference uses undefined alias.
+ * - SchemaInference: Failed to infer schema for table.
  */
 export type GetOutputSchemaError =
-  | Error.UnqualifiedTable
+  | Error.InvalidPayloadFormat
+  | Error.EmptyTablesAndFunctions
+  | Error.InvalidTableSql
+  | Error.TableReferenceResolution
+  | Error.FunctionReferenceResolution
+  | Error.DependencyNotFound
+  | Error.DependencyResolution
   | Error.CatalogQualifiedTable
+  | Error.UnqualifiedTable
   | Error.InvalidTableName
-  | Error.InvalidSchemaReference
   | Error.DatasetNotFound
-  | Error.DatasetStoreError
-  | Error.PlanningError
-  | Error.CatalogForSqlError
+  | Error.GetDatasetError
+  | Error.EthCallUdfCreationError
+  | Error.TableNotFoundInDataset
+  | Error.FunctionNotFoundInDataset
+  | Error.EthCallNotAvailable
+  | Error.DependencyAliasNotFound
+  | Error.SchemaInference
 
 /**
  * The api group for the dataset endpoints.
@@ -271,16 +297,12 @@ export class DatasetGroup extends HttpApiGroup.make("dataset")
 /**
  * The api group for the job endpoints.
  */
-export class JobGroup extends HttpApiGroup.make("job")
-  .add(getJobById)
-{}
+export class JobGroup extends HttpApiGroup.make("job").add(getJobById) {}
 
 /**
  * The api group for the schema endpoints.
  */
-export class SchemaGroup extends HttpApiGroup.make("schema")
-  .add(getOutputSchema)
-{}
+export class SchemaGroup extends HttpApiGroup.make("schema").add(getOutputSchema) {}
 
 /**
  * The api definition for the admin api.
@@ -404,12 +426,12 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
   /**
    * Gets the schema of a dataset.
    *
-   * @param sql - The SQL query to get the schema for.
-   * @returns An effect that resolves to the table schema.
+   * @param request - The schema request with tables and dependencies.
+   * @returns An effect that resolves to the schema response.
    */
   readonly getOutputSchema: (
-    sql: string,
-  ) => Effect.Effect<Model.OutputSchema, HttpClientError.HttpClientError | GetOutputSchemaError>
+    request: Model.SchemaRequest,
+  ) => Effect.Effect<Model.SchemaResponse, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
 /**
@@ -566,14 +588,10 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string) {
-    const request = client.schema.getOutputSchema({
-      payload: {
-        sqlQuery: sql,
-      },
-    })
-
-    const result = yield* request.pipe(
+  const getOutputSchema = Effect.fn("getOutputSchema")(function*(request: Model.SchemaRequest) {
+    const result = yield* client.schema.getOutputSchema({
+      payload: request,
+    }).pipe(
       Effect.catchTags({
         ParseError: Effect.die,
         HttpApiDecodeError: Effect.die,

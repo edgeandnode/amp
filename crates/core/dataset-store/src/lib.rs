@@ -53,9 +53,9 @@ pub use self::{
     error::{
         DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError, GetAllDatasetsError,
         GetClientError, GetDatasetByHashError, GetDatasetError, GetDerivedManifestError,
-        GetManifestError, LinkManifestError, ListAllDatasetsError, ListAllManifestsError,
-        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
-        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
+        GetManifestError, IsManifestLinkedError, LinkManifestError, ListAllDatasetsError,
+        ListAllManifestsError, ListDatasetsUsingManifestError, ListOrphanedManifestsError,
+        ListVersionTagsError, RegisterManifestError, ResolveRevisionError, SetVersionTagError,
         UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
@@ -345,8 +345,7 @@ impl DatasetStore {
         // Link manifest to dataset (idempotent)
         // Foreign key constraint will reject if manifest doesn't exist
         if let Err(err) =
-            metadata_db::datasets::link_manifest_to_dataset(&mut tx, namespace, name, manifest_hash)
-                .await
+            metadata_db::datasets::link_manifest(&mut tx, namespace, name, manifest_hash).await
         {
             return Err(if err.is_foreign_key_violation() {
                 LinkManifestError::ManifestNotFound(manifest_hash.clone())
@@ -365,6 +364,21 @@ impl DatasetStore {
             .map_err(LinkManifestError::TransactionCommit)?;
 
         Ok(())
+    }
+
+    /// Check if a manifest is linked to a specific dataset
+    ///
+    /// Returns true if the manifest hash is currently linked to the given dataset
+    /// (namespace/name combination).
+    pub async fn is_manifest_linked(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        manifest_hash: &Hash,
+    ) -> Result<bool, IsManifestLinkedError> {
+        metadata_db::datasets::is_manifest_linked(&self.metadata_db, namespace, name, manifest_hash)
+            .await
+            .map_err(IsManifestLinkedError)
     }
 
     /// Set a semantic version tag for a dataset manifest
