@@ -202,10 +202,10 @@ impl Scheduler {
         metadata_db::jobs::request_stop(&mut tx, &job_id)
             .await
             .map_err(|err| match err {
-                MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::NotFound) => {
+                MetadataDbError::JobStatusUpdate(JobStatusUpdateError::NotFound) => {
                     StopJobError::JobNotFound
                 }
-                MetadataDbError::JobStatusUpdateError(JobStatusUpdateError::StateConflict {
+                MetadataDbError::JobStatusUpdate(JobStatusUpdateError::StateConflict {
                     actual,
                     ..
                 }) => match actual.into() {

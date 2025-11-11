@@ -156,8 +156,8 @@ pub enum FileIdI64ConvError {
 pub enum FileIdFromStrError {
     /// The string is not a valid `i64`.
     #[error("Invalid number format: {0}")]
-    ParseError(#[from] std::num::ParseIntError),
+    ParseError(#[source] std::num::ParseIntError),
     /// The parsed value is zero or negative, but [`FileId`] requires positive values.
     #[error(transparent)]
-    NonPositive(#[from] FileIdI64ConvError),
+    NonPositive(FileIdI64ConvError),
 }

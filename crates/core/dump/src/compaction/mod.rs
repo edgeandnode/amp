@@ -52,7 +52,7 @@ impl Error for AmpCompactorTaskError {
 impl From<CollectorError> for AmpCompactorTaskError {
     fn from(err: CollectorError) -> Self {
         match err {
-            CollectorError::JoinError { err } => AmpCompactorTaskError::Join(err),
+            CollectorError::Join(err) => AmpCompactorTaskError::Join(err),
             other => AmpCompactorTaskError::Collection(other),
         }
     }
@@ -61,7 +61,7 @@ impl From<CollectorError> for AmpCompactorTaskError {
 impl From<CompactorError> for AmpCompactorTaskError {
     fn from(err: CompactorError) -> Self {
         match err {
-            CompactorError::JoinError { err } => AmpCompactorTaskError::Join(err),
+            CompactorError::Join(err) => AmpCompactorTaskError::Join(err),
             other => AmpCompactorTaskError::Compaction(other),
         }
     }

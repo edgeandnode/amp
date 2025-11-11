@@ -37,7 +37,7 @@ where
         .bind(notif)
         .execute(exe)
         .await
-        .map_err(NotifSendError::DbError)?;
+        .map_err(NotifSendError::Database)?;
     Ok(())
 }
 
@@ -50,7 +50,7 @@ pub enum NotifSendError {
 
     /// An error occurred while sending the notification
     #[error(transparent)]
-    DbError(sqlx::Error),
+    Database(sqlx::Error),
 }
 
 /// Establishes a new [`Listener`] by connecting to the specified URL.
@@ -100,7 +100,7 @@ impl NotifListener {
         let node_id = self.node_id;
         self.listener
             .into_stream()
-            .map_err(NotifRecvError::DbError)
+            .map_err(NotifRecvError::Database)
             .try_filter_map(move |notif| {
                 let node_id = node_id.clone();
                 async move {
@@ -129,7 +129,7 @@ impl NotifListener {
 pub enum NotifRecvError {
     /// An error occurred while receiving the notification
     #[error(transparent)]
-    DbError(sqlx::Error),
+    Database(sqlx::Error),
 
     /// The notification payload deserialization failed
     #[error("payload deserialization failed: {0}")]

@@ -137,13 +137,13 @@ async fn register_provider(
     }
 
     // Create client and register provider
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     client
         .providers()
         .register(provider_name, &json_value)
         .await
-        .map_err(Error::from)?;
+        .map_err(|source| Error::ClientError { source })?;
 
     Ok(())
 }
@@ -183,15 +183,12 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error from the provider client
     #[error("provider registration failed")]
     ClientError {
-        #[from]
+        #[source]
         source: crate::client::providers::RegisterError,
     },
 }

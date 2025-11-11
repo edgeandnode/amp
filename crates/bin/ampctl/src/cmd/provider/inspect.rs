@@ -52,7 +52,7 @@ pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
 async fn get_provider(global: &GlobalArgs, name: &str) -> Result<String, Error> {
     tracing::debug!("Creating API client");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let provider_value = client
         .providers()
@@ -83,10 +83,7 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from the API
     #[error("client error")]

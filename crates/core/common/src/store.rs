@@ -83,12 +83,17 @@ impl Store {
     pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {
         self.store
             .list(Some(&prefix.into()))
-            .map_err(|e| e.into())
+            .map_err(StoreError::ObjectStore)
             .boxed()
     }
 
     pub async fn list_all_shallow(&self) -> Result<Vec<ObjectMeta>, StoreError> {
-        Ok(self.store.list_with_delimiter(None).await?.objects)
+        Ok(self
+            .store
+            .list_with_delimiter(None)
+            .await
+            .map_err(StoreError::ObjectStore)?
+            .objects)
     }
 
     pub fn bucket(&self) -> Option<&str> {
@@ -124,19 +129,19 @@ pub fn object_store(
         ObjectStoreProvider::GoogleCloudStorage => {
             let builder = GoogleCloudStorageBuilder::from_env().with_url(url);
             let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
-            let store = builder.build()?;
+            let store = builder.build().map_err(ObjectStoreCreationError)?;
             Ok((Arc::new(store), bucket))
         }
         ObjectStoreProvider::AmazonS3 => {
             let builder = AmazonS3Builder::from_env().with_url(url);
             let bucket = builder.get_config_value(&AmazonS3ConfigKey::Bucket);
-            let store = builder.build()?;
+            let store = builder.build().map_err(ObjectStoreCreationError)?;
             Ok((Arc::new(store), bucket))
         }
         ObjectStoreProvider::MicrosoftAzure => {
             let builder = MicrosoftAzureBuilder::from_env().with_url(url);
             let bucket = builder.get_config_value(&AzureConfigKey::ContainerName);
-            let store = builder.build()?;
+            let store = builder.build().map_err(ObjectStoreCreationError)?;
             Ok((Arc::new(store), bucket))
         }
         ObjectStoreProvider::Local => {
@@ -152,7 +157,7 @@ pub fn object_store(
 /// Common causes include missing credentials, network issues, or configuration problems.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct ObjectStoreCreationError(#[from] object_store::Error);
+pub struct ObjectStoreCreationError(object_store::Error);
 
 /// Extension trait for `ObjectStore` that provides convenient methods for common operations.
 ///
@@ -183,7 +188,12 @@ where
     T: ObjectStore,
 {
     async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
-        Ok(self.get(&location.into()).await?.bytes().await?)
+        self.get(&location.into())
+            .await
+            .map_err(StoreError::ObjectStoreGet)?
+            .bytes()
+            .await
+            .map_err(StoreError::ObjectStoreBytes)
     }
 
     async fn get_string(&self, location: impl Into<Path>) -> Result<String, StoreError> {
@@ -224,12 +234,29 @@ pub enum StoreError {
         err: std::string::FromUtf8Error,
     },
 
-    /// Runtime error from the underlying object store implementation.
+    /// General runtime error from the underlying object store implementation.
     ///
+    /// This error occurs for operations other than get/bytes, such as listing objects.
+    /// Common causes: network timeouts, permission denied, service unavailable,
+    /// or authentication token expiry.
+    #[error("object store error: {0}")]
+    ObjectStore(#[source] object_store::Error),
+
+    /// Error getting object metadata or initiating object retrieval.
+    ///
+    /// This error occurs when calling `.get()` on the object store.
     /// Common causes: network timeouts, permission denied, file not found,
     /// service unavailable, or authentication token expiry.
-    #[error(transparent)]
-    ObjectStore(#[from] object_store::Error),
+    #[error("failed to get object: {0}")]
+    ObjectStoreGet(#[source] object_store::Error),
+
+    /// Error reading object bytes after successful retrieval.
+    ///
+    /// This error occurs when calling `.bytes()` on a retrieved object.
+    /// Common causes: network interruption during download, corrupted data,
+    /// or timeout while streaming the object content.
+    #[error("failed to read object bytes: {0}")]
+    ObjectStoreBytes(#[source] object_store::Error),
 }
 
 impl StoreError {
@@ -237,6 +264,8 @@ impl StoreError {
         matches!(
             self,
             StoreError::ObjectStore(object_store::Error::NotFound { .. })
+                | StoreError::ObjectStoreGet(object_store::Error::NotFound { .. })
+                | StoreError::ObjectStoreBytes(object_store::Error::NotFound { .. })
         )
     }
 }
@@ -269,7 +298,7 @@ impl ObjectStoreUrl {
     ///
     /// The URL must have a supported object store scheme (`file://`, `s3://`, `gs://`, etc.).
     fn try_from_url(url: impl AsRef<str>) -> Result<Self, InvalidObjectStoreUrlError> {
-        let inner = Url::parse(url.as_ref())?;
+        let inner = Url::parse(url.as_ref()).map_err(InvalidObjectStoreUrlError::UrlParseError)?;
 
         // Validate the scheme to ensure it's a supported object store scheme
         let _: ObjectStoreProvider = inner.scheme().parse()?;
@@ -357,7 +386,9 @@ impl std::str::FromStr for ObjectStoreUrl {
     type Err = InvalidObjectStoreUrlError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Url::parse(s)?.try_into()
+        Url::parse(s)
+            .map_err(InvalidObjectStoreUrlError::UrlParseError)?
+            .try_into()
     }
 }
 
@@ -487,7 +518,7 @@ impl std::str::FromStr for ObjectStoreProvider {
 pub enum InvalidObjectStoreUrlError {
     /// The URL format is invalid.
     #[error(transparent)]
-    UrlParseError(#[from] url::ParseError),
+    UrlParseError(url::ParseError),
 
     /// The URL scheme is not supported by object stores.
     #[error("unsupported object store scheme: {scheme}")]

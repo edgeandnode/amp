@@ -46,7 +46,7 @@ pub struct Args {
 /// Returns [`Error`] for API errors (400/500) or network failures.
 #[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, status = ?status))]
 pub async fn run(Args { global, status }: Args) -> Result<(), Error> {
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     prune_jobs(&client, status.as_ref()).await?;
 
@@ -82,10 +82,7 @@ async fn prune_jobs(
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error for job pruning operations.
     #[error("failed to prune jobs")]

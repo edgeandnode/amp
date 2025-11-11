@@ -53,7 +53,7 @@ pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
 async fn get_manifest(global: &GlobalArgs, hash: &Hash) -> Result<String, Error> {
     tracing::debug!("Creating client and retrieving manifest");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let manifest_value = client
         .manifests()
@@ -87,10 +87,7 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from ManifestsClient
     #[error("client error")]
