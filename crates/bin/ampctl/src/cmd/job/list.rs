@@ -2,7 +2,7 @@
 //!
 //! Retrieves and displays all jobs with pagination support through the admin API by:
 //! 1. Creating a client for the admin API
-//! 2. Using the client's jobs list method with optional limit and pagination
+//! 2. Using the client's jobs list method with optional limit, pagination, and status filter
 //! 3. Displaying the jobs as JSON
 //!
 //! # Configuration
@@ -10,6 +10,7 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Limit: `--limit` flag (default: 50, max: 1000)
 //! - After: `--after` flag for cursor-based pagination
+//! - Status: `--status` flag (default: "active" for non-terminal jobs, can be "all" or comma-separated statuses)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use monitoring::logging;
@@ -30,6 +31,10 @@ pub struct Args {
     /// Job identifier to paginate after
     #[arg(long, short = 'a')]
     pub after: Option<JobId>,
+
+    /// Status filter: "active" (default, non-terminal jobs), "all" (all jobs), or comma-separated status values (e.g., "scheduled,running")
+    #[arg(long, short = 's', default_value = "active")]
+    pub status: String,
 }
 
 /// List all jobs by retrieving them from the admin API.
@@ -39,17 +44,18 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for API errors (400/500) or network failures.
-#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, limit = ?limit, after = ?after))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, limit = ?limit, after = ?after, status = %status))]
 pub async fn run(
     Args {
         global,
         limit,
         after,
+        status,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!("Retrieving jobs from admin API");
 
-    let jobs_response = get_jobs(&global, limit, after).await?;
+    let jobs_response = get_jobs(&global, limit, after, &status).await?;
 
     let json = serde_json::to_string_pretty(&jobs_response).map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize jobs to JSON");
@@ -68,13 +74,18 @@ async fn get_jobs(
     global: &GlobalArgs,
     limit: Option<usize>,
     after: Option<JobId>,
+    status: &str,
 ) -> Result<client::jobs::JobsResponse, Error> {
     let client = global.build_client().map_err(Error::ClientBuildError)?;
 
-    let jobs_response = client.jobs().list(limit, after).await.map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list jobs");
-        Error::ClientError { source: err }
-    })?;
+    let jobs_response = client
+        .jobs()
+        .list(limit, after, Some(status))
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list jobs");
+            Error::ClientError { source: err }
+        })?;
 
     Ok(jobs_response)
 }

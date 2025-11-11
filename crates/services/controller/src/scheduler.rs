@@ -263,8 +263,15 @@ impl SchedulerJobs for Scheduler {
         &self,
         limit: i64,
         last_id: Option<JobId>,
+        statuses: Option<&[JobStatus]>,
     ) -> Result<Vec<Job>, ListJobsError> {
-        let jobs = metadata_db::jobs::list(&self.metadata_db, limit, last_id)
+        let statuses = statuses.map(|statuses| {
+            statuses
+                .iter()
+                .map(|s| (*s).into())
+                .collect::<Vec<metadata_db::JobStatus>>()
+        });
+        let jobs = metadata_db::jobs::list(&self.metadata_db, limit, last_id, statuses.as_deref())
             .await
             .map_err(ListJobsError)?
             .into_iter()

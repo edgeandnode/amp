@@ -98,6 +98,19 @@ impl JobStatus {
     pub fn terminal_statuses() -> [JobStatus; 3] {
         [Self::Completed, Self::Stopped, Self::Failed]
     }
+
+    /// Returns an array of all non-terminal (active) job statuses
+    ///
+    /// These are the statuses that represent jobs still in progress
+    /// and should be monitored or managed.
+    pub fn non_terminal_statuses() -> [JobStatus; 4] {
+        [
+            Self::Scheduled,
+            Self::Running,
+            Self::StopRequested,
+            Self::Stopping,
+        ]
+    }
 }
 
 impl std::str::FromStr for JobStatus {

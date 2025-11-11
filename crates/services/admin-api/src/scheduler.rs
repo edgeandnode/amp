@@ -66,11 +66,16 @@ pub trait SchedulerJobs: Send + Sync {
     /// Get a job by its ID
     async fn get_job(&self, job_id: JobId) -> Result<Option<Job>, GetJobError>;
 
-    /// List jobs with cursor-based pagination
+    /// List jobs with cursor-based pagination, optionally filtered by status
+    ///
+    /// If `statuses` is `None`, all jobs are returned.
+    /// If `statuses` is `Some(&[])`, an empty array, all jobs are returned.
+    /// If `statuses` is `Some(&[status1, status2, ...])`, only jobs with those statuses are returned.
     async fn list_jobs(
         &self,
         limit: i64,
         last_id: Option<JobId>,
+        statuses: Option<&[JobStatus]>,
     ) -> Result<Vec<Job>, ListJobsError>;
 
     /// Delete a job if it's in a terminal state
