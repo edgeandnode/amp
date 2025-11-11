@@ -175,6 +175,7 @@ impl TestCtx {
         opts_mut.collector.file_lock_duration = Duration::from_millis(25);
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
+        opts_mut.compactor.algorithm.cooldown_duration = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
         let cache = self.cache.clone();
         let mut task = AmpCompactor::start(table, cache, &opts, None);
