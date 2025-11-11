@@ -127,6 +127,21 @@ impl Reference {
         // Parse the remainder as a standard reference
         parse_reference_parts(remainder).map_err(PurlParseError::Reference)
     }
+
+    /// Same as normal display, but hash revisions only show first 7 characters.
+    pub fn short_display(&self) -> String {
+        let rev = match self.revision() {
+            Revision::Hash(h) => h.as_str()[..7].to_string(),
+            rev => rev.to_string(),
+        };
+
+        format!(
+            "{}/{}@{}",
+            self.namespace().as_str(),
+            self.name().as_str(),
+            rev
+        )
+    }
 }
 
 impl std::fmt::Display for Reference {

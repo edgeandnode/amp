@@ -107,7 +107,7 @@ pub(super) async fn new(
             end_block,
             metrics,
         )
-        .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref))
+        .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref.short_display()))
         .await
     };
     Ok(fut)
