@@ -199,6 +199,102 @@ describe("AmpRegistryService", () => {
 
         expect(result._tag).toBe("Failure")
       }))
+
+    it.effect("should fail with RegistryApiError on network error (RequestError)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.fail(
+            new HttpClientError.RequestError({
+              request: req,
+              reason: "Transport",
+              description: "Connection refused",
+            }),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("NETWORK_ERROR")
+            expect(result.cause.error.message).toContain("registry")
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on response error (ResponseError)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.fail(
+            new HttpClientError.ResponseError({
+              request: req,
+              response: HttpClientResponse.fromWeb(
+                req,
+                new Response("Gateway Timeout", {
+                  status: 504,
+                }),
+              ),
+              reason: "StatusCode",
+              description: "Gateway timeout",
+            }),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("RESPONSE_ERROR")
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on schema validation error", ({ expect }) =>
+      Effect.gen(function*() {
+        // Return 200 but with invalid JSON structure (missing required fields)
+        const invalidDataset = {
+          namespace: "edgeandnode",
+          // Missing required fields like name, created_at, etc.
+        }
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(invalidDataset), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("SCHEMA_VALIDATION_ERROR")
+          }
+        }
+      }))
   })
 
   describe("publishDataset", () => {
@@ -302,6 +398,105 @@ describe("AmpRegistryService", () => {
 
         expect(result._tag).toBe("Failure")
       }))
+
+    it.effect("should fail with RegistryApiError on network error", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.fail(
+            new HttpClientError.RequestError({
+              request: req,
+              reason: "Transport",
+              description: "Failed to establish connection",
+            }),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
+          namespace: "edgeandnode",
+          name: "mainnet",
+          description: "Mainnet dataset",
+          keywords: [],
+          indexing_chains: ["mainnet"],
+          source: [],
+          visibility: "public",
+          version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
+            status: "published",
+            version_tag: "1.0.0",
+            manifest: mockManifest,
+            kind: "firehose",
+            ancestors: [],
+          }),
+        })
+
+        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage, insertDto))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("NETWORK_ERROR")
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on schema validation error in response", ({ expect }) =>
+      Effect.gen(function*() {
+        // Return 201 but with malformed dataset DTO (missing required fields)
+        const malformedDataset = {
+          namespace: "edgeandnode",
+          name: "mainnet",
+          // Missing required fields like created_at, updated_at, owner, etc.
+        }
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(malformedDataset), {
+                status: 201,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
+          namespace: "edgeandnode",
+          name: "mainnet",
+          description: "Mainnet dataset",
+          keywords: [],
+          indexing_chains: ["mainnet"],
+          source: [],
+          visibility: "public",
+          version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
+            status: "published",
+            version_tag: "1.0.0",
+            manifest: mockManifest,
+            kind: "firehose",
+            ancestors: [],
+          }),
+        })
+
+        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage, insertDto))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("SCHEMA_VALIDATION_ERROR")
+          }
+        }
+      }))
   })
 
   describe("publishVersion", () => {
@@ -383,6 +578,54 @@ describe("AmpRegistryService", () => {
         const result = yield* Effect.exit(service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto))
 
         expect(result._tag).toBe("Failure")
+      }))
+
+    // Note: Network error test omitted for publishVersion due to HttpBody.jsonSchema
+    // being called before client.execute. Network error handling is tested in getDataset and publishDataset.
+
+    it.effect("should fail with RegistryApiError on schema validation error in response", ({ expect }) =>
+      Effect.gen(function*() {
+        // Return 201 but with malformed version DTO (missing required fields)
+        const malformedVersion = {
+          version_tag: "1.1.0",
+          status: "published",
+          // Missing required fields like created_at, dataset_reference, ancestors, descendants
+        }
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(malformedVersion), {
+                status: 201,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const versionDto = AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
+          status: "published",
+          version_tag: "1.1.0",
+          manifest: mockManifest,
+          kind: "firehose",
+          ancestors: [],
+        })
+
+        const result = yield* Effect.exit(service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("SCHEMA_VALIDATION_ERROR")
+          }
+        }
       }))
   })
 

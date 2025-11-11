@@ -53,18 +53,44 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @param name - Dataset name
      * @returns Option.some(dataset) if found, Option.none() if not found
      */
-    const getDataset = (namespace: Model.DatasetNamespace, name: Model.DatasetName) =>
+    const getDataset = (
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+    ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
       HttpClientRequest.get(buildUrl(`api/v1/datasets/${namespace}/${name}`), { acceptJson: true }).pipe(
         client.execute,
-        Effect.flatMap((response) =>
-          Effect.if(response.status === 404, {
-            onTrue: () => Effect.succeed(Option.none<AmpRegistryDatasetDto>()),
-            onFalse: () =>
+        Effect.catchTag("RequestError", (error) =>
+          Effect.fail(
+            new RegistryApiError({
+              status: 0, // No HTTP status for network errors
+              errorCode: "NETWORK_ERROR",
+              message: `Failed to connect to registry: ${error.reason}`,
+            }),
+          )),
+        Effect.catchTag("ResponseError", (error) =>
+          Effect.fail(
+            new RegistryApiError({
+              status: 0,
+              errorCode: "RESPONSE_ERROR",
+              message: `Invalid response from registry: ${error.reason}`,
+            }),
+          )),
+        Effect.flatMap(
+          HttpClientResponse.matchStatus({
+            404: () => Effect.succeed(Option.none<AmpRegistryDatasetDto>()),
+            "2xx": (response) =>
               HttpClientResponse.schemaBodyJson(AmpRegistryDatasetDto)(response).pipe(
                 Effect.map(Option.some),
-                Effect.catchAll(() => parseRegistryError(response)),
+                Effect.mapError(() =>
+                  new RegistryApiError({
+                    status: response.status,
+                    errorCode: "SCHEMA_VALIDATION_ERROR",
+                    message: "Response schema validation failed",
+                  })
+                ),
               ),
-          })
+            orElse: (response) => parseRegistryError(response),
+          }),
         ),
       )
 
@@ -74,9 +100,20 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @param dto - Dataset data to publish
      * @returns Created dataset
      */
-    const publishDataset = (auth: Auth.AuthStorageSchema, dto: AmpRegistryInsertDatasetDto) =>
+    const publishDataset = (
+      auth: Auth.AuthStorageSchema,
+      dto: AmpRegistryInsertDatasetDto,
+    ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
       Effect.gen(function*() {
-        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetDto)(dto)
+        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetDto)(dto).pipe(
+          Effect.mapError((error) =>
+            new RegistryApiError({
+              status: 0,
+              errorCode: "REQUEST_BODY_ERROR",
+              message: `Failed to encode request body: ${error.reason}`,
+            })
+          ),
+        )
         return yield* HttpClientRequest.post(buildUrl("api/v1/owners/@me/datasets/publish"), {
           acceptJson: true,
           headers: {
@@ -86,18 +123,36 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
           HttpClientRequest.bearerToken(auth.accessToken),
           HttpClientRequest.setBody(body),
           client.execute,
-          Effect.flatMap((response) =>
-            response.status !== 201
-              ? parseRegistryError(response)
-              : HttpClientResponse.schemaBodyJson(AmpRegistryDatasetDto)(response).pipe(
-                Effect.mapError(() =>
-                  new RegistryApiError({
-                    status: response.status,
-                    errorCode: "SCHEMA_VALIDATION_ERROR",
-                    message: "Response schema validation failed",
-                  })
+          Effect.catchTag("RequestError", (error) =>
+            Effect.fail(
+              new RegistryApiError({
+                status: 0,
+                errorCode: "NETWORK_ERROR",
+                message: `Failed to connect to registry: ${error.reason}`,
+              }),
+            )),
+          Effect.catchTag("ResponseError", (error) =>
+            Effect.fail(
+              new RegistryApiError({
+                status: 0,
+                errorCode: "RESPONSE_ERROR",
+                message: `Invalid response from registry: ${error.reason}`,
+              }),
+            )),
+          Effect.flatMap(
+            HttpClientResponse.matchStatus({
+              "2xx": (response) =>
+                HttpClientResponse.schemaBodyJson(AmpRegistryDatasetDto)(response).pipe(
+                  Effect.mapError(() =>
+                    new RegistryApiError({
+                      status: response.status,
+                      errorCode: "SCHEMA_VALIDATION_ERROR",
+                      message: "Response schema validation failed",
+                    })
+                  ),
                 ),
-              )
+              orElse: (response) => parseRegistryError(response),
+            }),
           ),
         )
       })
@@ -115,9 +170,17 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       dto: AmpRegistryInsertDatasetVersionDto,
-    ) =>
+    ): Effect.Effect<AmpRegistryDatasetVersionDto, RegistryApiError, never> =>
       Effect.gen(function*() {
-        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetVersionDto)(dto)
+        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetVersionDto)(dto).pipe(
+          Effect.mapError((error) =>
+            new RegistryApiError({
+              status: 0,
+              errorCode: "REQUEST_BODY_ERROR",
+              message: `Failed to encode request body: ${error.reason}`,
+            })
+          ),
+        )
         return yield* HttpClientRequest.post(
           buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}/versions/publish`),
           {
@@ -130,18 +193,36 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
           HttpClientRequest.bearerToken(auth.accessToken),
           HttpClientRequest.setBody(body),
           client.execute,
-          Effect.flatMap((response) =>
-            response.status !== 201
-              ? parseRegistryError(response)
-              : HttpClientResponse.schemaBodyJson(AmpRegistryDatasetVersionDto)(response).pipe(
-                Effect.mapError(() =>
-                  new RegistryApiError({
-                    status: response.status,
-                    errorCode: "SCHEMA_VALIDATION_ERROR",
-                    message: "Response schema validation failed",
-                  })
+          Effect.catchTag("RequestError", (error) =>
+            Effect.fail(
+              new RegistryApiError({
+                status: 0,
+                errorCode: "NETWORK_ERROR",
+                message: `Failed to connect to registry: ${error.reason}`,
+              }),
+            )),
+          Effect.catchTag("ResponseError", (error) =>
+            Effect.fail(
+              new RegistryApiError({
+                status: 0,
+                errorCode: "RESPONSE_ERROR",
+                message: `Invalid response from registry: ${error.reason}`,
+              }),
+            )),
+          Effect.flatMap(
+            HttpClientResponse.matchStatus({
+              "2xx": (response) =>
+                HttpClientResponse.schemaBodyJson(AmpRegistryDatasetVersionDto)(response).pipe(
+                  Effect.mapError(() =>
+                    new RegistryApiError({
+                      status: response.status,
+                      errorCode: "SCHEMA_VALIDATION_ERROR",
+                      message: "Response schema validation failed",
+                    })
+                  ),
                 ),
-              )
+              orElse: (response) => parseRegistryError(response),
+            }),
           ),
         )
       })
