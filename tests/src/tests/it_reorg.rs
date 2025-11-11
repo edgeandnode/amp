@@ -104,12 +104,12 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
             numbers: 0..=2,
             network: "anvil".to_string(),
             hash: blocks1[2].hash,
-            prev_hash: Some(blocks1[0].parent_hash),
+            prev_hash: blocks1[0].parent_hash,
         }
     );
     assert_eq!(ranges[1].numbers, 3..=3);
     assert_eq!(&ranges[1].network, "anvil");
-    assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
+    assert_ne!(&ranges[1].prev_hash, &ranges[0].hash);
 }
 
 #[tokio::test]
@@ -595,7 +595,7 @@ impl ReorgTestCtx {
             numbers: numbers.clone(),
             network: "anvil".to_string(),
             hash: blocks[*numbers.end() as usize].hash,
-            prev_hash: Some(blocks[*numbers.start() as usize].parent_hash),
+            prev_hash: blocks[*numbers.start() as usize].parent_hash,
         }
     }
 }

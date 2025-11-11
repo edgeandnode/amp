@@ -37,7 +37,7 @@ fn create_test_ranges(start: u64, end: u64, network: &str) -> Vec<BlockRange> {
         numbers: start..=end,
         network: network.to_string(),
         hash: BlockHash::ZERO,
-        prev_hash: None,
+        prev_hash: BlockHash::ZERO,
     }]
 }
 

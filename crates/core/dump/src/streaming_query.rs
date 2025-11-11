@@ -483,7 +483,7 @@ impl StreamingQuery {
                 .blocks_table_fetch(
                     &fork_ctx,
                     block.number.saturating_sub(1),
-                    block.prev_hash.as_ref(),
+                    Some(&block.prev_hash),
                 )
                 .await?;
         }
@@ -537,15 +537,15 @@ impl StreamingQuery {
             debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
-        let get_hash_value = |column_name: &str| -> Option<BlockHash> {
+        let get_hash_value = |column_name: &str| -> BlockHash {
             let column =
                 as_fixed_size_binary_array(results.column_by_name(column_name).unwrap()).unwrap();
-            let bytes = column.iter().flatten().next();
-            bytes.map(|b| b.try_into().unwrap())
+            let bytes = column.iter().flatten().next().unwrap();
+            bytes.try_into().unwrap()
         };
         Ok(Some(BlockRow {
             number,
-            hash: get_hash_value("hash").unwrap(),
+            hash: get_hash_value("hash"),
             prev_hash: get_hash_value("parent_hash"),
         }))
     }
@@ -554,7 +554,7 @@ impl StreamingQuery {
 struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
-    prev_hash: Option<BlockHash>,
+    prev_hash: BlockHash,
 }
 
 impl BlockRow {

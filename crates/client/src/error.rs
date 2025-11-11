@@ -202,23 +202,23 @@ pub enum ValidationError {
         expected_start: BlockNum,
     },
 
-    /// Missing prev_hash for non-genesis block
+    /// Missing prev_hash for non-genesis block (zero hash detected)
     ///
-    /// This occurs when a BlockRange starting after block 0 does not include prev_hash.
+    /// This occurs when a BlockRange starting after block 0 has a zero hash for prev_hash.
     /// The prev_hash field is required for hash chain validation to ensure blockchain
     /// integrity for all blocks except genesis.
     ///
-    /// prev_hash is only omitted for blocks starting at 0 (genesis), regardless of
+    /// Zero hash is only valid for blocks starting at 0 (genesis), regardless of
     /// whether it's the first message or a reorg back to genesis.
-    #[error("missing prev_hash for network '{network}' at block {block}")]
+    #[error("missing prev_hash for network '{network}' at block {block} (zero hash detected)")]
     MissingPrevHash { network: String, block: BlockNum },
 
-    /// Invalid prev_hash for genesis block
+    /// Invalid prev_hash for genesis block (non-zero hash detected)
     ///
-    /// This occurs when a BlockRange starting at block 0 (genesis) includes a prev_hash.
-    /// Genesis blocks have no parent block and therefore cannot have a prev_hash, even
-    /// in the case of a reorg back to genesis.
-    #[error("genesis block cannot have prev_hash")]
+    /// This occurs when a BlockRange starting at block 0 has a non-zero hash for prev_hash.
+    /// Genesis blocks have no parent block and therefore must have a zero hash for
+    /// prev_hash, even in the case of a reorg back to genesis.
+    #[error("genesis block must have zero hash for prev_hash")]
     InvalidPrevHash,
 
     /// Hash chain mismatch on consecutive blocks
@@ -241,7 +241,7 @@ pub enum ValidationError {
     HashMismatchOnConsecutiveBlocks {
         network: String,
         expected_hash: alloy::primitives::BlockHash,
-        actual_prev_hash: Option<alloy::primitives::BlockHash>,
+        actual_prev_hash: alloy::primitives::BlockHash,
     },
 
     /// Invalid reorg semantics
