@@ -157,7 +157,8 @@ The generated manifest includes the complete schema definition with all tables a
 
 #### Registration and Deployment
 
-After generating a manifest, you need to register it with a namespace and version:
+After generating a manifest, you need to register it with a namespace and version. 
+Before registering  the dataset, the Admin API must be running with `cargo run -p ampd -- --config ./config.toml  controller` or analogous command.
 
 ```bash
 # Register the dataset (creates/updates dev tag)
