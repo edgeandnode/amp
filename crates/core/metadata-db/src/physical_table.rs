@@ -65,7 +65,9 @@ pub async fn get_by_id<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::get_by_id(exe, id.into()).await.map_err(Error::Database)
+    sql::get_by_id(exe, id.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// Get a physical table location with full writer job details

@@ -67,9 +67,7 @@ pub enum Error {
     /// - Invalid data representations that cannot be encoded
     /// - Buffer allocation failures during encoding
     #[error("error encoding message: {reason}")]
-    Encode {
-        reason: String,
-    },
+    Encode { reason: String },
 
     /// PostgreSQL type encoding not supported for this Arrow type
     ///
