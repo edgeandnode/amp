@@ -13,7 +13,7 @@
 use monitoring::logging;
 use worker::job::JobId;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `jobs stop` command.
 #[derive(Debug, clap::Args)]
@@ -23,6 +23,23 @@ pub struct Args {
 
     /// The job ID to stop
     pub id: JobId,
+}
+
+/// Result of a job stop operation.
+#[derive(serde::Serialize)]
+struct StopResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for StopResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Job {} stop requested",
+            console::style("✓").green().bold(),
+            self.job_id
+        )
+    }
 }
 
 /// Stop a job by requesting it to stop via the admin API.
@@ -39,12 +56,12 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
     client.jobs().stop(&id).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to stop job");
         match err {
-            client::jobs::StopError::NotFound(_) => Error::JobNotFound { id },
-            _ => Error::StopJobError { source: err },
+            crate::client::jobs::StopError::NotFound(_) => Error::JobNotFound { id },
+            _ => Error::StopJobError(err),
         }
     })?;
-
-    crate::success!("Job {} stop requested", id);
+    let result = StopResult { job_id: id };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -73,5 +90,9 @@ pub enum Error {
     /// Note: The stop operation is idempotent - stopping a job that's already
     /// in a terminal state (Stopped, Completed, Failed) returns success.
     #[error("failed to stop job")]
-    StopJobError { source: client::jobs::StopError },
+    StopJobError(#[source] crate::client::jobs::StopError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }

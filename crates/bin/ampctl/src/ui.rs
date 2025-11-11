@@ -4,7 +4,7 @@ use console::style;
 #[macro_export]
 macro_rules! success {
     ($($arg:tt)*) => {
-        println!("{} {}", console::style("✓").green().bold(), format!($($arg)*))
+        eprintln!("{} {}", console::style("✓").green().bold(), format!($($arg)*))
     };
 }
 
@@ -12,7 +12,7 @@ macro_rules! success {
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        println!("{} {}", console::style("→").cyan(), format!($($arg)*))
+        eprintln!("{} {}", console::style("→").cyan(), format!($($arg)*))
     };
 }
 
@@ -54,7 +54,7 @@ macro_rules! error {
 #[macro_export]
 macro_rules! detail {
     ($($arg:tt)*) => {
-        println!("  {}", console::style(format!($($arg)*)).dim())
+        eprintln!("  {}", console::style(format!($($arg)*)).dim())
     };
 }
 

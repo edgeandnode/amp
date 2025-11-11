@@ -21,9 +21,33 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
+/// Result wrapper for providers list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    providers: Vec<client::providers::ProviderInfo>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.providers.is_empty() {
+            writeln!(f, "No providers found")
+        } else {
+            writeln!(f, "Providers:")?;
+            for provider in &self.providers {
+                writeln!(
+                    f,
+                    "  {} ({}) - {}",
+                    provider.name, provider.kind, provider.network
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// List all providers by retrieving them from the admin API.
 ///
-/// Retrieves all provider configurations and displays them as JSON.
+/// Retrieves all provider configurations and displays them based on the output format.
 ///
 /// # Errors
 ///
@@ -33,12 +57,8 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving providers from admin API");
 
     let providers = get_providers(&global).await?;
-
-    let json = serde_json::to_string_pretty(&providers).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize providers to JSON");
-        Error::JsonFormattingError { source: err }
-    })?;
-    println!("{}", json);
+    let result = ListResult { providers };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -52,7 +72,7 @@ async fn get_providers(global: &GlobalArgs) -> Result<Vec<client::providers::Pro
 
     let providers = client.providers().list().await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list providers");
-        Error::ClientError { source: err }
+        Error::ClientError(err)
     })?;
 
     Ok(providers)
@@ -67,12 +87,9 @@ pub enum Error {
 
     /// Client error from the API
     #[error("client error")]
-    ClientError {
-        #[source]
-        source: client::providers::ListError,
-    },
+    ClientError(#[source] client::providers::ListError),
 
     /// Failed to format JSON for display
     #[error("failed to format providers JSON")]
-    JsonFormattingError { source: serde_json::Error },
+    JsonFormattingError(#[source] serde_json::Error),
 }

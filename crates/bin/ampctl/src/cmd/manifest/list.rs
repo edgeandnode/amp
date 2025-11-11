@@ -21,9 +21,34 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
+/// Result wrapper for manifests list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    manifests: Vec<client::manifests::ManifestSummary>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.manifests.is_empty() {
+            writeln!(f, "No manifests found")
+        } else {
+            writeln!(f, "Manifests:")?;
+            for manifest in &self.manifests {
+                let dataset_text = if manifest.dataset_count == 1 {
+                    "1 dataset"
+                } else {
+                    &format!("{} datasets", manifest.dataset_count)
+                };
+                writeln!(f, "  {} - {}", manifest.hash, dataset_text)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// List all manifests by retrieving them from the admin API.
 ///
-/// Retrieves all manifests and displays them as JSON.
+/// Retrieves all manifests and displays them based on the output format.
 ///
 /// # Errors
 ///
@@ -33,12 +58,10 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving manifests from admin API");
 
     let manifests_response = get_manifests(&global).await?;
-
-    let json = serde_json::to_string_pretty(&manifests_response).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize manifests to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = ListResult {
+        manifests: manifests_response.manifests,
+    };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -67,7 +90,7 @@ pub enum Error {
 
     /// Client error from the API
     #[error("client error")]
-    ClientError(#[source] client::manifests::ListAllError),
+    ClientError(#[source] crate::client::manifests::ListAllError),
 
     /// Failed to format JSON for display
     #[error("failed to format manifests JSON")]

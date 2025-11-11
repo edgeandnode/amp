@@ -13,13 +13,30 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use crate::{args::GlobalArgs, client::manifests::PruneError};
+use crate::{args::GlobalArgs, client};
 
 /// Command-line arguments for the `manifest prune` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
     #[command(flatten)]
     pub global: GlobalArgs,
+}
+
+/// Result of a manifest pruning operation.
+#[derive(serde::Serialize)]
+struct PruneResult {
+    deleted_count: usize,
+}
+
+impl std::fmt::Display for PruneResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Pruned {} orphaned manifest(s)",
+            console::style("✓").green().bold(),
+            self.deleted_count
+        )
+    }
 }
 
 /// Prune all orphaned manifests via the admin API.
@@ -34,8 +51,8 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Pruning orphaned manifests via admin API");
 
     let deleted_count = prune_manifests(&global).await?;
-
-    crate::success!("Pruned {} orphaned manifest(s)", deleted_count);
+    let result = PruneResult { deleted_count };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -49,11 +66,13 @@ async fn prune_manifests(global: &GlobalArgs) -> Result<usize, Error> {
 
     let response = match client.manifests().prune().await {
         Ok(response) => response,
-        Err(err @ PruneError::ListOrphanedManifestsError(_)) => {
+        Err(err @ client::manifests::PruneError::ListOrphanedManifestsError(_)) => {
             return Err(Error::ListOrphanedManifestsError(err));
         }
-        Err(err @ PruneError::Network { .. }) => return Err(Error::Network(err)),
-        Err(err @ PruneError::UnexpectedResponse { .. }) => {
+        Err(err @ client::manifests::PruneError::Network { .. }) => {
+            return Err(Error::Network(err));
+        }
+        Err(err @ client::manifests::PruneError::UnexpectedResponse { .. }) => {
             return Err(Error::UnexpectedResponse(err));
         }
     };
@@ -76,7 +95,7 @@ pub enum Error {
     /// - Database permissions prevent the query operation
     /// - SQL execution errors during the orphaned manifest lookup
     #[error("list orphaned manifests error")]
-    ListOrphanedManifestsError(#[source] PruneError),
+    ListOrphanedManifestsError(#[source] crate::client::manifests::PruneError),
 
     /// Network or connection error communicating with admin API
     ///
@@ -86,7 +105,7 @@ pub enum Error {
     /// - DNS resolution fails for the admin URL
     /// - TLS/SSL connection issues
     #[error("network error")]
-    Network(#[source] PruneError),
+    Network(#[source] crate::client::manifests::PruneError),
 
     /// Unexpected response from the admin API
     ///
@@ -96,5 +115,9 @@ pub enum Error {
     /// - API responds with an error not covered by specific error cases
     /// - Server returns malformed or incomplete response
     #[error("unexpected response")]
-    UnexpectedResponse(#[source] PruneError),
+    UnexpectedResponse(#[source] crate::client::manifests::PruneError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }

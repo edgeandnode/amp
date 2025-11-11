@@ -66,6 +66,23 @@ pub struct Args {
     pub worker_id: Option<NodeId>,
 }
 
+/// Result of a dataset deployment operation.
+#[derive(serde::Serialize)]
+struct DeployResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for DeployResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Dataset deployed successfully",
+            console::style("✓").green().bold()
+        )?;
+        writeln!(f, "{} Job ID: {}", console::style("→").cyan(), self.job_id)
+    }
+}
+
 /// Deploy a dataset to start syncing blockchain data.
 ///
 /// Schedules a deployment job via the admin API and returns the job ID.
@@ -92,9 +109,8 @@ pub async fn run(
     );
 
     let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism, worker_id).await?;
-
-    crate::success!("Dataset deployed successfully");
-    crate::info!("Job ID: {}", job_id);
+    let result = DeployResult { job_id };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -116,7 +132,7 @@ async fn deploy_dataset(
         .datasets()
         .deploy(dataset_ref, end_block, parallelism, worker_id)
         .await
-        .map_err(|source| Error::Deploy { source })?;
+        .map_err(Error::Deploy)?;
 
     Ok(job_id)
 }
@@ -130,8 +146,9 @@ pub enum Error {
 
     /// Deployment error from the client
     #[error("deployment failed")]
-    Deploy {
-        #[source]
-        source: crate::client::datasets::DeployError,
-    },
+    Deploy(#[source] crate::client::datasets::DeployError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }
