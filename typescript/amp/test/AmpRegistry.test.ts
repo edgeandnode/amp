@@ -38,12 +38,12 @@ const mockDatasetDto = AmpRegistry.AmpRegistryDatasetDto.make({
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
   description: "Mainnet dataset",
-  indexing_chains: ["mainnet"],
+  indexing_chains: [], // Empty to match mockManifest's empty tables
   keywords: ["ethereum", "mainnet"],
   license: "MIT",
   readme: "# Mainnet Dataset",
   repository_url: new URL("https://github.com/edgeandnode/mainnet"),
-  source: ["firehose"],
+  source: [], // Empty to match publishFlow's derived source
   visibility: "public",
   owner: "0x04913E13A937cf63Fad3786FEE42b3d44dA558aA",
   dataset_reference: "edgeandnode/mainnet@latest",
@@ -286,6 +286,161 @@ describe("AmpRegistryService", () => {
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("SCHEMA_VALIDATION_ERROR")
+          }
+        }
+      }))
+  })
+
+  describe("getOwnedDataset", () => {
+    it.effect("should return Option.some when owned dataset exists (200)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) => {
+          // Verify bearer token is sent
+          expect(req.headers.authorization).toBe("Bearer test-access-token")
+          expect(req.url).toContain("owners/@me/datasets")
+
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(mockDatasetDto), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        })
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet")
+
+        expect(Option.isSome(result)).toBe(true)
+        if (Option.isSome(result)) {
+          expect(result.value.namespace).toBe("edgeandnode")
+          expect(result.value.name).toBe("mainnet")
+        }
+      }))
+
+    it.effect("should return Option.none when dataset not found (404)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response("Not Found", {
+                status: 404,
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* service.getOwnedDataset(mockAuthStorage, "edgeandnode", "nonexistent")
+
+        expect(Option.isNone(result)).toBe(true)
+      }))
+
+    it.effect("should fail with RegistryApiError on unauthorized (401)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(
+                JSON.stringify(
+                  AmpRegistry.AmpRegistryErrorResponseDto.make({
+                    error_code: "UNAUTHORIZED",
+                    error_message: "Invalid or missing authentication token",
+                    request_id: "req-401",
+                  }),
+                ),
+                {
+                  status: 401,
+                  headers: { "Content-Type": "application/json" },
+                },
+              ),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.status).toBe(401)
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on network error", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.fail(
+            new HttpClientError.RequestError({
+              request: req,
+              reason: "Transport",
+              description: "Connection refused",
+            }),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("NETWORK_ERROR")
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on schema validation error", ({ expect }) =>
+      Effect.gen(function*() {
+        // Return 200 but with invalid JSON structure (missing required fields)
+        const invalidDataset = {
+          namespace: "edgeandnode",
+          // Missing required fields
+        }
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(invalidDataset), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -618,6 +773,220 @@ describe("AmpRegistryService", () => {
         })
 
         const result = yield* Effect.exit(service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto))
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("SCHEMA_VALIDATION_ERROR")
+          }
+        }
+      }))
+  })
+
+  describe("updateDatasetMetadata", () => {
+    it.effect("should update dataset metadata successfully (200)", ({ expect }) =>
+      Effect.gen(function*() {
+        const updatedDataset = AmpRegistry.AmpRegistryDatasetDto.make({
+          ...mockDatasetDto,
+          description: "Updated description",
+          keywords: ["ethereum", "mainnet", "updated"],
+        })
+
+        const mockHttpClient = createMockHttpClient((req) => {
+          // Verify request has Bearer token and correct method
+          expect(req.headers.authorization).toBe("Bearer test-access-token")
+          expect(req.method).toBe("PUT")
+          expect(req.url).toContain("edgeandnode/mainnet")
+
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(updatedDataset), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        })
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
+          indexing_chains: ["mainnet"],
+          description: "Updated description",
+          keywords: ["ethereum", "mainnet", "updated"],
+        })
+
+        const result = yield* service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto)
+
+        expect(result.namespace).toBe("edgeandnode")
+        expect(result.name).toBe("mainnet")
+        expect(result.description).toBe("Updated description")
+        expect(result.keywords).toEqual(["ethereum", "mainnet", "updated"])
+      }))
+
+    it.effect("should fail with RegistryApiError on forbidden (403)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(
+                JSON.stringify(
+                  AmpRegistry.AmpRegistryErrorResponseDto.make({
+                    error_code: "FORBIDDEN",
+                    error_message: "You do not own this dataset",
+                    request_id: "req-update-403",
+                  }),
+                ),
+                {
+                  status: 403,
+                  headers: { "Content-Type": "application/json" },
+                },
+              ),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
+          indexing_chains: ["mainnet"],
+          description: "Updated description",
+        })
+
+        const result = yield* Effect.exit(
+          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+        )
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.status).toBe(403)
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on dataset not found (404)", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(
+                JSON.stringify(
+                  AmpRegistry.AmpRegistryErrorResponseDto.make({
+                    error_code: "DATASET_NOT_FOUND",
+                    error_message: "Dataset not found",
+                    request_id: "req-update-404",
+                  }),
+                ),
+                {
+                  status: 404,
+                  headers: { "Content-Type": "application/json" },
+                },
+              ),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
+          indexing_chains: ["mainnet"],
+        })
+
+        const result = yield* Effect.exit(
+          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "nonexistent", updateDto),
+        )
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.status).toBe(404)
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on network error", ({ expect }) =>
+      Effect.gen(function*() {
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.fail(
+            new HttpClientError.RequestError({
+              request: req,
+              reason: "Transport",
+              description: "Failed to establish connection",
+            }),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
+          indexing_chains: ["mainnet"],
+        })
+
+        const result = yield* Effect.exit(
+          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+        )
+
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure" && result.cause._tag === "Fail") {
+          expect(result.cause.error).toBeInstanceOf(AmpRegistry.RegistryApiError)
+          if (result.cause.error instanceof AmpRegistry.RegistryApiError) {
+            expect(result.cause.error.errorCode).toBe("NETWORK_ERROR")
+          }
+        }
+      }))
+
+    it.effect("should fail with RegistryApiError on schema validation error in response", ({ expect }) =>
+      Effect.gen(function*() {
+        // Return 200 but with malformed dataset DTO (missing required fields)
+        const malformedDataset = {
+          namespace: "edgeandnode",
+          name: "mainnet",
+          // Missing required fields like created_at, updated_at, owner, etc.
+        }
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              req,
+              new Response(JSON.stringify(malformedDataset), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+          )
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
+          indexing_chains: ["mainnet"],
+        })
+
+        const result = yield* Effect.exit(
+          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -1071,6 +1440,405 @@ describe("AmpRegistryService", () => {
         // Defaults for visibility ("public") and status ("published") are applied internally
         expect(result.namespace).toBe("edgeandnode")
         expect(result.name).toBe("test")
+        expect(result.revision).toBe("1.0.0")
+      }))
+
+    it.effect("should update metadata when publishing version if metadata changed", ({ expect }) =>
+      Effect.gen(function*() {
+        let getDatasetCalled = false
+        let publishVersionCalled = false
+        let updateMetadataCalled = false
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.gen(function*() {
+            // GET /api/v1/datasets/{namespace}/{name} - dataset exists with old description
+            if (req.method === "GET" && req.url.includes("/datasets/")) {
+              getDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(
+                  JSON.stringify(
+                    AmpRegistry.AmpRegistryDatasetDto.make({
+                      ...mockDatasetDto,
+                      description: "Old description",
+                    }),
+                  ),
+                  {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                  },
+                ),
+              )
+            }
+
+            // POST /api/v1/owners/@me/datasets/{namespace}/{name}/versions/publish
+            if (req.method === "POST" && req.url.includes("/versions/publish")) {
+              publishVersionCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockNewVersionDto), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // PUT /api/v1/owners/@me/datasets/{namespace}/{name} - update metadata
+            if (req.method === "PUT" && req.url.includes("/datasets/edgeandnode/mainnet")) {
+              updateMetadataCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(
+                  JSON.stringify(
+                    AmpRegistry.AmpRegistryDatasetDto.make({
+                      ...mockDatasetDto,
+                      description: "Mainnet dataset",
+                    }),
+                  ),
+                  {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                  },
+                ),
+              )
+            }
+
+            return yield* Effect.fail(
+              new HttpClientError.RequestError({
+                request: req,
+                reason: "InvalidUrl",
+                description: `Unexpected request: ${req.method} ${req.url}`,
+              }),
+            )
+          })
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const result = yield* service.publishFlow({
+          auth: mockAuthStorage,
+          context: mockManifestContext,
+          versionTag: "1.1.0",
+          changelog: "Updated features",
+        })
+
+        expect(getDatasetCalled).toBe(true)
+        expect(publishVersionCalled).toBe(true)
+        expect(updateMetadataCalled).toBe(true)
+        expect(result.namespace).toBe("edgeandnode")
+        expect(result.name).toBe("mainnet")
+        expect(result.revision).toBe("1.1.0")
+      }))
+
+    it.effect("should NOT update metadata when publishing version if metadata unchanged", ({ expect }) =>
+      Effect.gen(function*() {
+        let getDatasetCalled = false
+        let publishVersionCalled = false
+        let updateMetadataCalled = false
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.gen(function*() {
+            // GET /api/v1/datasets/{namespace}/{name} - dataset exists with same metadata
+            if (req.method === "GET" && req.url.includes("/datasets/")) {
+              getDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockDatasetDto), {
+                  status: 200,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // POST /api/v1/owners/@me/datasets/{namespace}/{name}/versions/publish
+            if (req.method === "POST" && req.url.includes("/versions/publish")) {
+              publishVersionCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockNewVersionDto), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // PUT /api/v1/owners/@me/datasets/{namespace}/{name} - should NOT be called
+            if (req.method === "PUT") {
+              updateMetadataCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response("Should not be called", {
+                  status: 500,
+                }),
+              )
+            }
+
+            return yield* Effect.fail(
+              new HttpClientError.RequestError({
+                request: req,
+                reason: "InvalidUrl",
+                description: `Unexpected request: ${req.method} ${req.url}`,
+              }),
+            )
+          })
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const result = yield* service.publishFlow({
+          auth: mockAuthStorage,
+          context: mockManifestContext,
+          versionTag: "1.1.0",
+          changelog: "Updated features",
+        })
+
+        expect(getDatasetCalled).toBe(true)
+        expect(publishVersionCalled).toBe(true)
+        expect(updateMetadataCalled).toBe(false)
+        expect(result.namespace).toBe("edgeandnode")
+        expect(result.name).toBe("mainnet")
+        expect(result.revision).toBe("1.1.0")
+      }))
+
+    it.effect("should update metadata when keywords change from empty to populated", ({ expect }) =>
+      Effect.gen(function*() {
+        let updateMetadataCalled = false
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.gen(function*() {
+            // GET - dataset exists with no keywords
+            if (req.method === "GET" && req.url.includes("/datasets/")) {
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(
+                  JSON.stringify(
+                    AmpRegistry.AmpRegistryDatasetDto.make({
+                      ...mockDatasetDto,
+                      keywords: undefined, // Use undefined instead of null
+                    }),
+                  ),
+                  {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                  },
+                ),
+              )
+            }
+
+            // POST - version publish
+            if (req.method === "POST" && req.url.includes("/versions/publish")) {
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockNewVersionDto), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // PUT - metadata update should be called
+            if (req.method === "PUT") {
+              updateMetadataCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockDatasetDto), {
+                  status: 200,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            return yield* Effect.fail(
+              new HttpClientError.RequestError({
+                request: req,
+                reason: "InvalidUrl",
+                description: `Unexpected request: ${req.method} ${req.url}`,
+              }),
+            )
+          })
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const result = yield* service.publishFlow({
+          auth: mockAuthStorage,
+          context: mockManifestContext, // Has keywords: ["ethereum", "mainnet"]
+          versionTag: "1.1.0",
+        })
+
+        expect(updateMetadataCalled).toBe(true)
+        expect(result.revision).toBe("1.1.0")
+      }))
+
+    it.effect("should publish version to existing private dataset", ({ expect }) =>
+      Effect.gen(function*() {
+        let getDatasetCalled = false
+        let getOwnedDatasetCalled = false
+        let publishVersionCalled = false
+        let publishDatasetCalled = false
+
+        const privateDataset = AmpRegistry.AmpRegistryDatasetDto.make({
+          ...mockDatasetDto,
+          visibility: "private",
+        })
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.gen(function*() {
+            // GET /api/v1/datasets/{namespace}/{name} - returns 404 (private dataset)
+            if (req.method === "GET" && !req.url.includes("@me")) {
+              getDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response("Not Found", {
+                  status: 404,
+                }),
+              )
+            }
+
+            // GET /api/v1/owners/@me/datasets/{namespace}/{name} - returns private dataset
+            if (req.method === "GET" && req.url.includes("@me")) {
+              getOwnedDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(privateDataset), {
+                  status: 200,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // POST /api/v1/owners/@me/datasets/{namespace}/{name}/versions/publish
+            if (req.method === "POST" && req.url.includes("/versions/publish")) {
+              publishVersionCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockNewVersionDto), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            // POST /api/v1/owners/@me/datasets/publish - should NOT be called
+            if (req.method === "POST" && req.url.includes("/datasets/publish")) {
+              publishDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response("Should not be called", {
+                  status: 500,
+                }),
+              )
+            }
+
+            return yield* Effect.fail(
+              new HttpClientError.RequestError({
+                request: req,
+                reason: "InvalidUrl",
+                description: `Unexpected request: ${req.method} ${req.url}`,
+              }),
+            )
+          })
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const result = yield* service.publishFlow({
+          auth: mockAuthStorage,
+          context: mockManifestContext,
+          versionTag: "1.1.0",
+          changelog: "New version for private dataset",
+        })
+
+        expect(getDatasetCalled).toBe(true)
+        expect(getOwnedDatasetCalled).toBe(true)
+        expect(publishVersionCalled).toBe(true)
+        expect(publishDatasetCalled).toBe(false)
+        expect(result.namespace).toBe("edgeandnode")
+        expect(result.name).toBe("mainnet")
+        expect(result.revision).toBe("1.1.0")
+      }))
+
+    it.effect("should create new dataset when both public and private checks return 404", ({ expect }) =>
+      Effect.gen(function*() {
+        let getDatasetCalled = false
+        let getOwnedDatasetCalled = false
+        let publishDatasetCalled = false
+
+        const mockHttpClient = createMockHttpClient((req) =>
+          Effect.gen(function*() {
+            // GET /api/v1/datasets/{namespace}/{name} - returns 404
+            if (req.method === "GET" && !req.url.includes("@me")) {
+              getDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response("Not Found", {
+                  status: 404,
+                }),
+              )
+            }
+
+            // GET /api/v1/owners/@me/datasets/{namespace}/{name} - returns 404
+            if (req.method === "GET" && req.url.includes("@me")) {
+              getOwnedDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response("Not Found", {
+                  status: 404,
+                }),
+              )
+            }
+
+            // POST /api/v1/owners/@me/datasets/publish - creates new dataset
+            if (req.method === "POST" && req.url.includes("/datasets/publish")) {
+              publishDatasetCalled = true
+              return HttpClientResponse.fromWeb(
+                req,
+                new Response(JSON.stringify(mockDatasetDto), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+            }
+
+            return yield* Effect.fail(
+              new HttpClientError.RequestError({
+                request: req,
+                reason: "InvalidUrl",
+                description: `Unexpected request: ${req.method} ${req.url}`,
+              }),
+            )
+          })
+        )
+
+        const MockHttpClientLayer = Layer.succeed(HttpClient.HttpClient, mockHttpClient)
+        const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
+
+        const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
+
+        const result = yield* service.publishFlow({
+          auth: mockAuthStorage,
+          context: mockManifestContext,
+          versionTag: "1.0.0",
+          changelog: "Initial release",
+        })
+
+        expect(getDatasetCalled).toBe(true)
+        expect(getOwnedDatasetCalled).toBe(true)
+        expect(publishDatasetCalled).toBe(true)
+        expect(result.namespace).toBe("edgeandnode")
+        expect(result.name).toBe("mainnet")
         expect(result.revision).toBe("1.0.0")
       }))
   })

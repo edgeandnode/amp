@@ -1,6 +1,7 @@
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpBody from "@effect/platform/HttpBody"
 import * as HttpClient from "@effect/platform/HttpClient"
+import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as Array from "effect/Array"
@@ -22,8 +23,11 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     // Helper to build URL
     const buildUrl = (path: string) => new URL(path, AMP_REGISTRY_API_URL_BASE).toString()
 
+    // Helper type for parsed registry errors (never succeeds, always fails with RegistryApiError)
+    type ParsedRegistryError = Effect.Effect<never, RegistryApiError, never>
+
     // Helper to parse registry error responses into RegistryApiError
-    const parseRegistryError = (response: HttpClientResponse.HttpClientResponse) =>
+    const parseRegistryError = (response: HttpClientResponse.HttpClientResponse): ParsedRegistryError =>
       response.json.pipe(
         Effect.flatMap(Schema.decodeUnknown(AmpRegistryErrorResponseDto)),
         Effect.flatMap((err) =>
@@ -47,22 +51,13 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         ),
       )
 
-    /**
-     * Get a dataset by namespace and name
-     * @param namespace - Dataset namespace
-     * @param name - Dataset name
-     * @returns Option.some(dataset) if found, Option.none() if not found
-     */
-    const getDataset = (
-      namespace: Model.DatasetNamespace,
-      name: Model.DatasetName,
-    ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
-      HttpClientRequest.get(buildUrl(`api/v1/datasets/${namespace}/${name}`), { acceptJson: true }).pipe(
-        client.execute,
+    // Helper for standard network/response error handling
+    const handleHttpClientErrors = <A, R>(effect: Effect.Effect<A, HttpClientError.HttpClientError, R>) =>
+      effect.pipe(
         Effect.catchTag("RequestError", (error) =>
           Effect.fail(
             new RegistryApiError({
-              status: 0, // No HTTP status for network errors
+              status: 0,
               errorCode: "NETWORK_ERROR",
               message: `Failed to connect to registry: ${error.reason}`,
             }),
@@ -75,11 +70,28 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
               message: `Invalid response from registry: ${error.reason}`,
             }),
           )),
+      )
+
+    // Helper for GET requests that return Option (404 -> None)
+    const getRequest = <A, I>(
+      url: string,
+      responseSchema: Schema.Schema<A, I, never>,
+      auth?: Auth.AuthStorageSchema,
+    ): Effect.Effect<Option.Option<A>, RegistryApiError, never> => {
+      const request = HttpClientRequest.get(url, { acceptJson: true })
+      const authenticatedRequest = auth
+        ? request.pipe(HttpClientRequest.bearerToken(auth.accessToken))
+        : request
+
+      return authenticatedRequest.pipe(
+        client.execute,
+        handleHttpClientErrors,
         Effect.flatMap(
           HttpClientResponse.matchStatus({
-            404: () => Effect.succeed(Option.none<AmpRegistryDatasetDto>()),
+            404: () => Effect.succeed(Option.none<A>()),
+            ...(auth ? { 401: (response) => parseRegistryError(response) } : {}),
             "2xx": (response) =>
-              HttpClientResponse.schemaBodyJson(AmpRegistryDatasetDto)(response).pipe(
+              HttpClientResponse.schemaBodyJson(responseSchema)(response).pipe(
                 Effect.map(Option.some),
                 Effect.mapError(() =>
                   new RegistryApiError({
@@ -92,20 +104,20 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
             orElse: (response) => parseRegistryError(response),
           }),
         ),
-      )
+      ) as Effect.Effect<Option.Option<A>, RegistryApiError, never>
+    }
 
-    /**
-     * Publish a new dataset
-     * @param auth - Authenticated user's auth storage
-     * @param dto - Dataset data to publish
-     * @returns Created dataset
-     */
-    const publishDataset = (
+    // Helper for authenticated POST/PUT requests with body
+    const makeAuthenticatedRequest = <A, AE, I, IE>(
+      method: "POST" | "PUT",
+      url: string,
       auth: Auth.AuthStorageSchema,
-      dto: AmpRegistryInsertDatasetDto,
-    ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
+      bodySchema: Schema.Schema<I, IE, never>,
+      body: I,
+      responseSchema: Schema.Schema<A, AE, never>,
+    ): Effect.Effect<A, RegistryApiError, never> =>
       Effect.gen(function*() {
-        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetDto)(dto).pipe(
+        const encodedBody = yield* HttpBody.jsonSchema(bodySchema)(body).pipe(
           Effect.mapError((error) =>
             new RegistryApiError({
               status: 0,
@@ -114,35 +126,26 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
             })
           ),
         )
-        return yield* HttpClientRequest.post(buildUrl("api/v1/owners/@me/datasets/publish"), {
-          acceptJson: true,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }).pipe(
+
+        const request = method === "POST"
+          ? HttpClientRequest.post(url, {
+            acceptJson: true,
+            headers: { "Content-Type": "application/json" },
+          })
+          : HttpClientRequest.put(url, {
+            acceptJson: true,
+            headers: { "Content-Type": "application/json" },
+          })
+
+        return yield* request.pipe(
           HttpClientRequest.bearerToken(auth.accessToken),
-          HttpClientRequest.setBody(body),
+          HttpClientRequest.setBody(encodedBody),
           client.execute,
-          Effect.catchTag("RequestError", (error) =>
-            Effect.fail(
-              new RegistryApiError({
-                status: 0,
-                errorCode: "NETWORK_ERROR",
-                message: `Failed to connect to registry: ${error.reason}`,
-              }),
-            )),
-          Effect.catchTag("ResponseError", (error) =>
-            Effect.fail(
-              new RegistryApiError({
-                status: 0,
-                errorCode: "RESPONSE_ERROR",
-                message: `Invalid response from registry: ${error.reason}`,
-              }),
-            )),
+          handleHttpClientErrors,
           Effect.flatMap(
             HttpClientResponse.matchStatus({
               "2xx": (response) =>
-                HttpClientResponse.schemaBodyJson(AmpRegistryDatasetDto)(response).pipe(
+                HttpClientResponse.schemaBodyJson(responseSchema)(response).pipe(
                   Effect.mapError(() =>
                     new RegistryApiError({
                       status: response.status,
@@ -158,6 +161,72 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       })
 
     /**
+     * Get a dataset by namespace and name
+     * @param namespace - Dataset namespace
+     * @param name - Dataset name
+     * @returns Option.some(dataset) if found, Option.none() if not found
+     */
+    const getDataset = (
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+    ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
+      getRequest(buildUrl(`api/v1/datasets/${namespace}/${name}`), AmpRegistryDatasetDto)
+
+    /**
+     * Get a dataset owned by the authenticated user (including private datasets)
+     * @param auth - Authenticated user's auth storage
+     * @param namespace - Dataset namespace
+     * @param name - Dataset name
+     * @returns Option.some(dataset) if found, Option.none() if not found
+     */
+    const getOwnedDataset = (
+      auth: Auth.AuthStorageSchema,
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+    ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
+      getRequest(buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}`), AmpRegistryDatasetDto, auth)
+
+    /**
+     * Get dataset by trying public endpoint first, then owned endpoint as fallback
+     * @param auth - Auth for owned dataset lookup
+     * @param namespace - Dataset namespace
+     * @param name - Dataset name
+     * @returns Option of dataset from either endpoint
+     */
+    const getDatasetWithFallback = (
+      auth: Auth.AuthStorageSchema,
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+    ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
+      getDataset(namespace, name).pipe(
+        Effect.flatMap((publicResult) =>
+          Option.match(publicResult, {
+            onSome: (dataset) => Effect.succeed(Option.some(dataset)),
+            onNone: () => getOwnedDataset(auth, namespace, name),
+          })
+        ),
+      )
+
+    /**
+     * Publish a new dataset
+     * @param auth - Authenticated user's auth storage
+     * @param dto - Dataset data to publish
+     * @returns Created dataset
+     */
+    const publishDataset = (
+      auth: Auth.AuthStorageSchema,
+      dto: AmpRegistryInsertDatasetDto,
+    ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
+      makeAuthenticatedRequest(
+        "POST",
+        buildUrl("api/v1/owners/@me/datasets/publish"),
+        auth,
+        AmpRegistryInsertDatasetDto,
+        dto,
+        AmpRegistryDatasetDto,
+      )
+
+    /**
      * Publish a new version to an existing dataset
      * @param auth - Authenticated user's auth storage
      * @param namespace - Dataset namespace
@@ -171,60 +240,94 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       name: Model.DatasetName,
       dto: AmpRegistryInsertDatasetVersionDto,
     ): Effect.Effect<AmpRegistryDatasetVersionDto, RegistryApiError, never> =>
+      makeAuthenticatedRequest(
+        "POST",
+        buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}/versions/publish`),
+        auth,
+        AmpRegistryInsertDatasetVersionDto,
+        dto,
+        AmpRegistryDatasetVersionDto,
+      )
+
+    /**
+     * Update mutable metadata fields on an existing dataset
+     * @param auth - Authenticated user's auth storage
+     * @param namespace - Dataset namespace
+     * @param name - Dataset name
+     * @param dto - Metadata update data
+     * @returns Updated dataset
+     */
+    const updateDatasetMetadata = (
+      auth: Auth.AuthStorageSchema,
+      namespace: Model.DatasetNamespace,
+      name: Model.DatasetName,
+      dto: AmpRegistryUpdateDatasetMetadataDto,
+    ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
+      makeAuthenticatedRequest(
+        "PUT",
+        buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}`),
+        auth,
+        AmpRegistryUpdateDatasetMetadataDto,
+        dto,
+        AmpRegistryDatasetDto,
+      )
+
+    /**
+     * Check if metadata has changed between existing dataset and new metadata
+     * @param dataset - Existing dataset from registry
+     * @param metadata - New metadata from context
+     * @param indexingChains - New indexing chains derived from manifest
+     * @param source - New source references
+     * @returns Effect that succeeds with true if any metadata field has changed
+     */
+    const hasMetadataChanged = (
+      dataset: AmpRegistryDatasetDto,
+      metadata: ManifestContext.DatasetContext["metadata"],
+      indexingChains: ReadonlyArray<string>,
+      source: ReadonlyArray<string>,
+    ): Effect.Effect<boolean, never, never> =>
       Effect.gen(function*() {
-        const body = yield* HttpBody.jsonSchema(AmpRegistryInsertDatasetVersionDto)(dto).pipe(
-          Effect.mapError((error) =>
-            new RegistryApiError({
-              status: 0,
-              errorCode: "REQUEST_BODY_ERROR",
-              message: `Failed to encode request body: ${error.reason}`,
-            })
-          ),
-        )
-        return yield* HttpClientRequest.post(
-          buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}/versions/publish`),
-          {
-            acceptJson: true,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        ).pipe(
-          HttpClientRequest.bearerToken(auth.accessToken),
-          HttpClientRequest.setBody(body),
-          client.execute,
-          Effect.catchTag("RequestError", (error) =>
-            Effect.fail(
-              new RegistryApiError({
-                status: 0,
-                errorCode: "NETWORK_ERROR",
-                message: `Failed to connect to registry: ${error.reason}`,
-              }),
-            )),
-          Effect.catchTag("ResponseError", (error) =>
-            Effect.fail(
-              new RegistryApiError({
-                status: 0,
-                errorCode: "RESPONSE_ERROR",
-                message: `Invalid response from registry: ${error.reason}`,
-              }),
-            )),
-          Effect.flatMap(
-            HttpClientResponse.matchStatus({
-              "2xx": (response) =>
-                HttpClientResponse.schemaBodyJson(AmpRegistryDatasetVersionDto)(response).pipe(
-                  Effect.mapError(() =>
-                    new RegistryApiError({
-                      status: response.status,
-                      errorCode: "SCHEMA_VALIDATION_ERROR",
-                      message: "Response schema validation failed",
-                    })
-                  ),
-                ),
-              orElse: (response) => parseRegistryError(response),
-            }),
-          ),
-        )
+        // Helper to treat null/undefined/empty as equivalent
+        const isEmpty = (value: unknown): boolean =>
+          value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)
+
+        // Helper to compare optional values
+        const optionalChanged = (datasetVal: unknown, metadataVal: unknown): boolean => {
+          if (isEmpty(datasetVal) && isEmpty(metadataVal)) return false
+          if (isEmpty(datasetVal) || isEmpty(metadataVal)) return true
+          return datasetVal !== metadataVal
+        }
+
+        // Helper to compare arrays
+        const arrayChanged = (
+          datasetArr: ReadonlyArray<unknown> | null | undefined,
+          metadataArr: ReadonlyArray<unknown> | undefined,
+        ): boolean => {
+          if (isEmpty(datasetArr) && isEmpty(metadataArr)) return false
+          if (isEmpty(datasetArr) || isEmpty(metadataArr)) return true
+          const arr1 = datasetArr ?? []
+          const arr2 = metadataArr ?? []
+          if (arr1.length !== arr2.length) return true
+          return arr1.some((val, idx) => val !== arr2[idx])
+        }
+
+        // Compare each mutable field
+        if (optionalChanged(dataset.description, metadata.description)) return true
+        if (arrayChanged(dataset.keywords, metadata.keywords)) return true
+        if (optionalChanged(dataset.readme, metadata.readme)) return true
+        if (
+          optionalChanged(
+            dataset.repository_url?.toString(),
+            metadata.repository?.toString(),
+          )
+        ) {
+          return true
+        }
+        if (optionalChanged(dataset.license, metadata.license)) return true
+        if (arrayChanged(dataset.source, source)) return true
+        if (arrayChanged(dataset.indexing_chains, indexingChains)) return true
+
+        return false
       })
 
     /**
@@ -254,8 +357,8 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       /** @todo figure out a way to derive from the manifest or ask the user */
       const source: ReadonlyArray<string> = []
 
-      // Check if dataset exists
-      const maybeDataset = yield* getDataset(namespace, name)
+      // Check if dataset exists (try public first, then owned/private)
+      const maybeDataset = yield* getDatasetWithFallback(auth, namespace, name)
 
       return yield* Option.match(maybeDataset, {
         // Dataset exists - validate ownership and publish new version
@@ -305,47 +408,65 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
               }),
             )
 
+            // Update metadata if any fields have changed
+            const metadataChanged = yield* hasMetadataChanged(dataset, metadata, indexingChains, source)
+            if (metadataChanged) {
+              yield* updateDatasetMetadata(
+                auth,
+                namespace,
+                name,
+                AmpRegistryUpdateDatasetMetadataDto.make({
+                  indexing_chains: indexingChains,
+                  description,
+                  keywords,
+                  readme,
+                  repository_url: repository,
+                  license,
+                  source,
+                }),
+              )
+            }
+
             // Return dataset reference
             return Model.DatasetReference.make({ namespace, name, revision: versionTag })
           }),
         // Dataset doesn't exist - publish new dataset with initial version
         onNone: () =>
-          Effect.gen(function*() {
-            yield* publishDataset(
-              auth,
-              AmpRegistryInsertDatasetDto.make({
-                namespace,
-                name,
-                description,
-                keywords,
-                indexing_chains: indexingChains,
-                source,
-                readme,
-                visibility: visibility ?? "public",
-                repository_url: repository,
-                license,
-                version: AmpRegistryInsertDatasetVersionDto.make({
-                  status: "published",
-                  version_tag: versionTag,
-                  manifest,
-                  kind: manifest.kind,
-                  ancestors: Array.map(dependencies, (dep) =>
-                    `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
-                  changelog,
-                }),
+          publishDataset(
+            auth,
+            AmpRegistryInsertDatasetDto.make({
+              namespace,
+              name,
+              description,
+              keywords,
+              indexing_chains: indexingChains,
+              source,
+              readme,
+              visibility: visibility ?? "public",
+              repository_url: repository,
+              license,
+              version: AmpRegistryInsertDatasetVersionDto.make({
+                status: "published",
+                version_tag: versionTag,
+                manifest,
+                kind: manifest.kind,
+                ancestors: Array.map(dependencies, (dep) =>
+                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
+                changelog,
               }),
-            )
-
-            // Return dataset reference
-            return Model.DatasetReference.make({ namespace, name, revision: versionTag })
-          }),
+            }),
+          ).pipe(Effect.map(() =>
+            Model.DatasetReference.make({ namespace, name, revision: versionTag })
+          )),
       })
     })
 
     return {
       getDataset,
+      getOwnedDataset,
       publishDataset,
       publishVersion,
+      updateDatasetMetadata,
       publishFlow,
     } as const
   }),
@@ -457,5 +578,17 @@ export class AmpRegistryInsertDatasetDto
     repository_url: Model.DatasetRepository.pipe(Schema.optionalWith({ nullable: true })),
     license: Model.DatasetLicense.pipe(Schema.optionalWith({ nullable: true })),
     version: AmpRegistryInsertDatasetVersionDto,
+  })
+{}
+
+export class AmpRegistryUpdateDatasetMetadataDto
+  extends Schema.Class<AmpRegistryUpdateDatasetMetadataDto>("Amp/Registry/Models/AmpRegistryUpdateDatasetMetadataDto")({
+    indexing_chains: Schema.Array(Schema.String),
+    description: Model.DatasetDescription.pipe(Schema.optionalWith({ nullable: true })),
+    keywords: Schema.Array(Model.DatasetKeyword).pipe(Schema.optionalWith({ nullable: true })),
+    readme: Model.DatasetReadme.pipe(Schema.optionalWith({ nullable: true })),
+    repository_url: Model.DatasetRepository.pipe(Schema.optionalWith({ nullable: true })),
+    license: Model.DatasetLicense.pipe(Schema.optionalWith({ nullable: true })),
+    source: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
   })
 {}
