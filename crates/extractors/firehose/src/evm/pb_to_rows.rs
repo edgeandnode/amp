@@ -238,7 +238,11 @@ pub fn protobufs_to_rows(
         numbers: header.block_num..=header.block_num,
         network: network.to_string(),
         hash: header.hash.into(),
-        prev_hash: Some(header.parent_hash.into()),
+        prev_hash: if header.block_num == 0 {
+            None
+        } else {
+            Some(header.parent_hash.into())
+        },
     };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity_for(&header);
