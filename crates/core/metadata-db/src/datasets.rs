@@ -28,7 +28,7 @@ use crate::{ManifestHashOwned, db::Executor, error::Error, manifests::ManifestHa
 /// DO NOTHING for idempotency. Both manifest and dataset must exist or
 /// foreign key constraint will fail.
 #[tracing::instrument(skip(exe), err)]
-pub async fn link_manifest_to_dataset<'c, E>(
+pub async fn link_manifest<'c, E>(
     exe: E,
     namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     name: impl Into<DatasetName<'_>> + std::fmt::Debug,
@@ -38,6 +38,27 @@ where
     E: Executor<'c>,
 {
     manifests::sql::insert(exe, namespace.into(), name.into(), manifest_hash.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Check if manifest is linked to dataset
+///
+/// Returns `true` if the manifest hash is linked to the dataset identified by
+/// namespace and name, `false` otherwise.
+///
+/// This performs an efficient EXISTS query on the junction table.
+#[tracing::instrument(skip(exe), err)]
+pub async fn is_manifest_linked<'c, E>(
+    exe: E,
+    namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+) -> Result<bool, Error>
+where
+    E: Executor<'c>,
+{
+    manifests::sql::exists(exe, namespace.into(), name.into(), manifest_hash.into())
         .await
         .map_err(Error::Database)
 }

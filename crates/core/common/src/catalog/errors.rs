@@ -1,7 +1,7 @@
 use datafusion::error::DataFusionError;
 use datasets_common::{reference::Reference, table_name::TableName};
 
-use crate::BoxError;
+use crate::{BoxError, catalog::sql::ResolveFunctionReferencesError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogForSqlError {
@@ -11,17 +11,16 @@ pub enum CatalogForSqlError {
     /// - The SQL statement contains invalid table references
     /// - Table names cannot be parsed or extracted
     /// - The SQL syntax is malformed for table resolution
-    #[error("Failed to resolve table references from SQL: {source}")]
-    TableReferenceResolution { source: BoxError },
+    #[error("Failed to resolve table references from SQL")]
+    TableReferenceResolution(#[source] BoxError),
 
     /// Failed to extract function names from the SQL statement.
     ///
     /// This occurs when:
-    /// - The SQL statement contains invalid function calls
-    /// - Function names cannot be parsed or extracted
-    /// - The SQL syntax is malformed for function analysis
-    #[error("Failed to extract function names from SQL: {source}")]
-    FunctionNameExtraction { source: BoxError },
+    /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
+    /// - An EXPLAIN statement wraps an unsupported statement type
+    #[error("Failed to resolve function references from SQL")]
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError),
 
     /// Failed to get the physical catalog for the resolved tables and functions.
     ///
@@ -31,6 +30,178 @@ pub enum CatalogForSqlError {
     /// - Tables have not been synced
     #[error("Failed to get physical catalog: {0}")]
     GetPhysicalCatalog(#[source] GetPhysicalCatalogError),
+}
+
+/// Errors specific to planning_ctx_for_sql_tables_with_deps operations
+///
+/// This error type is used exclusively by `planning_ctx_for_sql_tables_with_deps()` to create
+/// a planning context for SQL tables with external dependencies.
+#[derive(Debug, thiserror::Error)]
+pub enum PlanningCtxForSqlTablesWithDepsError {
+    /// Table reference is catalog-qualified.
+    ///
+    /// This occurs when a table reference includes a catalog qualifier.
+    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
+    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
+    #[error(
+        "In table '{table_name}': Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
+    )]
+    CatalogQualifiedTable {
+        table_name: TableName,
+        table_ref: String,
+    },
+
+    /// Table is not qualified with a schema/dataset name.
+    ///
+    /// All tables must be qualified with a dataset reference in the schema portion.
+    /// Unqualified tables (e.g., just `table_name`) are not allowed.
+    #[error(
+        "In table '{table_name}': Unqualified table '{table_ref}', all tables must be qualified with a dataset"
+    )]
+    UnqualifiedTable {
+        table_name: TableName,
+        table_ref: String,
+    },
+
+    /// Table name is invalid.
+    ///
+    /// This occurs when the table name portion of a table reference does not
+    /// conform to SQL identifier rules (must start with letter/underscore,
+    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
+    #[error(
+        "In table '{table_name}': Invalid table name '{invalid_table_name}' in table reference '{table_ref}'"
+    )]
+    InvalidTableName {
+        table_name: TableName,
+        invalid_table_name: String,
+        table_ref: String,
+        #[source]
+        source: datasets_common::table_name::TableNameError,
+    },
+
+    /// Dataset reference could not be found when loading dataset for table reference.
+    ///
+    /// This occurs when loading a dataset referenced in a table reference fails
+    /// because the dataset does not exist in the store.
+    #[error("In table '{table_name}': Dataset reference '{reference}' not found")]
+    DatasetNotFoundForTableRef {
+        table_name: TableName,
+        reference: Reference,
+    },
+
+    /// Failed to retrieve dataset from store when loading dataset for table reference.
+    ///
+    /// This occurs when loading a dataset definition fails:
+    /// - Dataset manifest is invalid or corrupted
+    /// - Unsupported dataset kind
+    /// - Storage backend errors when reading the dataset
+    #[error("In table '{table_name}': Failed to retrieve dataset '{reference}'")]
+    GetDatasetForTableRef {
+        table_name: TableName,
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Dependency alias not found when processing table reference.
+    ///
+    /// This occurs when a table reference uses an alias that was not provided
+    /// in the dependencies map.
+    #[error(
+        "In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
+    )]
+    DependencyAliasNotFoundForTableRef {
+        table_name: TableName,
+        alias: String,
+    },
+
+    /// Dataset reference could not be found when loading dataset for function.
+    ///
+    /// This occurs when loading a dataset referenced in a function name fails
+    /// because the dataset does not exist in the store.
+    #[error("In table '{table_name}': Dataset reference '{reference}' not found for function")]
+    DatasetNotFoundForFunction {
+        table_name: TableName,
+        reference: Reference,
+    },
+
+    /// Failed to retrieve dataset from store when loading dataset for function.
+    ///
+    /// This occurs when loading a dataset definition for a function fails:
+    /// - Dataset manifest is invalid or corrupted
+    /// - Unsupported dataset kind
+    /// - Storage backend errors when reading the dataset
+    #[error("In table '{table_name}': Failed to retrieve dataset '{reference}' for function")]
+    GetDatasetForFunction {
+        table_name: TableName,
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to create ETH call UDF for dataset referenced in function name.
+    ///
+    /// This occurs when creating the eth_call user-defined function for a function fails:
+    /// - Invalid provider configuration for the dataset
+    /// - Provider connection issues
+    /// - Dataset is not an EVM RPC dataset but eth_call was requested
+    #[error(
+        "In table '{table_name}': Failed to create ETH call UDF for dataset '{reference}' for function"
+    )]
+    EthCallUdfCreationForFunction {
+        table_name: TableName,
+        reference: Reference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Dependency alias not found when processing function name.
+    ///
+    /// This occurs when a function name uses an alias that was not provided
+    /// in the dependencies map.
+    #[error(
+        "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
+    )]
+    DependencyAliasNotFoundForFunction {
+        table_name: TableName,
+        alias: String,
+    },
+
+    /// Table not found in dataset.
+    ///
+    /// This occurs when the table name is referenced in the SQL query but the
+    /// dataset does not contain a table with that name.
+    #[error(
+        "In table '{table_name}': Table '{referenced_table_name}' not found in dataset '{reference}'"
+    )]
+    TableNotFoundInDataset {
+        table_name: TableName,
+        referenced_table_name: TableName,
+        reference: Reference,
+    },
+
+    /// Function not found in dataset.
+    ///
+    /// This occurs when a function is referenced in the SQL query but the
+    /// dataset does not contain a function with that name.
+    #[error(
+        "In table '{table_name}': Function '{function_name}' not found in dataset '{reference}'"
+    )]
+    FunctionNotFoundInDataset {
+        table_name: TableName,
+        function_name: String,
+        reference: Reference,
+    },
+
+    /// eth_call function not available for dataset.
+    ///
+    /// This occurs when the eth_call function is referenced in SQL but the
+    /// dataset does not support eth_call (not an EVM RPC dataset or no provider configured).
+    #[error("In table '{table_name}': Function 'eth_call' not available for dataset '{reference}'")]
+    EthCallNotAvailable {
+        table_name: TableName,
+        reference: Reference,
+    },
 }
 
 /// Errors specific to planning_ctx_for_sql operations
@@ -51,11 +222,11 @@ pub enum PlanningCtxForSqlError {
     /// Failed to extract function names from the SQL statement.
     ///
     /// This occurs when analyzing the SQL AST to find function calls:
-    /// - The SQL statement contains invalid function syntax
-    /// - Function names cannot be traversed from the AST
-    /// - DML statements are encountered (which are not supported)
-    #[error("Failed to extract function names from SQL")]
-    FunctionNameExtraction(#[source] BoxError),
+    /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
+    /// - An EXPLAIN statement wraps an unsupported statement type
+    /// - A function name has an invalid format (more than 2 parts)
+    #[error("Failed to resolve function references from SQL")]
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError),
 
     /// Table reference is catalog-qualified.
     ///
@@ -168,15 +339,22 @@ pub enum PlanningCtxForSqlError {
         reference: Reference,
     },
 
-    /// Function name has invalid format.
+    /// Function not found in dataset.
     ///
-    /// Function names must be either:
-    /// - Unqualified (assumed to be DataFusion built-in): `function_name`
-    /// - Dataset-qualified: `dataset.function_name`
+    /// This occurs when a function is referenced in the SQL query but the
+    /// dataset does not contain a function with that name.
+    #[error("Function '{function_name}' not found in dataset '{reference}'")]
+    FunctionNotFoundInDataset {
+        function_name: String,
+        reference: Reference,
+    },
+
+    /// eth_call function not available for dataset.
     ///
-    /// This error occurs when a function has more than two parts.
-    #[error("Invalid function format '{function}', expected 'dataset.function' or 'function'")]
-    InvalidFunctionFormat { function: String },
+    /// This occurs when the eth_call function is referenced in SQL but the
+    /// dataset does not support eth_call (not an EVM RPC dataset or no provider configured).
+    #[error("Function 'eth_call' not available for dataset '{reference}'")]
+    EthCallNotAvailable { reference: Reference },
 }
 
 /// Errors specific to get_physical_catalog operations
@@ -313,13 +491,20 @@ pub enum GetLogicalCatalogError {
         source: datasets_common::partial_reference::PartialReferenceError,
     },
 
-    /// Function name has invalid format.
+    /// Function not found in dataset.
     ///
-    /// Function names must be either:
-    /// - Unqualified (assumed to be DataFusion built-in): `function_name`
-    /// - Dataset-qualified: `dataset.function_name`
+    /// This occurs when a function is referenced in the SQL query but the
+    /// dataset does not contain a function with that name.
+    #[error("Function '{function_name}' not found in dataset '{reference}'")]
+    FunctionNotFoundInDataset {
+        function_name: String,
+        reference: Reference,
+    },
+
+    /// eth_call function not available for dataset.
     ///
-    /// This error occurs when a function has more than two parts.
-    #[error("Invalid function format '{function}', expected 'dataset.function' or 'function'")]
-    InvalidFunctionFormat { function: String },
+    /// This occurs when the eth_call function is referenced in SQL but the
+    /// dataset does not support eth_call (not an EVM RPC dataset or no provider configured).
+    #[error("Function 'eth_call' not available for dataset '{reference}'")]
+    EthCallNotAvailable { reference: Reference },
 }

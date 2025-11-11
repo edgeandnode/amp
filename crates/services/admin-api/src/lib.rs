@@ -152,8 +152,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // File schemas
         handlers::files::get_by_id::FileInfo,
         // Schema schemas
-        handlers::schema::OutputSchemaRequest,
-        handlers::schema::OutputSchemaResponse,
+        handlers::schema::SchemaRequest,
+        handlers::schema::SchemaResponse,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,

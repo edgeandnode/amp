@@ -29,35 +29,75 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           repository: config.repository,
         })
 
-        // Build manifest tables
-        const tables = yield* Effect.forEach(
-          Object.entries(config.tables ?? {}),
-          ([name, table]) =>
-            Effect.gen(function*() {
-              const schema = yield* client.getOutputSchema(table.sql).pipe(
-                Effect.catchAll((cause) =>
-                  new ManifestBuilderError({ cause, message: "Failed to get schema", table: name })
-                ),
+        // Build manifest tables - send all tables in one request
+        const tables = yield* Effect.gen(function*() {
+          const configTables = config.tables ?? {}
+          const configFunctions = config.functions ?? {}
+
+          // Extract function names from config
+          const functionNames = Object.keys(configFunctions)
+
+          // If no tables and no functions, skip schema request entirely
+          if (Object.keys(configTables).length === 0 && functionNames.length === 0) {
+            return []
+          }
+
+          // If no tables but we have functions, still skip schema request
+          // (functions-only validation happens server-side, returns empty schema)
+          if (Object.keys(configTables).length === 0) {
+            return []
+          }
+
+          // Prepare all table SQL queries
+          const tableSqlMap = Object.fromEntries(
+            Object.entries(configTables).map(([name, table]) => [name, table.sql]),
+          )
+
+          // Call schema endpoint with all tables and functions at once
+          const request = new Model.SchemaRequest({
+            tables: tableSqlMap,
+            dependencies: config.dependencies,
+            functions: functionNames.length > 0 ? functionNames : undefined,
+          })
+
+          const response = yield* client.getOutputSchema(request).pipe(
+            Effect.catchAll((cause) =>
+              Effect.fail(
+                new ManifestBuilderError({
+                  cause,
+                  message: "Failed to get schemas",
+                  table: "(all tables)",
+                }),
               )
+            ),
+          )
 
-              if (schema.networks.length != 1) {
-                return yield* Effect.fail(
-                  new ManifestBuilderError({
-                    cause: undefined,
-                    message: `Expected 1 network for SQL query, got ${schema.networks}`,
-                    table: name,
-                  }),
-                )
-              }
+          // Process each table's schema
+          return Object.entries(configTables).map(([name, table]) => {
+            const tableSchema = response.schemas[name]
+            if (!tableSchema) {
+              throw new ManifestBuilderError({
+                cause: undefined,
+                message: `No schema returned for table ${name}`,
+                table: name,
+              })
+            }
 
-              const network = schema.networks[0]
-              const input = new Model.TableInput({ sql: table.sql })
-              const output = new Model.Table({ input, schema: schema.schema, network })
+            if (tableSchema.networks.length != 1) {
+              throw new ManifestBuilderError({
+                cause: undefined,
+                message: `Expected 1 network for SQL query, got ${tableSchema.networks}`,
+                table: name,
+              })
+            }
 
-              return [name, output] as const
-            }),
-          { concurrency: 5 },
-        )
+            const network = tableSchema.networks[0]
+            const input = new Model.TableInput({ sql: table.sql })
+            const output = new Model.Table({ input, schema: tableSchema.schema, network })
+
+            return [name, output] as const
+          })
+        })
 
         // Build manifest functions
         const functions = Object.entries(config.functions ?? {}).map(([name, func]) => {
