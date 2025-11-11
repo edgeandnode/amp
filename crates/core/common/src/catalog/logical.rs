@@ -52,26 +52,27 @@ impl Dataset {
         })
     }
 
-    /// Returns the JS functions defined in this dataset.
+    /// Returns a specific JS function by name from this dataset.
     ///
-    /// ## Arguments
-    /// `catalog_schema`: The function will be named `<catalog_schema>.<function_name>`.
-    /// `isolate_pool`: JS functions need a V8 isolate pool order to be executed.
-    pub fn functions(
+    /// This implements lazy loading by only instantiating the requested function,
+    /// rather than creating all functions in the dataset.
+    pub fn function_by_name(
         &self,
-        catalog_schema: String,
+        schema: String,
+        name: &str,
         isolate_pool: IsolatePool,
-    ) -> impl Iterator<Item = AsyncScalarUDF> + '_ {
-        self.functions.iter().map(move |f| {
+    ) -> Option<ScalarUDF> {
+        self.functions.iter().find(|f| f.name == name).map(|f| {
             AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                isolate_pool.clone(),
-                catalog_schema.to_string(),
+                isolate_pool,
+                schema,
                 f.source.source.clone(),
                 f.source.filename.clone().into(),
                 f.name.clone().into(),
                 f.input_types.clone(),
                 f.output_type.clone(),
             )))
+            .into_scalar_udf()
         })
     }
 

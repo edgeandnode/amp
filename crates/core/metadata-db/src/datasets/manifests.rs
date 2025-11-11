@@ -48,6 +48,37 @@ pub(crate) mod sql {
         Ok(())
     }
 
+    /// Check if a manifest is linked to a specific dataset
+    ///
+    /// Returns `true` if the manifest hash is linked to the dataset identified by
+    /// namespace and name, `false` otherwise.
+    ///
+    /// This performs an efficient EXISTS query that short-circuits as soon as
+    /// a matching row is found, rather than scanning all rows.
+    pub async fn exists<'c, E>(
+        exe: E,
+        namespace: Namespace<'_>,
+        name: Name<'_>,
+        hash: ManifestHash<'_>,
+    ) -> Result<bool, sqlx::Error>
+    where
+        E: Executor<'c, Database = Postgres>,
+    {
+        let query = indoc::indoc! {r#"
+            SELECT EXISTS(
+                SELECT 1 FROM dataset_manifests
+                WHERE namespace = $1 AND name = $2 AND hash = $3
+            )
+        "#};
+
+        sqlx::query_scalar(query)
+            .bind(namespace)
+            .bind(name)
+            .bind(hash)
+            .fetch_one(exe)
+            .await
+    }
+
     /// Delete all manifest links for a dataset
     ///
     /// Removes all dataset-manifest associations for a given dataset. This operation is idempotent

@@ -21,6 +21,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.6",
  "common",
+ "datafusion",
  "dataset-store",
  "datasets-common",
  "datasets-derived",

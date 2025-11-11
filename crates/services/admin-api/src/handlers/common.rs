@@ -14,7 +14,7 @@ use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyV
 /// - Empty strings or whitespace-only strings are rejected with [`EmptyStringError`]
 /// - The **original string is preserved** including any leading/trailing whitespace
 /// - Once created, the string is guaranteed to contain at least one non-whitespace character
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "utoipa", schema(value_type = String))]
 pub struct NonEmptyString(String);

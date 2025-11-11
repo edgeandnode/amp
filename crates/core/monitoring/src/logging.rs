@@ -21,6 +21,7 @@ pub fn init() {
 
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
             .with_ansi(std::io::stderr().is_terminal())
             .init();
 
