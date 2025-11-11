@@ -55,8 +55,7 @@ impl Dataset {
     /// Returns a specific JS function by name from this dataset.
     ///
     /// This implements lazy loading by only instantiating the requested function,
-    /// rather than creating all functions in the dataset. This is critical for performance
-    /// as JavaScript UDFs require V8 isolate creation which is expensive.
+    /// rather than creating all functions in the dataset.
     pub fn function_by_name(
         &self,
         schema: String,
