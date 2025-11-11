@@ -190,10 +190,10 @@ where
     async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
         self.get(&location.into())
             .await
-            .map_err(StoreError::ObjectStore)?
+            .map_err(StoreError::ObjectStoreGet)?
             .bytes()
             .await
-            .map_err(StoreError::ObjectStore)
+            .map_err(StoreError::ObjectStoreBytes)
     }
 
     async fn get_string(&self, location: impl Into<Path>) -> Result<String, StoreError> {
@@ -234,12 +234,29 @@ pub enum StoreError {
         err: std::string::FromUtf8Error,
     },
 
-    /// Runtime error from the underlying object store implementation.
+    /// General runtime error from the underlying object store implementation.
     ///
+    /// This error occurs for operations other than get/bytes, such as listing objects.
+    /// Common causes: network timeouts, permission denied, service unavailable,
+    /// or authentication token expiry.
+    #[error("object store error: {0}")]
+    ObjectStore(#[source] object_store::Error),
+
+    /// Error getting object metadata or initiating object retrieval.
+    ///
+    /// This error occurs when calling `.get()` on the object store.
     /// Common causes: network timeouts, permission denied, file not found,
     /// service unavailable, or authentication token expiry.
-    #[error(transparent)]
-    ObjectStore(object_store::Error),
+    #[error("failed to get object: {0}")]
+    ObjectStoreGet(#[source] object_store::Error),
+
+    /// Error reading object bytes after successful retrieval.
+    ///
+    /// This error occurs when calling `.bytes()` on a retrieved object.
+    /// Common causes: network interruption during download, corrupted data,
+    /// or timeout while streaming the object content.
+    #[error("failed to read object bytes: {0}")]
+    ObjectStoreBytes(#[source] object_store::Error),
 }
 
 impl StoreError {
@@ -247,6 +264,8 @@ impl StoreError {
         matches!(
             self,
             StoreError::ObjectStore(object_store::Error::NotFound { .. })
+                | StoreError::ObjectStoreGet(object_store::Error::NotFound { .. })
+                | StoreError::ObjectStoreBytes(object_store::Error::NotFound { .. })
         )
     }
 }
