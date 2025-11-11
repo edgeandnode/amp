@@ -13,6 +13,8 @@ pub struct BlockRange {
     pub hash: BlockHash,
     /// Hash of the parent block at range start - 1.
     /// For genesis blocks (start = 0), this is a zero hash.
+    /// Defaults to zero hash for backwards compatibility with existing records.
+    #[serde(default)]
     pub prev_hash: BlockHash,
 }
 
