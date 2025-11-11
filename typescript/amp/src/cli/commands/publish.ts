@@ -6,7 +6,6 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
 import * as AmpRegistry from "../../AmpRegistry.ts"
 import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
@@ -20,9 +19,8 @@ const CLUSTER_ADMIN_URL = new URL("http://localhost:1610")
 export const publish = Command.make("publish", {
   args: {
     tag: Args.text({ name: "tag" }).pipe(
-      Args.withDescription("Dataset version (semver) or 'dev' tag"),
-      Args.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
-      Args.optional,
+      Args.withDescription("Dataset version (semver) tag"),
+      Args.withSchema(Model.DatasetVersion),
     ),
     changelog: Options.text("changelog").pipe(
       Options.withDescription(
@@ -51,10 +49,6 @@ export const publish = Command.make("publish", {
       }
       const accessToken = maybeAccessToken.value
 
-      // Determine version tag (handle optional, default to "dev")
-      const versionTag = Option.getOrElse(args.tag, () => "dev" as const)
-      const status = versionTag === "dev" ? "draft" : "published"
-
       const metadata = context.metadata
 
       yield* Console.info("Registering your Dataset with Amp")
@@ -63,9 +57,9 @@ export const publish = Command.make("publish", {
       )
 
       yield* Console.info(
-        `Deploying your Dataset to Amp ${metadata.namespace}/${metadata.name}@${versionTag}. This will start indexing`,
+        `Deploying your Dataset to Amp ${metadata.namespace}/${metadata.name}@${args.tag}. This will start indexing`,
       )
-      yield* client.deployDataset(metadata.namespace, metadata.name, versionTag).pipe(
+      yield* client.deployDataset(metadata.namespace, metadata.name, args.tag).pipe(
         Effect.tap(() => Console.info("Dataset successfully deployed to Amp")),
       )
 
@@ -73,9 +67,8 @@ export const publish = Command.make("publish", {
       const publishResult = yield* ampRegistry.publishFlow({
         auth: accessToken,
         context,
-        versionTag,
+        versionTag: args.tag,
         changelog: Option.getOrUndefined(args.changelog),
-        status,
       }).pipe(
         Effect.tap((result) => Console.log(`Published ${result.namespace}/${result.name}@${result.revision}`)),
         Effect.catchTags({

@@ -162,10 +162,9 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         context: ManifestContext.DatasetContext
         versionTag: Model.DatasetRevision
         changelog?: string | undefined
-        status: "published" | "draft"
       }>,
     ) {
-      const { auth, changelog, context, status, versionTag } = args
+      const { auth, changelog, context, versionTag } = args
       const { dependencies, manifest, metadata } = context
       const { description, keywords, license, name, namespace, readme, repository, visibility } = metadata
 
@@ -215,7 +214,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
               namespace,
               name,
               AmpRegistryInsertDatasetVersionDto.make({
-                status,
+                status: "published",
                 version_tag: versionTag,
                 manifest,
                 kind: manifest.kind,
@@ -245,7 +244,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                 repository_url: repository,
                 license,
                 version: AmpRegistryInsertDatasetVersionDto.make({
-                  status,
+                  status: "published",
                   version_tag: versionTag,
                   manifest,
                   kind: manifest.kind,
