@@ -15,7 +15,7 @@ arrow-flight.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
-common = { path = "../../core/common" }
+common = { path = "../core/common" }
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -22,7 +22,7 @@ snmalloc = ["dep:snmalloc-rs"]
 [dependencies]
 admin-api = { path = "../../services/admin-api" }
 alloy.workspace = true
-amp-client = { path = "../../client/amp-client", features = ["postgres"] }
+amp-client = { path = "../../client", features = ["postgres"] }
 anyhow.workspace = true
 arrow-array = { version = "56", default-features = false }
 arrow-schema = { version = "56" }

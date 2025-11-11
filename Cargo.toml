@@ -6,7 +6,7 @@ members = [
     "crates/bin/ampd",
     "crates/bin/ampsync",
     "crates/bin/ampup",
-    "crates/client/amp-client",
+    "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
     "crates/core/datasets-common",
