@@ -437,7 +437,6 @@ describe("AmpRegistryService", () => {
           context: mockManifestContext,
           versionTag: "1.0.0",
           changelog: "Initial release",
-          status: "published",
         })
 
         expect(getDatasetCalled).toBe(true)
@@ -498,7 +497,6 @@ describe("AmpRegistryService", () => {
           context: mockManifestContext,
           versionTag: "1.1.0",
           changelog: "Added new features",
-          status: "draft",
         })
 
         expect(getDatasetCalled).toBe(true)
@@ -548,7 +546,6 @@ describe("AmpRegistryService", () => {
             auth: mockAuthStorage,
             context: mockManifestContext,
             versionTag: "1.1.0",
-            status: "published",
           }),
         )
 
@@ -603,7 +600,6 @@ describe("AmpRegistryService", () => {
             auth: mockAuthStorage,
             context: mockManifestContext,
             versionTag: "1.0.0",
-            status: "published",
           }),
         )
 
@@ -697,7 +693,6 @@ describe("AmpRegistryService", () => {
           auth: mockAuthStorage,
           context: contextWithMultipleTables,
           versionTag: "1.0.0",
-          status: "published",
         })
 
         // Verify the flow completed successfully
@@ -763,7 +758,6 @@ describe("AmpRegistryService", () => {
           auth: mockAuthStorage,
           context: contextWithDependencies,
           versionTag: "1.1.0",
-          status: "published",
         })
 
         // Verify the flow completed successfully
@@ -828,7 +822,6 @@ describe("AmpRegistryService", () => {
           auth: mockAuthStorage,
           context: contextWithoutDefaults,
           versionTag: "1.0.0",
-          status: "published",
         })
 
         // Verify the flow completed successfully
