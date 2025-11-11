@@ -27,16 +27,13 @@ impl GlobalArgs {
         let mut client_builder = crate::client::build(self.admin_url.clone());
 
         if let Some(token) = self.auth_token.as_deref() {
-            client_builder = client_builder.with_bearer_token(
-                token
-                    .parse()
-                    .map_err(|err| BuildClientError::InvalidAuthToken { source: err })?,
-            );
+            client_builder = client_builder
+                .with_bearer_token(token.parse().map_err(BuildClientError::InvalidAuthToken)?);
         }
 
         client_builder
             .build()
-            .map_err(|err| BuildClientError::ClientBuildError { source: err })
+            .map_err(BuildClientError::ClientBuildError)
     }
 }
 
@@ -45,11 +42,9 @@ impl GlobalArgs {
 pub enum BuildClientError {
     /// Invalid authentication token
     #[error("invalid authentication token")]
-    InvalidAuthToken {
-        source: crate::client::auth::BearerTokenError,
-    },
+    InvalidAuthToken(#[source] crate::client::auth::BearerTokenError),
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError { source: crate::client::BuildError },
+    ClientBuildError(#[source] crate::client::BuildError),
 }

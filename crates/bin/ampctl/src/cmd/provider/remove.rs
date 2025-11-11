@@ -51,9 +51,7 @@ pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
 async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
     tracing::debug!("Creating API client");
 
-    let client = global
-        .build_client()
-        .map_err(|source| Error::ClientBuildError { source })?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     client
         .providers()
@@ -84,10 +82,7 @@ async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[source]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Invalid provider name
     #[error("invalid provider name: [{error_code}] {message}")]

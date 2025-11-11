@@ -108,9 +108,7 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Result<Hash, Error> {
     tracing::debug!("Creating admin API client");
 
-    let client = global
-        .build_client()
-        .map_err(|source| Error::ClientBuildError { source })?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
     let manifests_client = client.manifests();
 
     tracing::debug!("Sending registration request");
@@ -118,7 +116,7 @@ pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Resul
     manifests_client
         .register(manifest_str)
         .await
-        .map_err(|source| Error::RegisterError { source })
+        .map_err(Error::RegisterError)
 }
 
 /// Errors for manifest registration operations.
@@ -144,17 +142,11 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[source]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error from the manifest registration API client
     #[error("manifest registration failed")]
-    RegisterError {
-        #[source]
-        source: crate::client::manifests::RegisterError,
-    },
+    RegisterError(#[source] crate::client::manifests::RegisterError),
 }
 
 /// Manifest file path supporting local and remote storage.

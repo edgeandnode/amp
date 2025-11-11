@@ -48,9 +48,7 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
 /// Creates a client and uses the providers list method.
 #[tracing::instrument(skip_all)]
 async fn get_providers(global: &GlobalArgs) -> Result<Vec<client::providers::ProviderInfo>, Error> {
-    let client = global
-        .build_client()
-        .map_err(|source| Error::ClientBuildError { source })?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let providers = client.providers().list().await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list providers");
@@ -65,10 +63,7 @@ async fn get_providers(global: &GlobalArgs) -> Result<Vec<client::providers::Pro
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[source]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from the API
     #[error("client error")]
