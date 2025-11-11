@@ -125,7 +125,23 @@ impl AmpCollectorInnerTask {
     /// regardless of the configured intervals or if either are
     /// enabled.
     pub async fn run(self) -> TaskResult<Self> {
-        Ok(self.compact().await?.collect().await?)
+        let task_after_compact = match self.clone().compact().await {
+            Ok(task) => task,
+            Err(err) if Self::is_compactor_cancellation(&err) => {
+                tracing::warn!("Compaction task cancelled: {}", err);
+                return Ok(self);
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        match task_after_compact.collect().await {
+            Ok(task) => Ok(task),
+            Err(err) if Self::is_collector_cancellation(&err) => {
+                tracing::warn!("Collection task cancelled: {}", err);
+                Ok(self)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Try to run compaction followed by collection
@@ -136,7 +152,21 @@ impl AmpCollectorInnerTask {
     /// and/or neither respective interval has elapsed this is
     /// a no-op
     pub async fn try_run(self) -> TaskResult<Self> {
-        self.try_compact().await?.try_collect().await
+        match self.clone().try_compact().await {
+            Ok(task) => match task.try_collect().await {
+                Ok(task) => Ok(task),
+                Err(err) if Self::is_cancellation_task_error(&err) => {
+                    tracing::warn!("Collection task cancelled: {}", err);
+                    Ok(self)
+                }
+                Err(err) => Err(err),
+            },
+            Err(err) if Self::is_cancellation_task_error(&err) => {
+                tracing::warn!("Compaction task cancelled: {}", err);
+                Ok(self)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     async fn collect(mut self) -> CollectionResult<Self> {
@@ -179,6 +209,22 @@ impl AmpCollectorInnerTask {
         // Otherwise, return self without doing anything
         } else {
             Ok(self)
+        }
+    }
+
+    fn is_compactor_cancellation(err: &CompactorError) -> bool {
+        matches!(err, CompactorError::Join(join_err) if join_err.is_cancelled())
+    }
+
+    fn is_collector_cancellation(err: &CollectorError) -> bool {
+        matches!(err, CollectorError::Join(join_err) if join_err.is_cancelled())
+    }
+
+    fn is_cancellation_task_error(err: &AmpCompactorTaskError) -> bool {
+        match err {
+            AmpCompactorTaskError::Join(join_err) => join_err.is_cancelled(),
+            AmpCompactorTaskError::Compaction(compactor_err) => Self::is_compactor_cancellation(compactor_err),
+            AmpCompactorTaskError::Collection(collector_err) => Self::is_collector_cancellation(collector_err),
         }
     }
 }
