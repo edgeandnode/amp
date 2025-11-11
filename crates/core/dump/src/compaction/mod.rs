@@ -223,8 +223,12 @@ impl AmpCollectorInnerTask {
     fn is_cancellation_task_error(err: &AmpCompactorTaskError) -> bool {
         match err {
             AmpCompactorTaskError::Join(join_err) => join_err.is_cancelled(),
-            AmpCompactorTaskError::Compaction(compactor_err) => Self::is_compactor_cancellation(compactor_err),
-            AmpCompactorTaskError::Collection(collector_err) => Self::is_collector_cancellation(collector_err),
+            AmpCompactorTaskError::Compaction(compactor_err) => {
+                Self::is_compactor_cancellation(compactor_err)
+            }
+            AmpCompactorTaskError::Collection(collector_err) => {
+                Self::is_collector_cancellation(collector_err)
+            }
         }
     }
 }
