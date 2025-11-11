@@ -127,16 +127,16 @@ Dump extractor interfaces to parquet files.
   schema.
 
 Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as
-you can simply refer to the dataset by name. An example usage to dump first four million blocks of a
-dataset named `eth_firehose`, running two parallel jobs:
+you can refer to the dataset by its full reference (namespace/name@revision). An example usage to
+dump first four million blocks of a dataset, running two parallel jobs:
 
 ```
-cargo run --release -p ampd -- dump --dataset eth_firehose -e 4000000 -j 2
+cargo run --release -p ampd -- dump --dataset my_namespace/eth_firehose@latest -e 4000000 -j 2
 ```
 
-You will now be able to find your tables under `<dataset>/<table>/` in your data directory. Each
-table may contain multiple files, named by their start block, corresponding to table partitions. If
-the process is interrupted, it is safe to resume by running the same command again.
+You will now be able to find your tables in your configured data directory. Each table may contain
+multiple files, named by their start block, corresponding to table partitions. If the process is
+interrupted, it is safe to resume by running the same command again.
 
 Check the `--help` text for more configuration options.
 
@@ -156,7 +156,7 @@ This starts both a JSON Lines over HTTP server and an Arrow Flight (gRPC) server
 The HTTP server is straightforward, send it a query and get results, one row per line:
 
 ```
-curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
+curl -X POST http://localhost:1603 --data 'select * from "my_namespace/eth_rpc".logs limit 10'
 ```
 
 The Arrow Flight server requires a specialized client. We currently have a Python client,
