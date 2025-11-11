@@ -1,4 +1,3 @@
-import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as Prompt from "@effect/cli/Prompt"
@@ -18,9 +17,9 @@ const CLUSTER_ADMIN_URL = new URL("http://localhost:1610")
 
 export const publish = Command.make("publish", {
   args: {
-    tag: Args.text({ name: "tag" }).pipe(
-      Args.withDescription("Dataset version (semver) tag"),
-      Args.withSchema(Model.DatasetVersion),
+    tag: Options.text("tag").pipe(
+      Options.withDescription("Dataset version (semver) tag"),
+      Options.withSchema(Model.DatasetVersion),
     ),
     changelog: Options.text("changelog").pipe(
       Options.withDescription(
@@ -52,7 +51,7 @@ export const publish = Command.make("publish", {
       const metadata = context.metadata
 
       yield* Console.info("Registering your Dataset with Amp")
-      yield* client.registerDataset(metadata.namespace, metadata.name, context.manifest).pipe(
+      yield* client.registerDataset(metadata.namespace, metadata.name, context.manifest, args.tag).pipe(
         Effect.tap(() => Console.info("Dataset successfully registered with Amp")),
       )
 
@@ -61,6 +60,10 @@ export const publish = Command.make("publish", {
       )
       yield* client.deployDataset(metadata.namespace, metadata.name, args.tag).pipe(
         Effect.tap(() => Console.info("Dataset successfully deployed to Amp")),
+        Effect.catchTag("DatasetNotFound", (e) =>
+          Console.error(
+            `Failure deploying dataset ${metadata.namespace}/${metadata.name}@${args.tag}. Dataset not found`,
+          ).pipe(Effect.zipRight(Effect.fail(e)))),
       )
 
       yield* Console.info("Publishing your Dataset to the registry")
@@ -93,7 +96,7 @@ export const publish = Command.make("publish", {
 
       yield* Console.log("Dataset successfully published!")
       yield* Console.log(
-        `Visit https://registry.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
+        `Visit https://playground.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
       )
       return yield* ExitCode.Zero
     })
