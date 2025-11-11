@@ -26,9 +26,27 @@ pub struct Args {
     pub reference: Reference,
 }
 
+/// Result of a dataset inspect operation.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    dataset: client::datasets::DatasetInfo,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Namespace: {}", self.dataset.namespace)?;
+        writeln!(f, "Name: {}", self.dataset.name)?;
+        writeln!(f, "Revision: {}", self.dataset.revision)?;
+        writeln!(f, "Kind: {}", self.dataset.kind)?;
+        writeln!(f, "Manifest Hash: {}", self.dataset.manifest_hash)?;
+        Ok(())
+    }
+}
+
 /// Inspect dataset details by retrieving them from the admin API.
 ///
-/// Retrieves dataset information and displays it as JSON.
+/// Retrieves dataset information and displays it based on the output format.
 ///
 /// # Errors
 ///
@@ -38,12 +56,8 @@ pub async fn run(Args { global, reference }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving dataset from admin API");
 
     let dataset = get_dataset(&global, &reference).await?;
-
-    let json = serde_json::to_string_pretty(&dataset).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize dataset to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = InspectResult { dataset };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }

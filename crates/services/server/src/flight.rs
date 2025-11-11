@@ -110,7 +110,7 @@ impl Service {
         is_streaming: Option<bool>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
-        let query = parse_sql(sql).map_err(Error::from)?;
+        let query = parse_sql(sql).map_err(Error::CoreError)?;
         let dataset_store = self.dataset_store.clone();
         let catalog = catalog_for_sql(
             dataset_store.as_ref(),
@@ -122,7 +122,10 @@ impl Service {
         .map_err(Error::CatalogForSqlError)?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
+        let plan = ctx
+            .plan_sql(query.clone())
+            .await
+            .map_err(Error::CoreError)?;
 
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
@@ -159,9 +162,14 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
-            let plan = plan.attach_to(&ctx)?;
-            let record_batches = ctx.execute_plan(plan, true).await?;
+            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false)
+                .await
+                .map_err(Error::CoreError)?;
+            let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
+            let record_batches = ctx
+                .execute_plan(plan, true)
+                .await
+                .map_err(Error::CoreError)?;
             let stream = QueryResultStream::NonIncremental {
                 stream: NonEmptyRecordBatchStream::new(record_batches).boxed(),
                 schema,
@@ -252,13 +260,16 @@ impl Service {
                     // - Build a DataFusion query context with empty tables from that catalog.
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
-                    let query = parse_sql(&sql_query.query)?;
+                    let query = parse_sql(&sql_query.query).map_err(Error::CoreError)?;
                     let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
                         .await
                         .map_err(Error::PlanningCtxForSqlError)?;
                     let is_streaming = streaming_override
                         .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
-                    let schema = plan_ctx.sql_output_schema(query).await?;
+                    let schema = plan_ctx
+                        .sql_output_schema(query)
+                        .await
+                        .map_err(Error::CoreError)?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
@@ -832,7 +843,7 @@ pub enum Error {
     ExecutionError(DataFusionError),
 
     #[error("error looking up datasets: {0}")]
-    DatasetStoreError(#[from] GetDatasetError),
+    DatasetStoreError(#[source] GetDatasetError),
 
     #[error("error loading catalog for SQL: {0}")]
     CatalogForSqlError(#[source] CatalogForSqlError),
@@ -844,7 +855,7 @@ pub enum Error {
     PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
 
     #[error(transparent)]
-    CoreError(#[from] CoreError),
+    CoreError(CoreError),
 
     #[error("invalid query: {0}")]
     InvalidQuery(String),

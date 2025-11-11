@@ -35,6 +35,28 @@ pub struct Args {
     pub manifest_file: ManifestFilePath,
 }
 
+/// Result of a manifest registration operation.
+#[derive(serde::Serialize)]
+struct RegisterResult {
+    hash: String,
+}
+
+impl std::fmt::Display for RegisterResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Manifest registered successfully",
+            console::style("✓").green().bold()
+        )?;
+        writeln!(
+            f,
+            "{} Manifest hash: {}",
+            console::style("→").cyan(),
+            self.hash
+        )
+    }
+}
+
 /// Register a manifest with content-addressable storage via the admin API.
 ///
 /// Loads manifest content from storage and POSTs to `/manifests` endpoint.
@@ -56,11 +78,12 @@ pub async fn run(
     );
 
     let manifest_str = load_manifest(&manifest_file).await?;
-
     let hash = register_manifest(&global, &manifest_str).await?;
+    let result = RegisterResult {
+        hash: hash.to_string(),
+    };
 
-    crate::success!("Manifest registered successfully");
-    crate::info!("Manifest hash: {}", hash);
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -108,7 +131,7 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
 pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Result<Hash, Error> {
     tracing::debug!("Creating admin API client");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
     let manifests_client = client.manifests();
 
     tracing::debug!("Sending registration request");
@@ -116,7 +139,7 @@ pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Resul
     manifests_client
         .register(manifest_str)
         .await
-        .map_err(Error::from)
+        .map_err(Error::RegisterError)
 }
 
 /// Errors for manifest registration operations.
@@ -142,17 +165,15 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error from the manifest registration API client
     #[error("manifest registration failed")]
-    RegisterError {
-        #[from]
-        source: crate::client::manifests::RegisterError,
-    },
+    RegisterError(#[source] crate::client::manifests::RegisterError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }
 
 /// Manifest file path supporting local and remote storage.

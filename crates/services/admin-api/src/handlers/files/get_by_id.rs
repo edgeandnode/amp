@@ -169,7 +169,7 @@ pub enum Error {
     /// This covers database connection issues, query failures,
     /// and other internal database errors.
     #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    MetadataDbError(#[source] metadata_db::Error),
 }
 
 impl IntoErrorResponse for Error {

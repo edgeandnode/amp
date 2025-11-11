@@ -73,7 +73,7 @@ impl LocationNotifListener {
     ) -> impl Stream<Item = Result<LocationNotification, LocationNotifRecvError>> {
         self.0
             .into_stream()
-            .map_err(LocationNotifRecvError::DbError)
+            .map_err(LocationNotifRecvError::Database)
             .and_then(|notif| async move {
                 let location_id: LocationId = notif.payload().parse().map_err(|err| {
                     LocationNotifRecvError::PayloadParsingFailed {
@@ -98,7 +98,7 @@ pub enum LocationNotifRecvError {
 
     /// An error occurred while receiving the notification
     #[error(transparent)]
-    DbError(sqlx::Error),
+    Database(sqlx::Error),
 }
 
 /// A location change notification containing the LocationId

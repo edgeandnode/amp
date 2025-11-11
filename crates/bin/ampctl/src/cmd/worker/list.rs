@@ -21,9 +21,34 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
+/// Result wrapper for workers list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: client::workers::WorkersResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.data.workers.is_empty() {
+            writeln!(f, "No workers found")
+        } else {
+            writeln!(f, "Workers:")?;
+            for worker in &self.data.workers {
+                writeln!(
+                    f,
+                    "  {} (last heartbeat: {})",
+                    worker.node_id, worker.heartbeat_at
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// List all workers by retrieving them from the admin API.
 ///
-/// Retrieves all workers and displays them as JSON.
+/// Retrieves all workers and displays them based on the output format.
 ///
 /// # Errors
 ///
@@ -33,12 +58,10 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving workers from admin API");
 
     let workers_response = get_workers(&global).await?;
-
-    let json = serde_json::to_string_pretty(&workers_response).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize workers to JSON");
-        Error::JsonFormattingError { source: err }
-    })?;
-    println!("{}", json);
+    let result = ListResult {
+        data: workers_response,
+    };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -48,11 +71,11 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
 /// Creates a client and uses the workers list method.
 #[tracing::instrument(skip_all)]
 async fn get_workers(global: &GlobalArgs) -> Result<client::workers::WorkersResponse, Error> {
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let workers_response = client.workers().list().await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list workers");
-        Error::ClientError { source: err }
+        Error::ClientError(err)
     })?;
 
     Ok(workers_response)
@@ -63,16 +86,13 @@ async fn get_workers(global: &GlobalArgs) -> Result<client::workers::WorkersResp
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from the API
     #[error("client error")]
-    ClientError { source: client::workers::ListError },
+    ClientError(#[source] client::workers::ListError),
 
     /// Failed to format JSON for display
     #[error("failed to format workers JSON")]
-    JsonFormattingError { source: serde_json::Error },
+    JsonFormattingError(#[source] serde_json::Error),
 }

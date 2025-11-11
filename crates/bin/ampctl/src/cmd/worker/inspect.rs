@@ -26,9 +26,32 @@ pub struct Args {
     pub node_id: NodeId,
 }
 
+/// Result wrapper for worker inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: client::workers::WorkerDetailResponse,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Node ID: {}", self.data.node_id)?;
+        writeln!(f, "Created: {}", self.data.created_at)?;
+        writeln!(f, "Registered: {}", self.data.registered_at)?;
+        writeln!(f, "Heartbeat: {}", self.data.heartbeat_at)?;
+        writeln!(f)?;
+        writeln!(f, "Worker Info:")?;
+        writeln!(f, "  Version: {}", self.data.info.version)?;
+        writeln!(f, "  Commit: {}", self.data.info.commit_sha)?;
+        writeln!(f, "  Commit Timestamp: {}", self.data.info.commit_timestamp)?;
+        writeln!(f, "  Build Date: {}", self.data.info.build_date)?;
+        Ok(())
+    }
+}
+
 /// Inspect worker details by retrieving them from the admin API.
 ///
-/// Retrieves worker information and displays it as JSON.
+/// Retrieves worker information and displays it based on the output format.
 ///
 /// # Errors
 ///
@@ -38,12 +61,8 @@ pub async fn run(Args { global, node_id }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving worker from admin API");
 
     let worker = get_worker(&global, &node_id).await?;
-
-    let json = serde_json::to_string_pretty(&worker).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize worker to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = InspectResult { data: worker };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -56,7 +75,7 @@ async fn get_worker(
     global: &GlobalArgs,
     node_id: &NodeId,
 ) -> Result<client::workers::WorkerDetailResponse, Error> {
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let worker = client.workers().get(node_id).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to get worker");
@@ -76,10 +95,7 @@ async fn get_worker(
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from the API
     #[error("client error")]

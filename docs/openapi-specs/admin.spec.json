@@ -578,7 +578,7 @@
           "jobs"
         ],
         "summary": "Handler for the `GET /jobs` endpoint",
-        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)\n- `LIMIT_INVALID`: Limit is zero\n- `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)",
+        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n- `status`: Status filter - \"active\" (default, shows non-terminal jobs), \"all\" (shows all jobs), or comma-separated status values (e.g., \"scheduled,running\")\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)\n- `LIMIT_INVALID`: Limit is zero\n- `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)",
         "operationId": "jobs_list",
         "parameters": [
           {
@@ -595,6 +595,15 @@
             "name": "last_job_id",
             "in": "query",
             "description": "ID of the last job from the previous page for pagination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status filter: 'active' (default, non-terminal jobs), 'all' (all jobs), or comma-separated status values",
             "required": false,
             "schema": {
               "type": "string"

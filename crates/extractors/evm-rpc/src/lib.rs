@@ -39,7 +39,7 @@ pub enum Error {
     #[error("RPC client error: {0}")]
     Client(BoxError),
     #[error("store error: {0}")]
-    StoreError(#[from] StoreError),
+    StoreError(#[source] StoreError),
 }
 
 /// EVM RPC dataset manifest.

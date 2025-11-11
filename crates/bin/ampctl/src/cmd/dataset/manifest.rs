@@ -26,9 +26,24 @@ pub struct Args {
     pub reference: Reference,
 }
 
+/// Result wrapper for manifest inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: serde_json::Value,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // For manifest inspect, output pretty JSON as manifests are complex nested structures
+        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
 /// Retrieve dataset manifest by fetching it from the admin API.
 ///
-/// Retrieves the manifest JSON and displays it.
+/// Retrieves the manifest JSON and displays it based on the output format.
 ///
 /// # Errors
 ///
@@ -38,12 +53,8 @@ pub async fn run(Args { global, reference }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving dataset manifest from admin API");
 
     let manifest = get_manifest(&global, &reference).await?;
-
-    let json = serde_json::to_string_pretty(&manifest).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize manifest to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = InspectResult { data: manifest };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }

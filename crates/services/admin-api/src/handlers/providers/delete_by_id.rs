@@ -130,7 +130,7 @@ pub enum Error {
     /// such as filesystem errors, permission issues, or other
     /// store-level problems during deletion.
     #[error("failed to delete provider configuration: {0}")]
-    StoreError(#[from] DeleteError),
+    StoreError(#[source] DeleteError),
 }
 
 impl IntoErrorResponse for Error {

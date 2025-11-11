@@ -232,62 +232,118 @@ where
     Ok(result.rows_affected() as usize)
 }
 
-/// List the first page of jobs
+/// List the first page of jobs, optionally filtered by status
 ///
 /// Returns a paginated list of jobs ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
-pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<Job>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
-        FROM jobs
-        ORDER BY id DESC
-        LIMIT $1
-    "#};
-
-    let res = sqlx::query_as(query).bind(limit).fetch_all(exe).await?;
-    Ok(res)
-}
-
-/// List subsequent pages of jobs using cursor-based pagination
-///
-/// Returns a paginated list of jobs with IDs less than the provided cursor,
-/// ordered by ID in descending order (newest first). This implements cursor-based
-/// pagination for efficient traversal of large job lists.
-pub async fn list_next_page<'c, E>(
+/// If `statuses` is provided, only jobs matching those statuses are returned.
+pub async fn list_first_page<'c, E>(
     exe: E,
     limit: i64,
-    last_job_id: JobId,
+    statuses: Option<&[JobStatus]>,
 ) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {r#"
-        SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
-        FROM jobs
-        WHERE id < $2
-        ORDER BY id DESC
-        LIMIT $1
-    "#};
+    match statuses {
+        None => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    id,
+                    node_id,
+                    status,
+                    descriptor,
+                    created_at,
+                    updated_at
+                FROM jobs
+                ORDER BY id DESC
+                LIMIT $1
+            "#};
 
-    let res = sqlx::query_as(query)
-        .bind(limit)
-        .bind(last_job_id)
-        .fetch_all(exe)
-        .await?;
-    Ok(res)
+            sqlx::query_as(query).bind(limit).fetch_all(exe).await
+        }
+        Some(statuses) => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    id,
+                    node_id,
+                    status,
+                    descriptor,
+                    created_at,
+                    updated_at
+                FROM jobs
+                WHERE status = ANY($2)
+                ORDER BY id DESC
+                LIMIT $1
+            "#};
+
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(statuses)
+                .fetch_all(exe)
+                .await
+        }
+    }
+}
+
+/// List subsequent pages of jobs using cursor-based pagination, optionally filtered by status
+///
+/// Returns a paginated list of jobs with IDs less than the provided cursor,
+/// ordered by ID in descending order (newest first). This implements cursor-based
+/// pagination for efficient traversal of large job lists.
+/// If `statuses` is provided, only jobs matching those statuses are returned.
+pub async fn list_next_page<'c, E>(
+    exe: E,
+    limit: i64,
+    last_job_id: JobId,
+    statuses: Option<&[JobStatus]>,
+) -> Result<Vec<Job>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    match statuses {
+        None => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    id,
+                    node_id,
+                    status,
+                    descriptor,
+                    created_at,
+                    updated_at
+                FROM jobs
+                WHERE id < $2
+                ORDER BY id DESC
+                LIMIT $1
+            "#};
+
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(last_job_id)
+                .fetch_all(exe)
+                .await
+        }
+        Some(statuses) => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    id,
+                    node_id,
+                    status,
+                    descriptor,
+                    created_at,
+                    updated_at
+                FROM jobs
+                WHERE id < $2 AND status = ANY($3)
+                ORDER BY id DESC
+                LIMIT $1
+            "#};
+
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(last_job_id)
+                .bind(statuses)
+                .fetch_all(exe)
+                .await
+        }
+    }
 }
