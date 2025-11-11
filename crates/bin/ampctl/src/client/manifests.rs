@@ -300,7 +300,7 @@ impl<'a> ManifestsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Manifest deleted successfully");
+                tracing::debug!("Manifest deleted successfully");
                 Ok(())
             }
             400 | 409 | 500 => {

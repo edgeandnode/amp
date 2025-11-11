@@ -268,7 +268,7 @@ impl<'a> DatasetsClient<'a> {
                     }
                 })?;
 
-                tracing::info!(job_id = %deploy_response.job_id, "Dataset deployment job scheduled");
+                tracing::debug!(job_id = %deploy_response.job_id, "Dataset deployment job scheduled");
                 Ok(deploy_response.job_id)
             }
             400 | 404 | 500 => {
@@ -542,7 +542,7 @@ impl<'a> DatasetsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Dataset deleted successfully");
+                tracing::debug!("Dataset deleted successfully");
                 Ok(())
             }
             400 | 500 => {
@@ -717,7 +717,7 @@ impl<'a> DatasetsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Version deleted successfully");
+                tracing::debug!("Version deleted successfully");
                 Ok(())
             }
             400 | 500 => {

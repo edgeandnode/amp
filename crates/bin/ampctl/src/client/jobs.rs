@@ -183,7 +183,7 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             200 => {
-                tracing::info!("Job stop request processed successfully");
+                tracing::debug!("Job stop request processed successfully");
                 Ok(())
             }
             400 | 404 | 500 => {
@@ -265,7 +265,7 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Job deleted successfully");
+                tracing::debug!("Job deleted successfully");
                 Ok(())
             }
             400 | 409 | 500 => {
@@ -356,7 +356,7 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Jobs deleted successfully");
+                tracing::debug!("Jobs deleted successfully");
                 Ok(())
             }
             400 | 500 => {

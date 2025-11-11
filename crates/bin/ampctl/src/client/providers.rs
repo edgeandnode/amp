@@ -351,7 +351,7 @@ impl<'a> ProvidersClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Provider deleted successfully");
+                tracing::debug!("Provider deleted successfully");
                 Ok(())
             }
             400 | 404 | 500 => {
