@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use privy_rs::generated::types::{User, UserLinkedAccountsItem};
+use privy_rs::generated::types::{LinkedAccount, User};
 use serde::{Deserialize, Serialize};
 
 /// Extension trait for privy_rs User type to provide Ethereum address extraction utilities
@@ -34,13 +34,13 @@ impl UserExt for User {
 
         for account in &self.linked_accounts {
             match account {
-                UserLinkedAccountsItem::SmartWallet(wallet) => {
+                LinkedAccount::SmartWallet(wallet) => {
                     addresses.push(wallet.address.clone());
                 }
-                UserLinkedAccountsItem::Ethereum(wallet) => {
+                LinkedAccount::Ethereum(wallet) => {
                     addresses.push(wallet.address.clone());
                 }
-                UserLinkedAccountsItem::EthereumEmbeddedWallet(wallet) => {
+                LinkedAccount::EthereumEmbeddedWallet(wallet) => {
                     addresses.push(wallet.address.clone());
                 }
                 _ => {}
@@ -52,9 +52,9 @@ impl UserExt for User {
 }
 
 /// Find smart wallet address from linked accounts
-fn find_smart_wallet_address(linked_accounts: &[UserLinkedAccountsItem]) -> Option<String> {
+fn find_smart_wallet_address(linked_accounts: &[LinkedAccount]) -> Option<String> {
     for account in linked_accounts {
-        if let UserLinkedAccountsItem::SmartWallet(wallet) = account {
+        if let LinkedAccount::SmartWallet(wallet) = account {
             return Some(wallet.address.clone());
         }
     }
@@ -62,9 +62,9 @@ fn find_smart_wallet_address(linked_accounts: &[UserLinkedAccountsItem]) -> Opti
 }
 
 /// Find regular Ethereum wallet address (non-embedded)
-fn find_ethereum_wallet_address(linked_accounts: &[UserLinkedAccountsItem]) -> Option<String> {
+fn find_ethereum_wallet_address(linked_accounts: &[LinkedAccount]) -> Option<String> {
     for account in linked_accounts {
-        if let UserLinkedAccountsItem::Ethereum(wallet) = account {
+        if let LinkedAccount::Ethereum(wallet) = account {
             // Regular Ethereum wallet (not embedded)
             return Some(wallet.address.clone());
         }
@@ -73,11 +73,9 @@ fn find_ethereum_wallet_address(linked_accounts: &[UserLinkedAccountsItem]) -> O
 }
 
 /// Find Ethereum embedded wallet address
-fn find_ethereum_embedded_wallet_address(
-    linked_accounts: &[UserLinkedAccountsItem],
-) -> Option<String> {
+fn find_ethereum_embedded_wallet_address(linked_accounts: &[LinkedAccount]) -> Option<String> {
     for account in linked_accounts {
-        if let UserLinkedAccountsItem::EthereumEmbeddedWallet(wallet) = account {
+        if let LinkedAccount::EthereumEmbeddedWallet(wallet) = account {
             return Some(wallet.address.clone());
         }
     }
@@ -137,21 +135,20 @@ impl AuthenticatedUser {
 #[cfg(test)]
 mod tests {
     use privy_rs::generated::types::{
-        LinkedAccountEmail, LinkedAccountEmailType, LinkedAccountEthereum,
+        LinkedAccount, LinkedAccountEmail, LinkedAccountEmailType, LinkedAccountEthereum,
         LinkedAccountEthereumChainType, LinkedAccountEthereumEmbeddedWallet,
         LinkedAccountEthereumEmbeddedWalletChainType,
         LinkedAccountEthereumEmbeddedWalletConnectorType,
         LinkedAccountEthereumEmbeddedWalletRecoveryMethod, LinkedAccountEthereumEmbeddedWalletType,
         LinkedAccountEthereumEmbeddedWalletWalletClient,
         LinkedAccountEthereumEmbeddedWalletWalletClientType, LinkedAccountEthereumType,
-        LinkedAccountEthereumWalletClient, LinkedAccountSmartWallet,
-        LinkedAccountSmartWalletSmartWalletType, LinkedAccountSmartWalletType,
-        UserLinkedAccountsItem,
+        LinkedAccountEthereumWalletClient, LinkedAccountSmartWallet, LinkedAccountSmartWalletType,
+        SmartWalletType,
     };
 
     use super::*;
 
-    fn create_test_user_with_accounts(accounts: Vec<UserLinkedAccountsItem>) -> User {
+    fn create_test_user_with_accounts(accounts: Vec<LinkedAccount>) -> User {
         User {
             id: "test_user_id".to_string(),
             created_at: 1731974895.0,
@@ -167,7 +164,7 @@ mod tests {
     fn test_smart_wallet_priority() {
         let accounts = vec![
             // Ethereum embedded wallet (lowest priority)
-            UserLinkedAccountsItem::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
+            LinkedAccount::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
                 address: "0x3333333333333333333333333333333333333333".to_string(),
                 chain_id: "1".to_string(),
                 chain_type: LinkedAccountEthereumEmbeddedWalletChainType::Ethereum,
@@ -185,7 +182,7 @@ mod tests {
                 wallet_index: 0.0,
             }),
             // Regular Ethereum wallet (middle priority)
-            UserLinkedAccountsItem::Ethereum(LinkedAccountEthereum {
+            LinkedAccount::Ethereum(LinkedAccountEthereum {
                 address: "0x2222222222222222222222222222222222222222".to_string(),
                 chain_id: Some("1".to_string()),
                 chain_type: LinkedAccountEthereumChainType::Ethereum,
@@ -198,11 +195,11 @@ mod tests {
                 wallet_client_type: Some("browser".to_string()),
             }),
             // Smart wallet (highest priority)
-            UserLinkedAccountsItem::SmartWallet(LinkedAccountSmartWallet {
+            LinkedAccount::SmartWallet(LinkedAccountSmartWallet {
                 address: "0x1111111111111111111111111111111111111111".to_string(),
                 first_verified_at: Some(1731974895.0),
                 latest_verified_at: Some(1731974895.0),
-                smart_wallet_type: LinkedAccountSmartWalletSmartWalletType::Safe,
+                smart_wallet_type: SmartWalletType::Safe,
                 smart_wallet_version: None,
                 type_: LinkedAccountSmartWalletType::SmartWallet,
                 verified_at: 1731974895.0,
@@ -221,7 +218,7 @@ mod tests {
     #[test]
     fn test_ethereum_wallet_priority() {
         let accounts = vec![
-            UserLinkedAccountsItem::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
+            LinkedAccount::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
                 address: "0x3333333333333333333333333333333333333333".to_string(),
                 chain_id: "1".to_string(),
                 chain_type: LinkedAccountEthereumEmbeddedWalletChainType::Ethereum,
@@ -238,7 +235,7 @@ mod tests {
                 wallet_client_type: LinkedAccountEthereumEmbeddedWalletWalletClientType::Privy,
                 wallet_index: 0.0,
             }),
-            UserLinkedAccountsItem::Ethereum(LinkedAccountEthereum {
+            LinkedAccount::Ethereum(LinkedAccountEthereum {
                 address: "0x2222222222222222222222222222222222222222".to_string(),
                 chain_id: Some("1".to_string()),
                 chain_type: LinkedAccountEthereumChainType::Ethereum,
@@ -263,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_ethereum_embedded_wallet_fallback() {
-        let accounts = vec![UserLinkedAccountsItem::EthereumEmbeddedWallet(
+        let accounts = vec![LinkedAccount::EthereumEmbeddedWallet(
             LinkedAccountEthereumEmbeddedWallet {
                 address: "0x3333333333333333333333333333333333333333".to_string(),
                 chain_id: "1".to_string(),
@@ -294,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_no_ethereum_wallets() {
-        let accounts = vec![UserLinkedAccountsItem::Email(LinkedAccountEmail {
+        let accounts = vec![LinkedAccount::Email(LinkedAccountEmail {
             address: "user@example.com".to_string(),
             first_verified_at: Some(1731974895.0),
             latest_verified_at: Some(1731974895.0),
@@ -311,16 +308,16 @@ mod tests {
     #[test]
     fn test_all_ethereum_addresses() {
         let accounts = vec![
-            UserLinkedAccountsItem::SmartWallet(LinkedAccountSmartWallet {
+            LinkedAccount::SmartWallet(LinkedAccountSmartWallet {
                 address: "0x1111111111111111111111111111111111111111".to_string(),
                 first_verified_at: Some(1731974895.0),
                 latest_verified_at: Some(1731974895.0),
-                smart_wallet_type: LinkedAccountSmartWalletSmartWalletType::Safe,
+                smart_wallet_type: SmartWalletType::Safe,
                 smart_wallet_version: None,
                 type_: LinkedAccountSmartWalletType::SmartWallet,
                 verified_at: 1731974895.0,
             }),
-            UserLinkedAccountsItem::Ethereum(LinkedAccountEthereum {
+            LinkedAccount::Ethereum(LinkedAccountEthereum {
                 address: "0x2222222222222222222222222222222222222222".to_string(),
                 chain_id: Some("1".to_string()),
                 chain_type: LinkedAccountEthereumChainType::Ethereum,
@@ -332,7 +329,7 @@ mod tests {
                 wallet_client: LinkedAccountEthereumWalletClient::Unknown,
                 wallet_client_type: Some("browser".to_string()),
             }),
-            UserLinkedAccountsItem::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
+            LinkedAccount::EthereumEmbeddedWallet(LinkedAccountEthereumEmbeddedWallet {
                 address: "0x3333333333333333333333333333333333333333".to_string(),
                 chain_id: "1".to_string(),
                 chain_type: LinkedAccountEthereumEmbeddedWalletChainType::Ethereum,
@@ -373,18 +370,18 @@ mod tests {
     fn test_real_world_privy_response_structure() {
         // Test with a mix of account types including a smart wallet
         let accounts = vec![
-            UserLinkedAccountsItem::Email(LinkedAccountEmail {
+            LinkedAccount::Email(LinkedAccountEmail {
                 address: "tom.bombadill@privy.io".to_string(),
                 first_verified_at: Some(1674788927.0),
                 latest_verified_at: Some(1674788927.0),
                 type_: LinkedAccountEmailType::Email,
                 verified_at: 1674788927.0,
             }),
-            UserLinkedAccountsItem::SmartWallet(LinkedAccountSmartWallet {
+            LinkedAccount::SmartWallet(LinkedAccountSmartWallet {
                 address: "0x1234567890123456789012345678901234567890".to_string(),
                 first_verified_at: Some(1741194420.0),
                 latest_verified_at: Some(1741194420.0),
-                smart_wallet_type: LinkedAccountSmartWalletSmartWalletType::Safe,
+                smart_wallet_type: SmartWalletType::Safe,
                 smart_wallet_version: None,
                 type_: LinkedAccountSmartWalletType::SmartWallet,
                 verified_at: 1741194420.0,
