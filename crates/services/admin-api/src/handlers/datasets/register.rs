@@ -12,7 +12,6 @@ use datasets_common::{
     namespace::Namespace,
     version::Version,
 };
-use datasets_derived::manifest::DependencyValidationError;
 use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
@@ -24,8 +23,8 @@ use crate::{
     handlers::{
         common::{
             ParseDerivedManifestError, ParseRawManifestError,
+            parse_and_canonicalize_derived_dataset_manifest,
             parse_and_canonicalize_raw_dataset_manifest,
-            parse_validate_and_canonicalize_derived_dataset_manifest,
         },
         error::{ErrorResponse, IntoErrorResponse},
     },
@@ -181,26 +180,27 @@ pub async fn handler(
                 .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
 
             // Validate and serialize manifest based on dataset kind
-            let manifest_canonical = match dataset_kind {
-                DatasetKind::Derived => {
-                    parse_validate_and_canonicalize_derived_dataset_manifest(manifest_content.get())
-                        .map_err(Error::from)?
-                }
-                DatasetKind::EvmRpc => {
-                    parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(
+            let manifest_canonical =
+                match dataset_kind {
+                    DatasetKind::Derived => parse_and_canonicalize_derived_dataset_manifest(
                         manifest_content.get(),
+                        ctx.dataset_store.as_ref(),
                     )
-                    .map_err(Error::from)?
-                }
-                DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<
-                    FirehoseManifest,
-                >(manifest_content.get())
-                .map_err(Error::from)?,
-                DatasetKind::EthBeacon => parse_and_canonicalize_raw_dataset_manifest::<
-                    EthBeaconManifest,
-                >(manifest_content.get())
-                .map_err(Error::from)?,
-            };
+                    .await
+                    .map_err(Error::from)?,
+                    DatasetKind::EvmRpc => parse_and_canonicalize_raw_dataset_manifest::<
+                        EvmRpcManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                    DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<
+                        FirehoseManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                    DatasetKind::EthBeacon => parse_and_canonicalize_raw_dataset_manifest::<
+                        EthBeaconManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                };
 
             // Compute manifest hash from canonical serialization
             let manifest_hash = hash(&manifest_canonical);
@@ -420,13 +420,9 @@ pub enum Error {
     #[error("invalid manifest: {0}")]
     InvalidManifest(#[source] serde_json::Error),
 
-    /// Dependency validation error
-    ///
-    /// This occurs when:
-    /// - SQL queries are invalid
-    /// - SQL queries reference datasets not declared in dependencies
-    #[error("Manifest dependency error: {0}")]
-    DependencyValidationError(#[source] DependencyValidationError),
+    /// Manifest validation error
+    #[error("Manifest validation error: {0}")]
+    ManifestValidationError(#[source] common::manifest::derived::ManifestValidationError),
 
     /// Failed to register manifest in the system
     ///
@@ -486,7 +482,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPayloadFormat => "INVALID_PAYLOAD_FORMAT",
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
-            Error::DependencyValidationError(_) => "DEPENDENCY_VALIDATION_ERROR",
+            Error::ManifestValidationError(_) => "MANIFEST_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
             Error::ManifestLinkingError(_) => "MANIFEST_LINKING_ERROR",
             Error::VersionTaggingError(_) => "VERSION_TAGGING_ERROR",
@@ -500,7 +496,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPayloadFormat => StatusCode::BAD_REQUEST,
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
-            Error::DependencyValidationError(_) => StatusCode::BAD_REQUEST,
+            Error::ManifestValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ManifestLinkingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::VersionTaggingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -515,9 +511,7 @@ impl From<ParseDerivedManifestError> for Error {
     fn from(err: ParseDerivedManifestError) -> Self {
         match err {
             ParseDerivedManifestError::Deserialization(e) => Error::InvalidManifest(e),
-            ParseDerivedManifestError::DependencyValidation(e) => {
-                Error::DependencyValidationError(e)
-            }
+            ParseDerivedManifestError::ManifestValidation(e) => Error::ManifestValidationError(e),
             ParseDerivedManifestError::Serialization(e) => Error::InvalidManifest(e),
         }
     }

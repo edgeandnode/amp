@@ -1,6 +1,7 @@
 //! Common utilities for HTTP handlers
 
-use datasets_derived::{Manifest as DerivedDatasetManifest, manifest::DependencyValidationError};
+use common::catalog::dataset_access::DatasetAccess;
+use datasets_derived::Manifest as DerivedDatasetManifest;
 
 /// A string wrapper that ensures the value is not empty or whitespace-only
 ///
@@ -104,56 +105,36 @@ pub struct EmptyStringError;
 
 /// Parse, validate, and re-serialize a derived dataset manifest to canonical JSON format
 ///
-/// This function handles derived datasets which require dependency validation:
+/// This function handles derived datasets which require comprehensive validation:
 /// 1. Deserialize from JSON string
-/// 2. Validate dependencies using `manifest.validate_dependencies()`
+/// 2. Validate manifest using dataset store (SQL, dependencies, tables, functions)
 /// 3. Re-serialize to canonical JSON
-///
-/// Returns canonical JSON string on success
-pub fn parse_validate_and_canonicalize_derived_dataset_manifest(
+pub async fn parse_and_canonicalize_derived_dataset_manifest(
     manifest_str: impl AsRef<str>,
+    store: &impl DatasetAccess,
 ) -> Result<String, ParseDerivedManifestError> {
     let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
         .map_err(ParseDerivedManifestError::Deserialization)?;
 
-    manifest
-        .validate_dependencies()
-        .map_err(ParseDerivedManifestError::DependencyValidation)?;
+    common::manifest::derived::validate(&manifest, store)
+        .await
+        .map_err(ParseDerivedManifestError::ManifestValidation)?;
 
     serde_json::to_string(&manifest).map_err(ParseDerivedManifestError::Serialization)
 }
 
 /// Error type for derived dataset manifest parsing and validation
-///
-/// Represents the different failure points when processing a derived dataset manifest
-/// through the parse → validate → canonicalize pipeline.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseDerivedManifestError {
     /// Failed to deserialize the JSON string into a `DerivedDatasetManifest` struct
-    ///
-    /// This occurs when:
-    /// - JSON syntax is invalid
-    /// - JSON structure doesn't match the manifest schema
-    /// - Required fields are missing or have wrong types
     #[error("failed to deserialize manifest: {0}")]
     Deserialization(#[source] serde_json::Error),
 
-    /// Failed dependency validation after successful deserialization
-    ///
-    /// This occurs when:
-    /// - SQL queries reference datasets not declared in the dependencies list
-    /// - Circular dependencies are detected
-    /// - Other domain-specific validation rules are violated
-    #[error("dependency validation failed: {0}")]
-    DependencyValidation(#[source] DependencyValidationError),
+    /// Failed manifest validation after successful deserialization
+    #[error("manifest validation failed: {0}")]
+    ManifestValidation(#[from] common::manifest::derived::ManifestValidationError),
 
     /// Failed to serialize the validated manifest back to canonical JSON
-    ///
-    /// This occurs when:
-    /// - The manifest structure cannot be serialized (rare, indicates a bug)
-    /// - Memory allocation fails during serialization
-    ///
-    /// Note: This should rarely happen since we already deserialized successfully
     #[error("failed to serialize manifest: {0}")]
     Serialization(#[source] serde_json::Error),
 }

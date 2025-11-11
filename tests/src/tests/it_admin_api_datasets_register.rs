@@ -64,14 +64,14 @@ async fn register_with_missing_dependency_fails() {
     );
     let err = result.unwrap_err();
     match err {
-        RegisterError::DependencyValidationError(api_err) => {
-            assert_eq!(api_err.error_code, "DEPENDENCY_VALIDATION_ERROR");
+        RegisterError::ManifestValidationError(api_err) => {
+            assert_eq!(api_err.error_code, "MANIFEST_VALIDATION_ERROR");
             assert_eq!(
                 api_err.error_message,
-                r#"Manifest dependency error: undeclared dependencies of SQL query: ["eth_firehose"]"#,
+                r#"Manifest validation error: Dependency alias not found: In table 'test_table': Dependency alias 'eth_firehose' referenced in table but not provided in dependencies"#,
             );
         }
-        _ => panic!("Expected DependencyValidationError, got: {:?}", err),
+        _ => panic!("Expected ManifestValidationError, got: {:?}", err),
     }
 }
 
@@ -172,6 +172,8 @@ struct TestCtx {
 impl TestCtx {
     async fn setup(test_name: &str) -> Self {
         let ctx = TestCtxBuilder::new(test_name)
+            .with_dataset_manifest(("eth_firehose", "_/eth_firehose@0.0.1"))
+            .with_provider_config("firehose_eth_mainnet")
             .build()
             .await
             .expect("failed to build test context");
@@ -221,7 +223,7 @@ fn create_test_manifest() -> DerivedDatasetManifest {
         {
             "kind": "manifest",
             "dependencies": {
-                "raw_mainnet": "_/eth_firehose@0.0.1"
+                "eth_firehose": "_/eth_firehose@0.0.1"
             },
             "tables": {
                 "test_table": {
