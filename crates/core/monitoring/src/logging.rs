@@ -17,20 +17,18 @@ pub fn init() {
     // multiple initializations.
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let (env_filter, amp_log_level) = env_filter_and_log_level();
+        let env_filter = env_filter_and_log_level();
 
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
             .with_ansi(std::io::stderr().is_terminal())
             .init();
-
-        tracing::info!("log level: {}", amp_log_level);
     });
 }
 
 /// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
 pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
-    let (env_filter, amp_log_level) = env_filter_and_log_level();
+    let env_filter = env_filter_and_log_level();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
@@ -50,8 +48,6 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
         .with(fmt_layer)
         .with(telemetry_layer)
         .init();
-
-    tracing::info!("log level: {}", amp_log_level);
 
     Ok(traces_provider)
 }
@@ -83,7 +79,7 @@ const AMP_CRATES: &[&str] = &[
     "worker",
 ];
 
-fn env_filter_and_log_level() -> (EnvFilter, String) {
+fn env_filter_and_log_level() -> EnvFilter {
     // Parse directives from RUST_LOG
     let log_filter = EnvFilter::builder().with_default_directive(LevelFilter::ERROR.into());
     let directive_string = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
@@ -99,7 +95,7 @@ fn env_filter_and_log_level() -> (EnvFilter, String) {
         }
     }
 
-    (env_filter, log_level)
+    env_filter
 }
 
 /// Serialize the error source chain as a JSON array of strings.
