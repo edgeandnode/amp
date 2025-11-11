@@ -92,19 +92,19 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
     test.dump("anvil_rpc", 3).await;
     let blocks1 = test.query_blocks("anvil_rpc", None).await;
 
-    // For now, we don't fully handle reorgs. But we're checking that metadata reflects the current
-    // expected behavior. We only expect to query the "canonical chain", which will not resolve the
-    // reorg unless the uncled block range is re-dumped.
-    assert_eq!(&blocks0, &blocks1);
+    // Check that reorgs are fully handled in the same block in which they are detected
+    assert_eq!(blocks0.len(), 3);
+    assert_eq!(blocks1.len(), 4);
+
     let ranges = test.metadata_ranges("anvil_rpc").await;
-    assert_eq!(ranges.len(), 2);
+    assert_eq!(ranges.len(), 3);
     assert_eq!(
         &ranges[0],
         &BlockRange {
             numbers: 0..=2,
             network: "anvil".to_string(),
-            hash: blocks1[2].hash,
-            prev_hash: Some(blocks1[0].parent_hash),
+            hash: blocks0[2].hash,
+            prev_hash: Some(blocks0[0].parent_hash),
         }
     );
     assert_eq!(ranges[1].numbers, 3..=3);
