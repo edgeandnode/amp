@@ -197,6 +197,15 @@ export const DatasetKeyword = Schema.String.pipe(
   }),
 )
 
+export const DatasetSource = Schema.String.pipe(
+  Schema.annotations({
+    title: "Source",
+    description:
+      "Source of the dataset data. Like the block or logs table that powers the dataset, or the 0x address of the smart contract being queried",
+    examples: ["eth_mainnet_rpc.logs", "arbitrum_one_rpc.blocks", "0xc944e90c64b2c07662a292be6244bdf05cda44a7"],
+  }),
+)
+
 export const DatasetLicense = Schema.String.pipe(
   Schema.annotations({
     title: "License",
@@ -229,6 +238,7 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
   repository: DatasetRepository.pipe(Schema.optional),
   description: DatasetDescription.pipe(Schema.optional),
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  sources: Schema.Array(DatasetSource).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   visibility: Schema.Literal("public", "private").pipe(Schema.optional),
 }) {}
@@ -243,6 +253,7 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   repository: DatasetRepository.pipe(Schema.optional),
   description: DatasetDescription.pipe(Schema.optional),
   keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  sources: Schema.Array(DatasetSource).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   private: Schema.Boolean.pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),

@@ -284,7 +284,6 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       dataset: AmpRegistryDatasetDto,
       metadata: ManifestContext.DatasetContext["metadata"],
       indexingChains: ReadonlyArray<string>,
-      source: ReadonlyArray<string>,
     ): Effect.Effect<boolean, never, never> =>
       Effect.gen(function*() {
         // Helper to treat null/undefined/empty as equivalent
@@ -324,7 +323,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
           return true
         }
         if (optionalChanged(dataset.license, metadata.license)) return true
-        if (arrayChanged(dataset.source, source)) return true
+        if (arrayChanged(dataset.source, metadata.sources)) return true
         if (arrayChanged(dataset.indexing_chains, indexingChains)) return true
 
         return false
@@ -350,12 +349,10 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     ) {
       const { auth, changelog, context, versionTag } = args
       const { dependencies, manifest, metadata } = context
-      const { description, keywords, license, name, namespace, readme, repository, visibility } = metadata
+      const { description, keywords, license, name, namespace, readme, repository, sources, visibility } = metadata
 
       // derived from the tables in the dataset manifest
       const indexingChains = Object.values(manifest.tables).map((table) => table.network)
-      /** @todo figure out a way to derive from the manifest or ask the user */
-      const source: ReadonlyArray<string> = []
 
       // Check if dataset exists (try public first, then owned/private)
       const maybeDataset = yield* getDatasetWithFallback(auth, namespace, name)
@@ -409,7 +406,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
             )
 
             // Update metadata if any fields have changed
-            const metadataChanged = yield* hasMetadataChanged(dataset, metadata, indexingChains, source)
+            const metadataChanged = yield* hasMetadataChanged(dataset, metadata, indexingChains)
             if (metadataChanged) {
               yield* updateDatasetMetadata(
                 auth,
@@ -422,7 +419,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                   readme,
                   repository_url: repository,
                   license,
-                  source,
+                  source: sources,
                 }),
               )
             }
@@ -440,7 +437,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
               description,
               keywords,
               indexing_chains: indexingChains,
-              source,
+              source: sources,
               readme,
               visibility: visibility ?? "public",
               repository_url: repository,
