@@ -21,6 +21,7 @@ the env var name with `AMP_CONFIG_`. For example, to override the `data_dir` val
 `AMP_CONFIG_DATA_DIR` env var to the desired path.
 
 For nested configuration values, use double underscores (`__`) to represent the nesting hierarchy. For example:
+
 - To override `metadata_db.url`, set `AMP_CONFIG_METADATA_DB__URL`
 - To override `metadata_db.pool_size`, set `AMP_CONFIG_METADATA_DB__POOL_SIZE`
 - To override `writer.compression`, set `AMP_CONFIG_WRITER__COMPRESSION`
@@ -71,13 +72,44 @@ GCS Authorization can be configured through one of the following environment var
 
 ## Datasets
 
-All datasets have a name. This will be used as the dataset directory name under the data directory,
-and also as the catalog schema name in the SQL interface. So if you have a dataset name `foobar`, it
-will by default be placed under `<data_dir>/foobar/` and tables will be refered to in SQL as
-`foobar.table`.
+### Dataset Identity and Versioning
 
-Conceptually there are raw datasets, which are extracted from external systems such as Firehose,
-and then there are datasets defined as views on other datasets.
+Datasets in Amp are identified by three components:
+
+- **Namespace**: An organizational grouping (e.g., `my_org`, `edgeandnode`, or `_` for the default namespace)
+- **Name**: The dataset name (e.g., `eth_mainnet`, `uniswap_v3`)
+- **Version/Revision**: A version tag, special tag, or manifest hash (e.g., `1.0.0`, `latest`, `dev`, or a hash)
+
+The complete dataset reference follows the format: `namespace/name@revision`
+
+Examples:
+
+- `my_org/eth_mainnet@1.0.0` - Production release 1.0.0
+- `my_org/eth_mainnet@latest` - Latest semantic version
+- `my_org/eth_mainnet@dev` - Development version
+- `_/eth_mainnet@latest` - Using default namespace
+
+### SQL Schema Names
+
+In SQL queries, datasets are referenced using their fully qualified name (namespace/name) with quotes:
+
+```sql
+SELECT * FROM "namespace/name".table_name
+```
+
+Example: A dataset with namespace `my_org` and name `eth_mainnet` will have tables referenced in SQL as:
+
+- `"my_org/eth_mainnet".blocks`
+- `"my_org/eth_mainnet".logs`
+
+**Note**: SQL references must be quoted because the schema name contains a forward slash (`/`).
+
+### Dataset Categories
+
+Conceptually there are two categories of datasets:
+
+- **Raw datasets**: Extracted from external systems such as Firehose or EVM RPC endpoints
+- **Derived datasets**: Defined as SQL transformations over other datasets
 
 ## Raw datasets
 
@@ -116,12 +148,27 @@ ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet --finali
 
 - `--network`: Network name (e.g., mainnet, goerli, polygon, anvil)
 - `--kind`: Dataset type (evm-rpc, firehose, eth-beacon)
-- `--name`: Dataset name (must be a valid dataset identifier)
+- `--name`: Dataset name (must be a valid dataset identifier, without namespace)
 - `--out` (or `-o`): Optional output file or directory path. If a directory is specified, the file will be named `{kind}.json`. If not specified, the manifest is printed to stdout.
 - `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc, firehose, and eth-beacon datasets.
 - `--finalized-blocks-only`: Only include finalized block data (flag, defaults to false)
 
 The generated manifest includes the complete schema definition with all tables and columns for the specified dataset type and network.
+
+#### Registration and Deployment
+
+After generating a manifest, you need to register it with a namespace and version:
+
+```bash
+# Register the dataset (creates/updates dev tag)
+ampctl dataset register my_namespace/eth_mainnet ./manifest.json
+
+# Register with a specific version (creates version tag and updates latest if higher)
+ampctl dataset register my_namespace/eth_mainnet ./manifest.json --tag 1.0.0
+
+# Deploy the dataset for extraction
+ampctl dataset deploy my_namespace/eth_mainnet@1.0.0
+```
 
 # Providers
 
@@ -142,6 +189,7 @@ Each kind has its own set of required and optional configuration fields.
 ## Provider Configuration Structure
 
 All provider configurations must define:
+
 - `kind`: The provider type (must be one of the four kinds listed above)
 - `network`: The blockchain network identifier (e.g., "mainnet", "goerli", "polygon")
 

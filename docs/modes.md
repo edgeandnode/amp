@@ -55,23 +55,23 @@ Serverless mode performs immediate, on-demand extraction of blockchain data from
 ### Basic Usage
 
 ```bash
-# Extract a single dataset
-ampd dump --dataset eth_mainnet
+# Extract a single dataset (using dev tag)
+ampd dump --dataset my_namespace/eth_mainnet@dev
 
 # Extract with parallel jobs up to block 4M
-ampd dump --dataset eth_mainnet --end-block 4000000 --n-jobs 4
+ampd dump --dataset my_namespace/eth_mainnet@1.0.0 --end-block 4000000 --n-jobs 4
 
 # Extract multiple datasets
-ampd dump --dataset eth_mainnet,uniswap_v3
+ampd dump --dataset my_namespace/eth_mainnet@latest,my_namespace/uniswap_v3@latest
 
 # Extract from a manifest file
 ampd dump --dataset ./datasets/production.json
 
 # Start fresh (discard existing progress)
-ampd dump --dataset eth_mainnet --fresh
+ampd dump --dataset my_namespace/eth_mainnet@dev --fresh
 
 # Run periodically (every 30 minutes)
-ampd dump --dataset eth_mainnet --run-every-mins 30
+ampd dump --dataset my_namespace/eth_mainnet@latest --run-every-mins 30
 ```
 
 ### Behavior
@@ -139,24 +139,26 @@ ampd server --flight-server --jsonl-server  # Both query interfaces
 #### Query Examples
 
 **HTTP JSON Lines:**
+
 ```bash
 # Simple query
 curl -X POST http://localhost:1603 \
-  --data "SELECT * FROM eth_mainnet.blocks LIMIT 10"
+  --data "SELECT * FROM 'my_namespace/eth_mainnet'.blocks LIMIT 10"
 
 # Streaming query with compression
 curl -X POST http://localhost:1603 \
   -H "Accept-Encoding: gzip" \
-  --data "SELECT * FROM eth_mainnet.logs WHERE _block_num > 19000000"
+  --data "SELECT * FROM 'my_namespace/eth_mainnet'.logs WHERE _block_num > 19000000"
 ```
 
 **Arrow Flight (Python):**
+
 ```python
 from pyarrow import flight
 
 client = flight.connect("grpc://localhost:1602")
 reader = client.do_get(
-    flight.Ticket("SELECT * FROM eth_mainnet.blocks LIMIT 10")
+    flight.Ticket("SELECT * FROM 'my_namespace/eth_mainnet'.blocks LIMIT 10")
 )
 table = reader.read_all()
 print(table.to_pandas())
@@ -166,6 +168,7 @@ Without specifying any flags, both query servers are enabled by default.
 
 > [!NOTE]
 > The server flags work as explicit selectors, not toggles. When you specify any flags, only those servers are enabled. There is currently no way to disable specific servers while keeping the "default all" behavior. For example:
+>
 > - `ampd server` → both query servers enabled (Flight + JSON Lines)
 > - `ampd server --flight-server` → only Flight server enabled
 > - `ampd server --jsonl-server` → only JSON Lines server enabled
@@ -215,6 +218,7 @@ ampd worker --node-id us-east-1b-worker
 #### Worker Coordination
 
 Multiple workers coordinate through the metadata DB:
+
 - **Job assignment**: Jobs distributed to available workers
 - **Health monitoring**: Server tracks worker heartbeats
 - **Automatic failover**: Jobs reassigned if worker crashes
@@ -246,11 +250,12 @@ The controller component provides the Admin API for managing Amp operations. It 
 #### Architecture
 
 The controller provides the **Admin API Server** (default port 1610):
-   - RESTful management interface
-   - Control dump jobs remotely
-   - Monitor worker status
-   - Manage datasets and locations
-   - Query file metadata
+
+- RESTful management interface
+- Control dump jobs remotely
+- Monitor worker status
+- Manage datasets and locations
+- Query file metadata
 
 #### Basic Usage
 
@@ -264,12 +269,16 @@ ampd controller
 The Admin API provides full control over the Amp system:
 
 ##### Dataset Management
+
 ```bash
 # List all datasets
 curl http://localhost:1610/datasets
 
-# Get dataset details
-curl http://localhost:1610/datasets/eth_mainnet
+# Get dataset details (specific version)
+curl http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/1.0.0
+
+# List all versions of a dataset
+curl http://localhost:1610/datasets/my_namespace/eth_mainnet/versions
 
 # Register a new dataset
 curl -X POST http://localhost:1610/datasets \
@@ -278,6 +287,30 @@ curl -X POST http://localhost:1610/datasets \
 ```
 
 ##### Job Control
+
+```bash
+# List all jobs
+curl http://localhost:1610/jobs
+
+# Deploy a dataset (start a dump job)
+curl -X POST http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/1.0.0/deploy \
+  -H "Content-Type: application/json" \
+  -d '{
+    "end_block": 20000000
+  }'
+
+# Get job status (replace 42 with actual job_id)
+curl http://localhost:1610/jobs/42
+
+# Stop a running job (replace 42 with actual job_id)
+curl -X PUT http://localhost:1610/jobs/42/stop
+
+# Delete a job (replace 42 with actual job_id)
+curl -X DELETE http://localhost:1610/jobs/42
+```
+
+##### Job Control
+
 ```bash
 # List all jobs
 curl http://localhost:1610/jobs
@@ -300,6 +333,7 @@ curl -X DELETE http://localhost:1610/jobs/42
 ```
 
 ##### Worker Locations
+
 ```bash
 # List all registered locations (workers)
 curl http://localhost:1610/locations
@@ -312,9 +346,10 @@ curl http://localhost:1610/locations/7/files
 ```
 
 ##### File Operations
+
 ```bash
 # List all files for a dataset
-curl http://localhost:1610/files?dataset=eth_mainnet
+curl http://localhost:1610/files?dataset=my_namespace/eth_mainnet
 
 # Get file metadata (replace 512 with actual file_id)
 curl http://localhost:1610/files/512
@@ -339,6 +374,7 @@ Development mode runs a combined server and worker in a single process for simpl
 ### How It Works
 
 When running `ampd dev`:
+
 1. Server starts both query interfaces (Arrow Flight, JSON Lines)
 2. Controller (Admin API) automatically starts in the same process
 3. Worker automatically spawns in the same process with node ID "worker"
@@ -353,7 +389,7 @@ When running `ampd dev`:
 ampd dev
 
 # Schedule a job via Admin API (executed by embedded worker)
-curl -X POST http://localhost:1610/datasets/eth_mainnet/dump \
+curl -X POST http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/dev/deploy \
   -H "Content-Type: application/json" \
   -d '{
     "end_block": 1000000
@@ -361,7 +397,7 @@ curl -X POST http://localhost:1610/datasets/eth_mainnet/dump \
 
 # Query the data as it's being extracted
 curl -X POST http://localhost:1603 \
-  --data "SELECT COUNT(*) FROM eth_mainnet.blocks"
+  --data "SELECT COUNT(*) FROM 'my_namespace/eth_mainnet'.blocks"
 ```
 
 ### Benefits
@@ -404,6 +440,7 @@ This section describes common deployment topologies and when to use each.
 ```
 
 **When to use:**
+
 - Local development and testing
 - CI/CD pipelines
 - Quick prototyping
@@ -412,6 +449,7 @@ This section describes common deployment topologies and when to use each.
 **Operational mode:** Single-Node
 
 **Commands:**
+
 ```bash
 ampd dev
 ```
@@ -433,6 +471,7 @@ ampd dev
 ```
 
 **When to use:**
+
 - Read-only query serving
 - Separation of concerns (queries vs extraction)
 - Datasets populated by external processes (e.g., serverless dump jobs)
@@ -441,6 +480,7 @@ ampd dev
 **Operational mode:** Distributed (query component only)
 
 **Commands:**
+
 ```bash
 ampd server
 ```
@@ -477,6 +517,7 @@ ampd server
 ```
 
 **When to use:**
+
 - Production deployments
 - Resource isolation (CPU/memory for queries vs extraction)
 - Horizontal scaling of extraction
@@ -486,6 +527,7 @@ ampd server
 **Operational mode:** Distributed
 
 **Commands:**
+
 ```bash
 # Server node
 ampd server
@@ -535,6 +577,7 @@ Region A                      Region B
 ```
 
 **When to use:**
+
 - Global deployments with low-latency requirements
 - Geographic redundancy
 - Load distribution across regions
@@ -543,6 +586,7 @@ Region A                      Region B
 **Operational mode:** Distributed
 
 **Commands:**
+
 ```bash
 # Region A
 ampd server
@@ -577,18 +621,21 @@ ampd worker --node-id eu-west-1-worker
 ### Use Distributed Mode When:
 
 **Query-only server:**
+
 - Read-only query serving
 - Datasets populated by serverless jobs
 - Multiple query replicas needed
 - Separating read from write workloads
 
 **Controller-only:**
+
 - Management interface without query serving
 - Secure management in private network
 - Job scheduling and monitoring
 - Datasets managed by external processes
 
 **Controller + Server + Workers (full distributed):**
+
 - Production deployments
 - Resource isolation needed
 - Horizontal scaling required
@@ -602,6 +649,7 @@ ampd worker --node-id eu-west-1-worker
 **Recommended progression for growing deployments:**
 
 ### Stage 1: Development & Testing
+
 - **Mode:** Serverless + Single-Node
 - Use `ampd dump` for initial testing (serverless mode)
 - Use `ampd dev` for local query testing (single-node mode)
@@ -609,6 +657,7 @@ ampd worker --node-id eu-west-1-worker
 - **Not for production use**
 
 ### Stage 2: Production Single-Region
+
 - **Mode:** Distributed
 - Deploy `ampd controller` on management node
 - Deploy `ampd server` on query node(s)
@@ -618,6 +667,7 @@ ampd worker --node-id eu-west-1-worker
 - Production-ready with resource isolation
 
 ### Stage 3: Scaled Distributed Extraction
+
 - **Mode:** Distributed (scaled)
 - Deploy `ampd controller` for centralized management
 - Deploy multiple `ampd server` instances for query load balancing
@@ -626,6 +676,7 @@ ampd worker --node-id eu-west-1-worker
 - Horizontal scaling for management, queries, and extraction
 
 ### Stage 4: Multi-Region Production
+
 - **Mode:** Distributed (global)
 - Deploy `ampd controller` in primary region for centralized management
 - Deploy multiple `ampd server` instances in different regions for low-latency queries
@@ -636,6 +687,7 @@ ampd worker --node-id eu-west-1-worker
 ### Mixing Modes
 
 Different operational modes can coexist in the same deployment:
+
 - Run **distributed mode** (controller + server + workers) for continuous ingestion and queries
 - Use **serverless mode** (`ampd dump`) for ad-hoc extractions or manual backfills
 - Deploy query-only servers (distributed, read-only) in regions without extraction needs
@@ -736,18 +788,22 @@ Amp components currently do **not include built-in authentication or authorizati
 For production deployments requiring authentication:
 
 1. **API Gateway / Reverse Proxy**
+
    ```
    Client → API Gateway (Auth) → Amp Server
    ```
+
    - Use Kong, Nginx, Traefik, or cloud API gateways
    - Implement API key authentication
    - JWT token validation
    - OAuth2/OIDC integration
 
 2. **Mutual TLS (mTLS)**
+
    ```
    Client (with cert) ←TLS→ mTLS Proxy → Amp Server
    ```
+
    - Terminate TLS at proxy/load balancer
    - Client certificate validation
    - Especially suitable for Arrow Flight (gRPC)
@@ -783,6 +839,7 @@ For production deployments requiring authentication:
    - Azure Key Vault
 
 3. **Environment variables via secret injection:**
+
    ```bash
    # Bad - hardcoded in config
    AMP_CONFIG_METADATA_DB_URL=postgresql://user:password@host/db
@@ -797,7 +854,7 @@ For production deployments requiring authentication:
 ### Threat Model Summary
 
 | Component  | Threat Level | Attack Surface          | Mitigation                                          |
-|------------|--------------|-------------------------|-----------------------------------------------------|
+| ---------- | ------------ | ----------------------- | --------------------------------------------------- |
 | Controller | **HIGH**     | Admin API (1610)        | Private network, VPN access, audit logging          |
 | Server     | **MEDIUM**   | Query APIs (1602, 1603) | Rate limiting, read-only DB access, DDoS protection |
 | Worker     | **LOW**      | None (internal)         | Private network, minimal outbound access            |
