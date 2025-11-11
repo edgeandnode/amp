@@ -105,8 +105,58 @@ pub enum ProtocolError {
 
 /// Protocol invariant validation errors
 ///
-/// These errors occur when the server sends data that violates streaming
-/// protocol invariants. All validation errors indicate server misbehavior.
+/// The amp-client streaming protocol is **client-authoritative**: the client is
+/// responsible for validating all server responses for correctness. This ensures
+/// data integrity and prevents malformed or inconsistent blockchain data from
+/// being processed.
+///
+/// # Protocol Invariants
+///
+/// The streaming protocol enforces strict invariants that servers MUST uphold:
+///
+/// ## 1. Network Stability
+/// - The set of networks must remain constant throughout a stream
+/// - Each batch must contain exactly one BlockRange per network
+/// - No duplicate networks within a batch
+///
+/// ## 2. Block Range Continuity
+/// - **Consecutive blocks** (incoming.start = previous.end + 1):
+///   - Hash chain MUST match (incoming.prev_hash == previous.hash)
+///   - Represents normal forward progression on the same chain
+/// - **Forward gaps** (incoming.start > previous.end + 1):
+///   - Always a protocol violation (blocks cannot be skipped)
+/// - **Backwards jumps** (incoming.start < previous.end + 1):
+///   - Hash chain MUST mismatch (incoming.prev_hash != previous.hash)
+///   - Represents a blockchain reorg to a different chain
+///   - Valid regardless of endpoint (reorg can extend beyond previous endpoint)
+///
+/// ## 3. Hash Chain Continuity
+/// - All non-genesis blocks MUST include prev_hash for validation
+/// - Genesis blocks (first message at block 0) MUST NOT include prev_hash
+/// - Hash chain validates blockchain integrity across messages
+///
+/// ## 4. Reorg Semantics
+/// - **Detection**: Reorgs are detected via backwards jumps + hash mismatches
+/// - **Validation**: Reorg block ranges are validated like any other message
+/// - **Invalidation**: Computed from block range overlaps, not hash chain
+///
+/// # Protocol Violations Detected
+///
+/// Each ValidationError variant represents a specific protocol violation:
+/// - Missing or invalid prev_hash → breaks hash chain validation
+/// - Hash mismatch on consecutive blocks → cannot "reorg forward"
+/// - Backwards jump with matching hash → nonsensical (same chain, different position)
+/// - Forward gaps → missing blocks violate continuity
+/// - Network instability → set of networks must remain constant
+///
+/// # Client-Authoritative Design
+///
+/// The client validates ALL server messages and rejects any that violate protocol
+/// invariants. This design ensures:
+/// - Data integrity: Only valid, well-formed blockchain data is processed
+/// - Reorg safety: Reorgs are properly detected and validated
+/// - Protocol correctness: Server errors are caught immediately
+/// - No trust assumptions: Client does not trust server to follow protocol
 #[derive(thiserror::Error, Debug)]
 pub enum ValidationError {
     /// Duplicate network detected in a single batch
@@ -150,6 +200,80 @@ pub enum ValidationError {
         prev_end: BlockNum,
         incoming_start: BlockNum,
         expected_start: BlockNum,
+    },
+
+    /// Missing prev_hash for non-genesis block
+    ///
+    /// This occurs when a BlockRange starting after block 0 does not include prev_hash.
+    /// The prev_hash field is required for hash chain validation to ensure blockchain
+    /// integrity for all blocks except genesis.
+    ///
+    /// prev_hash is only omitted for blocks starting at 0 (genesis), regardless of
+    /// whether it's the first message or a reorg back to genesis.
+    #[error("missing prev_hash for network '{network}' at block {block}")]
+    MissingPrevHash { network: String, block: BlockNum },
+
+    /// Invalid prev_hash for genesis block
+    ///
+    /// This occurs when a BlockRange starting at block 0 (genesis) includes a prev_hash.
+    /// Genesis blocks have no parent block and therefore cannot have a prev_hash, even
+    /// in the case of a reorg back to genesis.
+    #[error("genesis block cannot have prev_hash")]
+    InvalidPrevHash,
+
+    /// Hash chain mismatch on consecutive blocks
+    ///
+    /// This occurs when consecutive blocks (incoming.start = previous.end + 1) have
+    /// a hash chain mismatch (incoming.prev_hash != previous.hash). This violates
+    /// the protocol invariant that forward progression must maintain hash chain
+    /// continuity.
+    ///
+    /// A hash mismatch on consecutive blocks indicates an attempt to "reorg forward",
+    /// which is nonsensical - reorgs must go backwards in time to an earlier block.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100 (hash H100)
+    /// - Incoming: blocks 101..=200 (prev_hash != H100)
+    /// - This is invalid: cannot reorg while progressing forward
+    #[error(
+        "hash chain mismatch on consecutive blocks for network '{network}': expected prev_hash to match {expected_hash:?}, got {actual_prev_hash:?}"
+    )]
+    HashMismatchOnConsecutiveBlocks {
+        network: String,
+        expected_hash: alloy::primitives::BlockHash,
+        actual_prev_hash: Option<alloy::primitives::BlockHash>,
+    },
+
+    /// Invalid reorg semantics
+    ///
+    /// This occurs when a backwards jump in block ranges does not have the expected
+    /// hash chain mismatch. When jumping backwards (incoming.start < previous.end + 1),
+    /// the hash chain MUST mismatch to indicate a reorg to a different chain.
+    ///
+    /// A backwards jump with matching hashes is nonsensical: it would mean the same
+    /// hash appears at different block positions, which violates blockchain integrity.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100 (hash H100)
+    /// - Incoming: blocks 50..=100 (hash H100, same endpoint)
+    /// - This is invalid: backwards jump must indicate different chain
+    #[error("invalid reorg for network '{network}': backwards jump with matching prev_hash")]
+    InvalidReorg { network: String },
+
+    /// Forward gap in block ranges
+    ///
+    /// This occurs when there is a gap in block numbers between consecutive messages.
+    /// The protocol requires strict block continuity - no blocks can be skipped.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100
+    /// - Incoming: blocks 150..=200
+    /// - Missing: blocks 101-149 (protocol violation)
+    #[error("gap in blocks for network '{network}': missing blocks {missing_start}..{missing_end}")]
+    Gap {
+        network: String,
+        missing_start: BlockNum,
+        missing_end: BlockNum,
     },
 }
 

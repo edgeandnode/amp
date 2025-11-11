@@ -11,6 +11,8 @@ pub struct BlockRange {
     pub numbers: RangeInclusive<BlockNum>,
     pub network: String,
     pub hash: BlockHash,
+    /// Hash of the parent block at range start - 1.
+    /// For genesis blocks (start = 0), this is None.
     pub prev_hash: Option<BlockHash>,
 }
 
@@ -38,7 +40,7 @@ impl BlockRange {
     fn adjacent(&self, other: &Self) -> bool {
         self.network == other.network
             && (self.end() + 1) == other.start()
-            && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
+            && other.prev_hash == Some(self.hash)
     }
 }
 

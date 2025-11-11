@@ -4,9 +4,45 @@
 //! must uphold when sending streaming responses. These validations ensure
 //! the client receives well-formed, consistent data.
 
+use std::cmp::Ordering;
+
 use common::metadata::segments::BlockRange;
 
 use crate::error::{Error, ValidationError};
+
+/// Validate prev_hash presence and correctness.
+///
+/// # Protocol Invariant
+/// - Blocks starting at 0 (genesis) MUST NOT have prev_hash (None)
+/// - All other blocks (start > 0) MUST have prev_hash (Some)
+///
+/// # Arguments
+/// * `incoming` - Block range to validate
+///
+/// # Returns
+/// * `Ok(())` if prev_hash presence is valid
+/// * `Err(Error::Validation(ValidationError::InvalidPrevHash))` if genesis has prev_hash
+/// * `Err(Error::Validation(ValidationError::MissingPrevHash))` if non-genesis lacks prev_hash
+pub fn validate_prev_hash(incoming: &BlockRange) -> Result<(), Error> {
+    if incoming.start() == 0 {
+        // Genesis block (start == 0): MUST NOT have prev_hash
+        // This is true regardless of whether it's the first message or a reorg to genesis
+        if incoming.prev_hash.is_some() {
+            return Err(Error::Validation(ValidationError::InvalidPrevHash));
+        }
+        return Ok(());
+    }
+
+    // All non-genesis blocks (start > 0): prev_hash is REQUIRED
+    if incoming.prev_hash.is_none() {
+        return Err(Error::Validation(ValidationError::MissingPrevHash {
+            network: incoming.network.clone(),
+            block: incoming.start(),
+        }));
+    }
+
+    Ok(())
+}
 
 /// Validate network consistency: no duplicates within batch, and stability across batches.
 ///
@@ -58,23 +94,37 @@ pub fn validate_networks(previous: &[BlockRange], incoming: &[BlockRange]) -> Re
     Ok(())
 }
 
-/// Validate that block ranges are consecutive for each network.
+/// Validate that block ranges are consecutive for each network with hash chain continuity.
 ///
-/// # Protocol Invariant
-/// For each network, consecutive batches must have adjacent block ranges:
-/// - If batch N ends at block 100 with hash H100
-/// - Then batch N+1 must start at block 101 with prev_hash = H100
+/// # Protocol Invariants
 ///
-/// This check is skipped when a reorg has been detected, as reorgs
-/// intentionally break consecutiveness.
+/// For each network, validates based on block range position:
+///
+/// ## 1. Consecutive Blocks (incoming.start = prev.end + 1)
+/// - Hash chain MUST match (incoming.prev_hash == prev.hash)
+/// - Represents normal forward progression on the same chain
+/// - Hash mismatch indicates protocol violation (cannot "reorg forward")
+///
+/// ## 2. Backwards Jump (incoming.start < prev.end + 1)
+/// - Hash chain MUST mismatch (incoming.prev_hash != prev.hash)
+/// - Represents a valid blockchain reorg to a different chain
+/// - Endpoint can be anywhere (reorg can extend beyond previous endpoint)
+///
+/// ## 3. Forward Gap (incoming.start > prev.end + 1)
+/// - Always a protocol violation
+/// - Blocks cannot be skipped
+///
+/// ## 4. Identical Range (incoming == prev)
+/// - Allowed for watermark repeats
+/// - Hash must match
 ///
 /// # Arguments
 /// * `previous` - Block ranges from previous batch
 /// * `incoming` - Block ranges from incoming batch
 ///
 /// # Returns
-/// * `Ok(())` if ranges are consecutive (or reorg detected)
-/// * `Err(Error::Validation(ValidationError::NonConsecutiveBlocks))` if consecutiveness broken
+/// * `Ok(())` if all validations pass
+/// * `Err(Error::Validation(ValidationError::*))` for protocol violations
 pub fn validate_consecutiveness(
     previous: &[BlockRange],
     incoming: &[BlockRange],
@@ -87,26 +137,46 @@ pub fn validate_consecutiveness(
             .find(|p| p.network == incoming_range.network);
 
         if let Some(prev_range) = prev_range {
-            // Allow two cases:
-            // 1. Consecutive ranges: incoming.start == prev.end + 1
-            // 2. Identical ranges: incoming == prev (watermarks can repeat the same range)
-            let is_consecutive = incoming_range.start() == prev_range.end() + 1;
-            let is_identical = incoming_range == prev_range;
-
-            if !is_consecutive && !is_identical {
-                let expected_start = prev_range.end() + 1;
-                return Err(Error::Validation(ValidationError::NonConsecutiveBlocks {
-                    network: incoming_range.network.clone(),
-                    prev_end: prev_range.end(),
-                    incoming_start: incoming_range.start(),
-                    expected_start,
-                }));
+            // Check if ranges are identical (watermarks can repeat)
+            if incoming_range == prev_range {
+                continue;
             }
 
-            // Note: We don't validate hash chain continuity here because:
-            // 1. Reorgs can cause hash mismatches which are detected at the transactional layer
-            // 2. The server may not always include prev_hash
-            // 3. Hash validation is primarily for debugging, not protocol correctness
+            // Validate based on block position
+            match incoming_range.start().cmp(&(prev_range.end() + 1)) {
+                Ordering::Greater => {
+                    // Forward gap - ALWAYS INVALID
+                    return Err(Error::Validation(ValidationError::Gap {
+                        network: incoming_range.network.clone(),
+                        missing_start: prev_range.end() + 1,
+                        missing_end: incoming_range.start() - 1,
+                    }));
+                }
+
+                Ordering::Equal => {
+                    // Consecutive blocks - hash chain MUST match
+                    if incoming_range.prev_hash != Some(prev_range.hash) {
+                        return Err(Error::Validation(
+                            ValidationError::HashMismatchOnConsecutiveBlocks {
+                                network: incoming_range.network.clone(),
+                                expected_hash: prev_range.hash,
+                                actual_prev_hash: incoming_range.prev_hash,
+                            },
+                        ));
+                    }
+                    // Valid progression
+                }
+
+                Ordering::Less => {
+                    // Backwards jump - hash chain MUST mismatch (indicates reorg)
+                    if incoming_range.prev_hash == Some(prev_range.hash) {
+                        return Err(Error::Validation(ValidationError::InvalidReorg {
+                            network: incoming_range.network.clone(),
+                        }));
+                    }
+                    // Valid reorg (backwards jump with hash mismatch)
+                }
+            }
         }
     }
 
@@ -119,7 +189,7 @@ mod tests {
 
     use super::*;
 
-    /// Create a test BlockRange with optional prev_hash for chaining
+    /// Create a test BlockRange with specified prev_hash
     fn test_range_with_prev(
         network: &str,
         start: u64,
@@ -326,11 +396,8 @@ mod tests {
             assert!(result.is_err(), "validation should fail with block gap");
             let error = result.expect_err("should return validation error");
             assert!(
-                matches!(
-                    error,
-                    Error::Validation(ValidationError::NonConsecutiveBlocks { .. })
-                ),
-                "Expected ValidationError::NonConsecutiveBlocks, got {:?}",
+                matches!(error, Error::Validation(ValidationError::Gap { .. })),
+                "Expected ValidationError::Gap, got {:?}",
                 error
             );
         }
@@ -338,8 +405,15 @@ mod tests {
         #[test]
         fn with_overlapping_blocks_fails() {
             //* Given
-            let previous = vec![test_range("eth", 0, 10, 10)];
-            let incoming = vec![test_range("eth", 10, 20, 20)]; // Overlap at block 10
+            let previous = vec![test_range_with_prev("eth", 0, 10, 10, None)];
+            // Overlap at block 10 (backwards jump with matching hash = invalid reorg)
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                10,
+                20,
+                20,
+                Some(previous[0].hash), // Same hash = invalid reorg
+            )];
 
             //* When
             let result = validate_consecutiveness(&previous, &incoming);
@@ -347,15 +421,15 @@ mod tests {
             //* Then
             assert!(
                 result.is_err(),
-                "validation should fail with overlapping blocks"
+                "validation should fail with overlapping blocks (invalid reorg)"
             );
             let error = result.expect_err("should return validation error");
             assert!(
                 matches!(
                     error,
-                    Error::Validation(ValidationError::NonConsecutiveBlocks { .. })
+                    Error::Validation(ValidationError::InvalidReorg { .. })
                 ),
-                "Expected ValidationError::NonConsecutiveBlocks, got {:?}",
+                "Expected ValidationError::InvalidReorg, got {:?}",
                 error
             );
         }
@@ -363,10 +437,13 @@ mod tests {
         #[test]
         fn with_multi_network_consecutive_succeeds() {
             //* Given
-            let previous = vec![test_range("eth", 0, 10, 10), test_range("polygon", 0, 5, 5)];
+            let previous = vec![
+                test_range_with_prev("eth", 0, 10, 10, None),
+                test_range_with_prev("polygon", 0, 5, 5, None),
+            ];
             let incoming = vec![
-                test_range("eth", 11, 20, 20),
-                test_range("polygon", 6, 10, 10),
+                test_range_with_prev("eth", 11, 20, 20, Some(previous[0].hash)),
+                test_range_with_prev("polygon", 6, 10, 10, Some(previous[1].hash)),
             ];
 
             //* When
@@ -376,6 +453,241 @@ mod tests {
             assert!(
                 result.is_ok(),
                 "validation should succeed with multi-network consecutive blocks"
+            );
+        }
+
+        #[test]
+        fn forward_gap_fails() {
+            //* Given
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                150,
+                200,
+                200,
+                Some(previous[0].hash),
+            )];
+
+            //* When
+            let result = validate_consecutiveness(&previous, &incoming);
+
+            //* Then
+            assert!(result.is_err(), "validation should fail with forward gap");
+            let error = result.expect_err("should return validation error");
+            assert!(
+                matches!(error, Error::Validation(ValidationError::Gap { .. })),
+                "Expected ValidationError::Gap, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn consecutive_blocks_with_hash_mismatch_fails() {
+            //* Given
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            // Create a different hash for the prev_hash (simulating a chain mismatch)
+            let mut fake_hash = [0u8; 32];
+            fake_hash[31] = 99; // Different from previous hash
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                101,
+                200,
+                200,
+                Some(BlockHash::from_slice(&fake_hash)),
+            )];
+
+            //* When
+            let result = validate_consecutiveness(&previous, &incoming);
+
+            //* Then
+            assert!(
+                result.is_err(),
+                "validation should fail with hash mismatch on consecutive blocks"
+            );
+            let error = result.expect_err("should return validation error");
+            assert!(
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::HashMismatchOnConsecutiveBlocks { .. })
+                ),
+                "Expected ValidationError::HashMismatchOnConsecutiveBlocks, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn backwards_jump_with_hash_mismatch_succeeds() {
+            //* Given
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            // Different hash for reorg
+            let mut reorg_hash = [0u8; 32];
+            reorg_hash[31] = 50; // Different hash
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                50,
+                150,
+                150,
+                Some(BlockHash::from_slice(&reorg_hash)),
+            )];
+
+            //* When
+            let result = validate_consecutiveness(&previous, &incoming);
+
+            //* Then
+            assert!(
+                result.is_ok(),
+                "validation should succeed with backwards jump and hash mismatch (valid reorg)"
+            );
+        }
+
+        #[test]
+        fn backwards_jump_with_matching_hash_fails() {
+            //* Given
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            // Same hash as previous (invalid reorg)
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                50,
+                100,
+                100,
+                Some(previous[0].hash), // Same hash - invalid!
+            )];
+
+            //* When
+            let result = validate_consecutiveness(&previous, &incoming);
+
+            //* Then
+            assert!(
+                result.is_err(),
+                "validation should fail with backwards jump but matching hash"
+            );
+            let error = result.expect_err("should return validation error");
+            assert!(
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::InvalidReorg { .. })
+                ),
+                "Expected ValidationError::InvalidReorg, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn reorg_extending_beyond_previous_endpoint_succeeds() {
+            //* Given
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            // Reorg to block 50, but extends to 200 (new chain has more blocks)
+            let mut reorg_hash = [0u8; 32];
+            reorg_hash[31] = 50;
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                50,
+                200,
+                200,
+                Some(BlockHash::from_slice(&reorg_hash)),
+            )];
+
+            //* When
+            let result = validate_consecutiveness(&previous, &incoming);
+
+            //* Then
+            assert!(
+                result.is_ok(),
+                "validation should succeed with reorg extending beyond previous endpoint"
+            );
+        }
+    }
+
+    mod validate_prev_hash {
+        use super::*;
+
+        #[test]
+        fn genesis_without_prev_hash_succeeds() {
+            //* Given
+            let range = test_range("eth", 0, 10, 1);
+
+            //* When
+            let result = validate_prev_hash(&range);
+
+            //* Then
+            assert!(
+                result.is_ok(),
+                "validation should succeed for genesis without prev_hash"
+            );
+        }
+
+        #[test]
+        fn genesis_with_prev_hash_fails() {
+            //* Given
+            let range = test_range_with_prev("eth", 0, 10, 1, Some(BlockHash::default()));
+
+            //* When
+            let result = validate_prev_hash(&range);
+
+            //* Then
+            assert!(
+                result.is_err(),
+                "validation should fail for genesis with prev_hash"
+            );
+            let error = result.expect_err("should return validation error");
+            assert!(
+                matches!(error, Error::Validation(ValidationError::InvalidPrevHash)),
+                "Expected ValidationError::InvalidPrevHash, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn non_genesis_with_prev_hash_succeeds() {
+            //* Given
+            let range = test_range_with_prev("eth", 100, 110, 1, Some(BlockHash::default()));
+
+            //* When
+            let result = validate_prev_hash(&range);
+
+            //* Then
+            assert!(
+                result.is_ok(),
+                "validation should succeed for non-genesis block with prev_hash"
+            );
+        }
+
+        #[test]
+        fn non_genesis_without_prev_hash_fails() {
+            //* Given
+            let range = test_range("eth", 100, 110, 1);
+
+            //* When
+            let result = validate_prev_hash(&range);
+
+            //* Then
+            assert!(
+                result.is_err(),
+                "validation should fail for non-genesis block without prev_hash"
+            );
+            let error = result.expect_err("should return validation error");
+            assert!(
+                matches!(
+                    error,
+                    Error::Validation(ValidationError::MissingPrevHash { .. })
+                ),
+                "Expected ValidationError::MissingPrevHash, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn reorg_to_genesis_succeeds() {
+            //* Given - reorg back to genesis (no prev_hash)
+            let range = test_range("eth", 0, 10, 1);
+
+            //* When
+            let result = validate_prev_hash(&range);
+
+            //* Then
+            assert!(
+                result.is_ok(),
+                "validation should succeed for reorg to genesis (no prev_hash)"
             );
         }
     }
