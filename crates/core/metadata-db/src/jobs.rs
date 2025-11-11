@@ -116,22 +116,24 @@ where
     }
 }
 
-/// List jobs with cursor-based pagination support
+/// List jobs with cursor-based pagination support, optionally filtered by status
 ///
 /// Uses cursor-based pagination where `last_job_id` is the ID of the last job
 /// from the previous page. For the first page, pass `None` for `last_job_id`.
+/// If `statuses` is provided, only jobs matching those statuses are returned.
 #[tracing::instrument(skip(exe), err)]
 pub async fn list<'c, E>(
     exe: E,
     limit: i64,
     last_job_id: Option<impl Into<JobId> + std::fmt::Debug>,
+    statuses: Option<&[JobStatus]>,
 ) -> Result<Vec<Job>, Error>
 where
     E: Executor<'c>,
 {
     match last_job_id {
-        None => sql::list_first_page(exe, limit).await,
-        Some(id) => sql::list_next_page(exe, limit, id.into()).await,
+        None => sql::list_first_page(exe, limit, statuses).await,
+        Some(id) => sql::list_next_page(exe, limit, id.into(), statuses).await,
     }
     .map_err(Error::Database)
 }

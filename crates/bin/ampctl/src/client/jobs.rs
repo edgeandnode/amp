@@ -402,9 +402,9 @@ impl<'a> JobsClient<'a> {
         }
     }
 
-    /// List jobs with pagination.
+    /// List jobs with pagination and optional status filter.
     ///
-    /// GETs from `/jobs` endpoint with optional limit and last_job_id parameters.
+    /// GETs from `/jobs` endpoint with optional limit, last_job_id, and status parameters.
     ///
     /// # Errors
     ///
@@ -415,6 +415,7 @@ impl<'a> JobsClient<'a> {
         &self,
         limit: Option<usize>,
         last_job_id: Option<JobId>,
+        status: Option<&str>,
     ) -> Result<JobsResponse, ListError> {
         let mut url = self.client.base_url().join(jobs_list()).expect("valid URL");
 
@@ -426,6 +427,9 @@ impl<'a> JobsClient<'a> {
             }
             if let Some(last_job_id) = last_job_id {
                 query_pairs.append_pair("last_job_id", &last_job_id.to_string());
+            }
+            if let Some(status) = status {
+                query_pairs.append_pair("status", status);
             }
         }
 

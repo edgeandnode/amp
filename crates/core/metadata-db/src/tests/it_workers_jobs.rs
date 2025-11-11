@@ -85,7 +85,7 @@ async fn pagination_traverses_all_jobs_ordered() {
     let mut cursor = None;
 
     loop {
-        let page = jobs::list(&metadata_db, page_size, cursor)
+        let page = jobs::list(&metadata_db, page_size, cursor, None)
             .await
             .expect("Failed to list jobs");
 
