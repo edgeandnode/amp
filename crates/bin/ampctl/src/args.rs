@@ -1,6 +1,9 @@
 //! Shared command-line arguments for ampctl commands.
 
+use clap::builder::TypedValueParser;
 use url::Url;
+
+use crate::output::OutputFormat;
 
 /// Global arguments shared across all commands that interact with the admin API.
 ///
@@ -15,9 +18,28 @@ pub struct GlobalArgs {
     /// Bearer token for authenticating requests to the admin API
     #[arg(long, env = "AMP_AUTH_TOKEN")]
     pub auth_token: Option<String>,
+
+    /// Output results in JSON format for machine consumption
+    #[arg(long = "json", global = true, action = clap::ArgAction::SetTrue, value_parser = clap::builder::BoolishValueParser::new().map(|b| if b { OutputFormat::Json } else { OutputFormat::Human }))]
+    pub format: OutputFormat,
 }
 
 impl GlobalArgs {
+    /// Print output using the configured format.
+    ///
+    /// In JSON mode, serializes to compact JSON on one line.
+    /// In Human mode, uses Display trait for human-readable output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if JSON serialization fails.
+    pub fn print<T>(&self, data: &T) -> Result<(), serde_json::Error>
+    where
+        T: serde::Serialize + std::fmt::Display,
+    {
+        self.format.print(data)
+    }
+
     /// Create a client using the admin URL and optional authentication token.
     ///
     /// # Errors

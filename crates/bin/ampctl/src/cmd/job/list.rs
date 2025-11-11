@@ -37,9 +37,36 @@ pub struct Args {
     pub status: String,
 }
 
+/// Result wrapper for jobs list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: crate::client::jobs::JobsResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.data.jobs.is_empty() {
+            writeln!(f, "No jobs found")
+        } else {
+            writeln!(f, "Jobs:")?;
+            for job in &self.data.jobs {
+                writeln!(f, "  {} - {} ({})", job.id, job.status, job.node_id)?;
+                writeln!(f, "    Created: {}", job.created_at)?;
+                writeln!(f, "    Updated: {}", job.updated_at)?;
+            }
+
+            if let Some(next_cursor) = &self.data.next_cursor {
+                writeln!(f, "\nNext cursor: {}", next_cursor)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// List all jobs by retrieving them from the admin API.
 ///
-/// Retrieves all jobs with pagination and displays them as JSON.
+/// Retrieves all jobs with pagination and displays them based on the output format.
 ///
 /// # Errors
 ///
@@ -56,12 +83,10 @@ pub async fn run(
     tracing::debug!("Retrieving jobs from admin API");
 
     let jobs_response = get_jobs(&global, limit, after, &status).await?;
-
-    let json = serde_json::to_string_pretty(&jobs_response).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize jobs to JSON");
-        Error::JsonFormattingError { source: err }
-    })?;
-    println!("{}", json);
+    let result = ListResult {
+        data: jobs_response,
+    };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -84,7 +109,7 @@ async fn get_jobs(
         .await
         .map_err(|err| {
             tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list jobs");
-            Error::ClientError { source: err }
+            Error::ClientError(err)
         })?;
 
     Ok(jobs_response)
@@ -99,9 +124,9 @@ pub enum Error {
 
     /// Client error from the API
     #[error("client error")]
-    ClientError { source: client::jobs::ListError },
+    ClientError(#[source] client::jobs::ListError),
 
     /// Failed to format JSON for display
     #[error("failed to format jobs JSON")]
-    JsonFormattingError { source: serde_json::Error },
+    JsonFormattingError(#[source] serde_json::Error),
 }

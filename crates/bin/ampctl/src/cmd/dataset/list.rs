@@ -21,9 +21,38 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
+/// Result of a dataset list operation.
+#[derive(serde::Serialize)]
+struct ListResult {
+    datasets: Vec<client::datasets::DatasetSummary>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.datasets.is_empty() {
+            writeln!(f, "No datasets found")
+        } else {
+            writeln!(f, "Datasets:")?;
+            for dataset in &self.datasets {
+                let versions_str = if dataset.versions.is_empty() {
+                    "no versions".to_string()
+                } else {
+                    format!("{} version(s)", dataset.versions.len())
+                };
+                writeln!(
+                    f,
+                    "  {}/{} - {}",
+                    dataset.namespace, dataset.name, versions_str
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// List all datasets by retrieving them from the admin API.
 ///
-/// Retrieves all datasets and displays them as JSON.
+/// Retrieves all datasets and displays them based on the output format.
 ///
 /// # Errors
 ///
@@ -33,12 +62,10 @@ pub async fn run(Args { global }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving datasets from admin API");
 
     let datasets_response = get_datasets(&global).await?;
-
-    let json = serde_json::to_string_pretty(&datasets_response).map_err(|err| {
-        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to serialize datasets to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = ListResult {
+        datasets: datasets_response.datasets,
+    };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
