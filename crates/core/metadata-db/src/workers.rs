@@ -39,7 +39,7 @@ where
 {
     sql::register(exe, node_id.into(), info.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Get worker by node ID
@@ -56,7 +56,7 @@ where
 {
     sql::get_by_id(exe, node_id.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// List all workers
@@ -68,7 +68,7 @@ pub async fn list<'c, E>(exe: E) -> Result<Vec<Worker>, Error>
 where
     E: Executor<'c>,
 {
-    sql::list(exe).await.map_err(Error::DbError)
+    sql::list(exe).await.map_err(Error::Database)
 }
 
 /// List active workers
@@ -83,7 +83,7 @@ where
 {
     sql::list_active(exe, interval)
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Establish a dedicated connection to the metadata DB, and return a future that loops
@@ -104,7 +104,7 @@ pub async fn heartbeat_loop(
             interval.tick().await;
             sql::update_heartbeat(&mut conn, node_id.clone())
                 .await
-                .map_err(Error::DbError)?;
+                .map_err(Error::Database)?;
         }
     };
 
@@ -126,7 +126,7 @@ pub async fn listen_for_job_notif(
     events::listen_url(&metadata_db.url, node_id.into())
         .await
         .map_err(|err| {
-            Error::JobNotificationRecvError(crate::workers::events::NotifRecvError::DbError(err))
+            Error::JobNotificationRecv(crate::workers::events::NotifRecvError::Database(err))
         })
 }
 
@@ -149,7 +149,7 @@ where
 {
     events::notify(exe, node_id.into(), payload)
         .await
-        .map_err(Error::JobNotificationSendError)
+        .map_err(Error::JobNotificationSend)
 }
 
 /// Represents a worker node in the metadata database.

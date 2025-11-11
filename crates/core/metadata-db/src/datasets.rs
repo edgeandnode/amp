@@ -39,7 +39,7 @@ where
 {
     manifests::sql::insert(exe, namespace.into(), name.into(), manifest_hash.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Register or update semantic version tag pointing to manifest
@@ -66,7 +66,7 @@ where
         manifest_hash.into(),
     )
     .await
-    .map_err(Error::DbError)
+    .map_err(Error::Database)
 }
 
 /// Update "latest" special tag to point to manifest
@@ -86,7 +86,7 @@ where
 {
     tags::sql::upsert_latest(exe, namespace.into(), name.into(), manifest_hash.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Update "dev" special tag to point to manifest
@@ -106,7 +106,7 @@ where
 {
     tags::sql::upsert_dev(exe, namespace.into(), name.into(), manifest_hash.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Retrieve version tag with complete details
@@ -126,7 +126,7 @@ where
 {
     tags::sql::get_version(exe, namespace.into(), name.into(), version.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Get "latest" tag and lock the row to prevent concurrent modifications
@@ -145,7 +145,7 @@ where
 {
     tags::sql::get_latest_for_update(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Retrieve manifest hash for version tag
@@ -164,7 +164,7 @@ where
 {
     tags::sql::get_version_hash(exe, namespace.into(), name.into(), version.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Retrieve manifest hash for "latest" special tag
@@ -182,7 +182,7 @@ where
 {
     tags::sql::get_latest_hash(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Retrieve manifest hash for "dev" special tag
@@ -200,7 +200,7 @@ where
 {
     tags::sql::get_dev_hash(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// List all semantic versions for dataset
@@ -218,7 +218,7 @@ where
 {
     tags::sql::list_versions(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// List all version tags with full details for a dataset
@@ -236,7 +236,7 @@ where
 {
     tags::sql::list_version_tags(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// List all dataset tags from registry
@@ -248,7 +248,7 @@ pub async fn list_all<'c, E>(exe: E) -> Result<Vec<DatasetTag>, Error>
 where
     E: Executor<'c>,
 {
-    tags::sql::list_all(exe).await.map_err(Error::DbError)
+    tags::sql::list_all(exe).await.map_err(Error::Database)
 }
 
 /// List all dataset tags using a specific manifest
@@ -270,7 +270,7 @@ where
 {
     tags::sql::list_by_manifest_hash(exe, manifest_hash.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Delete a specific version tag
@@ -289,7 +289,7 @@ where
 {
     tags::sql::delete_version(exe, namespace.into(), name.into(), version.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Delete all tags for a dataset
@@ -307,7 +307,7 @@ where
 {
     tags::sql::delete_all_for_dataset(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Delete all manifest links for a dataset
@@ -331,5 +331,5 @@ where
 {
     manifests::sql::delete_all_for_dataset(exe, namespace.into(), name.into())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }

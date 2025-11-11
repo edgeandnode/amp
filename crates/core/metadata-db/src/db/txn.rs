@@ -22,14 +22,14 @@ impl Transaction {
     ///
     /// If not called, the transaction automatically rolls back when dropped.
     pub async fn commit(self) -> Result<(), Error> {
-        self.0.commit().await.map_err(Error::DbError)
+        self.0.commit().await.map_err(Error::Database)
     }
 
     /// Rolls back all changes made within this transaction.
     ///
     /// Equivalent to dropping the transaction but allows explicit error handling.
     pub async fn rollback(self) -> Result<(), Error> {
-        self.0.rollback().await.map_err(Error::DbError)
+        self.0.rollback().await.map_err(Error::Database)
     }
 }
 

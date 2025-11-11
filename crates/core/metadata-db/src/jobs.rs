@@ -74,7 +74,7 @@ where
 {
     sql::insert_with_default_status(exe, node_id.into(), job_desc)
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Update job status to StopRequested
@@ -112,7 +112,7 @@ where
             actual: JobStatus::StopRequested | JobStatus::Stopping,
             ..
         }) => Ok(()),
-        Err(err) => Err(Error::JobStatusUpdateError(err)),
+        Err(err) => Err(Error::JobStatusUpdate(err)),
     }
 }
 
@@ -133,7 +133,7 @@ where
         None => sql::list_first_page(exe, limit).await,
         Some(id) => sql::list_next_page(exe, limit, id.into()).await,
     }
-    .map_err(Error::DbError)
+    .map_err(Error::Database)
 }
 
 /// Given a worker node ID, return all the scheduled jobs
@@ -157,7 +157,7 @@ where
         [JobStatus::Scheduled, JobStatus::Running],
     )
     .await
-    .map_err(Error::DbError)
+    .map_err(Error::Database)
 }
 
 /// Given a worker node ID, return all the active jobs
@@ -188,7 +188,7 @@ where
         ],
     )
     .await
-    .map_err(Error::DbError)
+    .map_err(Error::Database)
 }
 
 /// Returns the job with the given ID
@@ -200,7 +200,7 @@ pub async fn get_by_id<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::get_by_id(exe, id.into()).await.map_err(Error::DbError)
+    sql::get_by_id(exe, id.into()).await.map_err(Error::Database)
 }
 
 /// Get jobs for a given dataset
@@ -218,7 +218,7 @@ where
 {
     sql::get_jobs_by_dataset(exe, manifest_hash)
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
@@ -235,7 +235,7 @@ where
 {
     sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Scheduled], JobStatus::Running)
         .await
-        .map_err(Error::JobStatusUpdateError)
+        .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
@@ -256,7 +256,7 @@ where
         JobStatus::Stopping,
     )
     .await
-    .map_err(Error::JobStatusUpdateError)
+    .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `STOPPED` only if it's currently `STOPPING`
@@ -272,7 +272,7 @@ where
 {
     sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Stopping], JobStatus::Stopped)
         .await
-        .map_err(Error::JobStatusUpdateError)
+        .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
@@ -288,7 +288,7 @@ where
 {
     sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Running], JobStatus::Completed)
         .await
-        .map_err(Error::JobStatusUpdateError)
+        .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `FAILED` from either `RUNNING` or `SCHEDULED` states
@@ -306,7 +306,7 @@ where
         JobStatus::Failed,
     )
     .await
-    .map_err(Error::JobStatusUpdateError)
+    .map_err(Error::JobStatusUpdate)
 }
 
 /// Delete a job by ID if it's in a terminal state
@@ -323,7 +323,7 @@ where
 {
     sql::delete_by_id_and_statuses(exe, id.into(), JobStatus::terminal_statuses())
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Delete all jobs that match the specified status or statuses
@@ -340,7 +340,7 @@ where
 {
     sql::delete_by_status(exe, statuses)
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
 }
 
 /// Error type for conditional job status updates

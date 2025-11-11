@@ -8,19 +8,42 @@ use crate::{
 };
 
 /// Errors specific to manifest registration operations
+///
+/// This error type is used by `DatasetStore::register_manifest()`.
 #[derive(Debug, thiserror::Error)]
 pub enum RegisterManifestError {
     /// Failed to store manifest in dataset definitions store
+    ///
+    /// This occurs when the object store operation to save the manifest file fails.
+    /// The manifest file is stored in the dataset definitions object store before being
+    /// registered in the metadata database.
+    ///
+    /// Common causes:
+    /// - Object store connection failures (S3, GCS, local filesystem, etc.)
+    /// - Network issues when writing to remote storage
+    /// - Permission problems (filesystem permissions, cloud IAM roles)
+    /// - Disk full on local storage
+    /// - Invalid storage path or bucket configuration
+    ///
+    /// The operation can be retried as no partial state is persisted if storage fails.
     #[error("Failed to store manifest in dataset definitions store")]
-    ManifestStorage(#[from] StoreError),
+    ManifestStorage(#[source] StoreError),
 
     /// Failed to register manifest in metadata database
     ///
-    /// This occurs when the database operation to register the manifest metadata fails,
-    /// typically due to:
+    /// This occurs when the database operation to register the manifest metadata fails.
+    /// This happens after the manifest file has been successfully stored in the object store.
+    ///
+    /// Common causes:
     /// - Database connection issues
-    /// - Permission problems
-    /// - Database constraint violations
+    /// - Database unavailability or timeouts
+    /// - Permission problems (database user lacks INSERT privileges)
+    /// - Database constraint violations (e.g., duplicate manifest hash)
+    /// - Transaction conflicts with concurrent operations
+    ///
+    /// If this error occurs, the manifest file exists in the object store but is not
+    /// registered in the metadata database. The operation can be retried - duplicate
+    /// manifest hashes will be handled by database constraints.
     #[error("Failed to register manifest in metadata database")]
     MetadataRegistration(#[source] metadata_db::Error),
 }
