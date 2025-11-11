@@ -60,6 +60,8 @@ async fn sql_dataset_input_batch_size() {
 
     test.spawn_compaction_and_await_completion(table).await;
 
+    tokio::time::sleep(Duration::from_millis(150)).await; // Ensure file locks have expired
+
     // 6. After compaction, we expect an additional file to be created, with all data in it.
     let file_count_after = table.files().await.unwrap().len();
     assert_eq!(file_count_after, 5);
