@@ -31,8 +31,9 @@ pub fn is_streaming(stmt: &Statement) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use datasets_derived::sql_str::SqlStr;
+
     use super::*;
-    use crate::query_context::parse_sql;
 
     #[test]
     fn test_is_streaming() {
@@ -47,7 +48,8 @@ mod tests {
             ("SELECT * FROM test", false),
         ];
         for (sql, expected) in queries {
-            let stmt = parse_sql(sql).unwrap();
+            let sql_str: SqlStr = sql.parse().unwrap();
+            let stmt = crate::sql::parse(&sql_str).unwrap();
             assert_eq!(is_streaming(&stmt), expected);
         }
     }

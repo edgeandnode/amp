@@ -15,7 +15,7 @@ use common::{
         },
     },
     plan_visitors::prepend_special_block_num_field,
-    query_context::{Error as QueryContextError, parse_sql},
+    query_context::Error as QueryContextError,
 };
 use datafusion::sql::{TableReference, parser::Statement, resolve::resolve_table_references};
 use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
@@ -23,6 +23,7 @@ use datasets_derived::{
     dep_alias::DepAlias,
     dep_reference::{DepReference, HashOrVersion},
     manifest::TableSchema,
+    sql_str::SqlStr,
 };
 use tracing::instrument;
 
@@ -194,7 +195,7 @@ pub async fn handler(
             BTreeMap::new();
 
         for (table_name, sql_query) in tables {
-            let stmt = parse_sql(&sql_query).map_err(|err| Error::InvalidTableSql {
+            let stmt = common::sql::parse(&sql_query).map_err(|err| Error::InvalidTableSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
@@ -328,7 +329,7 @@ pub struct SchemaRequest {
     /// tables from dependencies using the alias names.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
-    pub tables: BTreeMap<TableName, NonEmptyString>,
+    pub tables: BTreeMap<TableName, SqlStr>,
 
     /// External dataset dependencies mapped by alias
     ///
@@ -396,7 +397,7 @@ enum Error {
         table_name: TableName,
         /// The underlying parse error
         #[source]
-        source: QueryContextError,
+        source: common::sql::ParseSqlError,
     },
 
     /// Failed to resolve table references in SQL query

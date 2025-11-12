@@ -2,11 +2,9 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
-use common::{
-    BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange,
-    query_context::parse_sql,
-};
+use common::{BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange, sql};
 use datasets_common::reference::Reference;
+use datasets_derived::sql_str::SqlStr;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
@@ -169,7 +167,7 @@ async fn flight_data_app_metadata() {
 
     // This sleep avoids a race between the first schema message, the flight data message,
     // and receiving both.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
     assert_eq!(
@@ -486,8 +484,8 @@ impl ReorgTestCtx {
     /// Get metadata ranges for the specified dataset.
     async fn metadata_ranges(&self, dataset: &str) -> Vec<BlockRange> {
         let test_env = &self.ctx;
-        let sql_query = format!("select * from {}.blocks", dataset);
-        let sql = parse_sql(&sql_query).expect("Failed to parse SQL for dataset.blocks");
+        let sql_query = SqlStr::new_unchecked(format!("select * from {}.blocks", dataset));
+        let sql = sql::parse(&sql_query).expect("Failed to parse SQL for dataset.blocks");
         let env = test_env
             .daemon_server()
             .config()

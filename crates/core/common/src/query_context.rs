@@ -69,8 +69,8 @@ pub enum Error {
     #[error("meta table error: {0}")]
     MetaTableError(DataFusionError),
 
-    #[error("SQL parse error: {0}")]
-    SqlParseError(BoxError),
+    #[error("SQL parse error")]
+    SqlParseError(#[source] crate::sql::ParseSqlError),
 
     #[error("DataFusion configuration error: {0}")]
     ConfigError(DataFusionError),
@@ -185,18 +185,6 @@ impl QueryContext {
         let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan)
-    }
-
-    /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
-    #[instrument(skip_all, err)]
-    pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
-        debug!("query: {}", query);
-
-        let statement = parse_sql(query)?;
-        let ctx = self.datafusion_ctx()?;
-        let plan = sql_to_plan(&ctx, statement).await?;
-
-        execute_plan(&ctx, plan, true).await
     }
 
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
@@ -365,22 +353,6 @@ pub fn udfs() -> Vec<ScalarUDF> {
 
 pub fn udafs() -> Vec<AggregateUDF> {
     vec![attestation::AttestationHasherUDF::new().into()]
-}
-
-pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
-    let mut statements =
-        parser::DFParser::parse_sql(sql).map_err(|e| Error::SqlParseError(e.into()))?;
-    if statements.len() != 1 {
-        return Err(Error::SqlParseError(
-            format!(
-                "a single SQL statement is expected, found {}",
-                statements.len()
-            )
-            .into(),
-        ));
-    }
-    let statement = statements.pop_back().unwrap();
-    Ok(statement)
 }
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.

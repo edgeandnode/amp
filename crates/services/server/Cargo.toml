@@ -13,6 +13,7 @@ bytes.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
+datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }

@@ -10,7 +10,10 @@ use std::{collections::BTreeMap, sync::Arc};
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use datasets_common::{manifest::DataType, table_name::TableName};
 
-use crate::{dataset_kind::DerivedDatasetKind, dep_alias::DepAlias, dep_reference::DepReference};
+use crate::{
+    dataset_kind::DerivedDatasetKind, dep_alias::DepAlias, dep_reference::DepReference,
+    sql_str::SqlStr,
+};
 
 /// Complete manifest definition for a derived dataset.
 ///
@@ -92,5 +95,5 @@ pub enum TableInput {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct View {
     /// SQL query defining the view
-    pub sql: String,
+    pub sql: SqlStr,
 }
