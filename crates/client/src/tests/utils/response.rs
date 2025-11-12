@@ -221,9 +221,9 @@ pub fn data_multi_with_epochs(
                 prev_bytes[1..9].copy_from_slice(&network_hash.to_be_bytes());
                 prev_bytes[24..32].copy_from_slice(&(start - 1).to_be_bytes());
 
-                BlockHash::from_slice(&prev_bytes)
+                Some(BlockHash::from_slice(&prev_bytes))
             } else {
-                BlockHash::ZERO
+                None
             };
 
             BlockRange {
@@ -280,9 +280,9 @@ pub fn watermark_multi_with_epochs(ranges: Vec<(&str, RangeInclusive<u64>, u8)>)
                 prev_bytes[1..9].copy_from_slice(&network_hash.to_be_bytes());
                 prev_bytes[24..32].copy_from_slice(&(start - 1).to_be_bytes());
 
-                BlockHash::from_slice(&prev_bytes)
+                Some(BlockHash::from_slice(&prev_bytes))
             } else {
-                BlockHash::ZERO
+                None
             };
 
             BlockRange {

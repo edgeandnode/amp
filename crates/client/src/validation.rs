@@ -14,8 +14,8 @@ use crate::error::{Error, ValidationError};
 /// Validate parent hash presence and correctness.
 ///
 /// # Protocol Invariant
-/// - Blocks starting at 0 (genesis) MUST have zero hash for parent hash
-/// - All other blocks (start > 0) MUST NOT have zero hash for parent hash
+/// - Blocks starting at 0 (genesis) MUST have None or zero hash for parent hash
+/// - All other blocks (start > 0) MUST have Some(non-zero hash) for parent hash
 ///
 /// # Arguments
 /// * `incoming` - Block range to validate
@@ -23,20 +23,21 @@ use crate::error::{Error, ValidationError};
 /// # Returns
 /// * `Ok(())` if parent hash is valid
 /// * `Err(Error::Validation(ValidationError::InvalidPrevHash))` if genesis has non-zero parent hash
-/// * `Err(Error::Validation(ValidationError::MissingPrevHash))` if non-genesis has zero parent hash
+/// * `Err(Error::Validation(ValidationError::MissingPrevHash))` if non-genesis missing or zero parent hash
 pub fn validate_prev_hash(incoming: &BlockRange) -> Result<(), Error> {
-    let is_zero_hash = incoming.prev_hash == BlockHash::ZERO;
+    // Check if prev_hash is "actually set": Some AND not zero hash
+    let is_actually_set = matches!(incoming.prev_hash, Some(hash) if hash != BlockHash::ZERO);
 
     if incoming.start() == 0 {
-        // Genesis block must have zero parent hash
-        if !is_zero_hash {
+        // Genesis block must have None or zero hash
+        if is_actually_set {
             return Err(Error::Validation(ValidationError::InvalidPrevHash));
         }
         return Ok(());
     }
 
-    // All non-genesis blocks must not have zero parent hash
-    if is_zero_hash {
+    // All non-genesis blocks must have Some(non-zero hash)
+    if !is_actually_set {
         return Err(Error::Validation(ValidationError::MissingPrevHash {
             network: incoming.network.clone(),
             block: incoming.start(),
@@ -155,13 +156,15 @@ pub fn validate_consecutiveness(
                 }
 
                 Ordering::Equal => {
-                    // The hash chain must match for onsecutive blocks
-                    if incoming_range.prev_hash != prev_range.hash {
+                    // The hash chain must match for consecutive blocks
+                    if incoming_range.prev_hash != Some(prev_range.hash) {
                         return Err(Error::Validation(
                             ValidationError::HashMismatchOnConsecutiveBlocks {
                                 network: incoming_range.network.clone(),
                                 expected_hash: prev_range.hash,
-                                actual_prev_hash: incoming_range.prev_hash,
+                                actual_prev_hash: incoming_range
+                                    .prev_hash
+                                    .unwrap_or(BlockHash::ZERO),
                             },
                         ));
                     }
@@ -169,7 +172,7 @@ pub fn validate_consecutiveness(
 
                 Ordering::Less => {
                     // The hash chain must not match for backwards jumps (reorg)
-                    if incoming_range.prev_hash == prev_range.hash {
+                    if incoming_range.prev_hash == Some(prev_range.hash) {
                         return Err(Error::Validation(ValidationError::InvalidReorg {
                             network: incoming_range.network.clone(),
                         }));
@@ -194,7 +197,7 @@ mod tests {
         start: u64,
         end: u64,
         hash_suffix: u8,
-        prev_hash: BlockHash,
+        prev_hash: Option<BlockHash>,
     ) -> BlockRange {
         let mut hash_bytes = [0u8; 32];
         hash_bytes[31] = hash_suffix;
@@ -210,7 +213,7 @@ mod tests {
 
     /// Create a standalone test BlockRange (for single-range tests)
     fn test_range(network: &str, start: u64, end: u64, hash_suffix: u8) -> BlockRange {
-        test_range_with_prev(network, start, end, hash_suffix, BlockHash::ZERO)
+        test_range_with_prev(network, start, end, hash_suffix, None)
     }
 
     mod validate_networks {
@@ -364,7 +367,13 @@ mod tests {
             //* Given
             let previous = vec![test_range("eth", 0, 10, 10)];
             // Create incoming range with prev_hash matching previous range's hash
-            let incoming = vec![test_range_with_prev("eth", 11, 20, 20, previous[0].hash)];
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                11,
+                20,
+                20,
+                Some(previous[0].hash),
+            )];
 
             //* When
             let result = validate_consecutiveness(&previous, &incoming);
@@ -398,14 +407,14 @@ mod tests {
         #[test]
         fn with_overlapping_blocks_fails() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 10, 10, BlockHash::ZERO)];
+            let previous = vec![test_range_with_prev("eth", 0, 10, 10, None)];
             // Overlap at block 10 (backwards jump with matching hash = invalid reorg)
             let incoming = vec![test_range_with_prev(
                 "eth",
                 10,
                 20,
                 20,
-                previous[0].hash, // Same hash = invalid reorg
+                Some(previous[0].hash), // Same hash = invalid reorg
             )];
 
             //* When
@@ -431,12 +440,12 @@ mod tests {
         fn with_multi_network_consecutive_succeeds() {
             //* Given
             let previous = vec![
-                test_range_with_prev("eth", 0, 10, 10, BlockHash::ZERO),
-                test_range_with_prev("polygon", 0, 5, 5, BlockHash::ZERO),
+                test_range_with_prev("eth", 0, 10, 10, None),
+                test_range_with_prev("polygon", 0, 5, 5, None),
             ];
             let incoming = vec![
-                test_range_with_prev("eth", 11, 20, 20, previous[0].hash),
-                test_range_with_prev("polygon", 6, 10, 10, previous[1].hash),
+                test_range_with_prev("eth", 11, 20, 20, Some(previous[0].hash)),
+                test_range_with_prev("polygon", 6, 10, 10, Some(previous[1].hash)),
             ];
 
             //* When
@@ -452,8 +461,14 @@ mod tests {
         #[test]
         fn forward_gap_fails() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 100, 100, BlockHash::ZERO)];
-            let incoming = vec![test_range_with_prev("eth", 150, 200, 200, previous[0].hash)];
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
+            let incoming = vec![test_range_with_prev(
+                "eth",
+                150,
+                200,
+                200,
+                Some(previous[0].hash),
+            )];
 
             //* When
             let result = validate_consecutiveness(&previous, &incoming);
@@ -471,7 +486,7 @@ mod tests {
         #[test]
         fn consecutive_blocks_with_hash_mismatch_fails() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 100, 100, BlockHash::ZERO)];
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
             // Create a different hash for the prev_hash (simulating a chain mismatch)
             let mut fake_hash = [0u8; 32];
             fake_hash[31] = 99; // Different from previous hash
@@ -480,7 +495,7 @@ mod tests {
                 101,
                 200,
                 200,
-                BlockHash::from_slice(&fake_hash),
+                Some(BlockHash::from_slice(&fake_hash)),
             )];
 
             //* When
@@ -505,7 +520,7 @@ mod tests {
         #[test]
         fn backwards_jump_with_hash_mismatch_succeeds() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 100, 100, BlockHash::ZERO)];
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
             // Different hash for reorg
             let mut reorg_hash = [0u8; 32];
             reorg_hash[31] = 50; // Different hash
@@ -514,7 +529,7 @@ mod tests {
                 50,
                 150,
                 150,
-                BlockHash::from_slice(&reorg_hash),
+                Some(BlockHash::from_slice(&reorg_hash)),
             )];
 
             //* When
@@ -530,14 +545,14 @@ mod tests {
         #[test]
         fn backwards_jump_with_matching_hash_fails() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 100, 100, BlockHash::ZERO)];
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
             // Same hash as previous (invalid reorg)
             let incoming = vec![test_range_with_prev(
                 "eth",
                 50,
                 100,
                 100,
-                previous[0].hash, // Same hash - invalid!
+                Some(previous[0].hash), // Same hash - invalid!
             )];
 
             //* When
@@ -562,7 +577,7 @@ mod tests {
         #[test]
         fn reorg_extending_beyond_previous_endpoint_succeeds() {
             //* Given
-            let previous = vec![test_range_with_prev("eth", 0, 100, 100, BlockHash::ZERO)];
+            let previous = vec![test_range_with_prev("eth", 0, 100, 100, None)];
             // Reorg to block 50, but extends to 200 (new chain has more blocks)
             let mut reorg_hash = [0u8; 32];
             reorg_hash[31] = 50;
@@ -571,7 +586,7 @@ mod tests {
                 50,
                 200,
                 200,
-                BlockHash::from_slice(&reorg_hash),
+                Some(BlockHash::from_slice(&reorg_hash)),
             )];
 
             //* When
@@ -609,7 +624,7 @@ mod tests {
             let mut non_zero_hash = [0u8; 32];
             non_zero_hash[31] = 1;
             let range =
-                test_range_with_prev("eth", 0, 10, 1, BlockHash::from_slice(&non_zero_hash));
+                test_range_with_prev("eth", 0, 10, 1, Some(BlockHash::from_slice(&non_zero_hash)));
 
             //* When
             let result = validate_prev_hash(&range);
@@ -632,8 +647,13 @@ mod tests {
             //* Given
             let mut non_zero_hash = [0u8; 32];
             non_zero_hash[31] = 1;
-            let range =
-                test_range_with_prev("eth", 100, 110, 1, BlockHash::from_slice(&non_zero_hash));
+            let range = test_range_with_prev(
+                "eth",
+                100,
+                110,
+                1,
+                Some(BlockHash::from_slice(&non_zero_hash)),
+            );
 
             //* When
             let result = validate_prev_hash(&range);

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use alloy::primitives::BlockHash;
 use common::{
     BoxError, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
@@ -51,7 +50,7 @@ pub fn json_to_row(network: &str, response: api::Response) -> Result<RawTableRow
         network: network.to_string(),
         numbers: slot..=slot,
         hash,
-        prev_hash: BlockHash::ZERO, // Zero hash to prevent hash-chaining, because some slots are skipped
+        prev_hash: None, // None to prevent hash-chaining, because some slots are skipped
     };
 
     let columns: Vec<ArrayRef> = match response {

@@ -483,7 +483,7 @@ impl StreamingQuery {
                 .blocks_table_fetch(
                     &fork_ctx,
                     block.number.saturating_sub(1),
-                    Some(&block.prev_hash),
+                    block.prev_hash.as_ref(),
                 )
                 .await?;
         }
@@ -546,7 +546,7 @@ impl StreamingQuery {
         Ok(Some(BlockRow {
             number,
             hash: get_hash_value("hash"),
-            prev_hash: get_hash_value("parent_hash"),
+            prev_hash: Some(get_hash_value("parent_hash")),
         }))
     }
 }
@@ -554,7 +554,7 @@ impl StreamingQuery {
 struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
-    prev_hash: BlockHash,
+    prev_hash: Option<BlockHash>,
 }
 
 impl BlockRow {

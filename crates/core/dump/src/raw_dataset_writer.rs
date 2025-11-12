@@ -195,7 +195,7 @@ impl RawTableWriter {
         // block range previously written. This means we need to split the segment to ensure all
         // blocks within a segment form a valid chain.
         let reorg = match self.current_range.as_ref() {
-            Some(current) => current.hash != table_rows.range.prev_hash,
+            Some(current) => Some(current.hash) != table_rows.range.prev_hash,
             None => false,
         };
         // We also split the segment if we have reached the configured max `partition_size`.
