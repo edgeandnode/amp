@@ -53,12 +53,9 @@
 //! - **Lazy UDF loading**: All functions implement lazy UDF loading for optimal performance
 //! - **No raw dataset overlap**: Raw dataset dumps don't use these planning functions
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
-use datafusion::{
-    logical_expr::ScalarUDF,
-    sql::{TableReference, parser::Statement, resolve::resolve_table_references},
-};
+use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
     fqn::FullyQualifiedName, hash::Hash, partial_reference::PartialReference, reference::Reference,
     revision::Revision, table_name::TableName,
@@ -76,7 +73,13 @@ use super::{
     logical::LogicalCatalog,
     physical::{Catalog, PhysicalTable},
 };
-use crate::{PlanningContext, ResolvedTable, query_context::QueryEnv};
+use crate::{
+    PlanningContext, ResolvedTable,
+    query_context::QueryEnv,
+    sql::{
+        FunctionReference, TableReference, resolve_function_references, resolve_table_references,
+    },
+};
 
 /// Creates a full catalog with physical data access for SQL query execution.
 ///
@@ -109,12 +112,12 @@ pub async fn catalog_for_sql(
     query: &Statement,
     env: QueryEnv,
 ) -> Result<Catalog, CatalogForSqlError> {
-    let (tables, _) = resolve_table_references(query, true)
-        .map_err(|err| CatalogForSqlError::TableReferenceResolution(err.into()))?;
-    let function_refs = resolve_function_references(query)
+    let table_refs =
+        resolve_table_references(query).map_err(CatalogForSqlError::TableReferenceResolution)?;
+    let func_refs = resolve_function_references(query)
         .map_err(CatalogForSqlError::FunctionReferenceResolution)?;
 
-    get_physical_catalog(store, metadata_db, tables, function_refs, &env)
+    get_physical_catalog(store, metadata_db, table_refs, func_refs, &env)
         .await
         .map_err(CatalogForSqlError::GetPhysicalCatalog)
 }
@@ -148,7 +151,7 @@ pub async fn planning_ctx_for_sql(
     query: &Statement,
 ) -> Result<PlanningContext, PlanningCtxForSqlError> {
     // Get table and function references from the SQL query
-    let (table_refs, _) = resolve_table_references(query, true)
+    let table_refs = resolve_table_references(query)
         .map_err(PlanningCtxForSqlError::TableReferenceResolution)?;
     let function_refs = resolve_function_references(query)
         .map_err(PlanningCtxForSqlError::FunctionReferenceResolution)?;
@@ -177,16 +180,8 @@ pub async fn planning_ctx_for_sql(
                     table_ref: table_ref.to_string(),
                 })?;
 
-        // Validate table name is a valid TableName
-        let table_name: TableName =
-            table_ref
-                .table()
-                .parse()
-                .map_err(|err| PlanningCtxForSqlError::InvalidTableName {
-                    table_name: table_ref.table().to_string(),
-                    table_ref: table_ref.to_string(),
-                    source: err,
-                })?;
+        // Get table name (already validated as TableName in TableReference)
+        let table_name = table_ref.table();
 
         // Parse schema to PartialReference -> Reference
         let partial_ref: PartialReference =
@@ -242,15 +237,16 @@ pub async fn planning_ctx_for_sql(
         let table = dataset
             .tables
             .iter()
-            .find(|t| t.name() == &table_name)
+            .find(|t| t.name() == table_name)
             .ok_or_else(|| PlanningCtxForSqlError::TableNotFoundInDataset {
-                table_name,
+                table_name: table_name.clone(),
                 reference,
             })?;
 
         // Use the original schema string from SQL as the schema name
         let table_ref = TableReference::partial(schema_str, table.name().as_str());
-        let resolved_table = ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone());
+        let resolved_table =
+            ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
 
         // Insert into map - automatically deduplicates by full table reference
         resolved_tables.insert(table_ref.to_string(), resolved_table);
@@ -423,17 +419,6 @@ async fn get_logical_catalog(
                     table_ref: table_ref.to_string(),
                 })?;
 
-        // Validate table name is a valid TableName
-        let table_name: TableName =
-            table_ref
-                .table()
-                .parse()
-                .map_err(|err| GetLogicalCatalogError::InvalidTableName {
-                    table_name: table_ref.table().to_string(),
-                    table_ref: table_ref.to_string(),
-                    source: err,
-                })?;
-
         // Parse schema to PartialReference -> Reference
         let partial_ref: PartialReference =
             schema_str
@@ -485,11 +470,15 @@ async fn get_logical_catalog(
         let resolved_tables = tables.entry(hash).or_default();
 
         // Find table in dataset and create ResolvedTable
-        if let Some(table) = dataset.tables.iter().find(|t| t.name() == &table_name) {
+        if let Some(table) = dataset
+            .tables
+            .iter()
+            .find(|t| t.name() == table_ref.table())
+        {
             // Use the original schema string from SQL as the schema name
             let table_ref = TableReference::partial(schema_str, table.name().as_str());
             let resolved_table =
-                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone());
+                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
 
             // Insert into map - automatically deduplicates by full table reference
             resolved_tables.insert(table_ref.to_string(), resolved_table);
@@ -663,16 +652,6 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                 }
             })?;
 
-            // Validate table name is a valid TableName
-            let referenced_table_name: TableName = table_ref.table().parse().map_err(|err| {
-                PlanningCtxForSqlTablesWithDepsError::InvalidTableName {
-                    table_name: table_name.clone(),
-                    invalid_table_name: table_ref.table().to_string(),
-                    table_ref: table_ref.to_string(),
-                    source: err,
-                }
-            })?;
-
             // Lookup alias in dependencies map (schema_str = alias)
             let (fqn, hash) = dependencies.get(&dep_alias).ok_or_else(|| {
                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
@@ -713,11 +692,11 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             let table = dataset
                 .tables
                 .iter()
-                .find(|t| t.name() == &referenced_table_name)
+                .find(|t| t.name() == table_ref.table())
                 .ok_or_else(
                     || PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset {
                         table_name: table_name.clone(),
-                        referenced_table_name,
+                        referenced_table_name: table_ref.table().clone(),
                         reference,
                     },
                 )?;
@@ -725,7 +704,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             // Use the original alias as the schema name
             let table_ref = TableReference::partial(schema_str, table.name().as_str());
             let resolved_table =
-                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone());
+                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
 
             // Insert into map - automatically deduplicates by full table reference
             resolved_tables.insert(table_ref.to_string(), resolved_table);
@@ -830,222 +809,4 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             .flat_map(|map| map.into_values())
             .collect(),
     }))
-}
-
-/// Resolves all function names from a SQL statement into structured [`FunctionReference`]s.
-///
-/// Extracts function calls and resolves them into typed [`FunctionReference`] variants.
-/// Fails fast if any function name has an invalid format (more than 2 parts).
-///
-/// Supported formats:
-/// - `function` → [`FunctionReference::Bare`] (built-in DataFusion functions)
-/// - `schema.function` → [`FunctionReference::Qualified`] (dataset UDFs)
-/// - `catalog.schema.function` → Error (not supported)
-pub fn resolve_function_references(
-    stmt: &Statement,
-) -> Result<Vec<FunctionReference>, ResolveFunctionReferencesError> {
-    let function_names = all_function_names(stmt)?;
-
-    let mut result = Vec::with_capacity(function_names.len());
-    for func_name in function_names {
-        let parts: Vec<_> = func_name.split('.').collect();
-        let func_ref = match parts.as_slice() {
-            [function] => FunctionReference::bare(function.to_string()),
-            [schema, function] => {
-                FunctionReference::qualified(schema.to_string(), function.to_string())
-            }
-            _ => {
-                return Err(ResolveFunctionReferencesError::InvalidFunctionFormat {
-                    function: func_name,
-                });
-            }
-        };
-        result.push(func_ref);
-    }
-
-    Ok(result)
-}
-
-/// A reference to a function that may be bare (unqualified) or qualified with a schema.
-///
-/// This enum provides a type-safe representation of function references extracted from SQL queries,
-/// similar to DataFusion's [`TableReference`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FunctionReference {
-    /// An unqualified function reference, e.g., "count", "sum"
-    ///
-    /// These typically refer to built-in DataFusion functions.
-    Bare {
-        /// The function name
-        function: Arc<str>,
-    },
-    /// A schema-qualified function reference, e.g., "schema.function"
-    ///
-    /// These refer to user-defined functions (UDFs) from specific datasets.
-    Qualified {
-        /// The schema (dataset reference) containing the function
-        schema: Arc<str>,
-        /// The function name
-        function: Arc<str>,
-    },
-}
-
-impl FunctionReference {
-    /// Creates a bare (unqualified) function reference.
-    pub fn bare(function: impl Into<Arc<str>>) -> Self {
-        Self::Bare {
-            function: function.into(),
-        }
-    }
-
-    /// Creates a qualified function reference.
-    pub fn qualified(schema: impl Into<Arc<str>>, function: impl Into<Arc<str>>) -> Self {
-        Self::Qualified {
-            schema: schema.into(),
-            function: function.into(),
-        }
-    }
-
-    /// Returns the function name, regardless of qualification.
-    pub fn function(&self) -> &str {
-        match self {
-            Self::Bare { function } => function,
-            Self::Qualified { function, .. } => function,
-        }
-    }
-
-    /// Returns the schema name if qualified, `None` otherwise.
-    pub fn schema(&self) -> Option<&str> {
-        match self {
-            Self::Bare { .. } => None,
-            Self::Qualified { schema, .. } => Some(schema),
-        }
-    }
-}
-
-impl std::fmt::Display for FunctionReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Bare { function } => write!(f, "{}", function),
-            Self::Qualified { schema, function } => write!(f, "{}.{}", schema, function),
-        }
-    }
-}
-
-/// Errors that occur when resolving function references from SQL statements
-///
-/// This error type is used by [`resolve_function_references`].
-#[derive(Debug, thiserror::Error)]
-pub enum ResolveFunctionReferencesError {
-    /// Failed to extract function names from SQL statement
-    ///
-    /// This occurs when the underlying function name extraction fails,
-    /// typically due to unsupported statement types.
-    #[error("Failed to resolve function references: {0}")]
-    FunctionReferenceResolution(#[from] AllFunctionNamesError),
-
-    /// Function reference has invalid format (more than 2 parts)
-    ///
-    /// This occurs when a function name contains 3 or more dot-separated parts,
-    /// such as `"catalog.schema.function"`. Currently, only bare functions
-    /// (1 part) and qualified functions (2 parts) are supported.
-    ///
-    /// # Examples
-    ///
-    /// - Valid: `"count"`, `"eth_mainnet.decode_log"`
-    /// - Invalid: `"catalog.schema.function"`, `"a.b.c.d"`
-    #[error("Invalid function format (expected 1 or 2 parts, got more): {function}")]
-    InvalidFunctionFormat { function: String },
-}
-
-/// Returns a list of all function names in the SQL statement.
-///
-/// Errors in case of some DML statements.
-///
-/// ## Note
-///
-/// This is an internal helper function. Use [`parse_function_names`] instead,
-/// which provides structured [`FunctionReference`] types.
-fn all_function_names(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesError> {
-    use std::ops::ControlFlow;
-
-    use datafusion::sql::sqlparser::ast::{Expr, Function, ObjectNamePart, Visit, Visitor};
-    use itertools::Itertools;
-
-    struct FunctionCollector {
-        functions: Vec<Function>,
-    }
-
-    impl Visitor for FunctionCollector {
-        type Break = ();
-
-        fn pre_visit_expr(&mut self, function: &Expr) -> ControlFlow<()> {
-            if let Expr::Function(f) = function {
-                self.functions.push(f.clone());
-            }
-            ControlFlow::Continue(())
-        }
-    }
-
-    let mut collector = FunctionCollector {
-        functions: Vec::new(),
-    };
-    let stmt = match stmt {
-        Statement::Statement(statement) => statement,
-        Statement::CreateExternalTable(_) | Statement::CopyTo(_) => {
-            return Err(AllFunctionNamesError::DmlNotSupported);
-        }
-        Statement::Explain(explain) => match explain.statement.as_ref() {
-            Statement::Statement(statement) => statement,
-            _ => return Err(AllFunctionNamesError::UnsupportedStatementInExplain),
-        },
-    };
-
-    let c = stmt.visit(&mut collector);
-    assert!(c.is_continue());
-
-    Ok(collector
-        .functions
-        .into_iter()
-        .map(|f| {
-            f.name
-                .0
-                .into_iter()
-                .filter_map(|s| match s {
-                    ObjectNamePart::Identifier(ident) => Some(ident.value),
-                    ObjectNamePart::Function(_) => None,
-                })
-                .join(".")
-        })
-        .collect())
-}
-
-/// Errors that occur when extracting function names from SQL statements
-///
-/// This error type is used by [`all_function_names`].
-#[derive(Debug, thiserror::Error)]
-pub enum AllFunctionNamesError {
-    /// DML statements are not supported for function name extraction
-    ///
-    /// This occurs when attempting to extract function names from DML statements
-    /// like `CreateExternalTable` or `CopyTo`. These statement types are not
-    /// supported because they represent data manipulation operations rather than
-    /// queryable SQL statements.
-    ///
-    /// Function name extraction is only meaningful for query statements (SELECT)
-    /// and their variants (e.g., within EXPLAIN).
-    #[error("DML statements (CreateExternalTable, CopyTo) are not supported")]
-    DmlNotSupported,
-
-    /// Unsupported statement type within EXPLAIN
-    ///
-    /// This occurs when an EXPLAIN statement contains a nested statement type
-    /// that is not supported for function name extraction. Only regular SQL
-    /// statements (SELECT, etc.) are supported within EXPLAIN.
-    ///
-    /// Common causes:
-    /// - EXPLAIN wrapping a DML statement (CreateExternalTable, CopyTo)
-    /// - EXPLAIN wrapping another EXPLAIN statement
-    #[error("Unsupported statement type in EXPLAIN")]
-    UnsupportedStatementInExplain,
 }

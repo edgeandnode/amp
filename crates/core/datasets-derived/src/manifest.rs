@@ -12,7 +12,7 @@ use datasets_common::{manifest::DataType, table_name::TableName};
 
 use crate::{
     dataset_kind::DerivedDatasetKind, dep_alias::DepAlias, dep_reference::DepReference,
-    sql_str::SqlStr,
+    func_name::FuncName, sql_str::SqlStr,
 };
 
 /// Complete manifest definition for a derived dataset.
@@ -35,7 +35,7 @@ pub struct Manifest {
     pub tables: BTreeMap<TableName, Table>,
     /// User-defined function definitions mapped by function name
     #[serde(default)]
-    pub functions: BTreeMap<String, Function>,
+    pub functions: BTreeMap<FuncName, Function>,
 }
 
 /// Table definition within a derived dataset.

@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use datafusion::sql::{TableReference, parser, resolve::resolve_table_references};
+use datafusion::sql::parser;
 use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
 use datasets_derived::{
     DerivedDatasetKind, Manifest,
@@ -18,10 +18,11 @@ use crate::{
         dataset_access::DatasetAccess,
         errors::PlanningCtxForSqlTablesWithDepsError,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
-        sql::{
-            FunctionReference, ResolveFunctionReferencesError,
-            planning_ctx_for_sql_tables_with_deps, resolve_function_references,
-        },
+        sql::planning_ctx_for_sql_tables_with_deps,
+    },
+    sql::{
+        FunctionReference, ResolveFunctionReferencesError, TableReference,
+        resolve_function_references, resolve_table_references,
     },
     utils::dfs,
 };
@@ -71,7 +72,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, BoxEr
         .functions
         .into_iter()
         .map(|(name, f)| LogicalFunction {
-            name,
+            name: name.into_inner(),
             input_types: f.input_types.into_iter().map(|dt| dt.0).collect(),
             output_type: f.output_type.0,
             source: LogicalFunctionSource {
@@ -116,7 +117,7 @@ pub fn sort_tables_by_dependencies(
     }
 
     for (table_name, query) in queries {
-        let (table_refs, _) = resolve_table_references(query, true)?;
+        let table_refs = resolve_table_references(query)?;
 
         // Filter to only include dependencies within the same dataset
         let mut table_deps: Vec<TableName> = vec![];
@@ -124,11 +125,8 @@ pub fn sort_tables_by_dependencies(
             match (table_ref.schema(), table_ref.table()) {
                 (None, table) if table != table_name => {
                     // Unqualified reference is assumed to be to a table in the same dataset
-                    #[expect(clippy::collapsible_if)]
-                    if let Ok(dep_name) = table.parse::<TableName>() {
-                        if table_map.contains_key(&dep_name) {
-                            table_deps.push(dep_name);
-                        }
+                    if table_map.contains_key(table) {
+                        table_deps.push(table.clone());
                     }
                 }
                 _ => {
@@ -237,11 +235,14 @@ pub async fn validate(
             })?;
 
         // Extract table references
-        let (table_refs, _) = resolve_table_references(&stmt, true).map_err(|err| {
-            ManifestValidationError::TableReferenceResolution {
+        let table_refs = resolve_table_references(&stmt).map_err(|err| match &err {
+            crate::sql::ResolveTableReferencesError::InvalidTableName { .. } => {
+                ManifestValidationError::InvalidTableName(err)
+            }
+            _ => ManifestValidationError::TableReferenceResolution {
                 table_name: table_name.clone(),
                 source: err,
-            }
+            },
         })?;
 
         // Extract function references
@@ -269,9 +270,6 @@ pub async fn validate(
             }
             PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
                 ManifestValidationError::UnqualifiedTable(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
-                ManifestValidationError::InvalidTableName(err)
             }
             PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef { .. } => {
                 ManifestValidationError::InvalidDependencyAliasForTableRef(err)
@@ -335,7 +333,7 @@ pub enum ManifestValidationError {
     TableReferenceResolution {
         table_name: TableName,
         #[source]
-        source: datafusion::error::DataFusionError,
+        source: crate::sql::ResolveTableReferencesError,
     },
 
     /// Failed to resolve function references from SQL query
@@ -377,8 +375,8 @@ pub enum ManifestValidationError {
     ///
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name: {0}")]
-    InvalidTableName(#[source] PlanningCtxForSqlTablesWithDepsError),
+    #[error("Invalid table name in SQL query: {0}")]
+    InvalidTableName(#[source] crate::sql::ResolveTableReferencesError),
 
     /// Dataset reference not found
     ///

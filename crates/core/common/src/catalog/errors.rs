@@ -1,19 +1,21 @@
-use datafusion::error::DataFusionError;
 use datasets_common::{reference::Reference, table_name::TableName};
 use datasets_derived::dep_alias::DepAlias;
 
-use crate::{BoxError, catalog::sql::ResolveFunctionReferencesError};
+use crate::{
+    BoxError,
+    sql::{ResolveFunctionReferencesError, ResolveTableReferencesError},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
     /// This occurs when:
-    /// - The SQL statement contains invalid table references
-    /// - Table names cannot be parsed or extracted
-    /// - The SQL syntax is malformed for table resolution
+    /// - Table references contain invalid identifiers
+    /// - Table references have unsupported format (not 1-3 parts)
+    /// - Table names don't conform to identifier rules
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] BoxError),
+    TableReferenceResolution(#[source] ResolveTableReferencesError),
 
     /// Failed to extract function names from the SQL statement.
     ///
@@ -62,22 +64,6 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     UnqualifiedTable {
         table_name: TableName,
         table_ref: String,
-    },
-
-    /// Table name is invalid.
-    ///
-    /// This occurs when the table name portion of a table reference does not
-    /// conform to SQL identifier rules (must start with letter/underscore,
-    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error(
-        "In table '{table_name}': Invalid table name '{invalid_table_name}' in table reference '{table_ref}'"
-    )]
-    InvalidTableName {
-        table_name: TableName,
-        invalid_table_name: String,
-        table_ref: String,
-        #[source]
-        source: datasets_common::table_name::TableNameError,
     },
 
     /// Dataset reference could not be found when loading dataset for table reference.
@@ -245,12 +231,12 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
 pub enum PlanningCtxForSqlError {
     /// Failed to resolve table references from the SQL statement.
     ///
-    /// This occurs when DataFusion's table reference resolver encounters issues:
-    /// - The SQL statement contains invalid table references
-    /// - Table names cannot be parsed or extracted
-    /// - The SQL syntax is malformed for table resolution
+    /// This occurs when:
+    /// - Table references contain invalid identifiers
+    /// - Table references have unsupported format (not 1-3 parts)
+    /// - Table names don't conform to identifier rules
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] DataFusionError),
+    TableReferenceResolution(#[source] ResolveTableReferencesError),
 
     /// Failed to extract function names from the SQL statement.
     ///
@@ -277,19 +263,6 @@ pub enum PlanningCtxForSqlError {
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
-
-    /// Table name is invalid.
-    ///
-    /// This occurs when the table name portion of a table reference does not
-    /// conform to SQL identifier rules (must start with letter/underscore,
-    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name '{table_name}' in table reference '{table_ref}'")]
-    InvalidTableName {
-        table_name: String,
-        table_ref: String,
-        #[source]
-        source: datasets_common::table_name::TableNameError,
-    },
 
     /// Failed to parse schema portion of table reference as PartialReference.
     ///
@@ -439,19 +412,6 @@ pub enum GetLogicalCatalogError {
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
-
-    /// Table name is invalid.
-    ///
-    /// This occurs when the table name portion of a table reference does not
-    /// conform to SQL identifier rules (must start with letter/underscore,
-    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name '{table_name}' in table reference '{table_ref}'")]
-    InvalidTableName {
-        table_name: String,
-        table_ref: String,
-        #[source]
-        source: datasets_common::table_name::TableNameError,
-    },
 
     /// Failed to parse schema portion of table reference as PartialReference.
     ///
