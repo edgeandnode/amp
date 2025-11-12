@@ -5,7 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-amp-client = { version = "0.1.0", path = "../../client/amp-client", features = ["lmdb"] }
+amp-client = { version = "0.1.0", path = "../../client", features = ["lmdb"] }
 anyhow.workspace = true
 chrono.workspace = true
 clap = { workspace = true, features = ["derive"] }
