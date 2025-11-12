@@ -99,12 +99,13 @@ fn env_filter() -> EnvFilter {
     env_filter
 }
 
-/// Serialize the error source chain as a JSON array of strings.
+/// Collect the error source chain as a vector of strings for tracing.
 ///
 /// Walks the `.source()` chain of the provided error and collects each source's
-/// Display representation into a JSON array. Returns an empty array "[]" if the
-/// error has no source chain.
-pub fn error_source(err: &dyn std::error::Error) -> String {
+/// Display representation into a vector. Returns a `DebugValue<Vec<String>>` that
+/// can be used directly in tracing macros. Returns an empty vector if the error
+/// has no source chain.
+pub fn error_source(err: &dyn std::error::Error) -> tracing::field::DebugValue<Vec<String>> {
     let mut sources = Vec::new();
     let mut current = err.source();
 
@@ -113,21 +114,105 @@ pub fn error_source(err: &dyn std::error::Error) -> String {
         current = curr.source();
     }
 
-    serde_json::to_string(&sources).expect("Failed to serialize error sources to JSON")
+    tracing::field::debug(sources)
 }
 
-/// If this fails, just update the above `AMP_CRATES` to match reality.
-#[test]
-fn assert_amp_crates() {
+#[cfg(test)]
+mod tests {
     use cargo_metadata::MetadataCommand;
 
-    let cmd = MetadataCommand::new().exec().unwrap();
-    let mut names: Vec<String> = cmd
-        .workspace_packages()
-        .into_iter()
-        .map(|pkg| pkg.name.replace("-", "_").clone())
-        .filter(|pkg| !pkg.ends_with("_gen")) // Exclude codegen crates
-        .collect();
-    names.sort();
-    assert_eq!(names, AMP_CRATES);
+    use super::*;
+
+    /// If this fails, just update the above `AMP_CRATES` to match reality.
+    #[test]
+    fn workspace_crates_match_amp_crates_list() {
+        //* Given
+        let cmd = MetadataCommand::new()
+            .exec()
+            .expect("should execute cargo metadata command");
+
+        //* When
+        let mut names: Vec<String> = cmd
+            .workspace_packages()
+            .into_iter()
+            .map(|pkg| pkg.name.replace("-", "_").clone())
+            .filter(|pkg| !pkg.ends_with("_gen")) // Exclude codegen crates
+            .collect();
+        names.sort();
+
+        //* Then
+        assert_eq!(names, AMP_CRATES);
+    }
+
+    #[test]
+    fn error_source_with_three_level_chain_returns_two_sources() {
+        //* Given
+        /// Root error representing database connection failure
+        #[derive(Debug, thiserror::Error)]
+        #[error("database connection refused")]
+        struct DatabaseConnectionError;
+
+        /// Error that occurs when a database query fails
+        #[derive(Debug, thiserror::Error)]
+        #[error("failed to execute query")]
+        struct QueryExecutionError(#[source] DatabaseConnectionError);
+
+        /// Error that occurs when fetching user data fails
+        #[derive(Debug, thiserror::Error)]
+        #[error("failed to fetch user data")]
+        struct FetchUserDataError(#[source] QueryExecutionError);
+
+        let error = FetchUserDataError(QueryExecutionError(DatabaseConnectionError));
+
+        //* When
+        let result = error_source(&error);
+
+        //* Then
+        // The error should be logged using `%` to display the error message
+        // Example: tracing::error!(error = %err, ...)
+        let error_str = format!("{}", error);
+        assert_eq!(
+            error_str, "failed to fetch user data",
+            "top-level error message should match"
+        );
+
+        // The error_source array should NOT include the top-level error message,
+        // only the underlying source errors in the chain
+        let error_source_str = format!("{:?}", result);
+        assert_eq!(
+            error_source_str, r#"["failed to execute query", "database connection refused"]"#,
+            "error source chain should contain both sources in order"
+        );
+    }
+
+    #[test]
+    fn error_source_with_no_source_returns_empty_vec() {
+        //* Given
+        /// Simple error with no underlying cause
+        #[derive(Debug, thiserror::Error)]
+        #[error("something went wrong")]
+        struct SimpleError;
+
+        let error = SimpleError;
+
+        //* When
+        let result = error_source(&error);
+
+        //* Then
+        // The error should be logged using `%` to display the error message
+        // Example: tracing::error!(error = %err, ...)
+        let error_str = format!("{}", error);
+        assert_eq!(
+            error_str, "something went wrong",
+            "error message should match"
+        );
+
+        // The error_source array should NOT include the top-level error message,
+        // only the underlying source errors in the chain (empty in this case)
+        let error_source_str = format!("{:?}", result);
+        assert_eq!(
+            error_source_str, "[]",
+            "error source chain should be empty for errors with no source"
+        );
+    }
 }
