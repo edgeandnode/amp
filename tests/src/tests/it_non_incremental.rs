@@ -17,5 +17,7 @@ async fn non_incremental_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("non-incremental-tests", &test_ctx, &mut client, None).await;
+    run_spec("non-incremental-tests", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }

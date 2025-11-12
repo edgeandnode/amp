@@ -27,7 +27,8 @@ async fn intra_deps_test() {
         &mut client,
         Some(Duration::from_secs(1)),
     )
-    .await;
+    .await
+    .expect("Failed to run spec");
 }
 
 #[tokio::test]
@@ -52,5 +53,6 @@ async fn multi_version_test() {
         &mut client,
         Some(Duration::from_secs(1)),
     )
-    .await;
+    .await
+    .expect("Failed to run spec");
 }

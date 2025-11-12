@@ -18,7 +18,9 @@ async fn sql_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("sql-tests", &test_ctx, &mut client, None).await;
+    run_spec("sql-tests", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
 
 #[tokio::test]
@@ -37,5 +39,7 @@ async fn sql_advanced_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("sql-advanced-tests", &test_ctx, &mut client, None).await;
+    run_spec("sql-advanced-tests", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
