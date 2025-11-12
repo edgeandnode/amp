@@ -5,6 +5,7 @@
 
 pub mod fqn;
 pub mod hash;
+pub mod hash_reference;
 pub mod manifest;
 pub mod name;
 pub mod namespace;

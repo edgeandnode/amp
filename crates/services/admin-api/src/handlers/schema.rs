@@ -18,7 +18,7 @@ use common::{
     },
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     dep_alias::DepAlias,
     dep_reference::{DepReference, HashOrVersion},
@@ -136,7 +136,7 @@ pub async fn handler(
     // Resolve all dependencies to their manifest hashes
     // This must happen before parsing SQL to ensure all dependencies exist
     let dependencies = {
-        let mut resolved: BTreeMap<DepAlias, (FullyQualifiedName, Hash)> = BTreeMap::new();
+        let mut resolved: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
         for (alias, dep_ref) in dependencies {
             let (fqn, hash_or_version) = dep_ref.clone().into_fqn_and_hash_or_version();
 
@@ -181,7 +181,7 @@ pub async fn handler(
                 }
             };
 
-            resolved.insert(alias, (fqn, hash));
+            resolved.insert(alias, (fqn, hash).into());
         }
         resolved
     };

@@ -1,4 +1,4 @@
-use datasets_common::{reference::Reference, table_name::TableName};
+use datasets_common::{hash_reference::HashReference, reference::Reference, table_name::TableName};
 use datasets_derived::dep_alias::DepAlias;
 
 use crate::{
@@ -73,7 +73,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     #[error("In table '{table_name}': Dataset reference '{reference}' not found")]
     DatasetNotFoundForTableRef {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
     },
 
     /// Failed to retrieve dataset from store when loading dataset for table reference.
@@ -85,7 +85,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     #[error("In table '{table_name}': Failed to retrieve dataset '{reference}'")]
     GetDatasetForTableRef {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
         #[source]
         source: BoxError,
     },
@@ -125,7 +125,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     #[error("In table '{table_name}': Dataset reference '{reference}' not found for function")]
     DatasetNotFoundForFunction {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
     },
 
     /// Failed to retrieve dataset from store when loading dataset for function.
@@ -137,7 +137,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     #[error("In table '{table_name}': Failed to retrieve dataset '{reference}' for function")]
     GetDatasetForFunction {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
         #[source]
         source: BoxError,
     },
@@ -153,7 +153,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     )]
     EthCallUdfCreationForFunction {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
         #[source]
         source: BoxError,
     },
@@ -196,7 +196,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     TableNotFoundInDataset {
         table_name: TableName,
         referenced_table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
     },
 
     /// Function not found in dataset.
@@ -209,7 +209,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     FunctionNotFoundInDataset {
         table_name: TableName,
         function_name: String,
-        reference: Reference,
+        reference: HashReference,
     },
 
     /// eth_call function not available for dataset.
@@ -219,7 +219,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     #[error("In table '{table_name}': Function 'eth_call' not available for dataset '{reference}'")]
     EthCallNotAvailable {
         table_name: TableName,
-        reference: Reference,
+        reference: HashReference,
     },
 }
 
