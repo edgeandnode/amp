@@ -7,14 +7,13 @@ use std::{
 use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
-    sql::TableReference,
 };
 use datasets_common::{partial_reference::PartialReference, table_name::TableName};
 use datasets_derived::{dep_alias::DepAlias, dep_reference::DepReference};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
+use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -45,9 +44,8 @@ impl Dataset {
         dataset_ref: PartialReference,
     ) -> impl Iterator<Item = ResolvedTable> + '_ {
         self.tables.iter().map(move |table| {
-            let table_ref =
-                TableReference::partial(dataset_ref.to_string(), table.name().to_string());
-            ResolvedTable::new(table.clone(), self.clone(), table_ref)
+            let table_ref = TableReference::partial(dataset_ref.to_string(), table.name().clone());
+            ResolvedTable::new(table_ref, table.clone(), self.clone())
         })
     }
 
@@ -139,7 +137,7 @@ impl fmt::Display for ResolvedTable {
 }
 
 impl ResolvedTable {
-    pub fn new(table: Table, dataset: Arc<Dataset>, table_ref: TableReference) -> Self {
+    pub fn new(table_ref: TableReference, table: Table, dataset: Arc<Dataset>) -> Self {
         Self {
             table,
             dataset,

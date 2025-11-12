@@ -147,8 +147,10 @@ impl DetachedLogicalPlan {
                 }) if source.table_type() == TableType::Base
                     && source.get_logical_plan().is_none() =>
                 {
+                    let table_ref = crate::sql::TableReference::try_from(table_name.clone())
+                        .map_err(|e| DataFusionError::External(Box::new(e)))?;
                     let provider = ctx
-                        .get_table(table_name)
+                        .get_table(&table_ref)
                         .map_err(|e| DataFusionError::External(e.into()))?;
                     *source = Arc::new(DefaultTableSource::new(provider));
                     Ok(Transformed::yes(node))

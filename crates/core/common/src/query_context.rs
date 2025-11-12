@@ -22,7 +22,7 @@ use datafusion::{
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     scalar::ScalarValue,
-    sql::{TableReference, parser},
+    sql::parser,
 };
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
@@ -45,6 +45,7 @@ use crate::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,
     },
+    sql::TableReference,
 };
 
 pub fn default_catalog_name() -> ScalarValue {
@@ -258,8 +259,9 @@ impl QueryContext {
         plan: &LogicalPlan,
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let mut range: Option<RangeInclusive<BlockNum>> = None;
-        for table in extract_table_references_from_plan(plan)? {
-            range = match (range, self.get_synced_range_for_table(&table)?) {
+        for df_table_ref in extract_table_references_from_plan(plan)? {
+            let table_ref = TableReference::try_from(df_table_ref)?;
+            range = match (range, self.get_synced_range_for_table(&table_ref)?) {
                 (None, range) | (range, None) => range,
                 (Some(a), Some(b)) => block_range_intersection(a, b),
             };

@@ -10,8 +10,10 @@
 //! |-------------------------------------------|------------------|---------------------|------------------|------------------|------------------|-------------|
 //! | [`planning_ctx_for_sql_tables_with_deps`] | ✅               | ✅                  | ❌               | ❌               | ❌               | ❌          |
 //! | [`planning_ctx_for_sql`]                  | ❌               | ❌                  | ✅ **EXCLUSIVE** | ❌               | ❌               | ❌          |
-//! | [`catalog_for_sql`]                       | ❌               | ❌                  | ❌               | ✅ **PRIMARY**   | ✅ **PRIMARY**   | ❌          |
-//! | [`get_logical_catalog`]                   | ❌               | ❌                  | ❌               | ✅ (indirect)    | ✅ (indirect)    | ❌          |
+//! | [`catalog_for_sql`]                       | ❌               | ❌                  | ❌               | ✅ **EXCLUSIVE** | ❌               | ❌          |
+//! | [`catalog_for_sql_with_deps`]             | ❌               | ❌                  | ❌               | ❌               | ✅ **EXCLUSIVE** | ❌          |
+//! | [`get_logical_catalog`]                   | ❌               | ❌                  | ❌               | ✅ (indirect)    | ❌               | ❌          |
+//! | [`get_logical_catalog_with_deps`]         | ❌               | ❌                  | ❌               | ❌               | ✅ (indirect)    | ❌          |
 //!
 //! # Data Paths
 //!
@@ -30,35 +32,44 @@
 //! - **Purpose**: Generate query plans and schemas without execution
 //! - **Function**: [`planning_ctx_for_sql`]
 //! - **Entry**: Arrow Flight `GetFlightInfo` (`crates/services/server/src/flight.rs`)
-//! - **Characteristics**: Fast schema response, logical catalog only
+//! - **Characteristics**: Fast schema response, logical catalog only, dynamic dataset resolution
 //!
-//! ## 3. Query Execution Path
+//! ## 3. Query Execution Path (Arrow Flight)
 //!
 //! - **Purpose**: Execute user queries via Arrow Flight
 //! - **Function**: [`catalog_for_sql`] (calls [`get_logical_catalog`] internally)
 //! - **Entry**: Arrow Flight `DoGet` (`crates/services/server/src/flight.rs`)
-//! - **Characteristics**: Full catalog with physical parquet locations, streaming results
+//! - **Characteristics**: Full catalog with physical parquet locations, dynamic dataset resolution, streaming results
+//! - **Resolution Strategy**: Resolves dataset references to hashes at query time (supports "latest" and version tags)
 //!
 //! ## 4. Derived Dataset Execution Path
 //!
 //! - **Purpose**: Execute SQL to create derived datasets during dumps
-//! - **Function**: [`catalog_for_sql`] (calls [`get_logical_catalog`] internally)
-//! - **Entry**: `ampd dump` for SQL datasets (`crates/core/dump/src/sql_dump.rs`)
-//! - **Characteristics**: Shares execution logic with query path, writes parquet files
+//! - **Function**: [`catalog_for_sql_with_deps`] (calls [`get_logical_catalog_with_deps`] internally)
+//! - **Entry**: `ampd dump` for SQL datasets (`crates/core/dump/src/core/sql_dump.rs`)
+//! - **Characteristics**: Full catalog with physical parquet locations, pre-resolved dependencies, writes parquet files
+//! - **Resolution Strategy**: Uses locked dataset hashes from manifest dependencies (deterministic, reproducible)
 //!
 //! # Key Insights
 //!
 //! - **Clean separation**: Each public function serves exactly one primary data path
-//! - **Shared execution**: Query and derived dataset paths use the same catalog logic
+//! - **Dependency handling**: Two parallel execution paths with different resolution strategies:
+//!   - **Dynamic resolution** (`catalog_for_sql`): For user queries that reference datasets by name/version
+//!   - **Pre-resolved dependencies** (`catalog_for_sql_with_deps`): For derived datasets with locked dependencies
+//! - **Function duplication**: `*_with_deps` variants avoid dual-mode logic and maintain clear boundaries
 //! - **Lazy UDF loading**: All functions implement lazy UDF loading for optimal performance
 //! - **No raw dataset overlap**: Raw dataset dumps don't use these planning functions
+//! - **Two-phase resolution**: Functions without deps use a two-phase pattern:
+//!   1. **Resolution phase**: `Reference` → `resolve_dataset_reference()` → `Hash`
+//!   2. **Retrieval phase**: `Hash` → `get_dataset_by_hash()` → `Dataset`
+//! - **Pre-resolved deps**: Functions with deps receive `HashReference` and skip phase 1
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, partial_reference::PartialReference,
-    reference::Reference, revision::Revision, table_name::TableName,
+    reference::Reference, table_name::TableName,
 };
 use datasets_derived::dep_alias::DepAlias;
 use js_runtime::isolate_pool::IsolatePool;
@@ -67,7 +78,8 @@ use metadata_db::MetadataDb;
 use super::{
     dataset_access::DatasetAccess,
     errors::{
-        CatalogForSqlError, GetLogicalCatalogError, GetPhysicalCatalogError,
+        CatalogForSqlError, CatalogForSqlWithDepsError, GetLogicalCatalogError,
+        GetLogicalCatalogWithDepsError, GetPhysicalCatalogError, GetPhysicalCatalogWithDepsError,
         PlanningCtxForSqlError, PlanningCtxForSqlTablesWithDepsError,
     },
     logical::LogicalCatalog,
@@ -80,6 +92,9 @@ use crate::{
         FunctionReference, TableReference, resolve_function_references, resolve_table_references,
     },
 };
+
+/// Special function name for the `eth_call` UDF that requires special handling
+const ETH_CALL_FUNCTION_NAME: &str = "eth_call";
 
 /// Creates a full catalog with physical data access for SQL query execution.
 ///
@@ -122,6 +137,64 @@ pub async fn catalog_for_sql(
         .map_err(CatalogForSqlError::GetPhysicalCatalog)
 }
 
+/// Creates a full catalog with physical data access for SQL query execution with pre-resolved dependencies.
+///
+/// This function builds a complete catalog that includes both logical schemas and physical
+/// parquet file locations, enabling actual query execution with DataFusion. Unlike
+/// `catalog_for_sql`, this function accepts pre-resolved dependencies from a derived dataset
+/// manifest, ensuring that SQL schema references map to the exact dataset versions specified
+/// in the manifest's dependencies.
+///
+/// ## Where Used
+///
+/// This function is used exclusively in the **Derived Dataset Execution Path**:
+///
+/// - **`crates/core/dump/src/core/sql_dump.rs`**:
+///   - Called during `ampd dump` to execute SQL-defined derived datasets
+///   - Uses dependencies from the derived dataset manifest
+///   - Writes query results as parquet files to object storage
+///
+/// ## Implementation
+///
+/// The function analyzes the SQL query to:
+/// 1. Extract table references and function names from the query
+/// 2. Map SQL schema references to pre-resolved dependency aliases
+/// 3. Load datasets by their locked hashes from the manifest dependencies
+/// 4. Build logical catalog with schemas and UDFs
+/// 5. Query metadata database for physical parquet locations
+/// 6. Construct physical catalog for query execution
+///
+/// ## Dependencies Parameter
+///
+/// The `dependencies` parameter is a map from dependency aliases (as used in SQL schema qualifiers)
+/// to fully-qualified dataset names and their content hashes. This ensures that:
+/// - SQL queries use the exact dataset versions declared in the manifest
+/// - No dynamic version resolution occurs during execution
+/// - Derived datasets are reproducible and deterministic
+pub async fn catalog_for_sql_with_deps(
+    store: &impl DatasetAccess,
+    metadata_db: &MetadataDb,
+    query: &Statement,
+    env: QueryEnv,
+    dependencies: BTreeMap<DepAlias, HashReference>,
+) -> Result<Catalog, CatalogForSqlWithDepsError> {
+    let table_refs = resolve_table_references(query)
+        .map_err(CatalogForSqlWithDepsError::TableReferenceResolution)?;
+    let func_refs = resolve_function_references(query)
+        .map_err(CatalogForSqlWithDepsError::FunctionReferenceResolution)?;
+
+    get_physical_catalog_with_deps(
+        store,
+        metadata_db,
+        table_refs,
+        func_refs,
+        &env,
+        &dependencies,
+    )
+    .await
+    .map_err(CatalogForSqlWithDepsError::GetPhysicalCatalogWithDeps)
+}
+
 /// Creates a planning context for SQL query planning without physical data access.
 ///
 /// This function builds a logical catalog with schemas only, enabling query plan generation
@@ -153,110 +226,110 @@ pub async fn planning_ctx_for_sql(
     // Get table and function references from the SQL query
     let table_refs = resolve_table_references(query)
         .map_err(PlanningCtxForSqlError::TableReferenceResolution)?;
-    let function_refs = resolve_function_references(query)
+    let func_refs = resolve_function_references(query)
         .map_err(PlanningCtxForSqlError::FunctionReferenceResolution)?;
 
     // Use hash-based map to deduplicate datasets and collect resolved tables
-    // Inner map: table_ref string -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<String, ResolvedTable>> = BTreeMap::new();
-    // Track UDFs separately from datasets - outer key: dataset hash, inner key: qualified UDF name
+    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference, ResolvedTable>> = BTreeMap::new();
+    // Track UDFs separately from datasets - outer key: dataset hash, inner key: function reference
     // Inner map ensures deduplication: multiple function references to the same UDF share one instance
-    let mut udfs: BTreeMap<Hash, BTreeMap<String, ScalarUDF>> = BTreeMap::new();
+    let mut udfs: BTreeMap<Hash, BTreeMap<FunctionReference, ScalarUDF>> = BTreeMap::new();
 
     // Part 1: Process table references
-    for table_ref in &table_refs {
-        // Check if table reference is catalog-qualified (not supported)
-        if table_ref.catalog().is_some() {
-            return Err(PlanningCtxForSqlError::CatalogQualifiedTable {
-                table_ref: table_ref.to_string(),
-            });
-        }
-
-        // Check if schema is present
-        let schema_str =
-            table_ref
-                .schema()
-                .ok_or_else(|| PlanningCtxForSqlError::UnqualifiedTable {
+    for table_ref in table_refs {
+        match &table_ref {
+            TableReference::Bare { .. } => {
+                return Err(PlanningCtxForSqlError::UnqualifiedTable {
                     table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Full { .. } => {
+                return Err(PlanningCtxForSqlError::CatalogQualifiedTable {
+                    table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Partial { schema, table } => {
+                // Parse schema to PartialReference -> Reference
+                let partial_ref: PartialReference = schema.parse().map_err(|err| {
+                    PlanningCtxForSqlError::InvalidSchemaReference {
+                        schema: schema.to_string(),
+                        source: err,
+                    }
                 })?;
 
-        // Get table name (already validated as TableName in TableReference)
-        let table_name = table_ref.table();
+                let reference: Reference = partial_ref.into();
 
-        // Parse schema to PartialReference -> Reference
-        let partial_ref: PartialReference =
-            schema_str
-                .parse()
-                .map_err(|err| PlanningCtxForSqlError::InvalidSchemaReference {
-                    schema: schema_str.to_string(),
-                    source: err,
-                })?;
+                // Resolve reference to hash
+                let hash = store
+                    .resolve_dataset_reference(&reference)
+                    .await
+                    .map_err(|err| PlanningCtxForSqlError::ResolveHash {
+                        reference: reference.clone(),
+                        source: err,
+                    })?
+                    .ok_or_else(|| {
+                        tracing::error!(
+                            reference = %reference,
+                            "Dataset not found"
+                        );
+                        PlanningCtxForSqlError::UnknownDatasetReference {
+                            reference: reference.clone(),
+                        }
+                    })?;
 
-        let reference: Reference = partial_ref.into();
+                // Create HashReference from resolved FQN and hash
+                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
-        // Resolve reference to hash
-        let hash = store
-            .resolve_dataset_reference(&reference)
-            .await
-            .map_err(|err| PlanningCtxForSqlError::ResolveHash {
-                reference: reference.clone(),
-                source: err,
-            })?
-            .ok_or_else(|| {
-                tracing::error!(
-                    reference = %reference,
-                    "Dataset not found"
-                );
-                PlanningCtxForSqlError::DatasetNotFound {
-                    reference: reference.clone(),
-                }
-            })?;
+                // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
+                let Entry::Vacant(entry) = tables
+                    .entry(hash.clone())
+                    .or_default()
+                    .entry(table_ref.clone())
+                else {
+                    continue;
+                };
 
-        // Use the full reference with hash revision
-        let reference = {
-            let (namespace, name, _) = reference.into_parts();
-            Reference::new(namespace, name, Revision::Hash(hash.clone()))
-        };
+                // Load dataset by hash (cached by store)
+                let dataset = store
+                    .get_dataset_by_hash(&hash)
+                    .await
+                    .map_err(|err| PlanningCtxForSqlError::GetDataset {
+                        reference: hash_ref.clone(),
+                        source: err,
+                    })?
+                    .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
+                        reference: hash_ref.clone(),
+                    })?;
 
-        // Load dataset by hash (cached by store)
-        let dataset = store
-            .get_dataset_by_hash(&hash)
-            .await
-            .map_err(|err| PlanningCtxForSqlError::GetDataset {
-                reference: reference.clone(),
-                source: err,
-            })?
-            .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
-                reference: reference.clone(),
-            })?;
+                // Find table in dataset
+                let dataset_table = dataset
+                    .tables
+                    .iter()
+                    .find(|t| t.name() == table)
+                    .ok_or_else(|| PlanningCtxForSqlError::TableNotFoundInDataset {
+                        table_name: table.as_ref().clone(),
+                        reference: hash_ref,
+                    })?;
 
-        // Get or create entry for this dataset's tables
-        let resolved_tables = tables.entry(hash).or_default();
+                // Create ResolvedTable with the original schema string from SQL
+                let resolved_table =
+                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
 
-        // Find table in dataset and create ResolvedTable
-        let table = dataset
-            .tables
-            .iter()
-            .find(|t| t.name() == table_name)
-            .ok_or_else(|| PlanningCtxForSqlError::TableNotFoundInDataset {
-                table_name: table_name.clone(),
-                reference,
-            })?;
-
-        // Use the original schema string from SQL as the schema name
-        let table_ref = TableReference::partial(schema_str, table.name().as_str());
-        let resolved_table =
-            ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
-
-        // Insert into map - automatically deduplicates by full table reference
-        resolved_tables.insert(table_ref.to_string(), resolved_table);
+                // Insert into vacant entry
+                entry.insert(resolved_table);
+            }
+        }
     }
 
     // Part 2: Process function names (load datasets for UDFs only)
-    for func_ref in &function_refs {
+    for func_ref in func_refs {
         match func_ref {
             FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
-            FunctionReference::Qualified { schema, function } => {
+            FunctionReference::Qualified {
+                ref schema,
+                ref function,
+            } => {
                 // Parse schema part to PartialReference -> Reference
                 let reference: Reference = schema
                     .parse::<PartialReference>()
@@ -274,53 +347,53 @@ pub async fn planning_ctx_for_sql(
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
+                    .ok_or_else(|| PlanningCtxForSqlError::UnknownDatasetReference {
                         reference: reference.clone(),
                     })?;
 
-                // Use the full reference with hash revision
-                let reference = {
-                    let (namespace, name, _) = reference.into_parts();
-                    Reference::new(namespace, name, Revision::Hash(hash.clone()))
-                };
+                // Create HashReference from resolved FQN and hash
+                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
                 // Load dataset by hash (cached by store)
                 let dataset = store
                     .get_dataset_by_hash(&hash)
                     .await
                     .map_err(|err| PlanningCtxForSqlError::GetDataset {
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                         source: err,
                     })?
                     .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                     })?;
 
-                // Get or create entry for this dataset's UDFs
-                let resolved_udfs = udfs.entry(hash).or_default();
+                // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
+                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref.clone())
+                else {
+                    continue;
+                };
 
                 // Get the UDF for this function reference
-                let udf = if function.as_ref() == "eth_call" {
+                let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
                         .eth_call_for_dataset(schema, &dataset)
                         .await
                         .map_err(|err| PlanningCtxForSqlError::EthCallUdfCreation {
-                            reference: reference.clone(),
+                            reference: hash_ref.clone(),
                             source: err,
                         })?
                         .ok_or_else(|| PlanningCtxForSqlError::EthCallNotAvailable {
-                            reference: reference.clone(),
+                            reference: hash_ref.clone(),
                         })?
                 } else {
                     dataset
                         .function_by_name(schema.to_string(), function, IsolatePool::dummy())
                         .ok_or_else(|| PlanningCtxForSqlError::FunctionNotFoundInDataset {
                             function_name: func_ref.to_string(),
-                            reference: reference.clone(),
+                            reference: hash_ref,
                         })?
                 };
 
-                resolved_udfs.insert(func_ref.to_string(), udf);
+                entry.insert(udf);
             }
         }
     }
@@ -373,6 +446,53 @@ async fn get_physical_catalog(
     Ok(Catalog::new(tables, logical_catalog))
 }
 
+/// Internal helper that converts logical catalog to physical catalog with data locations using pre-resolved dependencies.
+///
+/// This function queries the metadata database to retrieve physical parquet file locations
+/// for all tables in the logical catalog, enabling actual query execution. Unlike
+/// `get_physical_catalog`, this function uses pre-resolved dependencies to build the
+/// logical catalog.
+///
+/// ## Where Used
+///
+/// Called internally by `catalog_for_sql_with_deps` as part of building the full physical catalog
+/// for derived dataset execution.
+async fn get_physical_catalog_with_deps(
+    store: &impl DatasetAccess,
+    metadata_db: &MetadataDb,
+    table_refs: impl IntoIterator<Item = TableReference>,
+    function_refs: impl IntoIterator<Item = FunctionReference>,
+    env: &QueryEnv,
+    dependencies: &BTreeMap<DepAlias, HashReference>,
+) -> Result<Catalog, GetPhysicalCatalogWithDepsError> {
+    let logical_catalog = get_logical_catalog_with_deps(
+        store,
+        table_refs,
+        function_refs,
+        &env.isolate_pool,
+        dependencies,
+    )
+    .await
+    .map_err(GetPhysicalCatalogWithDepsError::GetLogicalCatalogWithDeps)?;
+
+    let mut tables = Vec::new();
+    for table in &logical_catalog.tables {
+        let physical_table = PhysicalTable::get_active(table, metadata_db.clone())
+            .await
+            .map_err(
+                |err| GetPhysicalCatalogWithDepsError::PhysicalTableRetrieval {
+                    table: table.to_string(),
+                    source: err,
+                },
+            )?
+            .ok_or(GetPhysicalCatalogWithDepsError::TableNotSynced {
+                table: table.to_string(),
+            })?;
+        tables.push(physical_table.into());
+    }
+    Ok(Catalog::new(tables, logical_catalog))
+}
+
 /// Internal helper that builds a logical catalog from table references and function names.
 ///
 /// This function resolves dataset references, loads dataset metadata, and creates UDFs
@@ -393,101 +513,104 @@ async fn get_logical_catalog(
     isolate_pool: &IsolatePool,
 ) -> Result<LogicalCatalog, GetLogicalCatalogError> {
     let table_refs = table_refs.into_iter().collect::<Vec<_>>();
-    let function_refs = func_refs.into_iter().collect::<Vec<_>>();
+    let func_refs = func_refs.into_iter().collect::<Vec<_>>();
 
     // Use hash-based map to deduplicate datasets and collect resolved tables
-    // Inner map: table_ref string -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<String, ResolvedTable>> = BTreeMap::new();
-    // Track UDFs separately from datasets - outer key: dataset hash, inner key: qualified UDF name
+    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference, ResolvedTable>> = BTreeMap::new();
+    // Track UDFs separately from datasets - outer key: dataset hash, inner key: function reference
     // Inner map ensures deduplication: multiple function references to the same UDF share one instance
-    let mut udfs: BTreeMap<Hash, BTreeMap<String, ScalarUDF>> = BTreeMap::new();
+    let mut udfs: BTreeMap<Hash, BTreeMap<FunctionReference, ScalarUDF>> = BTreeMap::new();
 
     // Part 1: Process table references
-    for table_ref in &table_refs {
-        // Check if table reference is catalog-qualified (not supported)
-        if table_ref.catalog().is_some() {
-            return Err(GetLogicalCatalogError::CatalogQualifiedTable {
-                table_ref: table_ref.to_string(),
-            });
-        }
-
-        // Check if schema is present
-        let schema_str =
-            table_ref
-                .schema()
-                .ok_or_else(|| GetLogicalCatalogError::UnqualifiedTable {
+    for table_ref in table_refs {
+        match &table_ref {
+            TableReference::Bare { .. } => {
+                return Err(GetLogicalCatalogError::UnqualifiedTable {
                     table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Full { .. } => {
+                return Err(GetLogicalCatalogError::CatalogQualifiedTable {
+                    table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Partial { schema, table } => {
+                // Parse schema to PartialReference -> Reference
+                let partial_ref: PartialReference = schema.parse().map_err(|err| {
+                    GetLogicalCatalogError::InvalidSchemaReference {
+                        schema: schema.to_string(),
+                        source: err,
+                    }
                 })?;
 
-        // Parse schema to PartialReference -> Reference
-        let partial_ref: PartialReference =
-            schema_str
-                .parse()
-                .map_err(|err| GetLogicalCatalogError::InvalidSchemaReference {
-                    schema: schema_str.to_string(),
-                    source: err,
-                })?;
+                let reference: Reference = partial_ref.into();
 
-        let reference: Reference = partial_ref.into();
+                // Resolve reference to hash
+                let hash = store
+                    .resolve_dataset_reference(&reference)
+                    .await
+                    .map_err(|err| GetLogicalCatalogError::ResolveHash {
+                        reference: reference.clone(),
+                        source: err,
+                    })?
+                    .ok_or_else(|| {
+                        tracing::error!(
+                            reference = %reference,
+                            "Dataset not found"
+                        );
+                        GetLogicalCatalogError::UnknownDatasetReference {
+                            reference: reference.clone(),
+                        }
+                    })?;
 
-        // Resolve reference to hash
-        let hash = store
-            .resolve_dataset_reference(&reference)
-            .await
-            .map_err(|err| GetLogicalCatalogError::ResolveHash {
-                reference: reference.clone(),
-                source: err,
-            })?
-            .ok_or_else(|| {
-                tracing::error!(
-                    reference = %reference,
-                    "Dataset not found"
-                );
-                GetLogicalCatalogError::DatasetNotFound {
-                    reference: reference.clone(),
-                }
-            })?;
+                // Create HashReference from resolved FQN and hash
+                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
-        // Use the full reference with hash revision
-        let reference = {
-            let (namespace, name, _) = reference.into_parts();
-            Reference::new(namespace, name, Revision::Hash(hash.clone()))
-        };
+                // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
+                let Entry::Vacant(entry) = tables
+                    .entry(hash.clone())
+                    .or_default()
+                    .entry(table_ref.clone())
+                else {
+                    continue;
+                };
 
-        // Load dataset by hash (cached by store)
-        let dataset = store
-            .get_dataset_by_hash(&hash)
-            .await
-            .map_err(|err| GetLogicalCatalogError::GetDataset {
-                reference: reference.clone(),
-                source: err,
-            })?
-            .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
-                reference: reference.clone(),
-            })?;
+                // Load dataset by hash (cached by store)
+                let dataset = store
+                    .get_dataset_by_hash(&hash)
+                    .await
+                    .map_err(|err| GetLogicalCatalogError::GetDataset {
+                        reference: hash_ref.clone(),
+                        source: err,
+                    })?
+                    .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
+                        reference: hash_ref.clone(),
+                    })?;
 
-        // Get or create entry for this dataset's tables
-        let resolved_tables = tables.entry(hash).or_default();
+                // Find table in dataset
+                let dataset_table = dataset
+                    .tables
+                    .iter()
+                    .find(|t| t.name() == table)
+                    .ok_or_else(|| GetLogicalCatalogError::TableNotFoundInDataset {
+                        table_name: table.as_ref().clone(),
+                        reference: hash_ref,
+                    })?;
 
-        // Find table in dataset and create ResolvedTable
-        if let Some(table) = dataset
-            .tables
-            .iter()
-            .find(|t| t.name() == table_ref.table())
-        {
-            // Use the original schema string from SQL as the schema name
-            let table_ref = TableReference::partial(schema_str, table.name().as_str());
-            let resolved_table =
-                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
+                // Create ResolvedTable with the original schema string from SQL
+                let resolved_table =
+                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
 
-            // Insert into map - automatically deduplicates by full table reference
-            resolved_tables.insert(table_ref.to_string(), resolved_table);
+                // Insert into vacant entry
+                entry.insert(resolved_table);
+            }
         }
     }
 
     // Part 2: Process function names (load datasets for UDFs only)
-    for func_ref in &function_refs {
-        match func_ref {
+    for func_ref in func_refs {
+        match &func_ref {
             FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
             FunctionReference::Qualified { schema, function } => {
                 // Parse schema part to PartialReference -> Reference
@@ -507,53 +630,250 @@ async fn get_logical_catalog(
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
+                    .ok_or_else(|| GetLogicalCatalogError::UnknownDatasetReference {
                         reference: reference.clone(),
                     })?;
 
-                // Use the full reference with hash revision
-                let reference = {
-                    let (namespace, name, _) = reference.into_parts();
-                    Reference::new(namespace, name, Revision::Hash(hash.clone()))
-                };
+                // Create HashReference from resolved FQN and hash
+                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
                 // Load dataset by hash (cached by store)
                 let dataset = store
                     .get_dataset_by_hash(&hash)
                     .await
                     .map_err(|err| GetLogicalCatalogError::GetDataset {
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                         source: err,
                     })?
                     .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                     })?;
 
-                // Get or create entry for this dataset's UDFs
-                let resolved_udfs = udfs.entry(hash).or_default();
+                // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
+                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref.clone())
+                else {
+                    continue;
+                };
 
                 // Get the UDF for this function reference
-                let udf = if function.as_ref() == "eth_call" {
+                let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
                         .eth_call_for_dataset(schema, &dataset)
                         .await
                         .map_err(|err| GetLogicalCatalogError::EthCallUdfCreation {
-                            reference: reference.clone(),
+                            reference: hash_ref.clone(),
                             source: err,
                         })?
                         .ok_or_else(|| GetLogicalCatalogError::EthCallNotAvailable {
-                            reference: reference.clone(),
+                            reference: hash_ref.clone(),
                         })?
                 } else {
                     dataset
                         .function_by_name(schema.to_string(), function, isolate_pool.clone())
                         .ok_or_else(|| GetLogicalCatalogError::FunctionNotFoundInDataset {
                             function_name: func_ref.to_string(),
-                            reference: reference.clone(),
+                            reference: hash_ref,
                         })?
                 };
 
-                resolved_udfs.insert(func_ref.to_string(), udf);
+                entry.insert(udf);
+            }
+        }
+    }
+
+    Ok(LogicalCatalog {
+        tables: tables
+            .into_values()
+            .flat_map(|map| map.into_values())
+            .collect(),
+        udfs: udfs
+            .into_values()
+            .flat_map(|map| map.into_values())
+            .collect(),
+    })
+}
+
+/// Internal helper that builds a logical catalog from table references and function names using pre-resolved dependencies.
+///
+/// This function resolves dataset references using the provided dependency mappings, loads
+/// dataset metadata, and creates UDFs for the referenced datasets. It builds the logical
+/// layer of the catalog without accessing physical data locations.
+///
+/// Unlike `get_logical_catalog`, this function:
+/// - Maps SQL schema references to dependency aliases
+/// - Uses pre-resolved dataset hashes from the dependencies map
+/// - Does not perform dynamic dataset resolution
+///
+/// ## Where Used
+///
+/// Called internally by:
+/// - `get_physical_catalog_with_deps` (which is called by `catalog_for_sql_with_deps`)
+///
+/// This function is part of the catalog construction pipeline for derived dataset execution.
+async fn get_logical_catalog_with_deps(
+    store: &impl DatasetAccess,
+    table_refs: impl IntoIterator<Item = TableReference>,
+    func_refs: impl IntoIterator<Item = FunctionReference>,
+    isolate_pool: &IsolatePool,
+    dependencies: &BTreeMap<DepAlias, HashReference>,
+) -> Result<LogicalCatalog, GetLogicalCatalogWithDepsError> {
+    let table_refs = table_refs.into_iter().collect::<Vec<_>>();
+    let func_refs = func_refs.into_iter().collect::<Vec<_>>();
+
+    // Use hash-based map to deduplicate datasets and collect resolved tables
+    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference, ResolvedTable>> = BTreeMap::new();
+    // Track UDFs separately from datasets - outer key: dataset hash, inner key: function reference
+    // Inner map ensures deduplication: multiple function references to the same UDF share one instance
+    let mut udfs: BTreeMap<Hash, BTreeMap<FunctionReference, ScalarUDF>> = BTreeMap::new();
+
+    // Part 1: Process table references
+    for table_ref in table_refs {
+        match &table_ref {
+            TableReference::Bare { .. } => {
+                return Err(GetLogicalCatalogWithDepsError::UnqualifiedTable {
+                    table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Full { .. } => {
+                return Err(GetLogicalCatalogWithDepsError::CatalogQualifiedTable {
+                    table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Partial { schema, table } => {
+                // Parse schema as DepAlias to validate it conforms to alias rules
+                let dep_alias: DepAlias = schema.parse().map_err(|err| {
+                    GetLogicalCatalogWithDepsError::InvalidDependencyAliasForTableRef {
+                        invalid_alias: schema.to_string(),
+                        table_ref: table_ref.to_string(),
+                        source: err,
+                    }
+                })?;
+
+                // Lookup alias in dependencies map (schema_str = alias)
+                let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
+                    GetLogicalCatalogWithDepsError::DependencyAliasNotFoundForTableRef {
+                        alias: dep_alias.clone(),
+                    }
+                })?;
+
+                // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
+                let Entry::Vacant(entry) = tables
+                    .entry(hash_ref.hash().clone())
+                    .or_default()
+                    .entry(table_ref.clone())
+                else {
+                    continue;
+                };
+
+                // Load dataset by hash (cached by store)
+                let dataset = store
+                    .get_dataset_by_hash(hash_ref.hash())
+                    .await
+                    .map_err(
+                        |err| GetLogicalCatalogWithDepsError::GetDatasetForTableRef {
+                            reference: hash_ref.clone(),
+                            source: err,
+                        },
+                    )?
+                    .ok_or_else(
+                        || GetLogicalCatalogWithDepsError::DatasetNotFoundForTableRef {
+                            reference: hash_ref.clone(),
+                        },
+                    )?;
+
+                // Find table in dataset
+                let dataset_table = dataset
+                    .tables
+                    .iter()
+                    .find(|t| t.name() == table)
+                    .ok_or_else(|| GetLogicalCatalogWithDepsError::TableNotFoundInDataset {
+                        table_name: table.as_ref().clone(),
+                        reference: hash_ref.clone(),
+                    })?;
+
+                // Create ResolvedTable with the original alias as the schema name
+                let resolved_table =
+                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
+
+                // Insert into vacant entry
+                entry.insert(resolved_table);
+            }
+        }
+    }
+
+    // Part 2: Process function names (load datasets for UDFs only)
+    for func_ref in func_refs {
+        match &func_ref {
+            FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
+            FunctionReference::Qualified { schema, function } => {
+                // Parse schema as DepAlias to validate it conforms to alias rules
+                let dep_alias: DepAlias = schema.parse().map_err(|err| {
+                    GetLogicalCatalogWithDepsError::InvalidDependencyAliasForFunctionRef {
+                        invalid_alias: schema.to_string(),
+                        func_ref: func_ref.to_string(),
+                        source: err,
+                    }
+                })?;
+
+                // Lookup alias in dependencies map (schema_str = alias)
+                let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
+                    GetLogicalCatalogWithDepsError::DependencyAliasNotFoundForFunctionRef {
+                        alias: dep_alias.clone(),
+                    }
+                })?;
+
+                // Load dataset by hash (cached by store)
+                let dataset = store
+                    .get_dataset_by_hash(hash_ref.hash())
+                    .await
+                    .map_err(
+                        |err| GetLogicalCatalogWithDepsError::GetDatasetForFunction {
+                            reference: hash_ref.clone(),
+                            source: err,
+                        },
+                    )?
+                    .ok_or_else(
+                        || GetLogicalCatalogWithDepsError::DatasetNotFoundForFunction {
+                            reference: hash_ref.clone(),
+                        },
+                    )?;
+
+                // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
+                let Entry::Vacant(entry) = udfs
+                    .entry(hash_ref.hash().clone())
+                    .or_default()
+                    .entry(func_ref.clone())
+                else {
+                    continue;
+                };
+
+                // Get the UDF for this function reference
+                let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
+                    store
+                        .eth_call_for_dataset(schema, &dataset)
+                        .await
+                        .map_err(|err| {
+                            GetLogicalCatalogWithDepsError::EthCallUdfCreationForFunction {
+                                reference: hash_ref.clone(),
+                                source: err,
+                            }
+                        })?
+                        .ok_or_else(|| GetLogicalCatalogWithDepsError::EthCallNotAvailable {
+                            reference: hash_ref.clone(),
+                        })?
+                } else {
+                    dataset
+                        .function_by_name(schema.to_string(), function, isolate_pool.clone())
+                        .ok_or_else(|| {
+                            GetLogicalCatalogWithDepsError::FunctionNotFoundInDataset {
+                                function_name: func_ref.to_string(),
+                                reference: hash_ref.clone(),
+                            }
+                        })?
+                };
+
+                entry.insert(udf);
             }
         }
     }
@@ -614,102 +934,110 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
     dependencies: BTreeMap<DepAlias, HashReference>,
 ) -> Result<PlanningContext, PlanningCtxForSqlTablesWithDepsError> {
     // Use hash-based map to deduplicate datasets across ALL tables
-    // Inner map: table_ref string -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<String, ResolvedTable>> = BTreeMap::new();
-    // Track UDFs separately from datasets - outer key: dataset hash, inner key: qualified UDF name
+    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference, ResolvedTable>> = BTreeMap::new();
+    // Track UDFs separately from datasets - outer key: dataset hash, inner key: function reference
     // Inner map ensures deduplication: multiple function references to the same UDF share one instance
-    let mut udfs: BTreeMap<Hash, BTreeMap<String, ScalarUDF>> = BTreeMap::new();
+    let mut udfs: BTreeMap<Hash, BTreeMap<FunctionReference, ScalarUDF>> = BTreeMap::new();
 
     // Process all tables - fail fast on first error
-    for (table_name, (table_refs, function_refs)) in references {
+    for (table_name, (table_refs, func_refs)) in references {
         // Part 1: Process table references for this table
-        for table_ref in &table_refs {
-            // Check if table reference is catalog-qualified (not supported)
-            if table_ref.catalog().is_some() {
-                return Err(
-                    PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable {
-                        table_name,
+        for table_ref in table_refs {
+            match &table_ref {
+                TableReference::Bare { .. } => {
+                    return Err(PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable {
+                        table_name: table_name.clone(),
                         table_ref: table_ref.to_string(),
-                    },
-                );
+                    });
+                }
+                TableReference::Full { .. } => {
+                    return Err(
+                        PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable {
+                            table_name,
+                            table_ref: table_ref.to_string(),
+                        },
+                    );
+                }
+                TableReference::Partial { schema, table } => {
+                    // Parse schema as DepAlias to validate it conforms to alias rules
+                    let dep_alias: DepAlias = schema.parse().map_err(|err| {
+                        PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
+                            table_name: table_name.clone(),
+                            invalid_alias: schema.to_string(),
+                            table_ref: table_ref.to_string(),
+                            source: err,
+                        }
+                    })?;
+
+                    // Lookup alias in dependencies map (schema_str = alias)
+                    let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
+                        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
+                            table_name: table_name.clone(),
+                            alias: dep_alias.clone(),
+                        }
+                    })?;
+
+                    // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
+                    let Entry::Vacant(entry) = tables
+                        .entry(hash_ref.hash().clone())
+                        .or_default()
+                        .entry(table_ref.clone())
+                    else {
+                        continue;
+                    };
+
+                    // Load dataset by hash (cached by store)
+                    let dataset = store
+                        .get_dataset_by_hash(hash_ref.hash())
+                        .await
+                        .map_err(|err| {
+                            PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef {
+                                table_name: table_name.clone(),
+                                reference: hash_ref.clone(),
+                                source: err,
+                            }
+                        })?
+                        .ok_or_else(|| {
+                            PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef {
+                                table_name: table_name.clone(),
+                                reference: hash_ref.clone(),
+                            }
+                        })?;
+
+                    // Find table in dataset
+                    let dataset_table = dataset
+                        .tables
+                        .iter()
+                        .find(|t| t.name() == table)
+                        .ok_or_else(|| {
+                            PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset {
+                                table_name: table_name.clone(),
+                                referenced_table_name: table.as_ref().clone(),
+                                reference: hash_ref.clone(),
+                            }
+                        })?;
+
+                    // Create ResolvedTable with the original alias as the schema name
+                    let resolved_table = ResolvedTable::new(
+                        table_ref.clone(),
+                        dataset_table.clone(),
+                        dataset.clone(),
+                    );
+
+                    // Insert into vacant entry
+                    entry.insert(resolved_table);
+                }
             }
-
-            // Check if schema is present (schema = alias name)
-            let schema_str = table_ref.schema().ok_or_else(|| {
-                PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable {
-                    table_name: table_name.clone(),
-                    table_ref: table_ref.to_string(),
-                }
-            })?;
-
-            // Parse schema as DepAlias to validate it conforms to alias rules
-            let dep_alias: DepAlias = schema_str.parse().map_err(|err| {
-                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
-                    table_name: table_name.clone(),
-                    invalid_alias: schema_str.to_string(),
-                    table_ref: table_ref.to_string(),
-                    source: err,
-                }
-            })?;
-
-            // Lookup alias in dependencies map (schema_str = alias)
-            let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
-                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
-                    table_name: table_name.clone(),
-                    alias: dep_alias.clone(),
-                }
-            })?;
-
-            // Load dataset by hash (cached by store)
-            let dataset = store
-                .get_dataset_by_hash(hash_ref.hash())
-                .await
-                .map_err(
-                    |err| PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef {
-                        table_name: table_name.clone(),
-                        reference: hash_ref.clone(),
-                        source: err,
-                    },
-                )?
-                .ok_or_else(|| {
-                    PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef {
-                        table_name: table_name.clone(),
-                        reference: hash_ref.clone(),
-                    }
-                })?;
-
-            // Get or create entry for this dataset's tables
-            let resolved_tables = tables.entry(hash_ref.hash().clone()).or_default();
-
-            // Find table in dataset and create ResolvedTable
-            let table = dataset
-                .tables
-                .iter()
-                .find(|t| t.name() == table_ref.table())
-                .ok_or_else(
-                    || PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset {
-                        table_name: table_name.clone(),
-                        referenced_table_name: table_ref.table().clone(),
-                        reference: hash_ref.clone(),
-                    },
-                )?;
-
-            // Use the original alias as the schema name
-            let table_ref = TableReference::partial(schema_str, table.name().as_str());
-            let resolved_table =
-                ResolvedTable::new(table.clone(), dataset.clone(), table_ref.clone().into());
-
-            // Insert into map - automatically deduplicates by full table reference
-            resolved_tables.insert(table_ref.to_string(), resolved_table);
         }
 
         // Part 2: Process function references for this table (load datasets for UDFs only)
-        for func_ref in &function_refs {
-            match func_ref {
+        for func_ref in func_refs {
+            match &func_ref {
                 FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
                 FunctionReference::Qualified { schema, function } => {
                     // Parse schema as DepAlias to validate it conforms to alias rules
-                    let dep_alias: DepAlias = schema.as_ref().parse().map_err(|err| {
+                    let dep_alias: DepAlias = schema.parse().map_err(|err| {
                         PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
                             table_name: table_name.clone(),
                             invalid_alias: schema.to_string(),
@@ -744,11 +1072,17 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                             }
                         })?;
 
-                    // Get or create entry for this dataset's UDFs
-                    let resolved_udfs = udfs.entry(hash_ref.hash().clone()).or_default();
+                    // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
+                    let Entry::Vacant(entry) = udfs
+                        .entry(hash_ref.hash().clone())
+                        .or_default()
+                        .entry(func_ref.clone())
+                    else {
+                        continue;
+                    };
 
                     // Get the UDF for this function reference
-                    let udf = if function.as_ref() == "eth_call" {
+                    let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                         store
                             .eth_call_for_dataset(schema, &dataset)
                             .await
@@ -777,7 +1111,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                             })?
                     };
 
-                    resolved_udfs.insert(func_ref.to_string(), udf);
+                    entry.insert(udf);
                 }
             }
         }

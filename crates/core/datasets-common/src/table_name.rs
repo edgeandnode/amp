@@ -3,6 +3,8 @@
 //! This module provides the `TableName` type for validated SQL table names that enforce
 //! naming conventions and ensure compatibility across SQL engines (DataFusion, PostgreSQL).
 
+use std::sync::Arc;
+
 /// Maximum length for SQL identifiers (PostgreSQL standard).
 const MAX_IDENTIFIER_LENGTH: usize = 63;
 
@@ -83,6 +85,18 @@ impl PartialEq<TableName> for str {
 impl PartialEq<&str> for TableName {
     fn eq(&self, other: &&str) -> bool {
         self.0 == **other
+    }
+}
+
+impl PartialEq<Arc<TableName>> for TableName {
+    fn eq(&self, other: &Arc<TableName>) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialEq<TableName> for Arc<TableName> {
+    fn eq(&self, other: &TableName) -> bool {
+        self.0 == other.0
     }
 }
 
