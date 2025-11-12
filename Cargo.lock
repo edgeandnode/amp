@@ -5904,7 +5904,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "serde_json",
+ "thiserror 2.0.17",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
