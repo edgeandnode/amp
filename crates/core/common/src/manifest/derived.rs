@@ -8,6 +8,7 @@ use datafusion::sql::{TableReference, parser, resolve::resolve_table_references}
 use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
 use datasets_derived::{
     DerivedDatasetKind, Manifest,
+    dep_alias::DepAlias,
     manifest::{TableInput, View},
 };
 
@@ -200,7 +201,7 @@ pub async fn validate(
 ) -> Result<(), ManifestValidationError> {
     // Step 1: Resolve all dependencies to (FQN, Hash) pairs
     // This must happen first to ensure all dependencies exist before parsing SQL
-    let mut dependencies: BTreeMap<String, (FullyQualifiedName, Hash)> = BTreeMap::new();
+    let mut dependencies: BTreeMap<DepAlias, (FullyQualifiedName, Hash)> = BTreeMap::new();
 
     for (alias, dep_reference) in &manifest.dependencies {
         // Convert DepReference to Reference for resolution
@@ -275,6 +276,12 @@ pub async fn validate(
             PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
                 ManifestValidationError::InvalidTableName(err)
             }
+            PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef { .. } => {
+                ManifestValidationError::InvalidDependencyAliasForTableRef(err)
+            }
+            PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
+                ..
+            } => ManifestValidationError::InvalidDependencyAliasForFunctionRef(err),
             PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
                 ManifestValidationError::DatasetNotFound(err)
             }
@@ -293,9 +300,9 @@ pub async fn validate(
             PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
                 ManifestValidationError::DependencyAliasNotFound(err)
             }
-            PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunction { .. } => {
-                ManifestValidationError::DependencyAliasNotFound(err)
-            }
+            PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
+                ..
+            } => ManifestValidationError::DependencyAliasNotFound(err),
             PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
                 ManifestValidationError::TableNotFoundInDataset(err)
             }
@@ -414,6 +421,27 @@ pub enum ManifestValidationError {
     /// The eth_call function is not available for the referenced dataset.
     #[error("eth_call function not available: {0}")]
     EthCallNotAvailable(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias
+    ///
+    /// The dependency alias does not conform to alias rules (must start with letter,
+    /// contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error("Invalid dependency alias: {0}")]
+    InvalidDependencyAlias(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias in table reference
+    ///
+    /// The dependency alias in a table reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error("Invalid dependency alias in table reference: {0}")]
+    InvalidDependencyAliasForTableRef(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias in function reference
+    ///
+    /// The dependency alias in a function reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error("Invalid dependency alias in function reference: {0}")]
+    InvalidDependencyAliasForFunctionRef(#[source] PlanningCtxForSqlTablesWithDepsError),
 
     /// Dependency alias not found
     ///

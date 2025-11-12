@@ -18,11 +18,12 @@ use common::{
     query_context::{Error as QueryContextError, parse_sql},
 };
 use datafusion::sql::{TableReference, parser::Statement, resolve::resolve_table_references};
-use datasets_common::{
+use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
+use datasets_derived::{
+    dep_alias::DepAlias,
     dep_reference::{DepReference, HashOrVersion},
-    table_name::TableName,
+    manifest::TableSchema,
 };
-use datasets_derived::manifest::TableSchema;
 use tracing::instrument;
 
 use crate::{
@@ -61,13 +62,15 @@ use crate::{
 /// - `CATALOG_QUALIFIED_TABLE`: Table uses unsupported catalog qualification
 /// - `UNQUALIFIED_TABLE`: Table missing required dataset qualification
 /// - `INVALID_TABLE_NAME`: Table name violates SQL identifier rules
+/// - `INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF`: Dependency alias in table reference is invalid
+/// - `INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF`: Dependency alias in function reference is invalid
+/// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
 /// - `DATASET_NOT_FOUND`: Referenced dataset does not exist
 /// - `GET_DATASET_ERROR`: Failed to retrieve dataset from store
 /// - `ETH_CALL_UDF_CREATION_ERROR`: Failed to create eth_call UDF
 /// - `TABLE_NOT_FOUND_IN_DATASET`: Table not found in referenced dataset
 /// - `FUNCTION_NOT_FOUND_IN_DATASET`: Function not found in referenced dataset
 /// - `ETH_CALL_NOT_AVAILABLE`: eth_call function not available for dataset
-/// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
 /// - `SCHEMA_INFERENCE`: Failed to infer output schema from query
 ///
 /// ## Schema Analysis Process
@@ -134,11 +137,9 @@ pub async fn handler(
     // Resolve all dependencies to their manifest hashes
     // This must happen before parsing SQL to ensure all dependencies exist
     let dependencies = {
-        let mut resolved = BTreeMap::new();
+        let mut resolved: BTreeMap<DepAlias, (FullyQualifiedName, Hash)> = BTreeMap::new();
         for (alias, dep_ref) in dependencies {
-            let alias_str = alias.to_string();
-            let ref_str = dep_ref.to_string();
-            let (fqn, hash_or_version) = dep_ref.into_fqn_and_hash_or_version();
+            let (fqn, hash_or_version) = dep_ref.clone().into_fqn_and_hash_or_version();
 
             // Resolve the dependency to its manifest hash based on whether it's a hash or version
             let hash = match hash_or_version {
@@ -149,15 +150,15 @@ pub async fn handler(
                         .is_manifest_linked(fqn.namespace(), fqn.name(), &hash)
                         .await
                         .map_err(|err| Error::DependencyResolution {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                             source: err.into(),
                         })?;
 
                     if !is_linked {
                         return Err(Error::DependencyNotFound {
-                            alias: alias_str,
-                            reference: ref_str,
+                            alias,
+                            reference: dep_ref,
                         }
                         .into());
                     }
@@ -170,18 +171,18 @@ pub async fn handler(
                         .resolve_version_hash(fqn.namespace(), fqn.name(), &version)
                         .await
                         .map_err(|err| Error::DependencyResolution {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                             source: err.into(),
                         })?
                         .ok_or_else(|| Error::DependencyNotFound {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                         })?
                 }
             };
 
-            resolved.insert(alias.into_inner(), (fqn, hash));
+            resolved.insert(alias, (fqn, hash));
         }
         resolved
     };
@@ -236,6 +237,12 @@ pub async fn handler(
                 PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
                     Error::InvalidTableName(err)
                 }
+                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
+                    ..
+                } => Error::InvalidDependencyAliasForTableRef(err),
+                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
+                    ..
+                } => Error::InvalidDependencyAliasForFunctionRef(err),
                 PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
                     Error::DatasetNotFound(err)
                 }
@@ -254,7 +261,7 @@ pub async fn handler(
                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
                     ..
                 } => Error::DependencyAliasNotFound(err),
-                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunction {
+                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
                     ..
                 } => Error::DependencyAliasNotFound(err),
                 PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
@@ -330,7 +337,7 @@ pub struct SchemaRequest {
     /// Symbolic references like "latest" or "dev" are not allowed.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
-    pub dependencies: BTreeMap<NonEmptyString, DepReference>,
+    pub dependencies: BTreeMap<DepAlias, DepReference>,
 
     /// Function names defined in the dataset configuration
     ///
@@ -428,9 +435,9 @@ enum Error {
     #[error("Dependency '{alias}' ({reference}) not found in dataset store")]
     DependencyNotFound {
         /// The alias name used in the request
-        alias: String,
-        /// The full reference string (namespace/name@version or namespace/name@hash)
-        reference: String,
+        alias: DepAlias,
+        /// The dependency reference (namespace/name@version or namespace/name@hash)
+        reference: DepReference,
     },
 
     /// Failed to resolve dependency
@@ -441,9 +448,9 @@ enum Error {
     #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
     DependencyResolution {
         /// The alias name used in the request
-        alias: String,
-        /// The full reference string
-        reference: String,
+        alias: DepAlias,
+        /// The dependency reference
+        reference: DepReference,
         /// The underlying resolution error
         #[source]
         source: BoxError,
@@ -509,9 +516,23 @@ enum Error {
     #[error(transparent)]
     EthCallNotAvailable(PlanningCtxForSqlTablesWithDepsError),
 
+    /// Invalid dependency alias in table reference
+    ///
+    /// The dependency alias in a table reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error(transparent)]
+    InvalidDependencyAliasForTableRef(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias in function reference
+    ///
+    /// The dependency alias in a function reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error(transparent)]
+    InvalidDependencyAliasForFunctionRef(PlanningCtxForSqlTablesWithDepsError),
+
     /// Dependency alias not found
     ///
-    /// A table reference uses an alias that was not provided in the dependencies map.
+    /// A table or function reference uses an alias that was not provided in the dependencies map.
     #[error(transparent)]
     DependencyAliasNotFound(PlanningCtxForSqlTablesWithDepsError),
 
@@ -563,6 +584,10 @@ impl IntoErrorResponse for Error {
             Error::CatalogQualifiedTable(_) => "CATALOG_QUALIFIED_TABLE",
             Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
             Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
+            Error::InvalidDependencyAliasForTableRef(_) => "INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF",
+            Error::InvalidDependencyAliasForFunctionRef(_) => {
+                "INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF"
+            }
             Error::DatasetNotFound(_) => "DATASET_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::EthCallUdfCreation(_) => "ETH_CALL_UDF_CREATION_ERROR",
@@ -586,6 +611,8 @@ impl IntoErrorResponse for Error {
             Error::CatalogQualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForTableRef(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForFunctionRef(_) => StatusCode::BAD_REQUEST,
             Error::DatasetNotFound(_) => StatusCode::NOT_FOUND,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::EthCallUdfCreation(_) => StatusCode::INTERNAL_SERVER_ERROR,
