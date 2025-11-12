@@ -139,19 +139,18 @@ pub enum LoadTestSpecError {
     },
 }
 
-/// Panics with detailed error messages including full error chain.
+/// Formats an error with detailed error chain.
 ///
-/// Walks through the error source chain and formats a comprehensive panic message.
-pub fn fail_with_error(err: &dyn std::error::Error, prefix: &str) -> ! {
+/// Walks through the error source chain and formats a comprehensive error message.
+pub fn fail_with_error(err: &dyn std::error::Error, prefix: &str) -> String {
     let err_chain = build_error_chain(err);
-    panic!("{}: {}{}", prefix, err, err_chain);
+    format!("{}: {}{}", prefix, err, err_chain)
 }
 
 /// Runs test specification steps.
 ///
 /// Loads a test specification from YAML and executes all its steps sequentially.
-/// Panics with detailed error messages including full error chain if the spec cannot be loaded
-/// or if any step fails.
+/// Returns an error with detailed error chain if the spec cannot be loaded or if any step fails.
 ///
 /// # Arguments
 /// * `spec_name` - Name of the spec file (without .yaml extension)
@@ -163,21 +162,23 @@ pub async fn run_spec(
     test_ctx: &TestCtx,
     client: &mut FlightClient,
     delay: Option<std::time::Duration>,
-) {
+) -> Result<(), String> {
     let steps = match load_test_spec(spec_name) {
         Ok(steps) => steps,
-        Err(err) => fail_with_error(&err, "Failed to load test spec"),
+        Err(err) => return Err(fail_with_error(&err, "Failed to load test spec")),
     };
 
     for step in steps {
         if let Err(err) = step.run(test_ctx, client).await {
-            fail_with_error(&err, "Failed to execute step");
+            return Err(fail_with_error(&err, "Failed to execute step"));
         }
 
         if let Some(duration) = delay {
             tokio::time::sleep(duration).await;
         }
     }
+
+    Ok(())
 }
 
 /// Builds an error chain string from an error and its sources.

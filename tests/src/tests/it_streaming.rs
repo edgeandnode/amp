@@ -22,7 +22,9 @@ async fn streaming_tests_basic() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("sql-streaming-tests-basic", &test_ctx, &mut client, None).await;
+    run_spec("sql-streaming-tests-basic", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -48,5 +50,6 @@ async fn streaming_tests_with_sql_datasets() {
         &mut client,
         None,
     )
-    .await;
+    .await
+    .expect("Failed to run spec");
 }

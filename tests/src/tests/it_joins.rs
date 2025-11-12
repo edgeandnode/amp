@@ -18,5 +18,7 @@ async fn joins_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("joins-tests", &test_ctx, &mut client, None).await;
+    run_spec("joins-tests", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }

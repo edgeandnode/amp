@@ -18,5 +18,7 @@ async fn basic_function() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec("basic-function", &test_ctx, &mut client, None).await;
+    run_spec("basic-function", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
