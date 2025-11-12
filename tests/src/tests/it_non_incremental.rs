@@ -1,6 +1,6 @@
 use monitoring::logging;
 
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn non_incremental_tests() {
@@ -17,5 +17,5 @@ async fn non_incremental_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("non-incremental-tests", (&test_ctx, &mut client));
+    run_spec("non-incremental-tests", &test_ctx, &mut client, None).await;
 }
