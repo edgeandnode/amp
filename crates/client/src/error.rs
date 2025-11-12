@@ -105,58 +105,8 @@ pub enum ProtocolError {
 
 /// Protocol invariant validation errors
 ///
-/// The amp-client streaming protocol is **client-authoritative**: the client is
-/// responsible for validating all server responses for correctness. This ensures
-/// data integrity and prevents malformed or inconsistent blockchain data from
-/// being processed.
-///
-/// # Protocol Invariants
-///
-/// The streaming protocol enforces strict invariants that servers MUST uphold:
-///
-/// ## 1. Network Stability
-/// - The set of networks must remain constant throughout a stream
-/// - Each batch must contain exactly one BlockRange per network
-/// - No duplicate networks within a batch
-///
-/// ## 2. Block Range Continuity
-/// - **Consecutive blocks** (incoming.start = previous.end + 1):
-///   - Hash chain MUST match (incoming.prev_hash == previous.hash)
-///   - Represents normal forward progression on the same chain
-/// - **Forward gaps** (incoming.start > previous.end + 1):
-///   - Always a protocol violation (blocks cannot be skipped)
-/// - **Backwards jumps** (incoming.start < previous.end + 1):
-///   - Hash chain MUST mismatch (incoming.prev_hash != previous.hash)
-///   - Represents a blockchain reorg to a different chain
-///   - Valid regardless of endpoint (reorg can extend beyond previous endpoint)
-///
-/// ## 3. Hash Chain Continuity
-/// - All non-genesis blocks MUST include prev_hash for validation
-/// - Genesis blocks (first message at block 0) MUST NOT include prev_hash
-/// - Hash chain validates blockchain integrity across messages
-///
-/// ## 4. Reorg Semantics
-/// - **Detection**: Reorgs are detected via backwards jumps + hash mismatches
-/// - **Validation**: Reorg block ranges are validated like any other message
-/// - **Invalidation**: Computed from block range overlaps, not hash chain
-///
-/// # Protocol Violations Detected
-///
-/// Each ValidationError variant represents a specific protocol violation:
-/// - Missing or invalid prev_hash → breaks hash chain validation
-/// - Hash mismatch on consecutive blocks → cannot "reorg forward"
-/// - Backwards jump with matching hash → nonsensical (same chain, different position)
-/// - Forward gaps → missing blocks violate continuity
-/// - Network instability → set of networks must remain constant
-///
-/// # Client-Authoritative Design
-///
-/// The client validates ALL server messages and rejects any that violate protocol
-/// invariants. This design ensures:
-/// - Data integrity: Only valid, well-formed blockchain data is processed
-/// - Reorg safety: Reorgs are properly detected and validated
-/// - Protocol correctness: Server errors are caught immediately
-/// - No trust assumptions: Client does not trust server to follow protocol
+/// These errors occur when the server sends data that violates streaming
+/// protocol invariants. All validation errors indicate server misbehavior.
 #[derive(thiserror::Error, Debug)]
 pub enum ValidationError {
     /// Duplicate network detected in a single batch

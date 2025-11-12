@@ -537,16 +537,16 @@ impl StreamingQuery {
             debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
-        let get_hash_value = |column_name: &str| -> BlockHash {
+        let get_hash_value = |column_name: &str| -> Option<BlockHash> {
             let column =
                 as_fixed_size_binary_array(results.column_by_name(column_name).unwrap()).unwrap();
-            let bytes = column.iter().flatten().next().unwrap();
-            bytes.try_into().unwrap()
+            let bytes = column.iter().flatten().next();
+            bytes.map(|b| b.try_into().unwrap())
         };
         Ok(Some(BlockRow {
             number,
-            hash: get_hash_value("hash"),
-            prev_hash: Some(get_hash_value("parent_hash")),
+            hash: get_hash_value("hash").unwrap(),
+            prev_hash: get_hash_value("parent_hash"),
         }))
     }
 }

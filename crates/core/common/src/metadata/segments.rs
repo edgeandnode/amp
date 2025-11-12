@@ -11,9 +11,6 @@ pub struct BlockRange {
     pub numbers: RangeInclusive<BlockNum>,
     pub network: String,
     pub hash: BlockHash,
-    /// Hash of the parent block at range start - 1.
-    /// For genesis blocks (start = 0), this should be None or Some(zero hash).
-    /// None for backwards compatibility with existing records.
     pub prev_hash: Option<BlockHash>,
 }
 
@@ -41,7 +38,7 @@ impl BlockRange {
     fn adjacent(&self, other: &Self) -> bool {
         self.network == other.network
             && (self.end() + 1) == other.start()
-            && other.prev_hash == Some(self.hash)
+            && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
     }
 }
 
@@ -412,7 +409,7 @@ mod test {
             network: "test".to_string(),
             hash: test_hash(*numbers.end() as u8, fork.1),
             prev_hash: if *numbers.start() == 0 {
-                None
+                Some(Default::default())
             } else {
                 Some(test_hash(*numbers.start() as u8 - 1, fork.0))
             },

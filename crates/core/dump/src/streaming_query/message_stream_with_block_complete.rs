@@ -299,7 +299,7 @@ mod tests {
             numbers: start..=end,
             network: "test".to_string(),
             hash: [0u8; 32].into(),
-            prev_hash: None,
+            prev_hash: Some([0u8; 32].into()),
         }
     }
 
