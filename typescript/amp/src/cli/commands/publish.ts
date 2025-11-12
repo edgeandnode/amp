@@ -12,8 +12,7 @@ import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 import { configFile, ExitCode } from "../common.ts"
 
-// const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.edgeandnode.com")
-const CLUSTER_ADMIN_URL = new URL("http://localhost:1610")
+const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.edgeandnode.com/controller")
 
 export const publish = Command.make("publish", {
   args: {
@@ -41,24 +40,31 @@ export const publish = Command.make("publish", {
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
       const client = yield* Admin.Admin
 
-      const maybeAccessToken = yield* auth.get()
-      if (Option.isNone(maybeAccessToken)) {
+      const maybeAuthStorage = yield* auth.get()
+      if (Option.isNone(maybeAuthStorage)) {
         yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
         return yield* ExitCode.NonZero
       }
-      const accessToken = maybeAccessToken.value
+      const authStorage = maybeAuthStorage.value
 
       const metadata = context.metadata
 
       yield* Console.info("Registering your Dataset with Amp")
-      yield* client.registerDataset(metadata.namespace, metadata.name, context.manifest, args.tag).pipe(
+      yield* client.registerDataset(
+        metadata.namespace,
+        metadata.name,
+        context.manifest,
+        args.tag,
+        // Admin API running on the test cluster requires passing the Authoriztion Bearer token to the request
+        authStorage.accessToken,
+      ).pipe(
         Effect.tap(() => Console.info("Dataset successfully registered with Amp")),
       )
 
       yield* Console.info(
         `Deploying your Dataset to Amp ${metadata.namespace}/${metadata.name}@${args.tag}. This will start indexing`,
       )
-      yield* client.deployDataset(metadata.namespace, metadata.name, args.tag).pipe(
+      yield* client.deployDataset(metadata.namespace, metadata.name, args.tag, undefined, authStorage.accessToken).pipe(
         Effect.tap(() => Console.info("Dataset successfully deployed to Amp")),
         Effect.catchTag("DatasetNotFound", (e) =>
           Console.error(
@@ -68,7 +74,7 @@ export const publish = Command.make("publish", {
 
       yield* Console.info("Publishing your Dataset to the registry")
       const publishResult = yield* ampRegistry.publishFlow({
-        auth: accessToken,
+        auth: authStorage,
         context,
         versionTag: args.tag,
         changelog: Option.getOrUndefined(args.changelog),

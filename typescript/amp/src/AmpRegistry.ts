@@ -13,7 +13,7 @@ import * as Auth from "./Auth.ts"
 import type * as ManifestContext from "./ManifestContext.ts"
 import * as Model from "./Model.ts"
 
-const AMP_REGISTRY_API_URL_BASE = new URL("http://localhost:4000")
+const AMP_REGISTRY_API_URL_BASE = new URL("https://api.registry.amp.staging.edgeandnode.com")
 
 export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Amp/Services/AmpRegistryService", {
   dependencies: [FetchHttpClient.layer, Auth.layer],
