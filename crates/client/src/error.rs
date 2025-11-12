@@ -151,6 +151,80 @@ pub enum ValidationError {
         incoming_start: BlockNum,
         expected_start: BlockNum,
     },
+
+    /// Missing prev_hash for non-genesis block (zero hash detected)
+    ///
+    /// This occurs when a BlockRange starting after block 0 has a zero hash for prev_hash.
+    /// The prev_hash field is required for hash chain validation to ensure blockchain
+    /// integrity for all blocks except genesis.
+    ///
+    /// Zero hash is only valid for blocks starting at 0 (genesis), regardless of
+    /// whether it's the first message or a reorg back to genesis.
+    #[error("missing prev_hash for network '{network}' at block {block} (zero hash detected)")]
+    MissingPrevHash { network: String, block: BlockNum },
+
+    /// Invalid prev_hash for genesis block (non-zero hash detected)
+    ///
+    /// This occurs when a BlockRange starting at block 0 has a non-zero hash for prev_hash.
+    /// Genesis blocks have no parent block and therefore must have a zero hash for
+    /// prev_hash, even in the case of a reorg back to genesis.
+    #[error("genesis block must have zero hash for prev_hash")]
+    InvalidPrevHash,
+
+    /// Hash chain mismatch on consecutive blocks
+    ///
+    /// This occurs when consecutive blocks (incoming.start = previous.end + 1) have
+    /// a hash chain mismatch (incoming.prev_hash != previous.hash). This violates
+    /// the protocol invariant that forward progression must maintain hash chain
+    /// continuity.
+    ///
+    /// A hash mismatch on consecutive blocks indicates an attempt to "reorg forward",
+    /// which is nonsensical - reorgs must go backwards in time to an earlier block.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100 (hash H100)
+    /// - Incoming: blocks 101..=200 (prev_hash != H100)
+    /// - This is invalid: cannot reorg while progressing forward
+    #[error(
+        "hash chain mismatch on consecutive blocks for network '{network}': expected prev_hash to match {expected_hash:?}, got {actual_prev_hash:?}"
+    )]
+    HashMismatchOnConsecutiveBlocks {
+        network: String,
+        expected_hash: alloy::primitives::BlockHash,
+        actual_prev_hash: alloy::primitives::BlockHash,
+    },
+
+    /// Invalid reorg semantics
+    ///
+    /// This occurs when a backwards jump in block ranges does not have the expected
+    /// hash chain mismatch. When jumping backwards (incoming.start < previous.end + 1),
+    /// the hash chain MUST mismatch to indicate a reorg to a different chain.
+    ///
+    /// A backwards jump with matching hashes is nonsensical: it would mean the same
+    /// hash appears at different block positions, which violates blockchain integrity.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100 (hash H100)
+    /// - Incoming: blocks 50..=100 (hash H100, same endpoint)
+    /// - This is invalid: backwards jump must indicate different chain
+    #[error("invalid reorg for network '{network}': backwards jump with matching prev_hash")]
+    InvalidReorg { network: String },
+
+    /// Forward gap in block ranges
+    ///
+    /// This occurs when there is a gap in block numbers between consecutive messages.
+    /// The protocol requires strict block continuity - no blocks can be skipped.
+    ///
+    /// For example:
+    /// - Previous: blocks 0..=100
+    /// - Incoming: blocks 150..=200
+    /// - Missing: blocks 101-149 (protocol violation)
+    #[error("gap in blocks for network '{network}': missing blocks {missing_start}..{missing_end}")]
+    Gap {
+        network: String,
+        missing_start: BlockNum,
+        missing_end: BlockNum,
+    },
 }
 
 // ============================================================================
