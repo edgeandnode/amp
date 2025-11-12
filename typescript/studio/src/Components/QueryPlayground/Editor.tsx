@@ -15,6 +15,7 @@ import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
+import { MONACO_AMP_DARK, registerCustomTheme } from "./monaco-theme"
 
 self.MonacoEnvironment = {
   getWorker() {
@@ -22,7 +23,7 @@ self.MonacoEnvironment = {
   },
 }
 
-export type EditorProps = Omit<MonacoEditorProps, "defaultLanguage" | "language"> & {
+export type EditorProps = Omit<MonacoEditorProps, "defaultLanguage" | "language" | "theme"> & {
   id: string
   onSubmit?: () => void
   // SQL Validation configuration
@@ -35,7 +36,6 @@ export function Editor({
   height = 450,
   id,
   onSubmit,
-  theme = "vs-dark",
   validationLevel = "full",
   ...rest
 }: Readonly<EditorProps>) {
@@ -76,12 +76,15 @@ export function Editor({
         defaultLanguage="sql"
         language="sql"
         height={height}
-        theme={theme}
+        theme={MONACO_AMP_DARK}
         value={field.state.value}
         onChange={(val: string | undefined) => field.handleChange(val || "")}
         data-state={hasErrors ? "invalid" : undefined}
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
+        beforeMount={(monaco) => {
+          registerCustomTheme(monaco)
+        }}
         onMount={(editor: monaco.editor.IStandaloneCodeEditor) => {
           // Configure editor options
           editor.updateOptions({

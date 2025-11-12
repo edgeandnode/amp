@@ -323,11 +323,11 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
       })
 
       // Valid query - should have no errors
-      const validErrors = validator.validateQuery("SELECT id, email FROM test.users")
+      const validErrors = validator.validateQuery("SELECT id, email FROM unknown.users")
       expect(validErrors).toHaveLength(0)
 
       // Invalid column - should have errors
-      const invalidErrors = validator.validateQuery("SELECT invalid_column FROM test.users")
+      const invalidErrors = validator.validateQuery("SELECT invalid_column FROM unknown.users")
       expect(invalidErrors.length).toBeGreaterThan(0)
 
       validator.dispose()
@@ -417,15 +417,15 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
 
       // This is the critical test - validates the exact scenario from the user's request
       // Query against manifest table should be valid
-      const errors = validator.validateQuery("SELECT * FROM example.blocks")
+      const errors = validator.validateQuery("SELECT * FROM unknown.blocks")
       expect(errors).toHaveLength(0)
 
       // Query with specific columns should also be valid
-      const specificColumnErrors = validator.validateQuery("SELECT block_number, hash FROM example.blocks")
+      const specificColumnErrors = validator.validateQuery("SELECT block_number, hash FROM unknown.blocks")
       expect(specificColumnErrors).toHaveLength(0)
 
       // Query with invalid table should have errors
-      const invalidTableErrors = validator.validateQuery("SELECT * FROM example.nonexistent")
+      const invalidTableErrors = validator.validateQuery("SELECT * FROM unknown.nonexistent")
       expect(invalidTableErrors.length).toBeGreaterThan(0)
 
       validator.dispose()
