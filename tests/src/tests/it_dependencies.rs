@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use monitoring::logging;
 
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 #[ignore = "The intra-deps resolution functionality is broken. Enable this test once fixed"]
@@ -21,11 +21,13 @@ async fn intra_deps_test() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!(
+    run_spec(
         "intra-deps",
-        (&test_ctx, &mut client),
-        delay = Duration::from_secs(1)
-    );
+        &test_ctx,
+        &mut client,
+        Some(Duration::from_secs(1)),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -44,9 +46,11 @@ async fn multi_version_test() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!(
+    run_spec(
         "multi-version",
-        (&test_ctx, &mut client),
-        delay = Duration::from_secs(1)
-    );
+        &test_ctx,
+        &mut client,
+        Some(Duration::from_secs(1)),
+    )
+    .await;
 }

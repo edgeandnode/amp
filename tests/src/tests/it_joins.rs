@@ -1,6 +1,6 @@
 use monitoring::logging;
 
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn joins_tests() {
@@ -18,5 +18,5 @@ async fn joins_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("joins-tests", (&test_ctx, &mut client));
+    run_spec("joins-tests", &test_ctx, &mut client, None).await;
 }
