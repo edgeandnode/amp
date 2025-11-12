@@ -6,20 +6,23 @@
 //!
 //! # Function-to-Data-Path Mapping
 //!
-//! | Function                                  | Schema Endpoint  | Query Planning   | Query Execution  | Derived Dataset  | Raw Dataset |
-//! |-------------------------------------------|------------------|------------------|------------------|------------------|-------------|
-//! | [`planning_ctx_for_sql_tables_with_deps`] | ✅ **EXCLUSIVE** | ❌               | ❌               | ❌               | ❌          |
-//! | [`planning_ctx_for_sql`]                  | ❌               | ✅ **EXCLUSIVE** | ❌               | ❌               | ❌          |
-//! | [`catalog_for_sql`]                       | ❌               | ❌               | ✅ **PRIMARY**   | ✅ **PRIMARY**   | ❌          |
-//! | [`get_logical_catalog`]                   | ❌               | ❌               | ✅ (indirect)    | ✅ (indirect)    | ❌          |
+//! | Function                                  | Schema Endpoint  | Manifest Validation | Query Planning   | Query Execution  | Derived Dataset  | Raw Dataset |
+//! |-------------------------------------------|------------------|---------------------|------------------|------------------|------------------|-------------|
+//! | [`planning_ctx_for_sql_tables_with_deps`] | ✅               | ✅                  | ❌               | ❌               | ❌               | ❌          |
+//! | [`planning_ctx_for_sql`]                  | ❌               | ❌                  | ✅ **EXCLUSIVE** | ❌               | ❌               | ❌          |
+//! | [`catalog_for_sql`]                       | ❌               | ❌                  | ❌               | ✅ **PRIMARY**   | ✅ **PRIMARY**   | ❌          |
+//! | [`get_logical_catalog`]                   | ❌               | ❌                  | ❌               | ✅ (indirect)    | ✅ (indirect)    | ❌          |
 //!
 //! # Data Paths
 //!
-//! ## 1. Schema Endpoint Path
+//! ## 1. Manifest Validation Path
 //!
 //! - **Purpose**: Validate dataset manifests without data access
 //! - **Function**: [`planning_ctx_for_sql_tables_with_deps`]
-//! - **Entry**: `POST /schema` via admin API (`crates/services/admin-api/src/handlers/schema.rs`)
+//! - **Entry Points**:
+//!   - `POST /schema` endpoint (`crates/services/admin-api/src/handlers/schema.rs`)
+//!   - `POST /manifests` endpoint via manifest validation (`crates/services/admin-api/src/handlers/manifests/register.rs`)
+//!   - `POST /datasets` endpoint via manifest validation (`crates/services/admin-api/src/handlers/datasets/register.rs`)
 //! - **Characteristics**: Multi-table validation, pre-resolved dependencies, no physical data
 //!
 //! ## 2. Query Planning Path
@@ -585,13 +588,24 @@ async fn get_logical_catalog(
 ///
 /// ## Where Used
 ///
-/// This function is used exclusively in the **Schema Endpoint Path**:
+/// This function is used in three manifest validation paths:
 ///
-/// - **Admin API Schema Handler** (`crates/services/admin-api/src/handlers/schema.rs`):
-///   - Called via `POST /schema` endpoint from TypeScript CLI (`amp register`)
-///   - Validates SQL in dataset manifests before registration
-///   - Handles multiple tables with shared dependencies in a single request
-///   - Returns schemas for manifest generation without accessing physical data
+/// 1. **Schema Endpoint** (`crates/services/admin-api/src/handlers/schema.rs`):
+///    - Called via `POST /schema` endpoint from TypeScript CLI (`amp register`)
+///    - Validates SQL in dataset manifests during interactive schema generation
+///    - Returns schemas for manifest generation without accessing physical data
+///
+/// 2. **Manifest Registration** (`crates/services/admin-api/src/handlers/manifests/register.rs`):
+///    - Called via `POST /manifests` endpoint during content-addressable manifest registration
+///    - Validates derived dataset manifests via `common::manifest::derived::validate()`
+///    - Ensures all SQL queries, dependencies, and table references are valid
+///    - Stores validated manifests in content-addressable storage without dataset linking
+///
+/// 3. **Dataset Registration** (`crates/services/admin-api/src/handlers/datasets/register.rs`):
+///    - Called via `POST /datasets` endpoint during dataset registration
+///    - Validates derived dataset manifests via `common::manifest::derived::validate()`
+///    - Ensures all SQL queries, dependencies, and table references are valid
+///    - Prevents invalid manifests from being registered and linked to dataset versions
 ///
 /// ## Implementation
 ///

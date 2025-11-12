@@ -135,7 +135,7 @@ impl<'a> ManifestsClient<'a> {
                     "INVALID_MANIFEST" => {
                         Err(RegisterError::InvalidManifest(error_response.into()))
                     }
-                    "DEPENDENCY_VALIDATION_ERROR" => Err(RegisterError::DependencyValidationError(
+                    "MANIFEST_VALIDATION_ERROR" => Err(RegisterError::ManifestValidationError(
                         error_response.into(),
                     )),
                     "UNSUPPORTED_DATASET_KIND" => {
@@ -566,14 +566,14 @@ pub enum RegisterError {
     #[error("invalid manifest")]
     InvalidManifest(#[source] ApiError),
 
-    /// Dependency validation error for derived datasets (400, DEPENDENCY_VALIDATION_ERROR)
+    /// Dependency validation error for derived datasets (400, MANIFEST_VALIDATION_ERROR)
     ///
     /// This occurs when:
     /// - SQL queries in derived datasets are syntactically invalid
     /// - SQL queries reference datasets not declared in the dependencies section
     /// - Dependency resolution fails during validation
     #[error("dependency validation error")]
-    DependencyValidationError(#[source] ApiError),
+    ManifestValidationError(#[source] ApiError),
 
     /// Unsupported dataset kind (400, UNSUPPORTED_DATASET_KIND)
     ///

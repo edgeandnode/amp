@@ -1135,8 +1135,8 @@ async fn search_dependencies_for_raw_dataset(
         }
 
         // Enqueue dependencies for exploration
-        for reference in dataset.dependencies.values() {
-            let dataset = dataset_store.get_dataset(reference).await?;
+        for dep in dataset.dependencies.values() {
+            let dataset = dataset_store.get_dataset(dep.to_reference()).await?;
             queue.push_back(dataset);
         }
     }
@@ -1160,7 +1160,11 @@ pub async fn dataset_and_dependencies(
             continue;
         }
 
-        let refs: Vec<Reference> = dataset.dependencies.values().cloned().collect();
+        let refs: Vec<Reference> = dataset
+            .dependencies
+            .values()
+            .map(|dep| dep.to_reference())
+            .collect();
         let mut untracked_refs = refs
             .iter()
             .filter(|r| deps.keys().all(|d| d != *r))

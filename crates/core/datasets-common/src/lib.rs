@@ -3,6 +3,7 @@
 //! This module provides shared structures used across different dataset definition formats,
 //! including serializable schema representations and common dataset metadata.
 
+pub mod dep_reference;
 pub mod fqn;
 pub mod hash;
 pub mod manifest;
