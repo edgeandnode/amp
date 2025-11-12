@@ -17,7 +17,7 @@ pub fn init() {
     // multiple initializations.
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let env_filter = env_filter_and_log_level();
+        let env_filter = env_filter();
 
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
@@ -28,7 +28,7 @@ pub fn init() {
 
 /// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
 pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
-    let env_filter = env_filter_and_log_level();
+    let env_filter = env_filter();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
@@ -79,7 +79,7 @@ const AMP_CRATES: &[&str] = &[
     "worker",
 ];
 
-fn env_filter_and_log_level() -> EnvFilter {
+fn env_filter() -> EnvFilter {
     // Parse directives from RUST_LOG
     let log_filter = EnvFilter::builder().with_default_directive(LevelFilter::ERROR.into());
     let directive_string = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
