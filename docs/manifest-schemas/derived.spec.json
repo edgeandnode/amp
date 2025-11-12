@@ -18,10 +18,13 @@
     "functions": {
       "description": "User-defined function definitions mapped by function name",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/Function"
-      },
-      "default": {}
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_$]*$": {
+          "$ref": "#/$defs/Function"
+        }
+      }
     },
     "kind": {
       "description": "Dataset kind, must be `manifest`",

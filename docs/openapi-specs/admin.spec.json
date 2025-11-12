@@ -1968,7 +1968,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Function names defined in the dataset configuration\n\nUsed to validate that functions are properly defined and available.\nAt least one of `tables` or `functions` must be provided."
+            "description": "Function names defined in the dataset configuration\n\nUsed to validate that functions are properly defined and available.\nAt least one of `tables` or `functions` must be provided.\n\nFunction names must follow DataFusion UDF identifier rules:\n- Start with a letter (a-z, A-Z) or underscore (_)\n- Contain only letters, digits (0-9), underscores (_), and dollar signs ($)\n- Maximum length of 255 bytes"
           },
           "tables": {
             "type": "object",
