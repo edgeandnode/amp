@@ -11,7 +11,7 @@ use metadata_db::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::{ConsistencyCheckError, WriterProperties};
+use crate::WriterProperties;
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
@@ -222,23 +222,6 @@ impl From<JoinError> for CompactorError {
 /// metadata cleanup.
 #[derive(thiserror::Error, Debug)]
 pub enum CollectorError {
-    /// Consistency check failed during garbage collection
-    ///
-    /// This occurs when pre-deletion validation detects inconsistencies that make
-    /// it unsafe to proceed with garbage collection. Consistency checks prevent
-    /// accidental deletion of files that are still in use.
-    ///
-    /// Common causes:
-    /// - File is still referenced by active queries or compaction jobs
-    /// - Metadata inconsistencies between database and storage
-    /// - File marked for deletion but still appears in active file list
-    /// - Concurrent modifications detected during validation
-    ///
-    /// This error prevents data loss by blocking unsafe deletions. The issue
-    /// should be investigated before retrying garbage collection.
-    #[error("consistency check failed: {0}")]
-    Consistency(#[source] ConsistencyCheckError),
-
     /// File not found in object store
     ///
     /// This occurs when attempting to delete a file that doesn't exist in storage.
@@ -412,10 +395,6 @@ impl From<ObjectStoreError> for CollectorError {
 }
 
 impl CollectorError {
-    pub fn consistency_check_error(error: ConsistencyCheckError) -> Self {
-        Self::Consistency(error)
-    }
-
     pub fn file_stream_error(err: metadata_db::Error) -> Self {
         Self::FileStream(err)
     }
