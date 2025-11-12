@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use datafusion::sql::parser;
-use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
+use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     DerivedDatasetKind, Manifest,
     dep_alias::DepAlias,
@@ -193,9 +193,9 @@ pub async fn validate(
     manifest: &Manifest,
     store: &impl DatasetAccess,
 ) -> Result<(), ManifestValidationError> {
-    // Step 1: Resolve all dependencies to (FQN, Hash) pairs
+    // Step 1: Resolve all dependencies to HashReference
     // This must happen first to ensure all dependencies exist before parsing SQL
-    let mut dependencies: BTreeMap<DepAlias, (FullyQualifiedName, Hash)> = BTreeMap::new();
+    let mut dependencies: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
 
     for (alias, dep_reference) in &manifest.dependencies {
         // Convert DepReference to Reference for resolution
@@ -217,7 +217,7 @@ pub async fn validate(
             })?;
 
         let fqn = reference.into_fqn();
-        dependencies.insert(alias.clone(), (fqn, hash));
+        dependencies.insert(alias.clone(), (fqn, hash).into());
     }
 
     // Step 2: Parse all SQL queries and extract references

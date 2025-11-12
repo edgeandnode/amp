@@ -57,8 +57,8 @@ use std::collections::BTreeMap;
 
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
-    fqn::FullyQualifiedName, hash::Hash, partial_reference::PartialReference, reference::Reference,
-    revision::Revision, table_name::TableName,
+    hash::Hash, hash_reference::HashReference, partial_reference::PartialReference,
+    reference::Reference, revision::Revision, table_name::TableName,
 };
 use datasets_derived::dep_alias::DepAlias;
 use js_runtime::isolate_pool::IsolatePool;
@@ -611,7 +611,7 @@ async fn get_logical_catalog(
 pub async fn planning_ctx_for_sql_tables_with_deps(
     store: &impl DatasetAccess,
     references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)>,
-    dependencies: BTreeMap<DepAlias, (FullyQualifiedName, Hash)>,
+    dependencies: BTreeMap<DepAlias, HashReference>,
 ) -> Result<PlanningContext, PlanningCtxForSqlTablesWithDepsError> {
     // Use hash-based map to deduplicate datasets across ALL tables
     // Inner map: table_ref string -> ResolvedTable (deduplicates table references)
@@ -653,40 +653,33 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             })?;
 
             // Lookup alias in dependencies map (schema_str = alias)
-            let (fqn, hash) = dependencies.get(&dep_alias).ok_or_else(|| {
+            let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
                     table_name: table_name.clone(),
                     alias: dep_alias.clone(),
                 }
             })?;
 
-            // Build reference from FQN and Hash (already resolved by handler)
-            let reference = Reference::new(
-                fqn.namespace().clone(),
-                fqn.name().clone(),
-                Revision::Hash(hash.clone()),
-            );
-
             // Load dataset by hash (cached by store)
             let dataset = store
-                .get_dataset_by_hash(hash)
+                .get_dataset_by_hash(hash_ref.hash())
                 .await
                 .map_err(
                     |err| PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef {
                         table_name: table_name.clone(),
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                         source: err,
                     },
                 )?
                 .ok_or_else(|| {
                     PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef {
                         table_name: table_name.clone(),
-                        reference: reference.clone(),
+                        reference: hash_ref.clone(),
                     }
                 })?;
 
             // Get or create entry for this dataset's tables
-            let resolved_tables = tables.entry(hash.clone()).or_default();
+            let resolved_tables = tables.entry(hash_ref.hash().clone()).or_default();
 
             // Find table in dataset and create ResolvedTable
             let table = dataset
@@ -697,7 +690,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                     || PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset {
                         table_name: table_name.clone(),
                         referenced_table_name: table_ref.table().clone(),
-                        reference,
+                        reference: hash_ref.clone(),
                     },
                 )?;
 
@@ -726,40 +719,33 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                     })?;
 
                     // Lookup alias in dependencies map (schema_str = alias)
-                    let (fqn, hash) = dependencies.get(&dep_alias).ok_or_else(|| {
+                    let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
                         PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
                             table_name: table_name.clone(),
                             alias: dep_alias.clone(),
                         }
                     })?;
 
-                    // Build reference from FQN and Hash
-                    let reference = Reference::new(
-                        fqn.namespace().clone(),
-                        fqn.name().clone(),
-                        Revision::Hash(hash.clone()),
-                    );
-
                     // Load dataset by hash (cached by store)
                     let dataset = store
-                        .get_dataset_by_hash(hash)
+                        .get_dataset_by_hash(hash_ref.hash())
                         .await
                         .map_err(|err| {
                             PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction {
                                 table_name: table_name.clone(),
-                                reference: reference.clone(),
+                                reference: hash_ref.clone(),
                                 source: err,
                             }
                         })?
                         .ok_or_else(|| {
                             PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction {
                                 table_name: table_name.clone(),
-                                reference: reference.clone(),
+                                reference: hash_ref.clone(),
                             }
                         })?;
 
                     // Get or create entry for this dataset's UDFs
-                    let resolved_udfs = udfs.entry(hash.clone()).or_default();
+                    let resolved_udfs = udfs.entry(hash_ref.hash().clone()).or_default();
 
                     // Get the UDF for this function reference
                     let udf = if function.as_ref() == "eth_call" {
@@ -769,14 +755,14 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                             .map_err(|err| {
                                 PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction {
                                     table_name: table_name.clone(),
-                                    reference: reference.clone(),
+                                    reference: hash_ref.clone(),
                                     source: err,
                                 }
                             })?
                             .ok_or_else(|| {
                                 PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable {
                                     table_name: table_name.clone(),
-                                    reference: reference.clone(),
+                                    reference: hash_ref.clone(),
                                 }
                             })?
                     } else {
@@ -786,7 +772,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                                 PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset {
                                     table_name: table_name.clone(),
                                     function_name: func_ref.to_string(),
-                                    reference: reference.clone(),
+                                    reference: hash_ref.clone(),
                                 }
                             })?
                     };
