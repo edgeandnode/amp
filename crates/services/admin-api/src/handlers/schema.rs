@@ -8,20 +8,21 @@ use axum::{
 use common::{
     BoxError,
     catalog::{
-        errors::PlanningCtxForSqlTablesWithDepsError,
-        sql::{
-            FunctionReference, ResolveFunctionReferencesError,
-            planning_ctx_for_sql_tables_with_deps, resolve_function_references,
-        },
+        errors::PlanningCtxForSqlTablesWithDepsError, sql::planning_ctx_for_sql_tables_with_deps,
     },
     plan_visitors::prepend_special_block_num_field,
     query_context::Error as QueryContextError,
+    sql::{
+        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
+        TableReference, resolve_function_references, resolve_table_references,
+    },
 };
-use datafusion::sql::{TableReference, parser::Statement, resolve::resolve_table_references};
+use datafusion::sql::parser::Statement;
 use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
 use datasets_derived::{
     dep_alias::DepAlias,
     dep_reference::{DepReference, HashOrVersion},
+    func_name::FuncName,
     manifest::TableSchema,
     sql_str::SqlStr,
 };
@@ -29,10 +30,7 @@ use tracing::instrument;
 
 use crate::{
     ctx::Ctx,
-    handlers::{
-        common::NonEmptyString,
-        error::{ErrorResponse, IntoErrorResponse},
-    },
+    handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
 /// Handler for the `POST /schema` endpoint
@@ -201,11 +199,14 @@ pub async fn handler(
             })?;
 
             // Extract table references from the statement
-            let (table_refs, _) = resolve_table_references(&stmt, true).map_err(|err| {
-                Error::TableReferenceResolution {
-                    table_name: table_name.clone(),
-                    source: err.into(),
+            let table_refs = resolve_table_references(&stmt).map_err(|err| match &err {
+                ResolveTableReferencesError::InvalidTableName { .. } => {
+                    Error::InvalidTableName(err)
                 }
+                _ => Error::TableReferenceResolution {
+                    table_name: table_name.clone(),
+                    source: err,
+                },
             })?;
 
             // Extract function references from the statement
@@ -234,9 +235,6 @@ pub async fn handler(
                 }
                 PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
                     Error::UnqualifiedTable(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
-                    Error::InvalidTableName(err)
                 }
                 PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
                     ..
@@ -344,9 +342,14 @@ pub struct SchemaRequest {
     ///
     /// Used to validate that functions are properly defined and available.
     /// At least one of `tables` or `functions` must be provided.
+    ///
+    /// Function names must follow DataFusion UDF identifier rules:
+    /// - Start with a letter (a-z, A-Z) or underscore (_)
+    /// - Contain only letters, digits (0-9), underscores (_), and dollar signs ($)
+    /// - Maximum length of 255 bytes
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub functions: Vec<NonEmptyString>,
+    pub functions: Vec<FuncName>,
 }
 
 /// Response returned by the schema endpoint
@@ -403,15 +406,16 @@ enum Error {
     /// Failed to resolve table references in SQL query
     ///
     /// This occurs when:
-    /// - Table references cannot be extracted from the parsed SQL statement
-    /// - Invalid table reference format is encountered
+    /// - Table references contain invalid identifiers
+    /// - Table references have unsupported format (not 1-3 parts)
+    /// - Table names don't conform to identifier rules
     #[error("Failed to resolve table references for table '{table_name}': {source}")]
     TableReferenceResolution {
         /// The table name that contains the invalid references
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: ResolveTableReferencesError,
     },
 
     /// Failed to resolve function references from SQL query
@@ -475,8 +479,8 @@ enum Error {
     ///
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error(transparent)]
-    InvalidTableName(PlanningCtxForSqlTablesWithDepsError),
+    #[error("Invalid table name in SQL query: {0}")]
+    InvalidTableName(#[source] ResolveTableReferencesError),
 
     /// Dataset reference not found
     ///
