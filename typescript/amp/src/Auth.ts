@@ -15,13 +15,11 @@ import * as Schema from "effect/Schema"
 import * as jose from "jose"
 import * as os from "node:os"
 import * as path from "node:path"
-import { isAddress } from "viem"
-import type * as Model from "./Model.ts"
+import * as Model from "./Model.ts"
 
 export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
 const JWKS = jose.createRemoteJWKSet(new URL("/.well-known/jwks.json", AUTH_PLATFORM_URL))
 
-const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
 )
@@ -43,7 +41,7 @@ export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>("Am
   }),
   user: Schema.Struct({
     id: AuthUserId,
-    accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Address)).annotations({
+    accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).annotations({
       identifier: "RefreshTokenResponse.user.accounts",
       description: "List of accounts (connected wallets, etc) belonging to the user",
       examples: [["cmfd6bf6u006vjx0b7xb2eybx", "0x5c8fA0bDf68C915a88cD68291fC7CF011C126C29"]],
@@ -66,7 +64,7 @@ export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/mode
   accessToken: Schema.NonEmptyTrimmedString,
   refreshToken: Schema.NonEmptyTrimmedString,
   userId: AuthUserId,
-  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Address)).pipe(Schema.optional),
+  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).pipe(Schema.optional),
   expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
 }) {}
 export class AuthTokenExpiredError extends Data.TaggedError("Amp/errors/auth/AuthTokenExpiredError") {}

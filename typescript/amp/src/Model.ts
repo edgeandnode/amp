@@ -1,12 +1,15 @@
 import * as Effect from "effect/Effect"
 import type * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
+import { isAddress } from "viem"
 
 export class TableDefinition extends Schema.Class<TableDefinition>(
   "TableDefinition",
 )({
   sql: Schema.String,
 }) {}
+
+export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
 export const DEFAULT_NAMESPACE = "_"
 
@@ -179,6 +182,38 @@ export const DatasetReadme = Schema.String.pipe(
   }),
 )
 
+export const DatasetDescription = Schema.String.pipe(
+  Schema.annotations({
+    title: "Description",
+    description: "additional description and details about the dataset",
+  }),
+)
+
+export const DatasetKeyword = Schema.String.pipe(
+  Schema.annotations({
+    title: "Keyword",
+    description: "keywords, or traits, about the dataset for discoverability and searching",
+    examples: ["NFT", "Collectibles", "DeFi", "Transfers"],
+  }),
+)
+
+export const DatasetSource = Schema.String.pipe(
+  Schema.annotations({
+    title: "Source",
+    description:
+      "Source of the dataset data. Like the block or logs table that powers the dataset, or the 0x address of the smart contract being queried",
+    examples: ["eth_mainnet_rpc.logs", "arbitrum_one_rpc.blocks", "0xc944e90c64b2c07662a292be6244bdf05cda44a7"],
+  }),
+)
+
+export const DatasetLicense = Schema.String.pipe(
+  Schema.annotations({
+    title: "License",
+    description: "License covering the dataset",
+    examples: ["MIT"],
+  }),
+)
+
 export class FunctionSource extends Schema.Class<FunctionSource>(
   "FunctionSource",
 )({
@@ -201,6 +236,11 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>(
   name: DatasetName,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
+  description: DatasetDescription.pipe(Schema.optional),
+  keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  sources: Schema.Array(DatasetSource).pipe(Schema.optional),
+  license: DatasetLicense.pipe(Schema.optional),
+  visibility: Schema.Literal("public", "private").pipe(Schema.optional),
 }) {}
 
 export class DatasetConfig extends Schema.Class<DatasetConfig>(
@@ -211,6 +251,11 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>(
   network: Network,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
+  description: DatasetDescription.pipe(Schema.optional),
+  keywords: Schema.Array(DatasetKeyword).pipe(Schema.optional),
+  sources: Schema.Array(DatasetSource).pipe(Schema.optional),
+  license: DatasetLicense.pipe(Schema.optional),
+  private: Schema.Boolean.pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceStr }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),

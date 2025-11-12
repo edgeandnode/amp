@@ -2,6 +2,7 @@ import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpApi from "@effect/platform/HttpApi"
 import * as HttpApiClient from "@effect/platform/HttpApiClient"
 import * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint"
+import * as HttpApiError from "@effect/platform/HttpApiError"
 import * as HttpApiGroup from "@effect/platform/HttpApiGroup"
 import * as HttpApiSchema from "@effect/platform/HttpApiSchema"
 import type * as HttpClientError from "@effect/platform/HttpClientError"
@@ -11,6 +12,14 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
+
+const OptionalAuthorizationHeaderSchema = Schema.Struct({
+  Authorization: Schema.optional(
+    Schema.String.pipe(
+      Schema.filter((val) => val.startsWith("Bearer ")),
+    ),
+  ),
+})
 
 /**
  * The dataset namespace parameter.
@@ -45,7 +54,9 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.VersionTaggingError)
   .addError(Error.StoreError)
   .addError(Error.ManifestNotFound)
+  .addError(HttpApiError.Unauthorized)
   .addSuccess(Schema.Void, { status: 201 })
+  .setHeaders(OptionalAuthorizationHeaderSchema)
   .setPayload(
     Schema.Struct({
       namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
@@ -67,6 +78,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
  * - VersionTaggingError: Failed to tag version for the dataset.
  * - StoreError: Dataset store operation error.
  * - ManifestNotFound: Manifest hash provided but manifest doesn't exist.
+ * - HttpApiError.Unauthorized: If registering with the public cluster and the request is not authorized
  */
 export type RegisterDatasetError =
   | Error.InvalidPayloadFormat
@@ -78,6 +90,7 @@ export type RegisterDatasetError =
   | Error.VersionTaggingError
   | Error.StoreError
   | Error.ManifestNotFound
+  | HttpApiError.Unauthorized
 
 /**
  * The get datasets endpoint (GET /datasets).
@@ -152,7 +165,9 @@ const deployDataset = HttpApiEndpoint.post(
   .addError(Error.DatasetStoreError)
   .addError(Error.SchedulerError)
   .addError(Error.MetadataDbError)
+  .addError(HttpApiError.Unauthorized)
   .addSuccess(Model.DeployResponse, { status: 202 })
+  .setHeaders(OptionalAuthorizationHeaderSchema)
   .setPayload(Model.DeployRequest)
 
 /**
@@ -163,6 +178,7 @@ const deployDataset = HttpApiEndpoint.post(
  * - DatasetStoreError: Failed to load dataset from store.
  * - SchedulerError: Failed to schedule the deployment job.
  * - MetadataDbError: Database error while scheduling job.
+ * - HttpApiError.Unauthorized: If deploying to the public cluster and the request is not authorized
  */
 export type DeployDatasetError =
   | Error.InvalidRequest
@@ -170,6 +186,7 @@ export type DeployDatasetError =
   | Error.DatasetStoreError
   | Error.SchedulerError
   | Error.MetadataDbError
+  | HttpApiError.Unauthorized
 
 /**
  * The get dataset manifest endpoint (GET /datasets/{namespace}/{name}/versions/{revision}/manifest).
@@ -237,8 +254,10 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .addError(Error.EthCallNotAvailable)
   .addError(Error.DependencyAliasNotFound)
   .addError(Error.SchemaInference)
+  .addError(HttpApiError.Unauthorized)
   .addSuccess(Model.SchemaResponse)
   .setPayload(Model.SchemaRequest)
+  .setHeaders(OptionalAuthorizationHeaderSchema)
 
 /**
  * Error type for the `getOutputSchema` endpoint.
@@ -261,6 +280,7 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
  * - EthCallNotAvailable: eth_call function not available for dataset.
  * - DependencyAliasNotFound: Table or function reference uses undefined alias.
  * - SchemaInference: Failed to infer schema for table.
+ * - HttpApiError.Unauthorized: If reading the output schema on the public cluster is unauthorized (missing Authorization bearer token, or invalid token)
  */
 export type GetOutputSchemaError =
   | Error.InvalidPayloadFormat
@@ -281,6 +301,7 @@ export type GetOutputSchemaError =
   | Error.EthCallNotAvailable
   | Error.DependencyAliasNotFound
   | Error.SchemaInference
+  | HttpApiError.Unauthorized
 
 /**
  * The api group for the dataset endpoints.
@@ -338,6 +359,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @param name The name of the dataset to register.
    * @param version Optional version of the dataset to register. If omitted, only the "dev" tag is updated.
    * @param manifest The dataset manifest to register.
+   * @param bearerToken Optional Authorization Bearer JWT. Required for registering to the test cluster admin-api
    * @return Whether the registration was successful.
    */
   readonly registerDataset: (
@@ -345,6 +367,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
     name: Model.DatasetName,
     manifest: Model.DatasetManifest,
     version?: Model.DatasetVersion | undefined,
+    bearerToken?: string | undefined,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
@@ -387,6 +410,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * @param name The name of the dataset to deploy.
    * @param revision The version/revision to deploy.
    * @param options The deployment options.
+   * @param bearerToken Optional Authorization Bearer JWT. Required for registering to the test cluster admin-api
    * @return The deployment response with job ID.
    */
   readonly deployDataset: (
@@ -397,6 +421,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
       endBlock?: string | null | undefined
       parallelism?: number | undefined
     } | undefined,
+    bearerToken?: string | undefined,
   ) => Effect.Effect<Model.DeployResponse, HttpClientError.HttpClientError | DeployDatasetError>
 
   /**
@@ -427,10 +452,12 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * Gets the schema of a dataset.
    *
    * @param request - The schema request with tables and dependencies.
+   * @param bearerToken Optional Authorization Bearer JWT. Required for reading the output schema from the public cluster admin-api
    * @returns An effect that resolves to the schema response.
    */
   readonly getOutputSchema: (
     request: Model.SchemaRequest,
+    bearerToken?: string | undefined,
   ) => Effect.Effect<Model.SchemaResponse, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
@@ -451,6 +478,7 @@ export const make = Effect.fn(function*(url: string) {
       name: Model.DatasetName,
       manifest: Model.DatasetManifest,
       version?: Model.DatasetVersion | undefined,
+      bearerToken?: string,
     ) {
       const request = client.dataset.registerDataset({
         payload: {
@@ -459,6 +487,7 @@ export const make = Effect.fn(function*(url: string) {
           manifest,
           version,
         },
+        headers: bearerToken != null ? { Authorization: `Bearer ${bearerToken}` } : {},
       })
 
       const result = yield* request.pipe(
@@ -520,6 +549,7 @@ export const make = Effect.fn(function*(url: string) {
       endBlock?: string | null | undefined
       parallelism?: number | undefined
     },
+    bearerToken?: string | undefined,
   ) {
     const result = yield* client.dataset.deployDataset({
       path: {
@@ -531,6 +561,7 @@ export const make = Effect.fn(function*(url: string) {
         endBlock: options?.endBlock,
         parallelism: options?.parallelism,
       },
+      headers: bearerToken != null ? { Authorization: `Bearer ${bearerToken}` } : {},
     }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
@@ -588,18 +619,21 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getOutputSchema = Effect.fn("getOutputSchema")(function*(request: Model.SchemaRequest) {
-    const result = yield* client.schema.getOutputSchema({
-      payload: request,
-    }).pipe(
-      Effect.catchTags({
-        ParseError: Effect.die,
-        HttpApiDecodeError: Effect.die,
-      }),
-    )
+  const getOutputSchema = Effect.fn("getOutputSchema")(
+    function*(request: Model.SchemaRequest, bearerToken?: string | undefined) {
+      const result = yield* client.schema.getOutputSchema({
+        payload: request,
+        headers: bearerToken != null ? { Authorization: `Bearer ${bearerToken}` } : {},
+      }).pipe(
+        Effect.catchTags({
+          ParseError: Effect.die,
+          HttpApiDecodeError: Effect.die,
+        }),
+      )
 
-    return result
-  })
+      return result
+    },
+  )
 
   return {
     registerDataset,
