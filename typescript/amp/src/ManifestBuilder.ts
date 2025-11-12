@@ -1,6 +1,8 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Admin from "./api/Admin.ts"
+import * as Auth from "./Auth.ts"
 import * as ManifestContext from "./ManifestContext.ts"
 import * as Model from "./Model.ts"
 
@@ -17,8 +19,10 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 }> {}
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/ManifestBuilder", {
+  dependencies: [Auth.layer],
   effect: Effect.gen(function*() {
     const client = yield* Admin.Admin
+    const auth = yield* Auth.AuthService
     const build = (config: Model.DatasetConfig) =>
       Effect.gen(function*() {
         // Extract metadata
@@ -31,7 +35,17 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           keywords: config.keywords,
           license: config.license,
           visibility: config.private ? "private" : "public",
+          sources: config.sources,
         })
+
+        // Check if the user is authenticated.
+        // This is required for fetching the output schema from the public cluster controller.
+        const maybeAccessToken = yield* auth.get().pipe(
+          Effect.map(Option.match({
+            onNone: () => undefined,
+            onSome: (storage) => storage.accessToken,
+          })),
+        )
 
         // Build manifest tables - send all tables in one request
         const tables = yield* Effect.gen(function*() {
@@ -64,7 +78,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
             functions: functionNames.length > 0 ? functionNames : undefined,
           })
 
-          const response = yield* client.getOutputSchema(request).pipe(
+          const response = yield* client.getOutputSchema(request, maybeAccessToken).pipe(
             Effect.catchAll((cause) =>
               Effect.fail(
                 new ManifestBuilderError({

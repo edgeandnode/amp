@@ -13,6 +13,14 @@ import * as Schema from "effect/Schema"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
+const OptionalAuthorizationHeaderSchema = Schema.Struct({
+  Authorization: Schema.optional(
+    Schema.String.pipe(
+      Schema.filter((val) => val.startsWith("Bearer ")),
+    ),
+  ),
+})
+
 /**
  * The dataset namespace parameter.
  */
@@ -48,15 +56,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.ManifestNotFound)
   .addError(HttpApiError.Unauthorized)
   .addSuccess(Schema.Void, { status: 201 })
-  .setHeaders(
-    Schema.Struct({
-      Authorization: Schema.optional(
-        Schema.String.pipe(
-          Schema.filter((val) => val.startsWith("Bearer ")),
-        ),
-      ),
-    }),
-  )
+  .setHeaders(OptionalAuthorizationHeaderSchema)
   .setPayload(
     Schema.Struct({
       namespace: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("namespace")),
@@ -167,15 +167,7 @@ const deployDataset = HttpApiEndpoint.post(
   .addError(Error.MetadataDbError)
   .addError(HttpApiError.Unauthorized)
   .addSuccess(Model.DeployResponse, { status: 202 })
-  .setHeaders(
-    Schema.Struct({
-      Authorization: Schema.optional(
-        Schema.String.pipe(
-          Schema.filter((val) => val.startsWith("Bearer ")),
-        ),
-      ),
-    }),
-  )
+  .setHeaders(OptionalAuthorizationHeaderSchema)
   .setPayload(Model.DeployRequest)
 
 /**
@@ -262,8 +254,10 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .addError(Error.EthCallNotAvailable)
   .addError(Error.DependencyAliasNotFound)
   .addError(Error.SchemaInference)
+  .addError(HttpApiError.Unauthorized)
   .addSuccess(Model.SchemaResponse)
   .setPayload(Model.SchemaRequest)
+  .setHeaders(OptionalAuthorizationHeaderSchema)
 
 /**
  * Error type for the `getOutputSchema` endpoint.
@@ -286,6 +280,7 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
  * - EthCallNotAvailable: eth_call function not available for dataset.
  * - DependencyAliasNotFound: Table or function reference uses undefined alias.
  * - SchemaInference: Failed to infer schema for table.
+ * - HttpApiError.Unauthorized: If reading the output schema on the public cluster is unauthorized (missing Authorization bearer token, or invalid token)
  */
 export type GetOutputSchemaError =
   | Error.InvalidPayloadFormat
@@ -306,6 +301,7 @@ export type GetOutputSchemaError =
   | Error.EthCallNotAvailable
   | Error.DependencyAliasNotFound
   | Error.SchemaInference
+  | HttpApiError.Unauthorized
 
 /**
  * The api group for the dataset endpoints.
@@ -456,10 +452,12 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
    * Gets the schema of a dataset.
    *
    * @param request - The schema request with tables and dependencies.
+   * @param bearerToken Optional Authorization Bearer JWT. Required for reading the output schema from the public cluster admin-api
    * @returns An effect that resolves to the schema response.
    */
   readonly getOutputSchema: (
     request: Model.SchemaRequest,
+    bearerToken?: string | undefined,
   ) => Effect.Effect<Model.SchemaResponse, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
@@ -621,18 +619,21 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getOutputSchema = Effect.fn("getOutputSchema")(function*(request: Model.SchemaRequest) {
-    const result = yield* client.schema.getOutputSchema({
-      payload: request,
-    }).pipe(
-      Effect.catchTags({
-        ParseError: Effect.die,
-        HttpApiDecodeError: Effect.die,
-      }),
-    )
+  const getOutputSchema = Effect.fn("getOutputSchema")(
+    function*(request: Model.SchemaRequest, bearerToken?: string | undefined) {
+      const result = yield* client.schema.getOutputSchema({
+        payload: request,
+        headers: bearerToken != null ? { Authorization: `Bearer ${bearerToken}` } : {},
+      }).pipe(
+        Effect.catchTags({
+          ParseError: Effect.die,
+          HttpApiDecodeError: Effect.die,
+        }),
+      )
 
-    return result
-  })
+      return result
+    },
+  )
 
   return {
     registerDataset,
