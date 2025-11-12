@@ -1,6 +1,6 @@
 use monitoring::logging;
 
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn sql_tests() {
@@ -18,7 +18,7 @@ async fn sql_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("sql-tests", (&test_ctx, &mut client));
+    run_spec("sql-tests", &test_ctx, &mut client, None).await;
 }
 
 #[tokio::test]
@@ -37,5 +37,5 @@ async fn sql_advanced_tests() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("sql-advanced-tests", (&test_ctx, &mut client));
+    run_spec("sql-advanced-tests", &test_ctx, &mut client, None).await;
 }

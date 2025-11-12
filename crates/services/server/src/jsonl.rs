@@ -5,7 +5,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use common::{BoxError, arrow, query_context::parse_sql, stream_helpers::is_streaming};
+use common::{BoxError, arrow, stream_helpers::is_streaming};
+use datasets_derived::sql_str::SqlStr;
 use futures::{StreamExt as _, TryStreamExt as _};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
@@ -26,25 +27,28 @@ pub fn build_router(service: Service) -> Router {
 
 #[tracing::instrument(skip_all)]
 async fn handle_jsonl_request(State(service): State<Service>, request: String) -> Response {
-    // Parse query to check if it's a streaming query
-    let query = match parse_sql(&request) {
-        Ok(query) => query,
-        Err(err) => return err.into_response(),
+    // Step 1: Validate SQL string (non-empty, meaningful content)
+    let sql_str = match request.parse::<SqlStr>() {
+        Ok(sql) => sql,
+        Err(err) => return bad_request_resp("INVALID_SQL_STRING", err),
     };
 
-    // Reject streaming queries
+    // Step 2: Parse SQL statement (validate syntax, ensure single statement)
+    let query = match common::sql::parse(&sql_str) {
+        Ok(query) => query,
+        Err(err) => return bad_request_resp("SQL_PARSE_ERROR", err),
+    };
+
+    // Step 3: Reject streaming queries
     if is_streaming(&query) {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({
-                "error_code": "STREAMING_NOT_SUPPORTED",
-                "error_message": "Streaming queries (SETTINGS stream = true) are not supported on the JSONL endpoint. Please use the Arrow Flight endpoint instead.",
-            })),
-        )
-            .into_response();
+        return bad_request_resp(
+            "STREAMING_NOT_SUPPORTED",
+            "Streaming queries (SETTINGS stream = true) are not supported on the JSONL endpoint. Please use the Arrow Flight endpoint instead.",
+        );
     }
 
-    let stream = match service.execute_query(&request, None, None).await {
+    // Step 4: Execute query
+    let stream = match service.execute_query(&sql_str, None, None).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
     };
@@ -66,6 +70,19 @@ async fn handle_jsonl_request(State(service): State<Service>, request: String) -
         .unwrap()
 }
 
+/// Build a BAD_REQUEST error response with the given error code and message
+fn bad_request_resp(code: &str, message: impl std::fmt::Display) -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        axum::Json(serde_json::json!({
+            "error_code": code,
+            "error_message": message.to_string(),
+        })),
+    )
+        .into_response()
+}
+
+/// Build an error payload string for streaming errors
 fn error_payload(message: impl std::fmt::Display) -> String {
     serde_json::json!({
         "error_code": "QUERY_ERROR",

@@ -9,9 +9,8 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{
-    partial_reference::PartialReference, reference::Reference, table_name::TableName,
-};
+use datasets_common::{partial_reference::PartialReference, table_name::TableName};
+use datasets_derived::{dep_alias::DepAlias, dep_reference::DepReference};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -21,7 +20,7 @@ use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 #[derive(Clone, Debug)]
 pub struct Dataset {
     pub manifest_hash: datasets_common::hash::Hash,
-    pub dependencies: BTreeMap<String, Reference>,
+    pub dependencies: BTreeMap<DepAlias, DepReference>,
     pub kind: String,
     pub network: Option<String>,
     pub start_block: Option<BlockNum>,

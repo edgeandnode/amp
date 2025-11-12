@@ -7,10 +7,13 @@
     "dependencies": {
       "description": "External dataset dependencies with version requirements",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/Reference"
-      },
-      "default": {}
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-zA-Z][a-zA-Z0-9_]*$": {
+          "$ref": "#/$defs/DepReference"
+        }
+      }
     },
     "functions": {
       "description": "User-defined function definitions mapped by function name",
@@ -59,6 +62,16 @@
     "DataType": {
       "description": "Arrow data type, e.g. `Int32`, `Utf8`, etc.",
       "type": "string"
+    },
+    "DepReference": {
+      "description": "Dependency reference combining fully qualified name and hash-or-version.\n\nThis is similar to `Reference` but only accepts explicit versions or hashes,\nexcluding symbolic references like \"latest\" or \"dev\".\n\nFormat: `namespace/name@version` or `namespace/name@hash`",
+      "type": "string",
+      "examples": [
+        "my_namespace/my_dataset@1.0.0",
+        "my_namespace/my_dataset@0.4.10-rc.1+20230502",
+        "my_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+      ],
+      "pattern": "^[a-z0-9_]+/[a-z_][a-z0-9_]*@.+$"
     },
     "Field": {
       "description": "Arrow field definition with name, type, and nullability.\n\nRepresents a single column in a table schema.",
@@ -127,18 +140,10 @@
         "filename"
       ]
     },
-    "Reference": {
-      "description": "A complete dataset reference combining namespace, name, and revision.\n\nThis type provides a fully versioned identifier for datasets by combining\na namespace, dataset name, and revision using `/` and `@` separators.\n\n## Format\n\nThe string representation follows the format: `<namespace>/<name>@<revision>`\n\n## Examples\n\n```text\nmy_namespace/my_dataset@1.0.0\nmy_namespace/my_dataset@0.4.10-rc.1+20230502\nmy_namespace/my_dataset@latest\nmy_namespace/my_dataset@dev\nmy_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9\n```\n\n## PURL Format\n\nReferences can also be represented as Package URLs (PURLs) with the format:\n`pkg:amp/<namespace>/<name>@<revision>`\n\nAll three components must follow their respective validation rules.",
+    "SqlStr": {
+      "description": "A string intended to contain SQL, with minimal validation.\n\nThis type performs basic string validation but does **not** parse or validate\nSQL syntax. Actual SQL statement parsing is deferred to the query engine.\n\n[`SqlStr`] is a marker type that provides minimal guarantees: the string is\nnon-empty and contains at least one non-whitespace character.\n\n## Validation Rules\n\n[`SqlStr`] must:\n- **Not be empty** (minimum length of 1 character)\n- **Not be only whitespace** (must contain at least one non-whitespace character)\n\n## Non-Goals\n\nThis type does **not**:\n- Parse SQL syntax\n- Validate SQL statement correctness\n- Check for SQL injection vulnerabilities",
       "type": "string",
-      "examples": [
-        "my_namespace/my_dataset@1.0.0",
-        "my_namespace/my_dataset@0.4.10-rc.1+20230502",
-        "my_namespace/my_dataset@latest",
-        "my_namespace/my_dataset@dev",
-        "my_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
-        "pkg:amp/my_namespace/my_dataset@1.0.0"
-      ],
-      "pattern": "^(pkg:amp/)?[a-z0-9_]+/[a-z_][a-z0-9_]*@.+$"
+      "minLength": 1
     },
     "Table": {
       "description": "Table definition within a derived dataset.\n\nDefines a table with its input source, schema, and network.",
@@ -191,7 +196,7 @@
       "properties": {
         "sql": {
           "description": "SQL query defining the view",
-          "type": "string"
+          "$ref": "#/$defs/SqlStr"
         }
       },
       "required": [

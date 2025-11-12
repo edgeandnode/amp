@@ -24,7 +24,7 @@ use crate::{
     error::{Error, ProtocolError},
     store::{BatchStore, StateStore},
     transactional::TransactionalStreamBuilder,
-    validation::{validate_consecutiveness, validate_networks},
+    validation::{validate_consecutiveness, validate_networks, validate_prev_hash},
 };
 
 /// Metadata attached to each batch from the server.
@@ -150,18 +150,36 @@ impl ProtocolStream {
                 let batch = response?;
                 let ranges = batch.metadata.ranges;
 
+                // Validate prev_hash for all incoming ranges
+                for range in &ranges {
+                    validate_prev_hash(range)?;
+                }
+
                 // Validate network consistency (duplicates + stability)
                 validate_networks(&previous, &ranges)?;
 
-                // Detect reorg before validating consecutiveness
-                let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|i| {
-                    let p = previous.iter().find(|p| p.network == i.network)?;
-                    if (i != p) && (i.start() <= p.end()) {
+                // Validate consecutiveness with hash chain validation
+                // This handles both normal progression and detects reorgs
+                validate_consecutiveness(&previous, &ranges)?;
+
+                // Detect reorgs from backwards jumps (start < prev.end + 1)
+                // Reorgs are identified by backwards jumps with hash mismatches
+                let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|incoming| {
+                    let prev = previous.iter().find(|p| p.network == incoming.network)?;
+
+                    // Skip if ranges are identical (watermarks can repeat)
+                    if incoming == prev {
+                        return None;
+                    }
+
+                    // Detect backwards jump (reorg)
+                    if incoming.start() < prev.end() + 1 {
                         return Some(InvalidationRange {
-                            network: i.network.clone(),
-                            numbers: i.start()..=BlockNum::max(i.end(), p.end()),
+                            network: incoming.network.clone(),
+                            numbers: incoming.start()..=BlockNum::max(incoming.end(), prev.end()),
                         });
                     }
+
                     None
                 }).collect();
 
@@ -171,9 +189,6 @@ impl ProtocolStream {
                         incoming: ranges.clone(),
                         invalidation,
                     };
-                } else {
-                    // Validate consecutiveness of block ranges
-                    validate_consecutiveness(&previous, &ranges)?;
                 }
 
                 if batch.metadata.ranges_complete {

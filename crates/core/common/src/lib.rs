@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod plan_visitors;
 pub mod planning_context;
 pub mod query_context;
+pub mod sql;
 pub mod store;
 pub mod stream_helpers;
 pub mod utils;

@@ -1,6 +1,6 @@
 use monitoring::logging;
 
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn basic_function() {
@@ -18,5 +18,5 @@ async fn basic_function() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("basic-function", (&test_ctx, &mut client));
+    run_spec("basic-function", &test_ctx, &mut client, None).await;
 }

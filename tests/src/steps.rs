@@ -139,49 +139,45 @@ pub enum LoadTestSpecError {
     },
 }
 
-/// Internal macro to panic with detailed error messages including full error chain.
+/// Panics with detailed error messages including full error chain.
 ///
 /// Walks through the error source chain and formats a comprehensive panic message.
-#[macro_export]
-macro_rules! fail_with_error {
-    ($err:expr, $prefix:expr) => {{
-        let err_chain = $crate::steps::build_error_chain(&$err);
-        panic!("{}: {}{}", $prefix, $err, err_chain);
-    }};
+pub fn fail_with_error(err: &dyn std::error::Error, prefix: &str) -> ! {
+    let err_chain = build_error_chain(err);
+    panic!("{}: {}{}", prefix, err, err_chain);
 }
 
-/// Macro to run test specification steps.
+/// Runs test specification steps.
 ///
 /// Loads a test specification from YAML and executes all its steps sequentially.
-/// Panics with detailed error messages including full error chain if the spec cannot be loaded.
-#[macro_export]
-macro_rules! run_spec {
-    ($spec_name:expr, ($test_ctx:expr, $client:expr)) => {
-        let steps = match $crate::steps::load_test_spec($spec_name) {
-            Ok(steps) => steps,
-            Err(err) => $crate::fail_with_error!(err, "Failed to load test spec"),
-        };
-
-        for step in steps {
-            if let Err(err) = step.run($test_ctx, $client).await {
-                $crate::fail_with_error!(err, "Failed to execute step");
-            }
-        }
+/// Panics with detailed error messages including full error chain if the spec cannot be loaded
+/// or if any step fails.
+///
+/// # Arguments
+/// * `spec_name` - Name of the spec file (without .yaml extension)
+/// * `test_ctx` - Test context containing environment setup
+/// * `client` - Flight client for executing queries
+/// * `delay` - Optional delay to sleep between steps
+pub async fn run_spec(
+    spec_name: &str,
+    test_ctx: &TestCtx,
+    client: &mut FlightClient,
+    delay: Option<std::time::Duration>,
+) {
+    let steps = match load_test_spec(spec_name) {
+        Ok(steps) => steps,
+        Err(err) => fail_with_error(&err, "Failed to load test spec"),
     };
-    ($spec_name:expr, ($test_ctx:expr, $client:expr), delay = $duration:expr) => {
-        let steps = match $crate::steps::load_test_spec($spec_name) {
-            Ok(steps) => steps,
-            Err(err) => $crate::fail_with_error!(err, "Failed to load test spec"),
-        };
 
-        for step in steps {
-            if let Err(err) = step.run($test_ctx, $client).await {
-                $crate::fail_with_error!(err, "Failed to execute step");
-            }
-
-            ::tokio::time::sleep($duration).await;
+    for step in steps {
+        if let Err(err) = step.run(test_ctx, client).await {
+            fail_with_error(&err, "Failed to execute step");
         }
-    };
+
+        if let Some(duration) = delay {
+            tokio::time::sleep(duration).await;
+        }
+    }
 }
 
 /// Builds an error chain string from an error and its sources.

@@ -16,10 +16,11 @@ use common::{
     },
     config::Config,
     metadata::segments::BlockRange,
-    query_context::parse_sql,
+    sql,
 };
 use dataset_store::DatasetStore;
 use datasets_common::{reference::Reference, table_name::TableName};
+use datasets_derived::sql_str::SqlStr;
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 
@@ -184,11 +185,15 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
 
     // Then compare row data for each table
     for table in left.physical_tables() {
-        let query = parse_sql(&format!(
+        let sql_string = format!(
             "select * from {} order by block_num",
             table.table_ref().to_quoted_string()
-        ))
-        .expect("Failed to parse SQL query");
+        );
+
+        // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
+        // for empty or invalid SQL. The format! macro ensures non-empty output.
+        let sql_str = SqlStr::new_unchecked(sql_string);
+        let query = sql::parse(sql_str).expect("Failed to parse SQL query");
 
         let left_rows: RecordBatch = left
             .query_context()

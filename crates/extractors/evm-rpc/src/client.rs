@@ -286,10 +286,11 @@ impl JsonRpcClient {
                             c.get_block_receipts(BlockId::Number(block_num)).await
                         })
                         .await
-                        .map(|receipts| {
-                            let mut receipts = receipts.expect("block already found");
+                        .map_err(BoxError::from)
+                        .and_then(|receipts| {
+                            let mut receipts = receipts.ok_or_else(|| format!("no receipts for block {}", block.header.number))?;
                             receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
-                            receipts
+                            Ok(receipts)
                         });
                     let Ok(receipts) = receipts else {
                         yield Err("error fetching receipts".into());

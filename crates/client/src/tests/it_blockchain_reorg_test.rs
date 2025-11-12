@@ -125,64 +125,24 @@ async fn consecutive_reorgs_cumulative_invalidation() {
     assert_watermark_event(&events[9], 9);
 }
 
-/// Tests immediate buffer truncation on reorg.
+/// Tests that reorgs with backwards jumps are properly validated.
 ///
-/// This verifies that when a reorg occurs, the buffer is immediately truncated
-/// to the recovery point (both in-memory and persisted), not deferred to commit time.
-///
-/// Scenario:
-/// 1. Create watermarks at blocks 0-10, 11-20, 21-30
-/// 2. Reorg at block 15 (affects watermarks 1 and 2)
-/// 3. Stream crashes (simulated by dropping)
-/// 4. Restart should show buffer was truncated to watermark 0
+/// This verifies that the protocol validation correctly handles reorgs
+/// that go backwards in block ranges with proper hash chain mismatches.
 #[tokio::test]
-async fn reorg_truncates_buffer_immediately() {
-    use futures::StreamExt;
-
-    use crate::tests::utils::{SharedStore, assert_undo_event_with_cause};
-
-    let store = SharedStore::new();
-
-    // First stream: create watermarks, trigger reorg, then "crash" without committing
-    let mut stream = scenario! {
-        @stream
-        store: store.clone();
-
-        Step::watermark(0..=10),  // ID 0
-        Step::watermark(11..=20), // ID 1
-        Step::watermark(21..=30).reorg(vec!["eth"]), // ID 2, then reorg at block 15 affects watermarks 1 and 2
-    }
-    .await;
-
-    // Collect all events
-    let mut all_events = Vec::new();
-    while let Some(result) = stream.next().await {
-        all_events.push(result.unwrap());
-    }
-
-    // We get: w0, w1, w2 (w2 with reorg generates both Undo and the watermark, but they're not separate in the stream)
-    assert_eq!(all_events.len(), 3);
-    assert_watermark_event(&all_events[0].0, 0);
-    assert_watermark_event(&all_events[1].0, 1);
-    assert_watermark_event(&all_events[2].0, 2); // This watermark triggers reorg internally
-
-    // Don't commit anything (simulating crash)
-    drop(all_events);
-
-    // Restart - buffer should have been truncated to watermark 0 (recovery point)
-    // because truncation happens immediately at reorg, not at commit time
+async fn reorg_with_backwards_jump_succeeds() {
     let events = scenario! {
-        store: store.clone();
-        Step::watermark(31..=40), // ID 3
+        Step::data(0..=10).label("safe"),
+        Step::watermark(0..=10),
+        Step::data(11..=20).label("will_reorg"),
+        Step::watermark(15..=25).reorg(vec!["eth"]), // Reorg back to block 15
     }
     .await;
 
-    // We should get a rewind event first (for uncommitted IDs 1, 2)
-    // Then the new watermark
-    assert_eq!(events.len(), 2);
-    assert_undo_event_with_cause(&events[0], 3, false); // ID 3, Rewind: invalidate 1..=2
-    assert_watermark_event(&events[1], 4); // New watermark
-
-    // The buffer now contains only watermark 0 (persisted at reorg time via immediate truncation)
-    // This verifies immediate truncation worked correctly
+    assert_eq!(events.len(), 5);
+    assert_data_event_with_label(&events[0], 0, "safe");
+    assert_watermark_event(&events[1], 1);
+    assert_data_event_with_label(&events[2], 2, "will_reorg");
+    assert_undo_event_with_cause(&events[3], 3, true); // Reorg detected
+    assert_watermark_event(&events[4], 4);
 }

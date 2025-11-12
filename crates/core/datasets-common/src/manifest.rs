@@ -14,7 +14,6 @@ use datafusion::{
 
 /// Common metadata fields required by all dataset definitions.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset kind. See specific dataset definitions for supported values.
     ///

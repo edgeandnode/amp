@@ -1,7 +1,7 @@
 use monitoring::logging;
 
 use crate::{
-    run_spec,
+    steps::run_spec,
     testlib::{ctx::TestCtxBuilder, helpers as test_helpers},
 };
 
@@ -22,7 +22,7 @@ async fn streaming_tests_basic() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!("sql-streaming-tests-basic", (&test_ctx, &mut client));
+    run_spec("sql-streaming-tests-basic", &test_ctx, &mut client, None).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -42,8 +42,11 @@ async fn streaming_tests_with_sql_datasets() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec!(
+    run_spec(
         "sql-streaming-tests-with-sql-datasets",
-        (&test_ctx, &mut client)
-    );
+        &test_ctx,
+        &mut client,
+        None,
+    )
+    .await;
 }

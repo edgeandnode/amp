@@ -3638,15 +3638,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datasets-common-gen"
-version = "0.1.0"
-dependencies = [
- "datasets-common",
- "schemars 1.1.0",
- "serde_json",
-]
-
-[[package]]
 name = "datasets-derived"
 version = "0.1.0"
 dependencies = [
@@ -5904,7 +5895,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "serde_json",
+ "thiserror 2.0.17",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -8081,6 +8072,7 @@ dependencies = [
  "common",
  "datafusion",
  "dataset-store",
+ "datasets-derived",
  "dump",
  "futures",
  "metadata-db",

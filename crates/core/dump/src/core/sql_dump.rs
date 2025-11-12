@@ -103,7 +103,7 @@ use common::{
         sql::catalog_for_sql,
     },
     metadata::{Generation, segments::ResumeWatermark},
-    query_context::{QueryEnv, parse_sql},
+    query_context::QueryEnv,
 };
 use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
@@ -152,7 +152,7 @@ pub async fn dump_table(
     };
 
     // Parse the SQL query
-    let query = parse_sql(query_sql)?;
+    let query = common::sql::parse(query_sql)?;
 
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     let dataset_store = ctx.dataset_store.clone();

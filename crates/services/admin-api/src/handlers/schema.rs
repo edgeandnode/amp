@@ -15,13 +15,16 @@ use common::{
         },
     },
     plan_visitors::prepend_special_block_num_field,
-    query_context::{Error as QueryContextError, parse_sql},
+    query_context::Error as QueryContextError,
 };
 use datafusion::sql::{TableReference, parser::Statement, resolve::resolve_table_references};
-use datasets_common::{
-    fqn::FullyQualifiedName, hash::Hash, table_name::TableName, version::Version,
+use datasets_common::{fqn::FullyQualifiedName, hash::Hash, table_name::TableName};
+use datasets_derived::{
+    dep_alias::DepAlias,
+    dep_reference::{DepReference, HashOrVersion},
+    manifest::TableSchema,
+    sql_str::SqlStr,
 };
-use datasets_derived::manifest::TableSchema;
 use tracing::instrument;
 
 use crate::{
@@ -60,13 +63,15 @@ use crate::{
 /// - `CATALOG_QUALIFIED_TABLE`: Table uses unsupported catalog qualification
 /// - `UNQUALIFIED_TABLE`: Table missing required dataset qualification
 /// - `INVALID_TABLE_NAME`: Table name violates SQL identifier rules
+/// - `INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF`: Dependency alias in table reference is invalid
+/// - `INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF`: Dependency alias in function reference is invalid
+/// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
 /// - `DATASET_NOT_FOUND`: Referenced dataset does not exist
 /// - `GET_DATASET_ERROR`: Failed to retrieve dataset from store
 /// - `ETH_CALL_UDF_CREATION_ERROR`: Failed to create eth_call UDF
 /// - `TABLE_NOT_FOUND_IN_DATASET`: Table not found in referenced dataset
 /// - `FUNCTION_NOT_FOUND_IN_DATASET`: Function not found in referenced dataset
 /// - `ETH_CALL_NOT_AVAILABLE`: eth_call function not available for dataset
-/// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
 /// - `SCHEMA_INFERENCE`: Failed to infer output schema from query
 ///
 /// ## Schema Analysis Process
@@ -133,11 +138,9 @@ pub async fn handler(
     // Resolve all dependencies to their manifest hashes
     // This must happen before parsing SQL to ensure all dependencies exist
     let dependencies = {
-        let mut resolved = BTreeMap::new();
+        let mut resolved: BTreeMap<DepAlias, (FullyQualifiedName, Hash)> = BTreeMap::new();
         for (alias, dep_ref) in dependencies {
-            let alias_str = alias.to_string();
-            let ref_str = dep_ref.to_string();
-            let (fqn, hash_or_version) = dep_ref.into_fqn_and_hash_or_version();
+            let (fqn, hash_or_version) = dep_ref.clone().into_fqn_and_hash_or_version();
 
             // Resolve the dependency to its manifest hash based on whether it's a hash or version
             let hash = match hash_or_version {
@@ -148,15 +151,15 @@ pub async fn handler(
                         .is_manifest_linked(fqn.namespace(), fqn.name(), &hash)
                         .await
                         .map_err(|err| Error::DependencyResolution {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                             source: err.into(),
                         })?;
 
                     if !is_linked {
                         return Err(Error::DependencyNotFound {
-                            alias: alias_str,
-                            reference: ref_str,
+                            alias,
+                            reference: dep_ref,
                         }
                         .into());
                     }
@@ -169,18 +172,18 @@ pub async fn handler(
                         .resolve_version_hash(fqn.namespace(), fqn.name(), &version)
                         .await
                         .map_err(|err| Error::DependencyResolution {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                             source: err.into(),
                         })?
                         .ok_or_else(|| Error::DependencyNotFound {
-                            alias: alias_str.clone(),
-                            reference: ref_str.clone(),
+                            alias: alias.clone(),
+                            reference: dep_ref.clone(),
                         })?
                 }
             };
 
-            resolved.insert(alias.into_inner(), (fqn, hash));
+            resolved.insert(alias, (fqn, hash));
         }
         resolved
     };
@@ -192,7 +195,7 @@ pub async fn handler(
             BTreeMap::new();
 
         for (table_name, sql_query) in tables {
-            let stmt = parse_sql(&sql_query).map_err(|err| Error::InvalidTableSql {
+            let stmt = common::sql::parse(&sql_query).map_err(|err| Error::InvalidTableSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
@@ -235,6 +238,12 @@ pub async fn handler(
                 PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
                     Error::InvalidTableName(err)
                 }
+                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
+                    ..
+                } => Error::InvalidDependencyAliasForTableRef(err),
+                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
+                    ..
+                } => Error::InvalidDependencyAliasForFunctionRef(err),
                 PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
                     Error::DatasetNotFound(err)
                 }
@@ -253,7 +262,7 @@ pub async fn handler(
                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
                     ..
                 } => Error::DependencyAliasNotFound(err),
-                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunction {
+                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
                     ..
                 } => Error::DependencyAliasNotFound(err),
                 PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
@@ -320,7 +329,7 @@ pub struct SchemaRequest {
     /// tables from dependencies using the alias names.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
-    pub tables: BTreeMap<TableName, NonEmptyString>,
+    pub tables: BTreeMap<TableName, SqlStr>,
 
     /// External dataset dependencies mapped by alias
     ///
@@ -329,7 +338,7 @@ pub struct SchemaRequest {
     /// Symbolic references like "latest" or "dev" are not allowed.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
-    pub dependencies: BTreeMap<NonEmptyString, DepReference>,
+    pub dependencies: BTreeMap<DepAlias, DepReference>,
 
     /// Function names defined in the dataset configuration
     ///
@@ -352,204 +361,6 @@ pub struct SchemaResponse {
     /// Contains one entry per table definition.
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, TableSchemaWithNetworks>))]
     schemas: BTreeMap<TableName, TableSchemaWithNetworks>,
-}
-
-/// Dependency reference combining fully qualified name and hash-or-version.
-///
-/// This is similar to `Reference` but only accepts explicit versions or hashes,
-/// excluding symbolic references like "latest" or "dev".
-///
-/// Format: `namespace/name@version` or `namespace/name@hash`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DepReference(FullyQualifiedName, HashOrVersion);
-
-impl DepReference {
-    /// Access the fully qualified name component.
-    pub fn fqn(&self) -> &FullyQualifiedName {
-        &self.0
-    }
-
-    /// Access the hash or version component.
-    pub fn revision(&self) -> &HashOrVersion {
-        &self.1
-    }
-
-    /// Consume self and return the FQN and HashOrVersion components.
-    pub fn into_fqn_and_hash_or_version(self) -> (FullyQualifiedName, HashOrVersion) {
-        (self.0, self.1)
-    }
-}
-
-impl std::fmt::Display for DepReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}", self.0, self.1)
-    }
-}
-
-impl std::str::FromStr for DepReference {
-    type Err = DepReferenceParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Expected format: namespace/name@hash_or_version
-        let (fqn_str, revision_str) = s
-            .split_once('@')
-            .ok_or_else(|| DepReferenceParseError::MissingAt(s.to_string()))?;
-
-        let fqn: FullyQualifiedName = fqn_str
-            .parse()
-            .map_err(|err| DepReferenceParseError::InvalidFqn(fqn_str.to_string(), err))?;
-
-        let revision: HashOrVersion = revision_str.parse().map_err(|err| {
-            DepReferenceParseError::InvalidRevision(revision_str.to_string(), err)
-        })?;
-
-        Ok(DepReference(fqn, revision))
-    }
-}
-
-impl serde::Serialize for DepReference {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.to_string().serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for DepReference {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-/// Hash or semantic version (no symbolic references like "latest" or "dev").
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HashOrVersion {
-    /// A 32-byte SHA-256 content hash
-    Hash(Hash),
-    /// A semantic version tag
-    Version(Version),
-}
-
-impl std::fmt::Display for HashOrVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HashOrVersion::Hash(hash) => write!(f, "{}", hash),
-            HashOrVersion::Version(version) => write!(f, "{}", version),
-        }
-    }
-}
-
-impl std::str::FromStr for HashOrVersion {
-    type Err = HashOrVersionParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Reject symbolic references
-        if s == "latest" || s == "dev" {
-            return Err(HashOrVersionParseError::SymbolicReference(s.to_string()));
-        }
-
-        // Try parsing as hash first
-        if let Ok(hash) = s.parse::<Hash>() {
-            return Ok(HashOrVersion::Hash(hash));
-        }
-
-        // Try parsing as version
-        if let Ok(version) = s.parse::<Version>() {
-            return Ok(HashOrVersion::Version(version));
-        }
-
-        Err(HashOrVersionParseError::Invalid(s.to_string()))
-    }
-}
-
-/// Errors that occur when parsing a dependency reference string
-///
-/// This error type is used when parsing strings in the format `namespace/name@revision`
-/// into [`DepReference`] instances. All variants include the invalid portion of the
-/// input string for debugging purposes.
-#[derive(Debug, thiserror::Error)]
-pub enum DepReferenceParseError {
-    /// Missing '@' separator between FQN and revision
-    ///
-    /// This occurs when the input string does not contain an '@' character to separate
-    /// the fully qualified name (namespace/name) from the revision (hash or version).
-    ///
-    /// Expected format: `namespace/name@version` or `namespace/name@hash`
-    ///
-    /// Common causes:
-    /// - Omitting the '@' separator entirely (e.g., `namespace/name`)
-    /// - Using wrong separator (e.g., `namespace/name:version`)
-    #[error("Missing '@' separator in reference: {0}")]
-    MissingAt(String),
-
-    /// Invalid fully qualified name component
-    ///
-    /// This occurs when the portion before the '@' separator cannot be parsed as a
-    /// valid fully qualified name (FQN). The FQN must be in the format `namespace/name`
-    /// where both parts are valid identifiers.
-    ///
-    /// Common causes:
-    /// - Missing namespace (e.g., `@version`)
-    /// - Invalid characters in namespace or name
-    /// - Missing '/' separator between namespace and name
-    /// - Empty namespace or name component
-    #[error("Invalid fully qualified name '{0}': {1}")]
-    InvalidFqn(String, datasets_common::fqn::FullyQualifiedNameError),
-
-    /// Invalid revision component (hash or version)
-    ///
-    /// This occurs when the portion after the '@' separator cannot be parsed as either
-    /// a valid hash or a valid semantic version.
-    ///
-    /// Common causes:
-    /// - Using symbolic references like "latest" or "dev" (not allowed)
-    /// - Invalid hash format (must be 64 hex characters)
-    /// - Invalid version format (must follow semantic versioning: MAJOR.MINOR.PATCH)
-    /// - Empty revision string
-    #[error("Invalid revision '{0}': {1}")]
-    InvalidRevision(String, HashOrVersionParseError),
-}
-
-/// Errors that occur when parsing a hash or version string
-///
-/// This error type is used when parsing strings into [`HashOrVersion`] instances.
-/// Unlike general revision references, this type explicitly rejects symbolic references
-/// like "latest" or "dev", requiring only concrete hashes or semantic versions.
-#[derive(Debug, thiserror::Error)]
-pub enum HashOrVersionParseError {
-    /// Symbolic reference not allowed
-    ///
-    /// This occurs when the input string is a symbolic reference like "latest" or "dev".
-    /// The schema endpoint requires explicit versions or content hashes to ensure
-    /// deterministic and reproducible schema analysis.
-    ///
-    /// Symbolic references are intentionally rejected because:
-    /// - They can point to different manifests over time
-    /// - Schema analysis results would be non-deterministic
-    /// - They make it unclear which exact dataset version was used
-    ///
-    /// Use an explicit version (e.g., "1.2.3") or hash instead.
-    #[error("Symbolic reference '{0}' not allowed (use explicit version or hash)")]
-    SymbolicReference(String),
-
-    /// Invalid hash or version format
-    ///
-    /// This occurs when the input string cannot be parsed as either:
-    /// - A valid 32-byte SHA-256 hash (64 hexadecimal characters)
-    /// - A valid semantic version (MAJOR.MINOR.PATCH format)
-    ///
-    /// Common causes:
-    /// - Partial or truncated hash
-    /// - Non-hexadecimal characters in hash
-    /// - Invalid version format (e.g., missing components, non-numeric parts)
-    /// - Empty string or whitespace-only input
-    #[error("Invalid hash or version: {0}")]
-    Invalid(String),
 }
 
 /// Errors that can occur during schema operations
@@ -586,7 +397,7 @@ enum Error {
         table_name: TableName,
         /// The underlying parse error
         #[source]
-        source: QueryContextError,
+        source: common::sql::ParseSqlError,
     },
 
     /// Failed to resolve table references in SQL query
@@ -625,9 +436,9 @@ enum Error {
     #[error("Dependency '{alias}' ({reference}) not found in dataset store")]
     DependencyNotFound {
         /// The alias name used in the request
-        alias: String,
-        /// The full reference string (namespace/name@version or namespace/name@hash)
-        reference: String,
+        alias: DepAlias,
+        /// The dependency reference (namespace/name@version or namespace/name@hash)
+        reference: DepReference,
     },
 
     /// Failed to resolve dependency
@@ -638,9 +449,9 @@ enum Error {
     #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
     DependencyResolution {
         /// The alias name used in the request
-        alias: String,
-        /// The full reference string
-        reference: String,
+        alias: DepAlias,
+        /// The dependency reference
+        reference: DepReference,
         /// The underlying resolution error
         #[source]
         source: BoxError,
@@ -706,9 +517,23 @@ enum Error {
     #[error(transparent)]
     EthCallNotAvailable(PlanningCtxForSqlTablesWithDepsError),
 
+    /// Invalid dependency alias in table reference
+    ///
+    /// The dependency alias in a table reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error(transparent)]
+    InvalidDependencyAliasForTableRef(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias in function reference
+    ///
+    /// The dependency alias in a function reference does not conform to alias rules
+    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error(transparent)]
+    InvalidDependencyAliasForFunctionRef(PlanningCtxForSqlTablesWithDepsError),
+
     /// Dependency alias not found
     ///
-    /// A table reference uses an alias that was not provided in the dependencies map.
+    /// A table or function reference uses an alias that was not provided in the dependencies map.
     #[error(transparent)]
     DependencyAliasNotFound(PlanningCtxForSqlTablesWithDepsError),
 
@@ -760,6 +585,10 @@ impl IntoErrorResponse for Error {
             Error::CatalogQualifiedTable(_) => "CATALOG_QUALIFIED_TABLE",
             Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
             Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
+            Error::InvalidDependencyAliasForTableRef(_) => "INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF",
+            Error::InvalidDependencyAliasForFunctionRef(_) => {
+                "INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF"
+            }
             Error::DatasetNotFound(_) => "DATASET_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::EthCallUdfCreation(_) => "ETH_CALL_UDF_CREATION_ERROR",
@@ -783,6 +612,8 @@ impl IntoErrorResponse for Error {
             Error::CatalogQualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForTableRef(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForFunctionRef(_) => StatusCode::BAD_REQUEST,
             Error::DatasetNotFound(_) => StatusCode::NOT_FOUND,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::EthCallUdfCreation(_) => StatusCode::INTERNAL_SERVER_ERROR,
