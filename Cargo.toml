@@ -10,7 +10,6 @@ members = [
     "crates/core/common",
     "crates/core/dataset-store",
     "crates/core/datasets-common",
-    "crates/core/datasets-common/gen",
     "crates/core/datasets-derived",
     "crates/core/datasets-derived/gen",
     "crates/core/dump",

@@ -3638,15 +3638,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datasets-common-gen"
-version = "0.1.0"
-dependencies = [
- "datasets-common",
- "schemars 1.1.0",
- "serde_json",
-]
-
-[[package]]
 name = "datasets-derived"
 version = "0.1.0"
 dependencies = [
