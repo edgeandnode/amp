@@ -11,6 +11,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use datasets_common::fqn::FullyQualifiedName;
+use monitoring::logging;
 
 use crate::{args::GlobalArgs, client};
 
@@ -24,9 +25,42 @@ pub struct Args {
     pub fqn: FullyQualifiedName,
 }
 
+/// Result wrapper for versions list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: client::datasets::VersionsResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Dataset: {}/{}", self.data.namespace, self.data.name)?;
+        writeln!(f)?;
+
+        if let Some(latest) = &self.data.special_tags.latest {
+            writeln!(f, "Latest version: {}", latest)?;
+        }
+        if let Some(dev) = &self.data.special_tags.dev {
+            writeln!(f, "Dev hash: {}", dev)?;
+        }
+
+        if self.data.versions.is_empty() {
+            writeln!(f, "\nNo versions found")?;
+        } else {
+            writeln!(f, "\nVersions:")?;
+            for version in &self.data.versions {
+                writeln!(f, "  {} ({})", version.version, version.manifest_hash)?;
+                writeln!(f, "    Created: {}", version.created_at)?;
+                writeln!(f, "    Updated: {}", version.updated_at)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// List all versions of a dataset by retrieving them from the admin API.
 ///
-/// Retrieves version information and displays it as JSON.
+/// Retrieves version information and displays it based on the output format.
 ///
 /// # Errors
 ///
@@ -36,12 +70,10 @@ pub async fn run(Args { global, fqn }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving dataset versions from admin API");
 
     let versions_response = get_versions(&global, &fqn).await?;
-
-    let json = serde_json::to_string_pretty(&versions_response).map_err(|err| {
-        tracing::error!(error = %err, "Failed to serialize versions to JSON");
-        Error::JsonFormattingError(err)
-    })?;
-    println!("{}", json);
+    let result = ListResult {
+        data: versions_response,
+    };
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
@@ -57,7 +89,7 @@ async fn get_versions(
     let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let versions_response = client.datasets().list_versions(fqn).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to list versions");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to list versions");
         Error::ClientError(err)
     })?;
 

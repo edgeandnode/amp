@@ -27,6 +27,22 @@ pub struct Args {
     pub hash: Hash,
 }
 
+/// Result of a manifest removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    hash: String,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Manifest deleted successfully",
+            console::style("✓").green().bold()
+        )
+    }
+}
+
 /// Remove a manifest from content-addressable storage via the admin API.
 ///
 /// Deletes the manifest if it is not linked to any datasets.
@@ -40,8 +56,11 @@ pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting manifest from admin API");
 
     delete_manifest(&global, &hash).await?;
+    let result = RemoveResult {
+        hash: hash.to_string(),
+    };
 
-    crate::success!("Manifest deleted successfully");
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -51,7 +70,7 @@ pub async fn run(Args { global, hash }: Args) -> Result<(), Error> {
 /// DELETEs to `/manifests/{hash}` endpoint using the admin API client.
 #[tracing::instrument(skip_all)]
 async fn delete_manifest(global: &GlobalArgs, hash: &Hash) -> Result<(), Error> {
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     client
         .manifests()
@@ -98,10 +117,7 @@ async fn delete_manifest(global: &GlobalArgs, hash: &Hash) -> Result<(), Error> 
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// API returned an error response
     #[error("API error: [{error_code}] {message}")]
@@ -114,4 +130,8 @@ pub enum Error {
     /// Unexpected response from API
     #[error("unexpected response (status {status}): {message}")]
     UnexpectedResponse { status: u16, message: String },
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }

@@ -6,6 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use metadata_db::{FileId, LocationId};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -60,7 +61,7 @@ pub async fn handler(
     let file_id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid file ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid file ID in path");
             return Err(Error::InvalidId { err }.into());
         }
     };
@@ -76,7 +77,7 @@ pub async fn handler(
             Err(Error::NotFound { id: file_id }.into())
         }
         Err(err) => {
-            tracing::debug!(error=?err, file_id=?file_id, "failed to query file metadata");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), file_id=?file_id, "failed to query file metadata");
             Err(Error::MetadataDbError(err).into())
         }
     }
@@ -168,7 +169,7 @@ pub enum Error {
     /// This covers database connection issues, query failures,
     /// and other internal database errors.
     #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    MetadataDbError(#[source] metadata_db::Error),
 }
 
 impl IntoErrorResponse for Error {

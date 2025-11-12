@@ -14,6 +14,7 @@ use datasets_derived::manifest::DependencyValidationError;
 use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -85,20 +86,20 @@ pub async fn handler(
     let payload = match payload {
         Ok(Json(payload)) => payload,
         Err(err) => {
-            tracing::error!(error=?err, "failed to parse request JSON");
+            tracing::error!(error = %err, error_source = logging::error_source(&err), "failed to parse request JSON");
             return Err(Error::InvalidPayloadFormat.into());
         }
     };
 
     // Convert payload to JSON string for processing
     let manifest_str = serde_json::to_string(&payload).map_err(|err| {
-        tracing::error!(error=?err, "failed to serialize payload to JSON string");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "failed to serialize payload to JSON string");
         Error::InvalidManifest(err)
     })?;
 
     // Parse as CommonManifest to extract kind
     let manifest = serde_json::from_str::<CommonManifest>(&manifest_str).map_err(|err| {
-        tracing::error!(error = ?err, "failed to parse manifest");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "failed to parse manifest");
         Error::InvalidManifest(err)
     })?;
 
@@ -140,7 +141,7 @@ pub async fn handler(
         tracing::error!(
             manifest_hash = %hash,
             kind = %dataset_kind,
-            error = ?err,
+            error = %err, error_source = logging::error_source(&err),
             "failed to register manifest"
         );
         return Err(match err {
@@ -197,7 +198,7 @@ pub enum Error {
     /// - Required manifest fields (name, kind, version, etc.) are missing or invalid
     /// - JSON serialization/deserialization fails during canonicalization
     #[error("invalid manifest: {0}")]
-    InvalidManifest(#[from] serde_json::Error),
+    InvalidManifest(#[source] serde_json::Error),
 
     /// Dependency validation error for derived datasets
     ///
@@ -206,7 +207,7 @@ pub enum Error {
     /// - SQL queries reference datasets not declared in the dependencies section
     /// - Dependency resolution fails during validation
     #[error("manifest dependency error: {0}")]
-    DependencyValidationError(#[from] DependencyValidationError),
+    DependencyValidationError(#[source] DependencyValidationError),
 
     /// Unsupported dataset kind
     ///

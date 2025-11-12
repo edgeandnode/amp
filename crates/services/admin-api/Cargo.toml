@@ -8,6 +8,7 @@ edition.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
+datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
@@ -17,8 +18,7 @@ evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
-object_store.workspace = true
-rand.workspace = true
+monitoring = { path = "../../core/monitoring" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = "3.14.0"

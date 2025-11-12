@@ -98,7 +98,10 @@ use std::{sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::{
+        physical::{Catalog, PhysicalTable},
+        sql::catalog_for_sql,
+    },
     metadata::{Generation, segments::ResumeWatermark},
     query_context::{QueryEnv, parse_sql},
 };
@@ -118,7 +121,7 @@ use crate::{
 
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(table = %table.table_name()), err)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn dump_table(
     ctx: Ctx,
     manifest: DerivedManifest,
@@ -140,7 +143,7 @@ pub async fn dump_table(
     // Get the table definition from the manifest
     let table_def = manifest
         .tables
-        .get(&table_name)
+        .get(table.table_name())
         .ok_or_else(|| format!("table `{}` not found in dataset", table_name))?;
 
     // Extract SQL query from the table input
@@ -157,10 +160,13 @@ pub async fn dump_table(
     let opts = opts.clone();
 
     join_set.spawn(async move {
-        let catalog = dataset_store
-            .clone()
-            .catalog_for_sql(&query, env.clone())
-            .await?;
+        let catalog = catalog_for_sql(
+            dataset_store.as_ref(),
+            &ctx.metadata_db,
+            &query,
+            env.clone(),
+        )
+        .await?;
         let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
@@ -237,7 +243,7 @@ pub async fn dump_table(
 }
 
 #[instrument(skip_all, err)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn dump_sql_query(
     ctx: &Ctx,
     env: &QueryEnv,

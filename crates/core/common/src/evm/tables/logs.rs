@@ -14,13 +14,14 @@ use crate::{
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
+    let name = TABLE_NAME.parse().expect("table name is valid");
     Table::new(
-        TABLE_NAME.to_string(),
+        name,
         SCHEMA.clone(),
         network,
         vec!["block_num".to_string(), "timestamp".to_string()],
     )
-    .expect("table name is valid")
+    .expect("table creation succeeds")
 }
 
 pub const TABLE_NAME: &str = "logs";

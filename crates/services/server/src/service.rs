@@ -15,7 +15,7 @@ use common::{BoxError, config::Config, utils::shutdown_signal};
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
-use monitoring::telemetry::metrics::Meter;
+use monitoring::{logging, telemetry::metrics::Meter};
 use thiserror::Error;
 use tokio::net::TcpListener;
 
@@ -69,13 +69,13 @@ pub async fn new(
         tokio::select! {
             result = flight_fut => {
                 if let Err(err) = &result {
-                    tracing::error!(error=?err, "Flight server shutting down due to unexpected error");
+                    tracing::error!(error = %err, error_source = logging::error_source(&**err), "Flight server shutting down due to unexpected error");
                 }
                 result
             }
             result = jsonl_fut => {
                 if let Err(err) = &result {
-                    tracing::error!(error=?err, "JSONL server shutting down due to unexpected error");
+                    tracing::error!(error = %err, error_source = logging::error_source(&**err), "JSONL server shutting down due to unexpected error");
                 }
                 result
             }
@@ -116,7 +116,7 @@ async fn new_flight_server(
             .with_graceful_shutdown(shutdown_signal())
             .await
             .map_err(|err| {
-                tracing::error!(error=?err, "Flight server error");
+                tracing::error!(error = %err, error_source = logging::error_source(&err), "Flight server error");
                 err.into()
             })
     };

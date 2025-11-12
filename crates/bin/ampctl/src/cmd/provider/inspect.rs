@@ -23,9 +23,24 @@ pub struct Args {
     pub name: String,
 }
 
+/// Result wrapper for provider inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: serde_json::Value,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // For provider inspect, output pretty JSON as provider configs are complex nested structures
+        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
+        write!(f, "{}", json)
+    }
+}
+
 /// Inspect a provider by retrieving it from the admin API.
 ///
-/// Retrieves provider configuration and displays it as pretty-printed JSON.
+/// Retrieves provider configuration and displays it based on the output format.
 ///
 /// # Errors
 ///
@@ -35,41 +50,37 @@ pub struct Args {
 pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
     tracing::debug!("Retrieving provider from admin API");
 
-    let provider_json = get_provider(&global, &name).await?;
+    let provider_value = get_provider_value(&global, &name).await?;
+    let result = InspectResult {
+        data: provider_value,
+    };
 
-    // Pretty-print the provider JSON to stdout
-    println!("{}", provider_json);
+    global.print(&result).map_err(Error::JsonFormattingError)?;
 
     Ok(())
 }
 
 /// Retrieve the provider from the admin API.
 ///
-/// GETs from `/providers/{name}` endpoint and returns the provider JSON.
+/// GETs from `/providers/{name}` endpoint and returns the provider value.
 #[tracing::instrument(skip_all)]
-async fn get_provider(global: &GlobalArgs, name: &str) -> Result<String, Error> {
+async fn get_provider_value(global: &GlobalArgs, name: &str) -> Result<serde_json::Value, Error> {
     tracing::debug!("Creating API client");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let provider_value = client
         .providers()
         .get(name)
         .await
-        .map_err(|err| Error::ClientError { source: err })?;
+        .map_err(Error::ClientError)?;
 
     // Handle None case (404)
     let provider_value = provider_value.ok_or_else(|| Error::ProviderNotFound {
         name: name.to_string(),
     })?;
 
-    // Pretty-print the provider JSON
-    let pretty_json = serde_json::to_string_pretty(&provider_value).map_err(|err| {
-        tracing::error!(error = %err, "Failed to pretty-print provider JSON");
-        Error::JsonFormattingError { source: err }
-    })?;
-
-    Ok(pretty_json)
+    Ok(provider_value)
 }
 
 /// Errors for provider inspection operations.
@@ -81,19 +92,13 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Client error from the API
     #[error("client error")]
-    ClientError {
-        #[source]
-        source: crate::client::providers::GetError,
-    },
+    ClientError(#[source] crate::client::providers::GetError),
 
     /// Failed to format JSON for display
     #[error("failed to format provider JSON")]
-    JsonFormattingError { source: serde_json::Error },
+    JsonFormattingError(#[source] serde_json::Error),
 }

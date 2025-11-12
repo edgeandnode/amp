@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
+use monitoring::logging;
 
 use super::provider_info::ProviderInfo;
 use crate::{
@@ -69,7 +70,7 @@ pub async fn handler(
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid provider name in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid provider name in path");
             return Err(Error::InvalidName { err }.into());
         }
     };
@@ -82,7 +83,7 @@ pub async fn handler(
     let provider_info = ProviderInfo::try_from((name.clone(), config)).map_err(|err| {
         tracing::error!(
             provider_name = %name,
-            error = %err,
+            error = %err, error_source = logging::error_source(&err),
             "failed to convert provider config to info"
         );
         Error::ConversionError { name, err }

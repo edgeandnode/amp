@@ -288,7 +288,7 @@
           "datasets"
         ],
         "summary": "Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/deploy` endpoint",
-        "description": "Schedules a data extraction job for the specified dataset revision.\n\n## Response\n- **202 Accepted**: Job successfully scheduled\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n\n## Behavior\nThis endpoint schedules a data extraction job for a dataset:\n1. Resolves the revision to find the corresponding version tag\n2. Loads the full dataset configuration from the dataset store\n3. Schedules an extraction job with the specified parameters\n4. Returns job ID for tracking\n\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\") - uses that specific version\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version tag\n- Manifest hash (SHA256 hash) - finds the version that points to this hash\n\nJobs are executed asynchronously by worker nodes. Use the returned job ID\nto track progress via the jobs endpoints.",
+        "description": "Schedules a data extraction job for the specified dataset revision.\n\n## Response\n- **202 Accepted**: Job successfully scheduled\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `LIST_VERSION_TAGS_ERROR`: Failed to list version tags from dataset store\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `WORKER_NOT_AVAILABLE`: Specified worker not found or inactive\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n\n## Behavior\nThis endpoint schedules a data extraction job for a dataset:\n1. Resolves the revision to find the corresponding version tag\n2. Loads the full dataset configuration from the dataset store\n3. Schedules an extraction job with the specified parameters\n4. Returns job ID for tracking\n\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\") - uses that specific version\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version tag\n- Manifest hash (SHA256 hash) - finds the version that points to this hash\n\nJobs are executed asynchronously by worker nodes. Use the returned job ID\nto track progress via the jobs endpoints.",
         "operationId": "deploy_dataset",
         "parameters": [
           {
@@ -578,7 +578,7 @@
           "jobs"
         ],
         "summary": "Handler for the `GET /jobs` endpoint",
-        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)\n- `LIMIT_INVALID`: Limit is zero\n- `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)",
+        "description": "Retrieves and returns a paginated list of jobs from the metadata database.\n\n## Query Parameters\n- `limit`: Maximum number of jobs to return (default: 50, max: 1000)\n- `last_job_id`: ID of the last job from previous page for cursor-based pagination\n- `status`: Status filter - \"active\" (default, shows non-terminal jobs), \"all\" (shows all jobs), or comma-separated status values (e.g., \"scheduled,running\")\n\n## Response\n- **200 OK**: Returns paginated job data with next cursor\n- **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)\n- `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)\n- `LIMIT_INVALID`: Limit is zero\n- `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)",
         "operationId": "jobs_list",
         "parameters": [
           {
@@ -595,6 +595,15 @@
             "name": "last_job_id",
             "in": "query",
             "description": "ID of the last job from the previous page for pagination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status filter: 'active' (default, non-terminal jobs), 'all' (all jobs), or comma-separated status values",
             "required": false,
             "schema": {
               "type": "string"
@@ -855,6 +864,36 @@
       }
     },
     "/manifests": {
+      "get": {
+        "tags": [
+          "manifests"
+        ],
+        "summary": "Handler for the `GET /manifests` endpoint",
+        "description": "Returns all registered manifests in the system.\n\n## Response\n- **200 OK**: Successfully retrieved all manifests\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `LIST_ALL_MANIFESTS_ERROR`: Failed to list all manifests from metadata database\n\n## Behavior\nThis handler returns a comprehensive list of all manifests registered in the system.\nFor each manifest, it includes:\n- The content-addressable hash (SHA-256)\n- The object store path where the manifest is stored\n\nResults are ordered by hash (lexicographical).",
+        "operationId": "list_all_manifests",
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved all manifests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "manifests"
@@ -1301,14 +1340,14 @@
         "tags": [
           "schema"
         ],
-        "summary": "Handler for the `/schema` endpoint that provides SQL schema analysis.",
-        "description": "This endpoint performs comprehensive SQL validation and schema inference by:\n1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser\n2. **Loading Datasets**: Retrieves actual dataset definitions from the registry\n3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets\n4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution\n5. **Special Fields**: Optionally prepends `SPECIAL_BLOCK_NUM` field for SQL datasets\n6. **Network Extraction**: Identifies which blockchain networks the query references\n\nThe validation works with real registered datasets and their actual schemas,\nensuring datasets exist, tables are valid, and column references are correct.\nThis enables accurate schema introspection for query builders and dataset development tools.\n\n## Request Body\n- `sql_query`: The SQL query to analyze\n- `is_sql_dataset`: (optional) Whether this is a SQL dataset (affects block number field inclusion)\n\n## Response\n- **200 OK**: Returns the schema and networks used by the query\n- **400 Bad Request**: SQL parse error\n- **500 Internal Server Error**: Dataset store or planning error\n\n## Error Codes\n- `SQL_PARSE_ERROR`: Failed to parse the SQL query\n- `DATASET_STORE_ERROR`: Failed to load datasets from store\n- `PLANNING_ERROR`: Failed to determine output schema",
+        "summary": "Handler for the `POST /schema` endpoint",
+        "description": "Analyzes SQL queries and returns the output schema without executing the query.\nPerforms comprehensive validation and schema inference using real registered datasets\nand their actual schemas.\n\n## Request Body\n- `dependencies`: External dataset dependencies mapped by alias\n- `tables`: Table definitions mapped by table name (optional if functions provided)\n- `functions`: Function names defined in dataset config (optional if tables provided)\n\n## Response\n- **200 OK**: Returns the inferred schema and networks referenced by the query\n- **400 Bad Request**: Invalid SQL syntax, table references, or function format\n- **404 Not Found**: Referenced dataset does not exist\n- **500 Internal Server Error**: Dataset store, planning, or internal errors\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or missing required fields\n- `EMPTY_TABLES_AND_FUNCTIONS`: No tables or functions provided (at least one is required)\n- `INVALID_TABLE_SQL`: SQL syntax error in table definition\n- `TABLE_REFERENCE_RESOLUTION`: Failed to extract table references from SQL\n- `FUNCTION_REFERENCE_RESOLUTION`: Failed to extract function references from SQL\n- `DEPENDENCY_NOT_FOUND`: Referenced dependency does not exist\n- `DEPENDENCY_RESOLUTION`: Failed to resolve dependency\n- `CATALOG_QUALIFIED_TABLE`: Table uses unsupported catalog qualification\n- `UNQUALIFIED_TABLE`: Table missing required dataset qualification\n- `INVALID_TABLE_NAME`: Table name violates SQL identifier rules\n- `DATASET_NOT_FOUND`: Referenced dataset does not exist\n- `GET_DATASET_ERROR`: Failed to retrieve dataset from store\n- `ETH_CALL_UDF_CREATION_ERROR`: Failed to create eth_call UDF\n- `TABLE_NOT_FOUND_IN_DATASET`: Table not found in referenced dataset\n- `FUNCTION_NOT_FOUND_IN_DATASET`: Function not found in referenced dataset\n- `ETH_CALL_NOT_AVAILABLE`: eth_call function not available for dataset\n- `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies\n- `SCHEMA_INFERENCE`: Failed to infer output schema from query\n\n## Schema Analysis Process\n1. **Parse SQL**: Validates syntax using DataFusion's SQL parser\n2. **Load Datasets**: Retrieves dataset definitions from the registry for all referenced datasets\n3. **Create Planning Context**: Builds planning context with real table schemas from stored datasets\n4. **Infer Schema**: Uses DataFusion's query planner to determine output schema without executing the query\n5. **Prepend Special Fields**: Adds `SPECIAL_BLOCK_NUM` field to the output schema\n6. **Extract Networks**: Identifies which blockchain networks are referenced by the query",
         "operationId": "schema_analyze",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OutputSchemaRequest"
+                "$ref": "#/components/schemas/SchemaRequest"
               }
             }
           },
@@ -1320,13 +1359,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OutputSchemaResponse"
+                  "$ref": "#/components/schemas/SchemaResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "SQL parse error",
+            "description": "Client error: Invalid SQL, table references, or function syntax",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1336,7 +1385,7 @@
             }
           },
           "500": {
-            "description": "Dataset store or planning error",
+            "description": "Server error: Dataset store, planning, or internal failures",
             "content": {
               "application/json": {
                 "schema": {
@@ -1354,7 +1403,7 @@
           "workers"
         ],
         "summary": "Handler for the `GET /workers` endpoint",
-        "description": "Retrieves and returns a list of all workers from the metadata database.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `METADATA_DB_LIST_ERROR`: Failed to retrieve workers list from database\n\nThis handler:\n- Fetches all workers from the metadata database\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
+        "description": "Retrieves and returns a list of all workers from the scheduler.\n\n## Response\n- **200 OK**: Returns all workers with their information\n- **500 Internal Server Error**: Scheduler query error\n\n## Error Codes\n- `SCHEDULER_LIST_WORKERS_ERROR`: Failed to retrieve workers list from scheduler\n\nThis handler:\n- Fetches all workers from the scheduler\n- Converts worker records to API response format with ISO 8601 RFC3339 timestamps\n- Returns a structured response with worker information including node IDs and last heartbeat times",
         "operationId": "workers_list",
         "responses": {
           "200": {
@@ -1386,7 +1435,7 @@
           "workers"
         ],
         "summary": "Handler for the `GET /workers/{id}` endpoint",
-        "description": "Retrieves and returns a specific worker by its node ID from the metadata database.\n\n## Path Parameters\n- `id`: The unique node identifier of the worker to retrieve\n\n## Response\n- **200 OK**: Returns the worker information as JSON with detailed metadata\n- **400 Bad Request**: Invalid node ID format (not parseable as NodeId)\n- **404 Not Found**: Worker with the given node ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier\n- `WORKER_NOT_FOUND`: No worker exists with the given node ID\n- `METADATA_DB_GET_BY_ID_ERROR`: Failed to retrieve worker from database",
+        "description": "Retrieves and returns a specific worker by its node ID from the scheduler.\n\n## Path Parameters\n- `id`: The unique node identifier of the worker to retrieve\n\n## Response\n- **200 OK**: Returns the worker information as JSON with detailed metadata\n- **400 Bad Request**: Invalid node ID format (not parseable as NodeId)\n- **404 Not Found**: Worker with the given node ID does not exist\n- **500 Internal Server Error**: Scheduler query error\n\n## Error Codes\n- `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier\n- `WORKER_NOT_FOUND`: No worker exists with the given node ID\n- `SCHEDULER_GET_WORKER_ERROR`: Failed to retrieve worker from scheduler",
         "operationId": "workers_get",
         "parameters": [
           {
@@ -1564,6 +1613,13 @@
             "format": "int32",
             "description": "Number of parallel workers to run\n\nEach worker will be responsible for an equal number of blocks.\nFor example, if extracting blocks 0-10,000,000 with parallelism=10,\neach worker will handle a contiguous section of 1 million blocks.\n\nOnly applicable to raw datasets (EVM RPC, Firehose, etc.).\nDerived datasets ignore this parameter.\n\nDefaults to 1 if not specified.",
             "minimum": 0
+          },
+          "worker_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional worker ID to assign the job to\n\nIf specified, the job will be assigned to this specific worker.\nIf not specified, a worker will be selected randomly from available workers.\n\nThe worker must be active (has sent heartbeats recently) for the deployment to succeed."
           }
         }
       },
@@ -1745,44 +1801,43 @@
           }
         }
       },
+      "ManifestInfo": {
+        "type": "object",
+        "description": "Summary information for a single manifest",
+        "required": [
+          "hash",
+          "dataset_count"
+        ],
+        "properties": {
+          "dataset_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of datasets using this manifest",
+            "minimum": 0
+          },
+          "hash": {
+            "type": "string",
+            "description": "Content-addressable hash (SHA-256)"
+          }
+        }
+      },
       "ManifestResponse": {
         "type": "object",
         "description": "Response wrapper for manifest content"
       },
-      "OutputSchemaRequest": {
+      "ManifestsResponse": {
         "type": "object",
-        "description": "Request payload for output schema analysis\n\nContains the SQL query to analyze and optional configuration flags.",
+        "description": "Response for listing all manifests",
         "required": [
-          "sql_query"
+          "manifests"
         ],
         "properties": {
-          "is_sql_dataset": {
-            "type": "boolean",
-            "description": "Whether this is a SQL dataset (affects block number field inclusion)\n\nWhen true, a special block number field is prepended to the schema.\nThis field tracks the block number for each row in SQL datasets."
-          },
-          "sql_query": {
-            "type": "string",
-            "description": "The SQL query to analyze for output schema determination"
-          }
-        }
-      },
-      "OutputSchemaResponse": {
-        "type": "object",
-        "description": "Response returned by the output schema endpoint\n\nContains the determined schema and list of networks referenced by the query.",
-        "required": [
-          "schema",
-          "networks"
-        ],
-        "properties": {
-          "networks": {
+          "manifests": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ManifestInfo"
             },
-            "description": "List of networks referenced by the query\n\nContains the network names of all datasets/tables referenced\nin the SQL query (e.g., \"mainnet\", \"polygon\", etc.)."
-          },
-          "schema": {
-            "description": "The output schema for the SQL query\n\nDescribes the structure and types of columns that will be returned\nwhen executing the provided SQL query against the dataset."
+            "description": "List of all manifests in the system"
           }
         }
       },
@@ -1894,6 +1949,58 @@
           }
         }
       },
+      "SchemaRequest": {
+        "type": "object",
+        "description": "Request for schema analysis with dependencies, tables, and functions",
+        "properties": {
+          "dependencies": {
+            "type": "object",
+            "description": "External dataset dependencies mapped by alias\n\nMaps alias names to dataset references (namespace/name@version or namespace/name@hash).\nThese aliases are used in SQL queries to reference external datasets.\nSymbolic references like \"latest\" or \"dev\" are not allowed.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Function names defined in the dataset configuration\n\nUsed to validate that functions are properly defined and available.\nAt least one of `tables` or `functions` must be provided."
+          },
+          "tables": {
+            "type": "object",
+            "description": "Table definitions mapped by table name\n\nEach table is defined by a SQL query that may reference\ntables from dependencies using the alias names.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SchemaResponse": {
+        "type": "object",
+        "description": "Response returned by the schema endpoint\n\nContains schemas and networks for one or more tables.",
+        "required": [
+          "schemas"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "object",
+            "description": "Schemas for each table\n\nMaps table names to their schemas and networks.\nContains one entry per table definition.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TableSchemaWithNetworks"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "SpecialTags": {
         "type": "object",
         "description": "Special tags pointing to versions or hashes",
@@ -1923,6 +2030,26 @@
           "Stopped",
           "Error"
         ]
+      },
+      "TableSchemaWithNetworks": {
+        "type": "object",
+        "description": "Table schema with associated networks\n\nContains the output schema for a table and the list of networks referenced by its query.",
+        "required": [
+          "schema",
+          "networks"
+        ],
+        "properties": {
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of networks referenced by this table's query\n\nContains the network names of all datasets/tables referenced\nin this specific table's SQL query (e.g., \"mainnet\", \"polygon\", etc.)."
+          },
+          "schema": {
+            "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
+          }
+        }
       },
       "Value": {},
       "VersionInfo": {

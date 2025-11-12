@@ -19,7 +19,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use datasets_common::{name::Name, partial_reference::PartialReference, reference::Reference};
+use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, consistency_check};
 use metadata_db::MetadataDb;
 
@@ -142,11 +142,11 @@ pub async fn get_table_block_ranges(table: &Arc<PhysicalTable>) -> Vec<BlockRang
 ///
 /// Panics if block ranges don't match between snapshots.
 pub async fn assert_snapshot_block_ranges_eq(left: &SnapshotContext, right: &SnapshotContext) {
-    let mut right_block_ranges: BTreeMap<String, Vec<BlockRange>> = BTreeMap::new();
+    let mut right_block_ranges: BTreeMap<TableName, Vec<BlockRange>> = BTreeMap::new();
 
     for table in right.physical_tables() {
         let ranges = get_table_block_ranges(table).await;
-        right_block_ranges.insert(table.table_name().to_string(), ranges);
+        right_block_ranges.insert(table.table_name().clone(), ranges);
     }
 
     for table in left.physical_tables() {
@@ -234,14 +234,12 @@ pub async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: &MetadataDb,
 ) -> Result<Catalog, BoxError> {
-    let dataset_ref = PartialReference::new(
-        None,
-        Name::try_from(dataset_name.to_string()).unwrap(),
-        None,
-    );
-    let dataset = dataset_store.get_dataset(dataset_ref.clone()).await?;
+    let dataset_ref: Reference = format!("_/{dataset_name}@latest")
+        .parse()
+        .expect("should be valid reference");
+    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table in dataset.resolved_tables(dataset_ref) {
+    for table in dataset.resolved_tables(dataset_ref.into()) {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
         let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
             .await?
@@ -257,22 +255,6 @@ pub async fn catalog_for_dataset(
 /// This helper creates a `TestMetricsContext` that can be used to collect and validate
 /// metrics during test execution. The context uses an in-memory exporter that captures
 /// all recorded metrics without requiring external observability infrastructure.
-///
-/// # Example
-///
-/// ```ignore
-/// let metrics = test_helpers::create_test_metrics_context();
-/// let test_ctx = TestCtxBuilder::new("my_test")
-///     .with_meter(metrics.meter().clone())
-///     .build()
-///     .await?;
-///
-/// // ... perform operations that should record metrics ...
-///
-/// let metrics = metrics.collect().await;
-/// let counter = find_counter(&metrics, "my_metric_name").unwrap();
-/// assert_eq!(counter.value, 1);
-/// ```
 pub fn create_test_metrics_context() -> crate::testlib::metrics::TestMetricsContext {
     crate::testlib::metrics::TestMetricsContext::new()
 }

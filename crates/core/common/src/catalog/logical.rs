@@ -9,7 +9,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::{partial_reference::PartialReference, reference::Reference};
+use datasets_common::{
+    partial_reference::PartialReference, reference::Reference, table_name::TableName,
+};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -50,26 +52,27 @@ impl Dataset {
         })
     }
 
-    /// Returns the JS functions defined in this dataset.
+    /// Returns a specific JS function by name from this dataset.
     ///
-    /// ## Arguments
-    /// `catalog_schema`: The function will be named `<catalog_schema>.<function_name>`.
-    /// `isolate_pool`: JS functions need a V8 isolate pool order to be executed.
-    pub fn functions(
+    /// This implements lazy loading by only instantiating the requested function,
+    /// rather than creating all functions in the dataset.
+    pub fn function_by_name(
         &self,
-        catalog_schema: String,
+        schema: String,
+        name: &str,
         isolate_pool: IsolatePool,
-    ) -> impl Iterator<Item = AsyncScalarUDF> + '_ {
-        self.functions.iter().map(move |f| {
+    ) -> Option<ScalarUDF> {
+        self.functions.iter().find(|f| f.name == name).map(|f| {
             AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                isolate_pool.clone(),
-                catalog_schema.to_string(),
+                isolate_pool,
+                schema,
                 f.source.source.clone(),
                 f.source.filename.clone().into(),
                 f.name.clone().into(),
                 f.input_types.clone(),
                 f.output_type.clone(),
             )))
+            .into_scalar_udf()
         })
     }
 
@@ -81,7 +84,7 @@ impl Dataset {
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
 pub struct Table {
     /// Bare table name.
-    name: String,
+    name: TableName,
     schema: SchemaRef,
     network: String,
     sorted_by: BTreeSet<String>,
@@ -89,12 +92,11 @@ pub struct Table {
 
 impl Table {
     pub fn new(
-        name: String,
+        name: TableName,
         schema: SchemaRef,
         network: String,
         sorted_by: Vec<String>,
     ) -> Result<Self, BoxError> {
-        validate_name(&name)?;
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
         sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
         Ok(Self {
@@ -105,7 +107,7 @@ impl Table {
         })
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &TableName {
         &self.name
     }
 
@@ -159,7 +161,7 @@ impl ResolvedTable {
     }
 
     /// Bare table name
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &TableName {
         &self.table.name
     }
 
@@ -191,21 +193,6 @@ pub struct Function {
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,
-}
-
-fn validate_name(name: &str) -> Result<(), BoxError> {
-    if let Some(c) = name
-        .chars()
-        .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
-    {
-        return Err(format!(
-            "names must be lowercase and contain only letters, underscores, and numbers, \
-             the name: '{name}' is not allowed because it contains the character '{c}'"
-        )
-        .into());
-    }
-
-    Ok(())
 }
 
 #[derive(Clone, Debug)]

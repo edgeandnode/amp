@@ -1,7 +1,25 @@
-use axum::{Json, extract::State, http::StatusCode};
+use std::collections::BTreeMap;
+
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
+    http::StatusCode,
+};
 use common::{
+    BoxError,
+    catalog::{
+        errors::PlanningCtxForSqlTablesWithDepsError,
+        sql::{
+            FunctionReference, ResolveFunctionReferencesError,
+            planning_ctx_for_sql_tables_with_deps, resolve_function_references,
+        },
+    },
     plan_visitors::prepend_special_block_num_field,
     query_context::{Error as QueryContextError, parse_sql},
+};
+use datafusion::sql::{TableReference, parser::Statement, resolve::resolve_table_references};
+use datasets_common::{
+    fqn::FullyQualifiedName, hash::Hash, table_name::TableName, version::Version,
 };
 use datasets_derived::manifest::TableSchema;
 use tracing::instrument;
@@ -14,33 +32,50 @@ use crate::{
     },
 };
 
-/// Handler for the `/schema` endpoint that provides SQL schema analysis.
+/// Handler for the `POST /schema` endpoint
 ///
-/// This endpoint performs comprehensive SQL validation and schema inference by:
-/// 1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser
-/// 2. **Loading Datasets**: Retrieves actual dataset definitions from the registry
-/// 3. **Schema Resolution**: Creates planning context with real table schemas from stored datasets
-/// 4. **Schema Inference**: Uses DataFusion's query planner to determine output schema without execution
-/// 5. **Special Fields**: Optionally prepends `SPECIAL_BLOCK_NUM` field for SQL datasets
-/// 6. **Network Extraction**: Identifies which blockchain networks the query references
-///
-/// The validation works with real registered datasets and their actual schemas,
-/// ensuring datasets exist, tables are valid, and column references are correct.
-/// This enables accurate schema introspection for query builders and dataset development tools.
+/// Analyzes SQL queries and returns the output schema without executing the query.
+/// Performs comprehensive validation and schema inference using real registered datasets
+/// and their actual schemas.
 ///
 /// ## Request Body
-/// - `sql_query`: The SQL query to analyze
-/// - `is_sql_dataset`: (optional) Whether this is a SQL dataset (affects block number field inclusion)
+/// - `dependencies`: External dataset dependencies mapped by alias
+/// - `tables`: Table definitions mapped by table name (optional if functions provided)
+/// - `functions`: Function names defined in dataset config (optional if tables provided)
 ///
 /// ## Response
-/// - **200 OK**: Returns the schema and networks used by the query
-/// - **400 Bad Request**: SQL parse error
-/// - **500 Internal Server Error**: Dataset store or planning error
+/// - **200 OK**: Returns the inferred schema and networks referenced by the query
+/// - **400 Bad Request**: Invalid SQL syntax, table references, or function format
+/// - **404 Not Found**: Referenced dataset does not exist
+/// - **500 Internal Server Error**: Dataset store, planning, or internal errors
 ///
 /// ## Error Codes
-/// - `SQL_PARSE_ERROR`: Failed to parse the SQL query
-/// - `DATASET_STORE_ERROR`: Failed to load datasets from store
-/// - `PLANNING_ERROR`: Failed to determine output schema
+/// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or missing required fields
+/// - `EMPTY_TABLES_AND_FUNCTIONS`: No tables or functions provided (at least one is required)
+/// - `INVALID_TABLE_SQL`: SQL syntax error in table definition
+/// - `TABLE_REFERENCE_RESOLUTION`: Failed to extract table references from SQL
+/// - `FUNCTION_REFERENCE_RESOLUTION`: Failed to extract function references from SQL
+/// - `DEPENDENCY_NOT_FOUND`: Referenced dependency does not exist
+/// - `DEPENDENCY_RESOLUTION`: Failed to resolve dependency
+/// - `CATALOG_QUALIFIED_TABLE`: Table uses unsupported catalog qualification
+/// - `UNQUALIFIED_TABLE`: Table missing required dataset qualification
+/// - `INVALID_TABLE_NAME`: Table name violates SQL identifier rules
+/// - `DATASET_NOT_FOUND`: Referenced dataset does not exist
+/// - `GET_DATASET_ERROR`: Failed to retrieve dataset from store
+/// - `ETH_CALL_UDF_CREATION_ERROR`: Failed to create eth_call UDF
+/// - `TABLE_NOT_FOUND_IN_DATASET`: Table not found in referenced dataset
+/// - `FUNCTION_NOT_FOUND_IN_DATASET`: Function not found in referenced dataset
+/// - `ETH_CALL_NOT_AVAILABLE`: eth_call function not available for dataset
+/// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
+/// - `SCHEMA_INFERENCE`: Failed to infer output schema from query
+///
+/// ## Schema Analysis Process
+/// 1. **Parse SQL**: Validates syntax using DataFusion's SQL parser
+/// 2. **Load Datasets**: Retrieves dataset definitions from the registry for all referenced datasets
+/// 3. **Create Planning Context**: Builds planning context with real table schemas from stored datasets
+/// 4. **Infer Schema**: Uses DataFusion's query planner to determine output schema without executing the query
+/// 5. **Prepend Special Fields**: Adds `SPECIAL_BLOCK_NUM` field to the output schema
+/// 6. **Extract Networks**: Identifies which blockchain networks are referenced by the query
 #[instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -49,134 +84,713 @@ use crate::{
         path = "/schema",
         tag = "schema",
         operation_id = "schema_analyze",
-        request_body = OutputSchemaRequest,
+        request_body = SchemaRequest,
         responses(
-            (status = 200, description = "Successfully analyzed SQL query and returned schema", body = OutputSchemaResponse),
-            (status = 400, description = "SQL parse error", body = crate::handlers::error::ErrorResponse),
-            (status = 500, description = "Dataset store or planning error", body = crate::handlers::error::ErrorResponse)
+            (status = 200, description = "Successfully analyzed SQL query and returned schema", body = SchemaResponse),
+            (status = 400, description = "Client error: Invalid SQL, table references, or function syntax", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Server error: Dataset store, planning, or internal failures", body = crate::handlers::error::ErrorResponse)
         )
     )
 )]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    Json(OutputSchemaRequest {
-        sql_query,
-        is_sql_dataset,
-    }): Json<OutputSchemaRequest>,
-) -> Result<Json<OutputSchemaResponse>, ErrorResponse> {
-    let stmt = parse_sql(sql_query.as_str()).map_err(Error::SqlParse)?;
-
-    let query_ctx = ctx
-        .dataset_store
-        .planning_ctx_for_sql(&stmt)
-        .await
-        .map_err(Error::DatasetStore)?;
-
-    let schema = query_ctx
-        .sql_output_schema(stmt)
-        .await
-        .map_err(Error::Planning)?;
-
-    let schema = if is_sql_dataset {
-        // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
-        prepend_special_block_num_field(&schema)
-    } else {
-        schema
+    payload: Result<Json<SchemaRequest>, JsonRejection>,
+) -> Result<Json<SchemaResponse>, ErrorResponse> {
+    let SchemaRequest {
+        tables,
+        dependencies,
+        functions,
+    } = match payload {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            tracing::error!("Failed to parse request JSON: {}", err);
+            return Err(Error::InvalidPayloadFormat { source: err }.into());
+        }
     };
 
-    let mut networks: Vec<String> = query_ctx
-        .catalog()
-        .iter()
-        .map(|t| t.table().network().to_string())
-        .collect();
-    networks.sort();
-    networks.dedup();
+    // Check if at least one of tables or functions is provided
+    if tables.is_empty() && functions.is_empty() {
+        tracing::error!("No tables or functions provided in schema request");
+        return Err(Error::EmptyTablesAndFunctions.into());
+    }
 
-    Ok(Json(OutputSchemaResponse {
-        schema: schema.into(),
-        networks,
-    }))
+    // Early return if only functions are provided (no SQL tables to validate)
+    if tables.is_empty() {
+        tracing::info!(
+            "Only functions provided ({}), no SQL validation needed",
+            functions.len()
+        );
+        // This would require:
+        // 1. Extracting all function calls from SQL using all_function_names()
+        // 2. Checking if the provided function names match what's used in SQL
+        // 3. Warning or erroring if functions are defined but never used
+        return Ok(Json(SchemaResponse {
+            schemas: BTreeMap::new(),
+        }));
+    }
+
+    // Resolve all dependencies to their manifest hashes
+    // This must happen before parsing SQL to ensure all dependencies exist
+    let dependencies = {
+        let mut resolved = BTreeMap::new();
+        for (alias, dep_ref) in dependencies {
+            let alias_str = alias.to_string();
+            let ref_str = dep_ref.to_string();
+            let (fqn, hash_or_version) = dep_ref.into_fqn_and_hash_or_version();
+
+            // Resolve the dependency to its manifest hash based on whether it's a hash or version
+            let hash = match hash_or_version {
+                HashOrVersion::Hash(hash) => {
+                    // Verify the hash is linked to the dataset (namespace/name)
+                    let is_linked = ctx
+                        .dataset_store
+                        .is_manifest_linked(fqn.namespace(), fqn.name(), &hash)
+                        .await
+                        .map_err(|err| Error::DependencyResolution {
+                            alias: alias_str.clone(),
+                            reference: ref_str.clone(),
+                            source: err.into(),
+                        })?;
+
+                    if !is_linked {
+                        return Err(Error::DependencyNotFound {
+                            alias: alias_str,
+                            reference: ref_str,
+                        }
+                        .into());
+                    }
+
+                    hash
+                }
+                HashOrVersion::Version(version) => {
+                    // Resolve version tag to hash for this specific dataset
+                    ctx.dataset_store
+                        .resolve_version_hash(fqn.namespace(), fqn.name(), &version)
+                        .await
+                        .map_err(|err| Error::DependencyResolution {
+                            alias: alias_str.clone(),
+                            reference: ref_str.clone(),
+                            source: err.into(),
+                        })?
+                        .ok_or_else(|| Error::DependencyNotFound {
+                            alias: alias_str.clone(),
+                            reference: ref_str.clone(),
+                        })?
+                }
+            };
+
+            resolved.insert(alias.into_inner(), (fqn, hash));
+        }
+        resolved
+    };
+
+    // Parse all SQL queries from tables and extract table references and function names
+    let (statements, references) = {
+        let mut statements: BTreeMap<TableName, Statement> = BTreeMap::new();
+        let mut references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)> =
+            BTreeMap::new();
+
+        for (table_name, sql_query) in tables {
+            let stmt = parse_sql(&sql_query).map_err(|err| Error::InvalidTableSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+
+            // Extract table references from the statement
+            let (table_refs, _) = resolve_table_references(&stmt, true).map_err(|err| {
+                Error::TableReferenceResolution {
+                    table_name: table_name.clone(),
+                    source: err.into(),
+                }
+            })?;
+
+            // Extract function references from the statement
+            let func_refs = resolve_function_references(&stmt).map_err(|err| {
+                Error::FunctionReferenceResolution {
+                    table_name: table_name.clone(),
+                    source: err,
+                }
+            })?;
+
+            statements.insert(table_name.clone(), stmt);
+            references.insert(table_name, (table_refs, func_refs));
+        }
+
+        (statements, references)
+    };
+
+    // Create planning context using resolved dependencies
+    // TODO: Verify that functions defined in config are actually used in table SQL statements
+    let planning_ctx =
+        planning_ctx_for_sql_tables_with_deps(ctx.dataset_store.as_ref(), references, dependencies)
+            .await
+            .map_err(|err| match &err {
+                PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable { .. } => {
+                    Error::CatalogQualifiedTable(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
+                    Error::UnqualifiedTable(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::InvalidTableName { .. } => {
+                    Error::InvalidTableName(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
+                    Error::DatasetNotFound(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
+                    Error::DatasetNotFound(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
+                    Error::GetDataset(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
+                    Error::GetDataset(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
+                    Error::EthCallUdfCreation(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
+                    ..
+                } => Error::DependencyAliasNotFound(err),
+                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunction {
+                    ..
+                } => Error::DependencyAliasNotFound(err),
+                PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
+                    Error::TableNotFoundInDataset(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
+                    Error::FunctionNotFoundInDataset(err)
+                }
+                PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
+                    Error::EthCallNotAvailable(err)
+                }
+            })?;
+
+    // Infer schema for each table and extract networks
+    let mut schemas = BTreeMap::new();
+    for (table_name, stmt) in statements {
+        // Infer schema using the planning context
+        let schema =
+            planning_ctx
+                .sql_output_schema(stmt)
+                .await
+                .map_err(|err| Error::SchemaInference {
+                    table_name: table_name.clone(),
+                    source: err,
+                })?;
+
+        // Prepend the special block number field
+        let schema = prepend_special_block_num_field(&schema);
+
+        // Extract networks from all tables in the catalog
+        let mut networks: Vec<String> = planning_ctx
+            .catalog()
+            .iter()
+            .map(|t| t.table().network().to_string())
+            .collect();
+        networks.sort();
+        networks.dedup();
+
+        schemas.insert(
+            table_name,
+            TableSchemaWithNetworks {
+                schema: schema.into(),
+                networks,
+            },
+        );
+    }
+
+    Ok(Json(SchemaResponse { schemas }))
 }
 
-/// Request payload for output schema analysis
+/// Request payload for schema analysis
 ///
-/// Contains the SQL query to analyze and optional configuration flags.
+/// Contains dependencies, table definitions, and function names for schema analysis.
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct OutputSchemaRequest {
-    /// The SQL query to analyze for output schema determination
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    sql_query: NonEmptyString,
-    /// Whether this is a SQL dataset (affects block number field inclusion)
+#[cfg_attr(
+    feature = "utoipa",
+    schema(description = "Request for schema analysis with dependencies, tables, and functions")
+)]
+pub struct SchemaRequest {
+    /// Table definitions mapped by table name
     ///
-    /// When true, a special block number field is prepended to the schema.
-    /// This field tracks the block number for each row in SQL datasets.
+    /// Each table is defined by a SQL query that may reference
+    /// tables from dependencies using the alias names.
     #[serde(default)]
-    is_sql_dataset: bool,
+    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
+    pub tables: BTreeMap<TableName, NonEmptyString>,
+
+    /// External dataset dependencies mapped by alias
+    ///
+    /// Maps alias names to dataset references (namespace/name@version or namespace/name@hash).
+    /// These aliases are used in SQL queries to reference external datasets.
+    /// Symbolic references like "latest" or "dev" are not allowed.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
+    pub dependencies: BTreeMap<NonEmptyString, DepReference>,
+
+    /// Function names defined in the dataset configuration
+    ///
+    /// Used to validate that functions are properly defined and available.
+    /// At least one of `tables` or `functions` must be provided.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
+    pub functions: Vec<NonEmptyString>,
 }
 
-/// Response returned by the output schema endpoint
+/// Response returned by the schema endpoint
 ///
-/// Contains the determined schema and list of networks referenced by the query.
+/// Contains schemas and networks for one or more tables.
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct OutputSchemaResponse {
-    /// The output schema for the SQL query
+pub struct SchemaResponse {
+    /// Schemas for each table
     ///
-    /// Describes the structure and types of columns that will be returned
-    /// when executing the provided SQL query against the dataset.
-    #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
-    schema: TableSchema,
-    /// List of networks referenced by the query
-    ///
-    /// Contains the network names of all datasets/tables referenced
-    /// in the SQL query (e.g., "mainnet", "polygon", etc.).
-    networks: Vec<String>,
+    /// Maps table names to their schemas and networks.
+    /// Contains one entry per table definition.
+    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, TableSchemaWithNetworks>))]
+    schemas: BTreeMap<TableName, TableSchemaWithNetworks>,
 }
 
-/// Errors that can occur during output schema operations
+/// Dependency reference combining fully qualified name and hash-or-version.
+///
+/// This is similar to `Reference` but only accepts explicit versions or hashes,
+/// excluding symbolic references like "latest" or "dev".
+///
+/// Format: `namespace/name@version` or `namespace/name@hash`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepReference(FullyQualifiedName, HashOrVersion);
+
+impl DepReference {
+    /// Access the fully qualified name component.
+    pub fn fqn(&self) -> &FullyQualifiedName {
+        &self.0
+    }
+
+    /// Access the hash or version component.
+    pub fn revision(&self) -> &HashOrVersion {
+        &self.1
+    }
+
+    /// Consume self and return the FQN and HashOrVersion components.
+    pub fn into_fqn_and_hash_or_version(self) -> (FullyQualifiedName, HashOrVersion) {
+        (self.0, self.1)
+    }
+}
+
+impl std::fmt::Display for DepReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.0, self.1)
+    }
+}
+
+impl std::str::FromStr for DepReference {
+    type Err = DepReferenceParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expected format: namespace/name@hash_or_version
+        let (fqn_str, revision_str) = s
+            .split_once('@')
+            .ok_or_else(|| DepReferenceParseError::MissingAt(s.to_string()))?;
+
+        let fqn: FullyQualifiedName = fqn_str
+            .parse()
+            .map_err(|err| DepReferenceParseError::InvalidFqn(fqn_str.to_string(), err))?;
+
+        let revision: HashOrVersion = revision_str.parse().map_err(|err| {
+            DepReferenceParseError::InvalidRevision(revision_str.to_string(), err)
+        })?;
+
+        Ok(DepReference(fqn, revision))
+    }
+}
+
+impl serde::Serialize for DepReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for DepReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// Hash or semantic version (no symbolic references like "latest" or "dev").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HashOrVersion {
+    /// A 32-byte SHA-256 content hash
+    Hash(Hash),
+    /// A semantic version tag
+    Version(Version),
+}
+
+impl std::fmt::Display for HashOrVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HashOrVersion::Hash(hash) => write!(f, "{}", hash),
+            HashOrVersion::Version(version) => write!(f, "{}", version),
+        }
+    }
+}
+
+impl std::str::FromStr for HashOrVersion {
+    type Err = HashOrVersionParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Reject symbolic references
+        if s == "latest" || s == "dev" {
+            return Err(HashOrVersionParseError::SymbolicReference(s.to_string()));
+        }
+
+        // Try parsing as hash first
+        if let Ok(hash) = s.parse::<Hash>() {
+            return Ok(HashOrVersion::Hash(hash));
+        }
+
+        // Try parsing as version
+        if let Ok(version) = s.parse::<Version>() {
+            return Ok(HashOrVersion::Version(version));
+        }
+
+        Err(HashOrVersionParseError::Invalid(s.to_string()))
+    }
+}
+
+/// Errors that occur when parsing a dependency reference string
+///
+/// This error type is used when parsing strings in the format `namespace/name@revision`
+/// into [`DepReference`] instances. All variants include the invalid portion of the
+/// input string for debugging purposes.
+#[derive(Debug, thiserror::Error)]
+pub enum DepReferenceParseError {
+    /// Missing '@' separator between FQN and revision
+    ///
+    /// This occurs when the input string does not contain an '@' character to separate
+    /// the fully qualified name (namespace/name) from the revision (hash or version).
+    ///
+    /// Expected format: `namespace/name@version` or `namespace/name@hash`
+    ///
+    /// Common causes:
+    /// - Omitting the '@' separator entirely (e.g., `namespace/name`)
+    /// - Using wrong separator (e.g., `namespace/name:version`)
+    #[error("Missing '@' separator in reference: {0}")]
+    MissingAt(String),
+
+    /// Invalid fully qualified name component
+    ///
+    /// This occurs when the portion before the '@' separator cannot be parsed as a
+    /// valid fully qualified name (FQN). The FQN must be in the format `namespace/name`
+    /// where both parts are valid identifiers.
+    ///
+    /// Common causes:
+    /// - Missing namespace (e.g., `@version`)
+    /// - Invalid characters in namespace or name
+    /// - Missing '/' separator between namespace and name
+    /// - Empty namespace or name component
+    #[error("Invalid fully qualified name '{0}': {1}")]
+    InvalidFqn(String, datasets_common::fqn::FullyQualifiedNameError),
+
+    /// Invalid revision component (hash or version)
+    ///
+    /// This occurs when the portion after the '@' separator cannot be parsed as either
+    /// a valid hash or a valid semantic version.
+    ///
+    /// Common causes:
+    /// - Using symbolic references like "latest" or "dev" (not allowed)
+    /// - Invalid hash format (must be 64 hex characters)
+    /// - Invalid version format (must follow semantic versioning: MAJOR.MINOR.PATCH)
+    /// - Empty revision string
+    #[error("Invalid revision '{0}': {1}")]
+    InvalidRevision(String, HashOrVersionParseError),
+}
+
+/// Errors that occur when parsing a hash or version string
+///
+/// This error type is used when parsing strings into [`HashOrVersion`] instances.
+/// Unlike general revision references, this type explicitly rejects symbolic references
+/// like "latest" or "dev", requiring only concrete hashes or semantic versions.
+#[derive(Debug, thiserror::Error)]
+pub enum HashOrVersionParseError {
+    /// Symbolic reference not allowed
+    ///
+    /// This occurs when the input string is a symbolic reference like "latest" or "dev".
+    /// The schema endpoint requires explicit versions or content hashes to ensure
+    /// deterministic and reproducible schema analysis.
+    ///
+    /// Symbolic references are intentionally rejected because:
+    /// - They can point to different manifests over time
+    /// - Schema analysis results would be non-deterministic
+    /// - They make it unclear which exact dataset version was used
+    ///
+    /// Use an explicit version (e.g., "1.2.3") or hash instead.
+    #[error("Symbolic reference '{0}' not allowed (use explicit version or hash)")]
+    SymbolicReference(String),
+
+    /// Invalid hash or version format
+    ///
+    /// This occurs when the input string cannot be parsed as either:
+    /// - A valid 32-byte SHA-256 hash (64 hexadecimal characters)
+    /// - A valid semantic version (MAJOR.MINOR.PATCH format)
+    ///
+    /// Common causes:
+    /// - Partial or truncated hash
+    /// - Non-hexadecimal characters in hash
+    /// - Invalid version format (e.g., missing components, non-numeric parts)
+    /// - Empty string or whitespace-only input
+    #[error("Invalid hash or version: {0}")]
+    Invalid(String),
+}
+
+/// Errors that can occur during schema operations
 #[derive(Debug, thiserror::Error)]
 enum Error {
-    /// SQL parse error
+    /// Invalid request payload format
+    ///
+    /// This occurs when:
+    /// - Request JSON is malformed or missing required fields
+    /// - JSON deserialization fails
+    /// - Request body cannot be parsed
+    #[error("Invalid payload format: {source}")]
+    InvalidPayloadFormat {
+        /// The rejection details from Axum's JSON extractor
+        source: JsonRejection,
+    },
+
+    /// No tables or functions provided in request
+    ///
+    /// This occurs when both the `tables` and `functions` fields are empty.
+    /// At least one table or function must be provided for schema analysis.
+    #[error("At least one table or function must be provided")]
+    EmptyTablesAndFunctions,
+
+    /// Invalid SQL query in table definition
     ///
     /// This occurs when:
     /// - The provided SQL query has invalid syntax
     /// - Unsupported SQL features are used
     /// - Query parsing fails for other reasons
-    #[error("SQL parse error: {0}")]
-    SqlParse(QueryContextError),
-    /// Dataset store error while loading datasets
+    #[error("Invalid SQL query for table '{table_name}': {source}")]
+    InvalidTableSql {
+        /// The table name that contains the invalid SQL
+        table_name: TableName,
+        /// The underlying parse error
+        #[source]
+        source: QueryContextError,
+    },
+
+    /// Failed to resolve table references in SQL query
     ///
     /// This occurs when:
-    /// - The dataset store is not accessible
-    /// - There's a configuration error in the store
-    /// - I/O errors while reading dataset definitions
-    #[error("Dataset store error: {0}")]
-    DatasetStore(#[from] dataset_store::PlanningCtxForSqlError),
-    /// Planning error while determining output schema
+    /// - Table references cannot be extracted from the parsed SQL statement
+    /// - Invalid table reference format is encountered
+    #[error("Failed to resolve table references for table '{table_name}': {source}")]
+    TableReferenceResolution {
+        /// The table name that contains the invalid references
+        table_name: TableName,
+        /// The underlying resolution error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Failed to resolve function references from SQL query
+    ///
+    /// This occurs when:
+    /// - Function references cannot be extracted from the parsed SQL statement
+    /// - Unsupported DML statements are encountered
+    #[error("Failed to resolve function references for table '{table_name}': {source}")]
+    FunctionReferenceResolution {
+        /// The table name that contains the invalid functions
+        table_name: TableName,
+        /// The underlying extraction error
+        #[source]
+        source: ResolveFunctionReferencesError,
+    },
+
+    /// Dependency not found in dataset store
+    ///
+    /// This occurs when:
+    /// - A referenced dependency does not exist in the dataset store
+    /// - The specified version or hash cannot be found
+    #[error("Dependency '{alias}' ({reference}) not found in dataset store")]
+    DependencyNotFound {
+        /// The alias name used in the request
+        alias: String,
+        /// The full reference string (namespace/name@version or namespace/name@hash)
+        reference: String,
+    },
+
+    /// Failed to resolve dependency
+    ///
+    /// This occurs when:
+    /// - Dependency resolution encounters an error
+    /// - Database query fails during resolution
+    #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
+    DependencyResolution {
+        /// The alias name used in the request
+        alias: String,
+        /// The full reference string
+        reference: String,
+        /// The underlying resolution error
+        #[source]
+        source: BoxError,
+    },
+
+    /// Catalog-qualified table reference not supported
+    ///
+    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
+    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
+    #[error(transparent)]
+    CatalogQualifiedTable(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Unqualified table reference
+    ///
+    /// All tables must be qualified with a dataset reference in the schema portion.
+    /// Unqualified tables (e.g., just `table_name`) are not allowed.
+    #[error(transparent)]
+    UnqualifiedTable(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid table name
+    ///
+    /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
+    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
+    #[error(transparent)]
+    InvalidTableName(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Dataset reference not found
+    ///
+    /// The referenced dataset does not exist in the store.
+    #[error(transparent)]
+    DatasetNotFound(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Failed to retrieve dataset from store
+    ///
+    /// This occurs when loading a dataset definition fails due to:
+    /// - Invalid or corrupted manifest
+    /// - Unsupported dataset kind
+    /// - Storage backend errors
+    #[error(transparent)]
+    GetDataset(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Failed to create ETH call UDF
+    ///
+    /// This occurs when creating the eth_call user-defined function fails.
+    #[error(transparent)]
+    EthCallUdfCreation(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Table not found in dataset
+    ///
+    /// The referenced table does not exist in the dataset.
+    #[error(transparent)]
+    TableNotFoundInDataset(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Function not found in dataset
+    ///
+    /// The referenced function does not exist in the dataset.
+    #[error(transparent)]
+    FunctionNotFoundInDataset(PlanningCtxForSqlTablesWithDepsError),
+
+    /// eth_call function not available
+    ///
+    /// The eth_call function is not available for the referenced dataset.
+    #[error(transparent)]
+    EthCallNotAvailable(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Dependency alias not found
+    ///
+    /// A table reference uses an alias that was not provided in the dependencies map.
+    #[error(transparent)]
+    DependencyAliasNotFound(PlanningCtxForSqlTablesWithDepsError),
+
+    /// Failed to infer schema for table
     ///
     /// This occurs when:
     /// - Query planning fails due to invalid references
     /// - Type inference fails for the query
     /// - Schema determination encounters errors
-    #[error("Planning error: {0}")]
-    Planning(QueryContextError),
+    #[error("Failed to infer schema for table '{table_name}': {source}")]
+    SchemaInference {
+        /// The table name that failed schema inference
+        table_name: TableName,
+        /// The underlying query context error
+        #[source]
+        source: QueryContextError,
+    },
+}
+
+/// Table schema with associated networks
+///
+/// Contains the output schema for a table and the list of networks referenced by its query.
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct TableSchemaWithNetworks {
+    /// The output schema for the table
+    ///
+    /// Describes the structure and types of columns that will be returned
+    /// when executing the SQL query for this table.
+    #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
+    schema: TableSchema,
+    /// List of networks referenced by this table's query
+    ///
+    /// Contains the network names of all datasets/tables referenced
+    /// in this specific table's SQL query (e.g., "mainnet", "polygon", etc.).
+    networks: Vec<String>,
 }
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
-            Error::SqlParse(_) => "SQL_PARSE_ERROR",
-            Error::DatasetStore(_) => "DATASET_STORE_ERROR",
-            Error::Planning(_) => "PLANNING_ERROR",
+            Error::InvalidPayloadFormat { .. } => "INVALID_PAYLOAD_FORMAT",
+            Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
+            Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
+            Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
+            Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
+            Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
+            Error::DependencyResolution { .. } => "DEPENDENCY_RESOLUTION",
+            Error::CatalogQualifiedTable(_) => "CATALOG_QUALIFIED_TABLE",
+            Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
+            Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
+            Error::DatasetNotFound(_) => "DATASET_NOT_FOUND",
+            Error::GetDataset(_) => "GET_DATASET_ERROR",
+            Error::EthCallUdfCreation(_) => "ETH_CALL_UDF_CREATION_ERROR",
+            Error::TableNotFoundInDataset(_) => "TABLE_NOT_FOUND_IN_DATASET",
+            Error::FunctionNotFoundInDataset(_) => "FUNCTION_NOT_FOUND_IN_DATASET",
+            Error::EthCallNotAvailable(_) => "ETH_CALL_NOT_AVAILABLE",
+            Error::DependencyAliasNotFound(_) => "DEPENDENCY_ALIAS_NOT_FOUND",
+            Error::SchemaInference { .. } => "SCHEMA_INFERENCE",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::SqlParse(_) => StatusCode::BAD_REQUEST,
-            Error::DatasetStore(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::Planning(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidPayloadFormat { .. } => StatusCode::BAD_REQUEST,
+            Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
+            Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
+            Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
+            Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
+            Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::DependencyResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CatalogQualifiedTable(_) => StatusCode::BAD_REQUEST,
+            Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,
+            Error::DatasetNotFound(_) => StatusCode::NOT_FOUND,
+            Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::EthCallUdfCreation(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TableNotFoundInDataset(_) => StatusCode::NOT_FOUND,
+            Error::FunctionNotFoundInDataset(_) => StatusCode::NOT_FOUND,
+            Error::EthCallNotAvailable(_) => StatusCode::NOT_FOUND,
+            Error::DependencyAliasNotFound(_) => StatusCode::BAD_REQUEST,
+            Error::SchemaInference { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

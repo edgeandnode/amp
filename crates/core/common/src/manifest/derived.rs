@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use datafusion::sql::{parser, resolve::resolve_table_references};
+use datasets_common::table_name::TableName;
 use datasets_derived::{DerivedDatasetKind, Manifest, manifest::TableInput};
 
 use crate::{
@@ -19,7 +20,7 @@ use crate::{
 /// Extract all SQL queries from table views.
 pub fn queries(
     manifest: &Manifest,
-) -> Result<BTreeMap<String, parser::Statement>, query_context::Error> {
+) -> Result<BTreeMap<TableName, parser::Statement>, query_context::Error> {
     let mut queries = BTreeMap::new();
     for (table_name, table) in &manifest.tables {
         let TableInput::View(query) = &table.input;
@@ -92,16 +93,16 @@ pub fn dataset(
 /// Tables with no dependencies come first, followed by tables that depend on them.
 pub fn sort_tables_by_dependencies(
     tables: Vec<LogicalTable>,
-    queries: &BTreeMap<String, parser::Statement>,
+    queries: &BTreeMap<TableName, parser::Statement>,
 ) -> Result<Vec<LogicalTable>, BoxError> {
     // Map of table name -> Table
-    let table_map: BTreeMap<String, LogicalTable> = tables
+    let table_map = tables
         .into_iter()
-        .map(|t| (t.name().to_string(), t))
-        .collect();
+        .map(|t| (t.name().clone(), t))
+        .collect::<BTreeMap<TableName, LogicalTable>>();
 
     // Dependency map: table -> [tables it depends on]
-    let mut deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
 
     // Initialize empty deps with all tables
     for table_name in table_map.keys() {
@@ -112,13 +113,16 @@ pub fn sort_tables_by_dependencies(
         let (table_refs, _) = resolve_table_references(query, true)?;
 
         // Filter to only include dependencies within the same dataset
-        let mut table_deps: Vec<String> = vec![];
+        let mut table_deps: Vec<TableName> = vec![];
         for table_ref in table_refs {
             match (table_ref.schema(), table_ref.table()) {
-                (None, table) => {
+                (None, table) if table != table_name => {
                     // Unqualified reference is assumed to be to a table in the same dataset
-                    if table != table_name && table_map.contains_key(table) {
-                        table_deps.push(table.to_string());
+                    #[expect(clippy::collapsible_if)]
+                    if let Ok(dep_name) = table.parse::<TableName>() {
+                        if table_map.contains_key(&dep_name) {
+                            table_deps.push(dep_name);
+                        }
                     }
                 }
                 _ => {
@@ -149,11 +153,13 @@ pub fn sort_tables_by_dependencies(
 ///
 /// Uses depth-first search to order tables such that each table comes after
 /// all tables it depends on. Detects circular dependencies.
-fn table_dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
-    let nodes: BTreeSet<&String> = deps.keys().collect();
-    let mut ordered: Vec<String> = Vec::new();
-    let mut visited: BTreeSet<&String> = BTreeSet::new();
-    let mut visiting: BTreeSet<&String> = BTreeSet::new();
+fn table_dependency_sort(
+    deps: BTreeMap<TableName, Vec<TableName>>,
+) -> Result<Vec<TableName>, BoxError> {
+    let nodes: BTreeSet<&TableName> = deps.keys().collect();
+    let mut ordered: Vec<TableName> = Vec::new();
+    let mut visited: BTreeSet<&TableName> = BTreeSet::new();
+    let mut visiting: BTreeSet<&TableName> = BTreeSet::new();
 
     for node in nodes {
         if !visited.contains(node) {

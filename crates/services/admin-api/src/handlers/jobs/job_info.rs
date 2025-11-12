@@ -1,6 +1,6 @@
 //! Job information types for API responses
 
-use worker::JobId;
+use worker::job::{Job, JobId};
 
 /// Represents job information for the API response
 ///
@@ -30,10 +30,10 @@ pub struct JobInfo {
     pub descriptor: serde_json::Value,
 }
 
-impl From<metadata_db::Job> for JobInfo {
-    fn from(value: metadata_db::Job) -> Self {
+impl From<Job> for JobInfo {
+    fn from(value: Job) -> Self {
         Self {
-            id: value.id.into(),
+            id: value.id,
             created_at: value.created_at.to_rfc3339(),
             updated_at: value.updated_at.to_rfc3339(),
             node_id: value.node_id.to_string(),

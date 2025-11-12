@@ -245,7 +245,7 @@ impl EvmDecodeParams {
                         Err(e) => {
                             tracing::trace!(
                                 function_name=%call.alloy_function.name,
-                                error=?e,
+                                error = %e,
                                 "failed to decode function params"
                             );
                             for (field, ty) in call.input_types.iter().enumerate() {

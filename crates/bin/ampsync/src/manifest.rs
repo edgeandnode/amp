@@ -1,252 +1,499 @@
-use std::time::Duration;
+//! Manifest fetching.
+//!
+//! The manifest contains table definitions with Arrow schemas that are used
+//! to create PostgreSQL tables.
 
-use admin_api::handlers::datasets::get::DatasetInfo;
-use datasets_common::{name::Name, namespace::Namespace, version::Version};
-use datasets_derived::Manifest;
-use lazy_static::lazy_static;
+use std::{collections::BTreeMap, time::Duration};
 
-/// Errors that can occur when fetching dataset manifests from admin-api.
-#[derive(Debug, thiserror::Error)]
-pub enum ManifestError {
-    #[error("Dataset '{dataset}' version '{version}' not found in admin-api")]
-    DatasetNotFound { dataset: String, version: String },
+use backon::{ExponentialBuilder, Retryable};
+use dataset_store::DatasetKind;
+use datasets_common::{manifest::TableSchema, reference::Reference};
+use monitoring::logging;
+use reqwest::Client;
 
-    #[error("No versions available for dataset '{dataset}' in admin-api")]
-    NoVersionsAvailable { dataset: String },
+use crate::{config::SyncConfig, sql};
 
-    #[error("Failed to connect to admin-api at {url}: {message}")]
-    NetworkError { url: String, message: String },
+/// Generic manifest that extracts table schemas from any dataset kind.
+///
+/// This is a unified view over different dataset manifest types (evm-rpc,
+/// firehose, eth-beacon, derived), extracting just the table information
+/// needed for syncing to PostgreSQL.
+#[derive(Debug, Clone)]
+pub struct Manifest {
+    /// Dataset kind
+    pub kind: DatasetKind,
 
-    #[error("HTTP {status} from admin-api {url}: {message}")]
-    HttpError {
-        status: u16,
-        url: String,
-        message: String,
-    },
+    /// Tables in this dataset, mapping table name to table schema
+    pub tables: BTreeMap<String, TableSchema>,
 
-    #[error("Invalid manifest")]
-    InvalidManifest(#[source] anyhow::Error),
+    /// Fully resolved dataset reference
+    pub reference: Reference,
 }
 
-impl ManifestError {
-    /// Returns true if this error is retryable (transient/recoverable).
-    ///
-    /// Retryable errors include:
-    /// - Dataset not found (maybe published soon)
-    /// - No versions available (maybe published soon)
-    /// - Network errors (maybe transient)
-    /// - 5xx HTTP errors (server-side issues, may recover)
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            ManifestError::DatasetNotFound { .. }
-            | ManifestError::NoVersionsAvailable { .. }
-            | ManifestError::NetworkError { .. }
-            | ManifestError::InvalidManifest { .. } => true,
-            ManifestError::HttpError { status, .. } => *status >= 500,
+/// Helper trait for extracting table schemas from manifests.
+trait HasTables {
+    fn into_tables(self) -> BTreeMap<String, TableSchema>;
+}
+
+impl HasTables for evm_rpc_datasets::Manifest {
+    fn into_tables(self) -> BTreeMap<String, TableSchema> {
+        self.tables
+            .into_iter()
+            .map(|(name, table)| (name, table.schema))
+            .collect()
+    }
+}
+
+impl HasTables for eth_beacon_datasets::Manifest {
+    fn into_tables(self) -> BTreeMap<String, TableSchema> {
+        self.tables
+            .into_iter()
+            .map(|(name, table)| (name, table.schema))
+            .collect()
+    }
+}
+
+impl HasTables for firehose_datasets::dataset::Manifest {
+    fn into_tables(self) -> BTreeMap<String, TableSchema> {
+        self.tables
+            .into_iter()
+            .map(|(name, table)| (name, table.schema))
+            .collect()
+    }
+}
+
+impl HasTables for datasets_derived::manifest::Manifest {
+    fn into_tables(self) -> BTreeMap<String, TableSchema> {
+        self.tables
+            .into_iter()
+            .map(|(name, table)| (name.to_string(), table.schema))
+            .collect()
+    }
+}
+
+/// Envelope for two-phase manifest deserialization.
+///
+/// Deserializes only the `kind` field upfront to determine which manifest
+/// type to use for full deserialization.
+#[derive(serde::Deserialize)]
+struct ManifestEnvelope {
+    kind: String,
+}
+
+/// Parse manifest from JSON string and extract table schemas.
+fn parse_manifest<T>(
+    json_str: &str,
+    kind_name: &str,
+) -> Result<BTreeMap<String, TableSchema>, FetchManifestError>
+where
+    T: serde::de::DeserializeOwned + HasTables,
+{
+    let manifest: T =
+        serde_json::from_str(json_str).map_err(|e| FetchManifestError::ParseJsonSerde {
+            message: format!("Failed to parse {} manifest: {}", kind_name, e),
+            source: e,
+        })?;
+    Ok(manifest.into_tables())
+}
+
+/// Parse manifest JSON text into a Manifest with table schemas.
+///
+/// This function performs two-phase deserialization:
+/// 1. Extract the `kind` field to determine the manifest type
+/// 2. Deserialize the full JSON into the appropriate manifest type
+///
+/// # Arguments
+///
+/// - `text`: JSON text of the manifest
+/// - `reference`: Fully resolved dataset reference
+///
+/// # Returns
+///
+/// The parsed manifest with kind and table schemas.
+///
+/// # Errors
+///
+/// Returns error if:
+/// - JSON is malformed
+/// - `kind` field is missing or unsupported
+/// - Manifest deserialization fails
+/// - Manifest contains no tables
+fn parse_manifest_from_text(
+    text: &str,
+    reference: Reference,
+) -> Result<Manifest, FetchManifestError> {
+    // Extract the kind field first to determine manifest type
+    let envelope: ManifestEnvelope =
+        serde_json::from_str(text).map_err(|e| FetchManifestError::ParseJsonSerde {
+            message: "Failed to parse manifest envelope".to_string(),
+            source: e,
+        })?;
+
+    // Parse the dataset kind from envelope
+    let kind: DatasetKind =
+        envelope
+            .kind
+            .parse()
+            .map_err(|e: dataset_store::UnsupportedKindError| {
+                FetchManifestError::InvalidArrowType {
+                    message: format!("Unsupported dataset kind: {}", e.kind),
+                }
+            })?;
+
+    // Deserialize full manifest based on kind
+    let tables = match kind {
+        DatasetKind::EvmRpc => parse_manifest::<evm_rpc_datasets::Manifest>(text, "EVM-RPC")?,
+        DatasetKind::EthBeacon => {
+            parse_manifest::<eth_beacon_datasets::Manifest>(text, "Eth-Beacon")?
         }
+        DatasetKind::Firehose => {
+            parse_manifest::<firehose_datasets::dataset::Manifest>(text, "Firehose")?
+        }
+        DatasetKind::Derived => {
+            parse_manifest::<datasets_derived::manifest::Manifest>(text, "Derived")?
+        }
+    };
+
+    let manifest = Manifest {
+        kind,
+        tables,
+        reference,
+    };
+
+    // Validate manifest has tables
+    if manifest.tables.is_empty() {
+        return Err(FetchManifestError::NoTables);
     }
+
+    Ok(manifest)
 }
 
-lazy_static! {
-    /// Shared HTTP client for admin-api requests with optimized connection pooling.
-    ///
-    /// Creating a new client for each request is expensive as it spawns new connection pools,
-    /// DNS resolvers, and TLS session caches. This shared client reuses connections efficiently.
-    static ref ADMIN_API_CLIENT: reqwest::Client = reqwest::Client::builder()
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(10)
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .expect("Failed to create HTTP client");
-}
-
-/// Fetch ONLY the latest version without fetching the full schema.
+/// Validate table name using the centralized SQL validation module.
 ///
-/// This is used by version polling to efficiently check for new versions
-/// without the overhead of fetching the schema. Uses the "latest" version endpoint.
+/// This delegates to `sql::validate_identifier()` which uses sqlparser
+/// and character restrictions to ensure the name is a safe PostgreSQL identifier.
 ///
-/// Uses the default namespace "_".
-pub async fn fetch_latest_version(
-    admin_api_addr: &str,
-    namespace: &Namespace,
-    name: &Name,
-) -> Result<Version, ManifestError> {
-    let url = format!(
-        "{}/datasets/{}/{}/versions/latest",
-        admin_api_addr, namespace, name
-    );
-
-    let response =
-        ADMIN_API_CLIENT
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| ManifestError::NetworkError {
-                url: url.clone(),
-                message: e.to_string(),
-            })?;
-
-    let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(ManifestError::NoVersionsAvailable {
-            dataset: name.to_string(),
-        });
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(ManifestError::HttpError {
-            status: status.as_u16(),
-            url: url.clone(),
-            message: body,
-        });
-    }
-
-    let dataset_info: DatasetInfo =
-        response
-            .json()
-            .await
-            .map_err(|e| ManifestError::NetworkError {
-                url: url.clone(),
-                message: e.to_string(),
-            })?;
-
-    // The revision field contains the resolved version
-    dataset_info.revision.to_string().parse().map_err(|e| {
-        ManifestError::InvalidManifest(anyhow::anyhow!("Invalid version format: {}", e))
+/// See the `sql` module for detailed validation logic.
+fn validate_table_name(name: &str) -> Result<(), FetchManifestError> {
+    sql::validate_identifier(name).map_err(|e| FetchManifestError::InvalidTableName {
+        name: name.to_string(),
+        reason: e.to_string(),
     })
 }
 
-/// Fetch manifest with indefinite polling for initial startup.
-///
-/// This function polls the admin-api until the dataset becomes available.
-/// Used during initial startup when the dataset might not be published yet.
-///
-/// # Arguments
-/// * `admin_api_addr` - Base URL of the admin-api service
-/// * `name` - Dataset name
-/// * `version` - Optional dataset version. If None, uses latest version.
-///
-/// # Returns
-/// * `Ok(Manifest)` - Successfully fetched manifest
-/// * `Err(ManifestError)` - Non-recoverable errors (permanent failures)
-///
-/// # Behavior
-/// - On retryable errors: Retry with exponential backoff (indefinitely)
-/// - On non-retryable errors: Fail immediately
-/// - Logs helpful messages to guide users to run `nozzle dump`
-pub async fn fetch_manifest_with_startup_poll(
-    admin_api_addr: &str,
-    namespace: &Namespace,
-    name: &Name,
-    version: Option<&Version>,
-) -> Result<Manifest, ManifestError> {
-    let mut first_error_logged = false;
-    let mut attempt = 0u32;
-    let max_backoff_secs = 30u64;
+/// Errors that occur when fetching or parsing manifests
+#[derive(Debug, thiserror::Error)]
+pub enum FetchManifestError {
+    /// Failed to fetch manifest from Admin API
+    #[error("Failed to fetch manifest from Admin API at '{url}' after retries")]
+    FetchFromApi {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
 
-    loop {
-        match fetch_manifest(admin_api_addr, namespace, name, version).await {
-            Ok(manifest) => {
-                if attempt > 0 {
-                    tracing::info!(
-                        "Successfully fetched manifest after {} attempts",
-                        attempt + 1
-                    );
-                }
-                return Ok(manifest);
-            }
-            Err(e) if e.is_retryable() => {
-                if !first_error_logged {
-                    tracing::warn!(
-                        error = %e,
-                        "dataset_not_found_waiting_for_publish"
-                    );
-                    tracing::warn!(
-                        "Have you run 'nozzle dump --dataset <name>' to publish the dataset?"
-                    );
-                    tracing::info!("waiting_for_dataset");
-                    first_error_logged = true;
-                }
+    /// Admin API returned non-success status
+    #[error("Admin API returned status {status} for '{url}'")]
+    ApiStatusError {
+        status: reqwest::StatusCode,
+        url: String,
+    },
 
-                // Calculate backoff with saturation to avoid overflow
-                let backoff_secs = if attempt < 5 {
-                    2u64.pow(attempt)
-                } else {
-                    max_backoff_secs
-                }
-                .min(max_backoff_secs);
+    /// Failed to parse manifest JSON response (from reqwest)
+    #[error("Failed to parse manifest JSON response: {message}")]
+    ParseJsonHttp {
+        message: String,
+        #[source]
+        source: reqwest::Error,
+    },
 
-                if attempt > 0 && attempt.is_multiple_of(5) {
-                    tracing::info!(
-                        attempt = attempt + 1,
-                        retry_delay_secs = backoff_secs,
-                        "still_waiting_for_dataset"
-                    );
-                }
+    /// Failed to parse manifest JSON (from serde)
+    #[error("Failed to parse manifest JSON: {message}")]
+    ParseJsonSerde {
+        message: String,
+        #[source]
+        source: serde_json::Error,
+    },
 
-                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                // Non-retryable error
-                return Err(e);
-            }
+    /// Invalid Arrow type in manifest
+    #[error("Invalid Arrow type in manifest: {message}")]
+    InvalidArrowType { message: String },
+
+    /// Manifest contains no tables
+    #[error("Manifest contains no tables")]
+    NoTables,
+
+    /// Invalid table name in manifest
+    #[error("Invalid table name '{name}': {reason}")]
+    InvalidTableName { name: String, reason: String },
+}
+
+impl FetchManifestError {
+    /// Classify error as retryable or fatal.
+    ///
+    /// Retryable errors will retry indefinitely with exponential backoff (capped).
+    /// Fatal errors fail immediately without retries.
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Network errors
+            Self::FetchFromApi { .. } => true,
+
+            // Http response errors
+            Self::ApiStatusError { .. } => true,
+
+            // Json parse errors
+            Self::ParseJsonHttp { .. } => true,
+
+            // Schema/validation errors
+            Self::ParseJsonSerde { .. } => false,
+            Self::InvalidArrowType { .. } => false,
+            Self::InvalidTableName { .. } => false,
+            Self::NoTables => false,
         }
     }
 }
 
-/// Fetch and construct a dataset Manifest from admin-api schema.
+/// Fetch dataset manifest from Admin API with retry logic.
 ///
-/// Fetches the manifest from the admin-api endpoint. If version is None, uses "latest".
+/// This function fetches the table schemas for a dataset from the Admin API,
+/// with automatic retry on transient failures.
 ///
-/// Uses the default namespace "_".
-pub async fn fetch_manifest(
-    admin_api_addr: &str,
-    namespace: &Namespace,
-    name: &Name,
-    version: Option<&Version>,
-) -> Result<Manifest, ManifestError> {
-    let version_str = version
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| "latest".to_string());
+/// # Arguments
+///
+/// - `config`: Configuration containing Admin API address and dataset information
+///
+/// # Returns
+///
+/// The manifest containing table names and Arrow schemas.
+///
+/// # Errors
+///
+/// Returns error if:
+/// - Response JSON cannot be parsed (malformed manifest)
+/// - Arrow schema conversion fails (unsupported types)
+/// - Manifest validation fails (no tables, invalid names)
+pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManifestError> {
+    // Convert PartialReference to full Reference by filling in defaults
+    let dataset = config.dataset.to_full_reference();
+
+    let url = format!(
+        "{}/datasets/{}/{}/versions/{}/manifest",
+        config.amp_admin_api_addr,
+        dataset.namespace(),
+        dataset.name(),
+        dataset.revision()
+    );
 
     tracing::info!(
-        namespace = %namespace,
-        dataset = %name,
-        version = %version_str,
-        admin_api_addr = %admin_api_addr,
+        dataset = %config.dataset,
+        url = %url,
         "fetching_manifest"
     );
 
-    let manifest_url = format!(
-        "{}/datasets/{}/{}/versions/{}/manifest",
-        admin_api_addr, namespace, name, version_str
+    // Create HTTP client (reused across retries)
+    let client = Client::new();
+
+    // Create retry-able fetch function
+    let fetch = || async {
+        // Fetch response
+        let response =
+            client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| FetchManifestError::FetchFromApi {
+                    url: url.clone(),
+                    source: e,
+                })?;
+
+        // Check for HTTP errors
+        let status = response.status();
+        if !status.is_success() {
+            return Err(FetchManifestError::ApiStatusError {
+                status,
+                url: url.clone(),
+            });
+        }
+
+        // Get the full response text so we can parse it based on the kind
+        let text = response
+            .text()
+            .await
+            .map_err(|e| FetchManifestError::ParseJsonHttp {
+                message: "Failed to read response text".to_string(),
+                source: e,
+            })?;
+
+        // Parse the manifest from the text
+        parse_manifest_from_text(&text, dataset.clone())
+    };
+
+    // Retry with exponential backoff, jitter, and error classification
+    let manifest = fetch
+        .retry(
+            ExponentialBuilder::default()
+                .with_jitter() // Prevent thundering herd
+                .with_max_delay(Duration::from_secs(config.manifest_fetch_max_backoff_secs)),
+        )
+        .when(FetchManifestError::is_retryable) // Only retry retryable errors
+        .notify(|err, duration| {
+            tracing::warn!(
+                error = %err, error_source = logging::error_source(&err),
+                retry_after_ms = duration.as_millis(),
+                retryable = err.is_retryable(),
+                "manifest_fetch_failed_retrying"
+            );
+        })
+        .await?;
+
+    tracing::info!(
+        dataset = %config.dataset,
+        tables = manifest.tables.len(),
+        "manifest_fetched_successfully"
     );
-    let manifest_resp = ADMIN_API_CLIENT
-        .get(&manifest_url)
-        .send()
-        .await
-        .map_err(|e| ManifestError::NetworkError {
-            url: manifest_url.clone(),
-            message: e.to_string(),
-        })?;
-    let status = manifest_resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(ManifestError::DatasetNotFound {
-            dataset: name.to_string(),
-            version: version_str.clone(),
-        });
+
+    // Validate all table names before returning
+    for table_name in manifest.tables.keys() {
+        validate_table_name(table_name)?;
     }
-    if !status.is_success() {
-        let body = manifest_resp.text().await.unwrap_or_default();
-        return Err(ManifestError::HttpError {
-            status: status.as_u16(),
-            url: manifest_url.clone(),
-            message: body,
-        });
+
+    Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+
+    use super::*;
+
+    const DERIVED_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/register_test_dataset__1_0_0.json");
+    const EVM_RPC_MANIFEST: &str = include_str!("../../../../tests/config/manifests/eth_rpc.json");
+    const ETH_BEACON_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/eth_beacon.json");
+    const FIREHOSE_MANIFEST: &str =
+        include_str!("../../../../tests/config/manifests/eth_firehose.json");
+
+    fn test_reference() -> Reference {
+        Reference::new(
+            Namespace::from_str("_").unwrap(),
+            Name::try_from("test".to_string()).unwrap(),
+            Revision::Latest,
+        )
     }
-    manifest_resp
-        .json::<Manifest>()
-        .await
-        .map_err(|e| ManifestError::InvalidManifest(e.into()))
+
+    #[test]
+    fn test_parse_derived_manifest() {
+        let manifest = parse_manifest_from_text(DERIVED_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::Derived);
+        assert_eq!(manifest.tables.len(), 1);
+        assert!(manifest.tables.contains_key("erc20_transfers"));
+
+        let table = &manifest.tables["erc20_transfers"];
+        assert_eq!(table.arrow.fields.len(), 5);
+        assert_eq!(table.arrow.fields[0].name, "_block_num");
+        assert_eq!(table.arrow.fields[1].name, "block_num");
+        assert_eq!(table.arrow.fields[2].name, "miner");
+    }
+
+    #[test]
+    fn test_parse_evm_rpc_manifest() {
+        let manifest = parse_manifest_from_text(EVM_RPC_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::EvmRpc);
+        assert!(manifest.tables.contains_key("blocks"));
+        assert!(manifest.tables.contains_key("transactions"));
+        assert!(manifest.tables.contains_key("logs"));
+    }
+
+    #[test]
+    fn test_parse_eth_beacon_manifest() {
+        let manifest = parse_manifest_from_text(ETH_BEACON_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::EthBeacon);
+        assert!(manifest.tables.contains_key("blocks"));
+    }
+
+    #[test]
+    fn test_parse_firehose_manifest() {
+        let manifest = parse_manifest_from_text(FIREHOSE_MANIFEST, test_reference())
+            .expect("Failed to parse manifest");
+
+        assert_eq!(manifest.kind, DatasetKind::Firehose);
+        assert!(manifest.tables.contains_key("blocks"));
+        assert!(manifest.tables.contains_key("transactions"));
+        assert!(manifest.tables.contains_key("logs"));
+    }
+
+    #[test]
+    fn test_parse_manifest_unsupported_kind() {
+        let json = r#"{
+            "kind": "unknown-kind",
+            "tables": {}
+        }"#;
+
+        let result = parse_manifest_from_text(json, test_reference());
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::InvalidArrowType { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_manifest_no_tables() {
+        let json = r#"{
+            "kind": "manifest",
+            "dependencies": {},
+            "functions": {},
+            "tables": {}
+        }"#;
+
+        let result = parse_manifest_from_text(json, test_reference());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FetchManifestError::NoTables));
+    }
+
+    #[test]
+    fn test_parse_manifest_malformed_json() {
+        let json = r#"{
+            "kind": "manifest",
+            "tables": {
+        "#;
+
+        let result = parse_manifest_from_text(json, test_reference());
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::ParseJsonSerde { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_manifest_missing_kind() {
+        let json = r#"{
+            "tables": {
+                "test": {
+                    "schema": {
+                        "arrow": {
+                            "fields": []
+                        }
+                    }
+                }
+            }
+        }"#;
+
+        let result = parse_manifest_from_text(json, test_reference());
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FetchManifestError::ParseJsonSerde { .. }
+        ));
+    }
 }

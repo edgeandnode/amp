@@ -329,7 +329,7 @@ async fn list_jobs_first_page_when_empty() {
             .expect("Failed to connect to metadata db");
 
     //* When
-    let jobs = jobs::sql::list_first_page(&metadata_db, 10)
+    let jobs = jobs::sql::list_first_page(&metadata_db, 10, None)
         .await
         .expect("Failed to list jobs");
 
@@ -372,7 +372,7 @@ async fn list_jobs_first_page_respects_limit() {
     }
 
     //* When
-    let jobs = jobs::sql::list_first_page(&metadata_db, 3)
+    let jobs = jobs::sql::list_first_page(&metadata_db, 3, None)
         .await
         .expect("Failed to list jobs");
 
@@ -421,7 +421,7 @@ async fn list_jobs_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = jobs::sql::list_first_page(&metadata_db, 3)
+    let first_page = jobs::sql::list_first_page(&metadata_db, 3, None)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -430,7 +430,7 @@ async fn list_jobs_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = jobs::sql::list_next_page(&metadata_db, 3, cursor)
+    let second_page = jobs::sql::list_next_page(&metadata_db, 3, cursor, None)
         .await
         .expect("Failed to list second page");
 

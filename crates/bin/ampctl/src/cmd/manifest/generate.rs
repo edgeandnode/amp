@@ -26,6 +26,7 @@ use std::path::PathBuf;
 
 use dataset_store::DatasetKind;
 use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+use monitoring::logging;
 
 /// Command-line arguments for the `gen-manifest` command.
 #[derive(Debug, clap::Args)]
@@ -193,7 +194,7 @@ pub async fn run(
         }
 
         let file = std::fs::File::create(&out_path).map_err(|err| {
-            tracing::error!(path = %out_path.display(), error = %err, "Failed to create output file");
+            tracing::error!(path = %out_path.display(), error = %err, error_source = logging::error_source(&err), "Failed to create output file");
             Error::WriteOutput(err)
         })?;
 

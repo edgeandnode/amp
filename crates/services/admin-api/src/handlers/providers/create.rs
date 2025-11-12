@@ -6,6 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use dataset_store::providers::{ProviderConfig, RegisterError};
+use monitoring::logging;
 
 use super::{convert, provider_info::ProviderInfo};
 use crate::{
@@ -65,7 +66,7 @@ pub async fn handler(
     let provider_info = match body {
         Ok(Json(provider_info)) => provider_info,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid JSON in request body");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid JSON in request body");
             return Err(Error::InvalidRequestBody { err }.into());
         }
     };
@@ -94,7 +95,7 @@ pub async fn handler(
             other => {
                 tracing::error!(
                     %provider_name,
-                    error = %other,
+                    error = %other, error_source = logging::error_source(&other),
                     "failed to register provider"
                 );
                 Error::StoreError(other)
@@ -153,7 +154,7 @@ pub enum Error {
     /// such as filesystem errors, serialization failures, or
     /// other store-level issues.
     #[error("failed to store provider configuration: {0}")]
-    StoreError(#[from] RegisterError),
+    StoreError(#[source] RegisterError),
 }
 
 impl IntoErrorResponse for Error {

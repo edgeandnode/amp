@@ -2,7 +2,10 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
-use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use common::{
+    BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange,
+    query_context::parse_sql,
+};
 use datasets_common::reference::Reference;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
@@ -89,19 +92,19 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
     test.dump("anvil_rpc", 3).await;
     let blocks1 = test.query_blocks("anvil_rpc", None).await;
 
-    // For now, we don't fully handle reorgs. But we're checking that metadata reflects the current
-    // expected behavior. We only expect to query the "canonical chain", which will not resolve the
-    // reorg unless the uncled block range is re-dumped.
-    assert_eq!(&blocks0, &blocks1);
+    // Check that reorgs are fully handled in the same block in which they are detected
+    assert_eq!(blocks0.len(), 3);
+    assert_eq!(blocks1.len(), 4);
+
     let ranges = test.metadata_ranges("anvil_rpc").await;
-    assert_eq!(ranges.len(), 2);
+    assert_eq!(ranges.len(), 3);
     assert_eq!(
         &ranges[0],
         &BlockRange {
             numbers: 0..=2,
             network: "anvil".to_string(),
-            hash: blocks1[2].hash,
-            prev_hash: Some(blocks1[0].parent_hash),
+            hash: blocks0[2].hash,
+            prev_hash: Some(blocks0[0].parent_hash),
         }
     );
     assert_eq!(ranges[1].numbers, 3..=3);
@@ -490,10 +493,8 @@ impl ReorgTestCtx {
             .config()
             .make_query_env()
             .expect("Failed to create query environment");
-        let catalog = test_env
-            .daemon_server()
-            .dataset_store()
-            .catalog_for_sql(&sql, env)
+        let dataset_store = test_env.daemon_server().dataset_store();
+        let catalog = catalog_for_sql(dataset_store.as_ref(), test_env.metadata_db(), &sql, env)
             .await
             .expect("Failed to create catalog for SQL query");
         let table = catalog

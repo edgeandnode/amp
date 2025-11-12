@@ -12,9 +12,10 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use worker::JobId;
+use monitoring::logging;
+use worker::job::JobId;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `jobs rm` command.
 #[derive(Debug, clap::Args)]
@@ -26,6 +27,23 @@ pub struct Args {
     pub id: JobId,
 }
 
+/// Result of a job removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Job {} removed",
+            console::style("✓").green().bold(),
+            self.job_id
+        )
+    }
+}
+
 /// Remove a job by deleting it via the admin API.
 ///
 /// # Errors
@@ -33,16 +51,16 @@ pub struct Args {
 /// Returns [`Error`] for API errors (400/409/500) or network failures.
 #[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, job_id = %id))]
 pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     tracing::debug!("Removing job via admin API");
 
     client.jobs().delete_by_id(&id).await.map_err(|err| {
-        tracing::error!(error = %err, "Failed to remove job");
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to remove job");
         Error::DeleteError(err)
     })?;
-
-    crate::success!("Job {} removed", id);
+    let result = RemoveResult { job_id: id };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -52,10 +70,7 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error for job rm operations.
     ///
@@ -67,5 +82,9 @@ pub enum Error {
     ///
     /// Note: The delete operation is idempotent - deleting a non-existent job returns success.
     #[error("failed to remove job")]
-    DeleteError(#[source] client::jobs::DeleteByIdError),
+    DeleteError(#[source] crate::client::jobs::DeleteByIdError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }

@@ -376,7 +376,16 @@ export const JobId = Schema.Number.pipe(
   }),
 )
 
-export const JobStatus = Schema.Literal("RUNNING", "TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
+export const JobStatus = Schema.Literal(
+  "SCHEDULED",
+  "RUNNING",
+  "COMPLETED",
+  "STOPPED",
+  "STOP_REQUESTED",
+  "STOPPING",
+  "FAILED",
+  "UNKNOWN",
+).pipe(
   Schema.annotations({
     title: "JobStatus",
     description: "the status of a job",
@@ -424,4 +433,26 @@ export class DeployRequest extends Schema.Class<DeployRequest>("DeployRequest")(
 
 export class DeployResponse extends Schema.Class<DeployResponse>("DeployResponse")({
   jobId: JobId.pipe(Schema.propertySignature, Schema.fromKey("job_id")),
+}) {}
+
+export const GenrateTokenDuration = Schema.String.pipe(
+  Schema.pattern(
+    /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
+  ),
+)
+export type GenrateTokenDuration = typeof GenrateTokenDuration.Type
+
+export class SchemaRequest extends Schema.Class<SchemaRequest>("SchemaRequest")({
+  tables: Schema.Record({ key: Schema.String, value: Schema.String }),
+  dependencies: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  functions: Schema.optional(Schema.Array(Schema.String)),
+}) {}
+
+export class TableSchemaWithNetworks extends Schema.Class<TableSchemaWithNetworks>("TableSchemaWithNetworks")({
+  schema: TableSchema,
+  networks: Schema.Array(Schema.String),
+}) {}
+
+export class SchemaResponse extends Schema.Class<SchemaResponse>("SchemaResponse")({
+  schemas: Schema.Record({ key: Schema.String, value: TableSchemaWithNetworks }),
 }) {}

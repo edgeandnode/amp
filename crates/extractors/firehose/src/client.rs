@@ -43,9 +43,11 @@ impl Client {
         let metrics = meter.map(crate::metrics::MetricsRegistry::new);
 
         let client = {
-            let uri = Uri::from_str(&config.url)?;
+            let uri = Uri::from_str(&config.url).map_err(Error::UriParse)?;
             let mut endpoint = Endpoint::from(uri);
-            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
+            endpoint = endpoint
+                .tls_config(ClientTlsConfig::new().with_native_roots())
+                .map_err(Error::Connection)?;
             let auth = AuthInterceptor::new(config.token)?;
             Client {
                 endpoint,
@@ -74,7 +76,7 @@ impl Client {
         &self,
     ) -> Result<StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>, Error>
     {
-        let channel = self.endpoint.connect().await?;
+        let channel = self.endpoint.connect().await.map_err(Error::Connection)?;
         Ok(StreamClient::with_interceptor(channel, self.auth.clone())
             .accept_compressed(CompressionEncoding::Gzip)
             .send_compressed(CompressionEncoding::Gzip)
@@ -100,9 +102,13 @@ impl Client {
         // We intentionally do not store and reuse the connection, but recreate it every time.
         // This is more robust to connection failures.
         let mut client = self.connect().await?;
-        let raw_stream = client.blocks(request).await?.into_inner();
+        let raw_stream = client
+            .blocks(request)
+            .await
+            .map_err(Error::Call)?
+            .into_inner();
         let block_stream = raw_stream
-            .err_into::<Error>()
+            .map_err(Error::Call)
             .and_then(|response| async move {
                 let StreamResponse {
                     block,
@@ -113,7 +119,8 @@ impl Client {
                     return Err(Error::AssertFail("Expected block, found none".into()));
                 };
 
-                let ethereum_block = pbethereum::Block::decode(block.value.as_ref())?;
+                let ethereum_block = pbethereum::Block::decode(block.value.as_ref())
+                    .map_err(Error::PbDecodeError)?;
                 Ok(ethereum_block)
             });
 
@@ -127,13 +134,15 @@ pub struct AuthInterceptor {
 }
 
 impl AuthInterceptor {
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err)]
     pub fn new(token: Option<String>) -> Result<Self, Error> {
         Ok(AuthInterceptor {
-            token: token.map_or(Ok(None), |token| {
-                let bearer_token = format!("bearer {}", token);
-                bearer_token.parse::<MetadataValue<Ascii>>().map(Some)
-            })?,
+            token: token
+                .map_or(Ok(None), |token| {
+                    let bearer_token = format!("bearer {}", token);
+                    bearer_token.parse::<MetadataValue<Ascii>>().map(Some)
+                })
+                .map_err(Error::Utf8)?,
         })
     }
 }

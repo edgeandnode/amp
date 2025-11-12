@@ -25,6 +25,22 @@ pub struct Args {
     pub name: String,
 }
 
+/// Result of a provider removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    name: String,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Provider deleted successfully",
+            console::style("✓").green().bold()
+        )
+    }
+}
+
 /// Remove a provider from the admin API.
 ///
 /// Deletes the provider configuration if it exists.
@@ -38,8 +54,8 @@ pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting provider from admin API");
 
     delete_provider(&global, &name).await?;
-
-    crate::success!("Provider deleted successfully");
+    let result = RemoveResult { name };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -51,7 +67,7 @@ pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
 async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
     tracing::debug!("Creating API client");
 
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     client
         .providers()
@@ -82,10 +98,7 @@ async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
 pub enum Error {
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Invalid provider name
     #[error("invalid provider name: [{error_code}] {message}")]
@@ -106,4 +119,8 @@ pub enum Error {
     /// Unexpected response from API
     #[error("unexpected response (status {status}): {message}")]
     UnexpectedResponse { status: u16, message: String },
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }

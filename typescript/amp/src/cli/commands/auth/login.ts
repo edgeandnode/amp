@@ -5,11 +5,12 @@ import * as NodePath from "@effect/platform-node/NodePath"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
-import { addSeconds } from "date-fns/addSeconds"
 import * as Data from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Fn from "effect/Function"
 import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
@@ -340,12 +341,14 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
   )
 
   // Step 4: Store the tokens
+  const now = yield* DateTime.now
+  const expiry = Fn.pipe(now, DateTime.add({ seconds: tokenResponse.expires_in }), DateTime.toEpochMillis)
   yield* auth.set(Auth.AuthStorageSchema.make({
     accessToken: tokenResponse.access_token,
     refreshToken: tokenResponse.refresh_token,
     userId: tokenResponse.user_id,
     accounts: tokenResponse.user_accounts,
-    expiry: addSeconds(Date.now(), tokenResponse.expires_in).getTime(),
+    expiry,
   }))
 
   // Step 5: Log success

@@ -121,22 +121,22 @@ where
 
 /// Error when storing manifest in object store
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to put manifest in object store")]
+#[error("Failed to put manifest in object store: {0}")]
 pub struct StoreError(#[source] pub object_store::Error);
 
 /// Errors specific to manifest retrieval operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetError {
     /// Failed to get manifest object from object store
-    #[error("Failed to get manifest object from object store")]
+    #[error("Failed to get manifest object from object store: {0}")]
     ObjectStoreGet(#[source] object_store::Error),
 
     /// Failed to read manifest bytes from object store
-    #[error("Failed to read manifest bytes from object store")]
+    #[error("Failed to read manifest bytes from object store: {0}")]
     ObjectStoreReadBytes(#[source] object_store::Error),
 
     /// Failed to decode manifest content as UTF-8
-    #[error("Failed to decode manifest content as UTF-8")]
+    #[error("Failed to decode manifest content as UTF-8: {0}")]
     Utf8Error(#[source] std::string::FromUtf8Error),
 }
 

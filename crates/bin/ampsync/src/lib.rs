@@ -1,11 +1,14 @@
-pub mod batch_utils;
+// Core modules
+pub mod arrow;
+pub mod commands;
 pub mod config;
-pub mod conn;
+pub mod engine;
+pub mod manager;
 pub mod manifest;
-pub mod stream_manager;
-pub mod stream_task;
-pub mod sync_engine;
-pub mod version_polling;
+pub mod sql;
+pub mod task;
 
-#[cfg(test)]
-mod tests;
+// Re-export for convenience
+pub use config::SyncConfig;
+pub use engine::Engine;
+pub use manager::StreamManager;

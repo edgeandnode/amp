@@ -1,4 +1,5 @@
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
+import type * as Headers from "@effect/platform/Headers"
 import * as HttpBody from "@effect/platform/HttpBody"
 import * as HttpClient from "@effect/platform/HttpClient"
 import type * as HttpClientError from "@effect/platform/HttpClientError"
@@ -33,15 +34,22 @@ export class JsonLines extends Context.Tag("Amp/JsonLines")<JsonLines, {
    *
    * @param schema - The schema of the results.
    * @param sql - The sql query to execute.
+   * @param headers - Additional headers to append to the client request
    * @returns A stream of results.
    */
   readonly stream: {
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: TemplateStringsArray) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: TemplateStringsArray,
+      headers?: Headers.Input | undefined,
+    ) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: string) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: string,
+      headers?: Headers.Input | undefined,
+    ) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
   }
 
   /**
@@ -49,15 +57,22 @@ export class JsonLines extends Context.Tag("Amp/JsonLines")<JsonLines, {
    *
    * @param schema - The schema of the results.
    * @param sql - The sql query to execute.
+   * @param headers - Additional headers to append to the client request
    * @returns The results.
    */
   readonly query: {
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: TemplateStringsArray) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: TemplateStringsArray,
+      headers?: Headers.Input | undefined,
+    ) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: string) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: string,
+      headers?: Headers.Input | undefined,
+    ) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
   }
 }>() {}
 
@@ -88,15 +103,21 @@ export const make = Effect.fn(function*(url: string) {
   const stream: {
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: TemplateStringsArray) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: TemplateStringsArray,
+      headers?: Headers.Input | undefined,
+    ) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: string) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
-  } = (schema) => (sql) => {
+    ): (
+      sql: string,
+      headers?: Headers.Input | undefined,
+    ) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
+  } = (schema) => (sql, headers) => {
     return Stream.unwrap(
       Effect.gen(function*() {
         const query = typeof sql === "string" ? sql : yield* Template.make(sql)
-        const response = yield* client.post(url, { body: HttpBody.text(query) })
+        const response = yield* client.post(url, { body: HttpBody.text(query), headers })
 
         return response.stream
       }),
@@ -113,12 +134,18 @@ export const make = Effect.fn(function*(url: string) {
   const query: {
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: TemplateStringsArray) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
+    ): (
+      sql: TemplateStringsArray,
+      headers?: Headers.Input | undefined,
+    ) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
     <A, I, R>(
       schema: Schema.Schema<A, I, R>,
-    ): (sql: string) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
-  } = (schema) => (sql) =>
-    stream(schema)(sql as any).pipe(
+    ): (
+      sql: string,
+      headers?: Headers.Input | undefined,
+    ) => Effect.Effect<Array<A>, HttpClientError.HttpClientError | JsonLinesError, R>
+  } = (schema) => (sql, headers) =>
+    stream(schema)(sql as any, headers).pipe(
       Stream.runCollect,
       Effect.map((_) => Chunk.toArray(_)),
     )

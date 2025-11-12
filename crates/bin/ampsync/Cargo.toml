@@ -22,7 +22,7 @@ snmalloc = ["dep:snmalloc-rs"]
 [dependencies]
 admin-api = { path = "../../services/admin-api" }
 alloy.workspace = true
-amp-client = { path = "../../client/amp-client" }
+amp-client = { path = "../../client", features = ["postgres"] }
 anyhow.workspace = true
 arrow-array = { version = "56", default-features = false }
 arrow-schema = { version = "56" }
@@ -35,12 +35,20 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
+dataset-store = { path = "../../core/dataset-store" }
+eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
+pg_escape.workspace = true
 phf = { version = "0.13.1", features = ["macros"] }
 reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 snmalloc-rs = { version = "0.3.8", optional = true }
+sqlparser.workspace = true
 sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
     "postgres",
@@ -52,6 +60,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tokio-util = "0.7.12"
 tracing.workspace = true
+uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
 alloy.workspace = true

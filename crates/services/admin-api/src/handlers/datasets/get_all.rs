@@ -2,6 +2,7 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use datasets_common::{name::Name, version::Version};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -46,7 +47,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, E
     let datasets = metadata_db::datasets::list_all(&ctx.metadata_db)
         .await
         .map_err(|err| {
-            tracing::debug!(error=?err, "failed to list datasets");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list datasets");
             Error::MetadataDbError(err)
         })?;
 
@@ -95,7 +96,7 @@ pub enum Error {
     /// This covers database connection issues, query failures,
     /// and other internal database errors.
     #[error("metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
+    MetadataDbError(#[source] metadata_db::Error),
 }
 
 impl IntoErrorResponse for Error {

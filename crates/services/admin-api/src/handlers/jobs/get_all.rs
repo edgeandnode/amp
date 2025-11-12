@@ -5,8 +5,9 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
+use monitoring::logging;
 use serde::{Deserialize, Serialize};
-use worker::JobId;
+use worker::job::JobId;
 
 use super::job_info::JobInfo;
 use crate::{
@@ -30,10 +31,53 @@ pub struct QueryParams {
 
     /// ID of the last job from the previous page for pagination
     last_job_id: Option<JobId>,
+
+    /// Status filter: "active" (default), "all", or comma-separated status values
+    #[serde(default = "default_status_filter")]
+    status: StatusFilter,
 }
 
 fn default_limit() -> usize {
     DEFAULT_PAGE_LIMIT
+}
+
+fn default_status_filter() -> StatusFilter {
+    StatusFilter::Active
+}
+
+/// Status filter for job listing
+#[derive(Debug, Clone)]
+pub enum StatusFilter {
+    /// Show only active (non-terminal) jobs (default)
+    Active,
+    /// Show all jobs regardless of status
+    All,
+    /// Show jobs with specific statuses
+    Specific(Vec<worker::job::JobStatus>),
+}
+
+impl<'de> Deserialize<'de> for StatusFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.eq_ignore_ascii_case("active") {
+            Ok(StatusFilter::Active)
+        } else if s.eq_ignore_ascii_case("all") {
+            Ok(StatusFilter::All)
+        } else {
+            let statuses = s
+                .split(',')
+                .map(|s| s.trim())
+                .map(|s| {
+                    s.parse::<worker::job::JobStatus>()
+                        .map_err(|e| serde::de::Error::custom(format!("invalid status: {}", e)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(StatusFilter::Specific(statuses))
+        }
+    }
 }
 
 /// Handler for the `GET /jobs` endpoint
@@ -43,6 +87,7 @@ fn default_limit() -> usize {
 /// ## Query Parameters
 /// - `limit`: Maximum number of jobs to return (default: 50, max: 1000)
 /// - `last_job_id`: ID of the last job from previous page for cursor-based pagination
+/// - `status`: Status filter - "active" (default, shows non-terminal jobs), "all" (shows all jobs), or comma-separated status values (e.g., "scheduled,running")
 ///
 /// ## Response
 /// - **200 OK**: Returns paginated job data with next cursor
@@ -64,7 +109,8 @@ fn default_limit() -> usize {
         operation_id = "jobs_list",
         params(
             ("limit" = Option<usize>, Query, description = "Maximum number of jobs to return (default: 50, max: 1000)"),
-            ("last_job_id" = Option<String>, Query, description = "ID of the last job from the previous page for pagination")
+            ("last_job_id" = Option<String>, Query, description = "ID of the last job from the previous page for pagination"),
+            ("status" = Option<String>, Query, description = "Status filter: 'active' (default, non-terminal jobs), 'all' (all jobs), or comma-separated status values")
         ),
         responses(
             (status = 200, description = "Successfully retrieved jobs", body = JobsResponse),
@@ -80,7 +126,7 @@ pub async fn handler(
     let query = match query {
         Ok(Query(query)) => query,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid query parameters");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid query parameters");
             return Err(Error::InvalidQueryParams { err }.into());
         }
     };
@@ -97,21 +143,34 @@ pub async fn handler(
         query.limit
     };
 
+    // Convert status filter to job statuses
+    let statuses = match query.status {
+        StatusFilter::Active => Some(vec![
+            worker::job::JobStatus::Scheduled,
+            worker::job::JobStatus::Running,
+            worker::job::JobStatus::StopRequested,
+            worker::job::JobStatus::Stopping,
+        ]),
+        StatusFilter::All => None,
+        StatusFilter::Specific(statuses) => Some(statuses),
+    };
+
     // Fetch jobs from scheduler
     let jobs = ctx
         .scheduler
         .list_jobs(
             limit as i64,
-            query.last_job_id, // SAFETY: limit is capped at 1000 by validation above
+            query.last_job_id,
+            statuses.as_deref(), // SAFETY: limit is capped at 1000 by validation above
         )
         .await
         .map_err(|err| {
-            tracing::debug!(error=?err, "failed to list jobs");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list jobs");
             Error::ListJobs(err)
         })?;
 
     // Determine next cursor (ID of the last job in this page)
-    let next_cursor = jobs.last().map(|job| job.id.into());
+    let next_cursor = jobs.last().map(|job| job.id);
     let jobs = jobs
         .into_iter()
         .take(limit)

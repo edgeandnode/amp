@@ -5,7 +5,8 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::JobId;
+use monitoring::logging;
+use worker::job::JobId;
 
 use super::job_info::JobInfo;
 use crate::{
@@ -57,7 +58,7 @@ pub async fn handler(
     let id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid job ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid job ID in path");
             return Err(Error::InvalidId { err }.into());
         }
     };
@@ -66,7 +67,7 @@ pub async fn handler(
         Ok(Some(job)) => Ok(Json(job.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {
-            tracing::debug!(error=?err, job_id=?id, "failed to get job");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), job_id=?id, "failed to get job");
             Err(Error::GetJob(err).into())
         }
     }

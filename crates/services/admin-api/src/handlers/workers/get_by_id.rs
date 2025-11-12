@@ -5,7 +5,8 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::{NodeId, WorkerInfo};
+use monitoring::logging;
+use worker::{info::WorkerInfo, node_id::NodeId};
 
 use crate::{
     ctx::Ctx,
@@ -14,7 +15,7 @@ use crate::{
 
 /// Handler for the `GET /workers/{id}` endpoint
 ///
-/// Retrieves and returns a specific worker by its node ID from the metadata database.
+/// Retrieves and returns a specific worker by its node ID from the scheduler.
 ///
 /// ## Path Parameters
 /// - `id`: The unique node identifier of the worker to retrieve
@@ -23,12 +24,12 @@ use crate::{
 /// - **200 OK**: Returns the worker information as JSON with detailed metadata
 /// - **400 Bad Request**: Invalid node ID format (not parseable as NodeId)
 /// - **404 Not Found**: Worker with the given node ID does not exist
-/// - **500 Internal Server Error**: Database connection or query error
+/// - **500 Internal Server Error**: Scheduler query error
 ///
 /// ## Error Codes
 /// - `INVALID_WORKER_ID`: The provided ID is not a valid worker node identifier
 /// - `WORKER_NOT_FOUND`: No worker exists with the given node ID
-/// - `METADATA_DB_GET_BY_ID_ERROR`: Failed to retrieve worker from database
+/// - `SCHEDULER_GET_WORKER_ERROR`: Failed to retrieve worker from scheduler
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -55,17 +56,17 @@ pub async fn handler(
     let id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid worker node ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid worker node ID in path");
             return Err(Error::InvalidId(err).into());
         }
     };
 
-    match metadata_db::workers::get_by_id(&ctx.metadata_db, &id).await {
+    match ctx.scheduler.get_worker_by_id(&id).await {
         Ok(Some(worker)) => Ok(Json(worker.into())),
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {
-            tracing::debug!(error=?err, worker_id=?id, "failed to get worker by ID");
-            Err(Error::MetadataDbGetById(err).into())
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), worker_id=?id, "failed to get worker by ID");
+            Err(Error::SchedulerGetWorker(err).into())
         }
     }
 }
@@ -247,7 +248,7 @@ impl From<metadata_db::Worker> for WorkerDetailResponse {
 ///
 /// This enum represents all possible error conditions that can occur
 /// when handling a `GET /workers/{id}` request, from path parsing
-/// to database operations.
+/// to scheduler operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The worker node ID in the URL path is invalid
@@ -262,20 +263,20 @@ pub enum Error {
     /// The requested worker was not found
     ///
     /// This occurs when:
-    /// - No worker exists with the specified node ID in the database
+    /// - No worker exists with the specified node ID
     /// - The worker was removed after the request was made
     /// - The node ID refers to a nonexistent record
     #[error("worker '{id}' not found")]
     NotFound { id: NodeId },
 
-    /// Failed to retrieve worker from the metadata database
+    /// Failed to retrieve worker from the scheduler
     ///
     /// This occurs when:
     /// - Database connection fails or is lost during the query
     /// - Query execution encounters an internal database error
     /// - Connection pool is exhausted or unavailable
     #[error("failed to get worker by ID: {0}")]
-    MetadataDbGetById(#[source] metadata_db::Error),
+    SchedulerGetWorker(#[source] crate::scheduler::GetWorkerError),
 }
 
 impl IntoErrorResponse for Error {
@@ -283,7 +284,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId(_) => "INVALID_WORKER_ID",
             Error::NotFound { .. } => "WORKER_NOT_FOUND",
-            Error::MetadataDbGetById(_) => "METADATA_DB_GET_BY_ID_ERROR",
+            Error::SchedulerGetWorker(_) => "SCHEDULER_GET_WORKER_ERROR",
         }
     }
 
@@ -291,7 +292,7 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidId(_) => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
-            Error::MetadataDbGetById(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SchedulerGetWorker(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

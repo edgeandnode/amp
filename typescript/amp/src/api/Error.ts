@@ -108,6 +108,32 @@ export class DatasetNotFound extends Schema.Class<DatasetNotFound>("DatasetNotFo
 }
 
 /**
+ * TableNotFoundInDataset - Table not found in dataset.
+ *
+ * Causes:
+ * - Table name referenced in SQL query does not exist in the dataset
+ * - Table name is misspelled
+ * - Dataset does not contain the referenced table
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries with invalid table references
+ */
+export class TableNotFoundInDataset extends Schema.Class<TableNotFoundInDataset>("TableNotFoundInDataset")(
+  {
+    code: Schema.Literal("TABLE_NOT_FOUND_IN_DATASET").pipe(
+      Schema.propertySignature,
+      Schema.fromKey("error_code"),
+    ),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "TableNotFoundInDataset" as const
+}
+
+/**
  * InvalidSelector - The provided dataset selector (name/version) is malformed or invalid.
  *
  * Causes:
@@ -465,6 +491,7 @@ export class ManifestNotFound extends Schema.Class<ManifestNotFound>("ManifestNo
  *
  * Applies to:
  * - POST /datasets - When request body is invalid
+ * - POST /schema - When request payload cannot be parsed
  */
 export class InvalidPayloadFormat extends Schema.Class<InvalidPayloadFormat>("InvalidPayloadFormat")(
   {
@@ -556,15 +583,14 @@ export class RegistrationFailed extends Schema.Class<RegistrationFailed>("Regist
  * PlanningError - Query planning failure.
  *
  * Causes:
- * - Invalid SQL syntax in query
- * - Referenced tables or datasets don't exist
- * - Type mismatches in query
- * - Unsupported SQL features
- * - Schema inference failures
+ * - Query planning fails due to invalid references
+ * - Type inference failures
+ * - Schema determination errors
+ * - Internal DataFusion planning errors
  *
  * Applies to:
+ * - POST /schema - When determining output schema
  * - Query execution operations
- * - Schema inference operations
  */
 export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
   {
@@ -572,7 +598,7 @@ export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
-    [HttpApiSchema.AnnotationStatus]: 400,
+    [HttpApiSchema.AnnotationStatus]: 500,
   },
 ) {
   readonly _tag = "PlanningError" as const
@@ -601,4 +627,454 @@ export class CatalogForSqlError extends Schema.Class<CatalogForSqlError>("Catalo
   },
 ) {
   readonly _tag = "CatalogForSqlError" as const
+}
+
+/**
+ * UnqualifiedTable - Table reference is not qualified with a dataset.
+ *
+ * Causes:
+ * - SQL query contains a table reference without a schema/dataset qualifier
+ * - All tables must be qualified with a dataset reference (e.g., dataset.table)
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries
+ * - Query operations with unqualified table references
+ */
+export class UnqualifiedTable extends Schema.Class<UnqualifiedTable>("UnqualifiedTable")(
+  {
+    code: Schema.Literal("UNQUALIFIED_TABLE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "UnqualifiedTable" as const
+}
+
+/**
+ * CatalogQualifiedTable - Table reference includes a catalog qualifier.
+ *
+ * Causes:
+ * - SQL query contains a catalog-qualified table reference (catalog.schema.table)
+ * - Only dataset-qualified tables are supported (dataset.table)
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries
+ * - Query operations with catalog-qualified table references
+ */
+export class CatalogQualifiedTable extends Schema.Class<CatalogQualifiedTable>("CatalogQualifiedTable")(
+  {
+    code: Schema.Literal("CATALOG_QUALIFIED_TABLE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "CatalogQualifiedTable" as const
+}
+
+/**
+ * InvalidTableName - Table name does not conform to SQL identifier rules.
+ *
+ * Causes:
+ * - Table name contains invalid characters
+ * - Table name doesn't follow naming conventions
+ * - Table name exceeds maximum length
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries
+ * - Query operations with invalid table names
+ */
+export class InvalidTableName extends Schema.Class<InvalidTableName>("InvalidTableName")(
+  {
+    code: Schema.Literal("INVALID_TABLE_NAME").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidTableName" as const
+}
+
+/**
+ * InvalidSchemaReference - Schema portion of table reference is not a valid dataset reference.
+ *
+ * Causes:
+ * - Schema/dataset reference format is invalid
+ * - Dataset reference doesn't conform to expected format (namespace/name@version)
+ * - Invalid characters or structure in dataset reference
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries
+ * - Query operations with invalid schema references
+ */
+export class InvalidSchemaReference extends Schema.Class<InvalidSchemaReference>("InvalidSchemaReference")(
+  {
+    code: Schema.Literal("INVALID_SCHEMA_REFERENCE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidSchemaReference" as const
+}
+
+/**
+ * ResolveHashError - Failed to resolve dataset reference to hash.
+ *
+ * Causes:
+ * - Dataset store cannot resolve a reference to content hash
+ * - Storage backend errors
+ * - Invalid reference format
+ *
+ * Applies to:
+ * - POST /schema - When resolving dataset references
+ */
+export class ResolveHashError extends Schema.Class<ResolveHashError>("ResolveHashError")(
+  {
+    code: Schema.Literal("RESOLVE_HASH_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "ResolveHashError" as const
+}
+
+/**
+ * GetDatasetError - Failed to retrieve dataset from store.
+ *
+ * Causes:
+ * - Dataset manifest is invalid or corrupted
+ * - Unsupported dataset kind
+ * - Storage backend errors when reading dataset
+ *
+ * Applies to:
+ * - POST /schema - When loading dataset definitions
+ */
+export class GetDatasetError extends Schema.Class<GetDatasetError>("GetDatasetError")(
+  {
+    code: Schema.Literal("GET_DATASET_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "GetDatasetError" as const
+}
+
+/**
+ * EthCallUdfCreationError - Failed to create ETH call UDF.
+ *
+ * Causes:
+ * - Invalid provider configuration for dataset
+ * - Provider connection issues
+ * - Dataset is not an EVM RPC dataset but eth_call was requested
+ *
+ * Applies to:
+ * - POST /schema - When creating ETH call UDFs
+ */
+export class EthCallUdfCreationError extends Schema.Class<EthCallUdfCreationError>("EthCallUdfCreationError")(
+  {
+    code: Schema.Literal("ETH_CALL_UDF_CREATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "EthCallUdfCreationError" as const
+}
+
+/**
+ * InvalidFunctionReference - Invalid function reference in SQL.
+ *
+ * Causes:
+ * - Function's dataset qualifier cannot be parsed as valid dataset reference
+ * - Invalid function qualification format
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries with dataset-qualified functions
+ */
+export class InvalidFunctionReference extends Schema.Class<InvalidFunctionReference>("InvalidFunctionReference")(
+  {
+    code: Schema.Literal("INVALID_FUNCTION_REFERENCE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidFunctionReference" as const
+}
+
+/**
+ * InvalidFunctionFormat - Invalid function format in SQL.
+ *
+ * Causes:
+ * - Function names must be either unqualified or dataset-qualified
+ * - Function has more than two parts
+ * - Invalid function naming format
+ *
+ * Applies to:
+ * - POST /schema - When analyzing SQL queries with functions
+ */
+export class InvalidFunctionFormat extends Schema.Class<InvalidFunctionFormat>("InvalidFunctionFormat")(
+  {
+    code: Schema.Literal("INVALID_FUNCTION_FORMAT").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidFunctionFormat" as const
+}
+
+/**
+ * SqlParseError - SQL parse error.
+ *
+ * Causes:
+ * - SQL query has invalid syntax
+ * - Unsupported SQL features are used
+ * - Query parsing fails
+ *
+ * Applies to:
+ * - POST /schema - When parsing SQL queries
+ */
+export class SqlParseError extends Schema.Class<SqlParseError>("SqlParseError")(
+  {
+    code: Schema.Literal("SQL_PARSE_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "SqlParseError" as const
+}
+
+/**
+ * FunctionNotFoundInDataset - Function not found in referenced dataset.
+ *
+ * Causes:
+ * - SQL query references a function that doesn't exist in the dataset
+ * - Function name is misspelled or dataset doesn't define the function
+ *
+ * Applies to:
+ * - POST /schema - When resolving function references
+ */
+export class FunctionNotFoundInDataset extends Schema.Class<FunctionNotFoundInDataset>("FunctionNotFoundInDataset")(
+  {
+    code: Schema.Literal("FUNCTION_NOT_FOUND_IN_DATASET").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "FunctionNotFoundInDataset" as const
+}
+
+/**
+ * EthCallNotAvailable - eth_call function not available for dataset.
+ *
+ * Causes:
+ * - eth_call function is referenced in SQL but dataset doesn't support it
+ * - Dataset is not an EVM RPC dataset
+ *
+ * Applies to:
+ * - POST /schema - When checking eth_call availability
+ */
+export class EthCallNotAvailable extends Schema.Class<EthCallNotAvailable>("EthCallNotAvailable")(
+  {
+    code: Schema.Literal("ETH_CALL_NOT_AVAILABLE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "EthCallNotAvailable" as const
+}
+
+/**
+ * DependencyNotFound - Dependency not found in dataset store.
+ *
+ * Causes:
+ * - Referenced dependency does not exist in dataset store
+ * - Specified version or hash cannot be found
+ *
+ * Applies to:
+ * - POST /schema - When resolving dependencies
+ */
+export class DependencyNotFound extends Schema.Class<DependencyNotFound>("DependencyNotFound")(
+  {
+    code: Schema.Literal("DEPENDENCY_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "DependencyNotFound" as const
+}
+
+/**
+ * DependencyAliasNotFound - Dependency alias not found in dependencies map.
+ *
+ * Causes:
+ * - Table reference uses an alias not provided in dependencies
+ * - Function reference uses an alias not provided in dependencies
+ *
+ * Applies to:
+ * - POST /schema - When looking up dependency aliases
+ */
+export class DependencyAliasNotFound extends Schema.Class<DependencyAliasNotFound>("DependencyAliasNotFound")(
+  {
+    code: Schema.Literal("DEPENDENCY_ALIAS_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "DependencyAliasNotFound" as const
+}
+
+/**
+ * EmptyTablesAndFunctions - No tables or functions provided.
+ *
+ * Causes:
+ * - At least one table or function is required for schema analysis
+ *
+ * Applies to:
+ * - POST /schema - When both tables and functions fields are empty
+ */
+export class EmptyTablesAndFunctions extends Schema.Class<EmptyTablesAndFunctions>("EmptyTablesAndFunctions")(
+  {
+    code: Schema.Literal("EMPTY_TABLES_AND_FUNCTIONS").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "EmptyTablesAndFunctions" as const
+}
+
+/**
+ * InvalidTableSql - SQL syntax error in table definition.
+ *
+ * Causes:
+ * - Query parsing fails
+ *
+ * Applies to:
+ * - POST /schema - When analyzing table SQL queries
+ */
+export class InvalidTableSql extends Schema.Class<InvalidTableSql>("InvalidTableSql")(
+  {
+    code: Schema.Literal("INVALID_TABLE_SQL").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidTableSql" as const
+}
+
+/**
+ * TableReferenceResolution - Failed to extract table references from SQL.
+ *
+ * Causes:
+ * - Invalid table reference format encountered
+ *
+ * Applies to:
+ * - POST /schema - When resolving table references
+ */
+export class TableReferenceResolution extends Schema.Class<TableReferenceResolution>("TableReferenceResolution")(
+  {
+    code: Schema.Literal("TABLE_REFERENCE_RESOLUTION").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "TableReferenceResolution" as const
+}
+
+/**
+ * FunctionReferenceResolution - Failed to resolve function references from SQL.
+ *
+ * Causes:
+ * - Unsupported DML statements encountered
+ *
+ * Applies to:
+ * - POST /schema - When resolving function references
+ */
+export class FunctionReferenceResolution
+  extends Schema.Class<FunctionReferenceResolution>("FunctionReferenceResolution")(
+    {
+      code: Schema.Literal("FUNCTION_REFERENCE_RESOLUTION").pipe(
+        Schema.propertySignature,
+        Schema.fromKey("error_code"),
+      ),
+      message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+    },
+    {
+      [HttpApiSchema.AnnotationStatus]: 500,
+    },
+  )
+{
+  readonly _tag = "FunctionReferenceResolution" as const
+}
+
+/**
+ * DependencyResolution - Failed to resolve dependency.
+ *
+ * Causes:
+ * - Database query fails during resolution
+ *
+ * Applies to:
+ * - POST /schema - When resolving dependencies
+ */
+export class DependencyResolution extends Schema.Class<DependencyResolution>("DependencyResolution")(
+  {
+    code: Schema.Literal("DEPENDENCY_RESOLUTION").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "DependencyResolution" as const
+}
+
+/**
+ * SchemaInference - Failed to infer output schema from query.
+ *
+ * Causes:
+ * - Schema determination encounters errors
+ *
+ * Applies to:
+ * - POST /schema - When inferring output schema
+ */
+export class SchemaInference extends Schema.Class<SchemaInference>("SchemaInference")(
+  {
+    code: Schema.Literal("SCHEMA_INFERENCE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "SchemaInference" as const
 }

@@ -36,6 +36,7 @@
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
 use datasets_common::{fqn::FullyQualifiedName, version::Version};
+use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 use serde_json::value::RawValue;
 
@@ -124,7 +125,7 @@ async fn load_manifest(manifest_path: &ManifestFilePath) -> Result<String, Error
                 path: manifest_path.to_string(),
             }
         } else {
-            tracing::error!(path = %manifest_path, error = %err, "Failed to read manifest");
+            tracing::error!(path = %manifest_path, error = %err, error_source = logging::error_source(&err), "Failed to read manifest");
             Error::ManifestReadError {
                 path: manifest_path.to_string(),
                 source: err,

@@ -346,26 +346,3 @@ jobs:
             images+="${tag}@${DIGEST} "
           done
           cosign sign --yes ${images}
-
-  trigger-deploy:
-    needs: build
-    if: success()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger AMP Deploy in amp-infra
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          github-token: ${{ secrets.AMP_INFRA_DISPATCH_TOKEN }}
-          script: |
-            await github.rest.repos.createDispatchEvent({
-              owner: 'edgeandnode',
-              repo: 'amp-infra',
-              event_type: 'build-completed',
-              client_payload: {
-                ref: context.ref,
-                sha: context.sha,
-                workflow_run_id: context.runId,
-                build_status: 'success',
-                repository: context.repo.repo
-              }
-            });

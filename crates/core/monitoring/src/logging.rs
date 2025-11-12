@@ -17,20 +17,19 @@ pub fn init() {
     // multiple initializations.
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let (env_filter, amp_log_level) = env_filter_and_log_level();
+        let env_filter = env_filter();
 
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
             .with_ansi(std::io::stderr().is_terminal())
             .init();
-
-        tracing::info!("log level: {}", amp_log_level);
     });
 }
 
 /// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
 pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
-    let (env_filter, amp_log_level) = env_filter_and_log_level();
+    let env_filter = env_filter();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
@@ -50,8 +49,6 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
         .with(fmt_layer)
         .with(telemetry_layer)
         .init();
-
-    tracing::info!("log level: {}", amp_log_level);
 
     Ok(traces_provider)
 }
@@ -83,7 +80,7 @@ const AMP_CRATES: &[&str] = &[
     "worker",
 ];
 
-fn env_filter_and_log_level() -> (EnvFilter, String) {
+fn env_filter() -> EnvFilter {
     // Parse directives from RUST_LOG
     let log_filter = EnvFilter::builder().with_default_directive(LevelFilter::ERROR.into());
     let directive_string = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
@@ -99,7 +96,24 @@ fn env_filter_and_log_level() -> (EnvFilter, String) {
         }
     }
 
-    (env_filter, log_level)
+    env_filter
+}
+
+/// Serialize the error source chain as a JSON array of strings.
+///
+/// Walks the `.source()` chain of the provided error and collects each source's
+/// Display representation into a JSON array. Returns an empty array "[]" if the
+/// error has no source chain.
+pub fn error_source(err: &dyn std::error::Error) -> String {
+    let mut sources = Vec::new();
+    let mut current = err.source();
+
+    while let Some(curr) = current {
+        sources.push(curr.to_string());
+        current = curr.source();
+    }
+
+    serde_json::to_string(&sources).expect("Failed to serialize error sources to JSON")
 }
 
 /// If this fails, just update the above `AMP_CRATES` to match reality.

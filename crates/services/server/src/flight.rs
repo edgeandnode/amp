@@ -26,7 +26,11 @@ use common::{
         datatypes::SchemaRef,
         ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
-    catalog::physical::Catalog,
+    catalog::{
+        errors::{CatalogForSqlError, GetPhysicalCatalogError, PlanningCtxForSqlError},
+        physical::Catalog,
+        sql::{catalog_for_sql, planning_ctx_for_sql},
+    },
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv, parse_sql},
@@ -35,8 +39,8 @@ use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{
-    CatalogForSqlError, DatasetStore, GetDatasetError, GetPhysicalCatalogError,
-    PlanningCtxForSqlError, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+    DatasetStore, GetDatasetError, manifests::DatasetManifestsStore,
+    providers::ProviderConfigsStore,
 };
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
@@ -65,6 +69,7 @@ pub struct Service {
     dataset_store: Arc<DatasetStore>,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
+    metadata_db: MetadataDb,
 }
 
 impl Service {
@@ -95,6 +100,7 @@ impl Service {
             dataset_store,
             notification_multiplexer,
             metrics,
+            metadata_db,
         })
     }
 
@@ -104,14 +110,22 @@ impl Service {
         is_streaming: Option<bool>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
-        let query = parse_sql(sql).map_err(Error::from)?;
+        let query = parse_sql(sql).map_err(Error::CoreError)?;
         let dataset_store = self.dataset_store.clone();
-        let catalog = dataset_store
-            .catalog_for_sql(&query, self.env.clone())
-            .await?;
+        let catalog = catalog_for_sql(
+            dataset_store.as_ref(),
+            &self.metadata_db,
+            &query,
+            self.env.clone(),
+        )
+        .await
+        .map_err(Error::CatalogForSqlError)?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
+        let plan = ctx
+            .plan_sql(query.clone())
+            .await
+            .map_err(Error::CoreError)?;
 
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
@@ -148,9 +162,14 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
-            let plan = plan.attach_to(&ctx)?;
-            let record_batches = ctx.execute_plan(plan, true).await?;
+            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false)
+                .await
+                .map_err(Error::CoreError)?;
+            let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
+            let record_batches = ctx
+                .execute_plan(plan, true)
+                .await
+                .map_err(Error::CoreError)?;
             let stream = QueryResultStream::NonIncremental {
                 stream: NonEmptyRecordBatchStream::new(record_batches).boxed(),
                 schema,
@@ -223,6 +242,7 @@ impl Service {
         &self,
         descriptor: FlightDescriptor,
         resume_watermark: Option<ResumeWatermark>,
+        streaming_override: Option<bool>,
     ) -> Result<FlightInfo, Error> {
         let (ticket, schema) = match DescriptorType::try_from(descriptor.r#type)
             .map_err(|e| Error::PbDecodeError(e.to_string()))?
@@ -240,10 +260,16 @@ impl Service {
                     // - Build a DataFusion query context with empty tables from that catalog.
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
-                    let query = parse_sql(&sql_query.query)?;
-                    let plan_ctx = self.dataset_store.planning_ctx_for_sql(&query).await?;
-                    let is_streaming = common::stream_helpers::is_streaming(&query);
-                    let schema = plan_ctx.sql_output_schema(query).await?;
+                    let query = parse_sql(&sql_query.query).map_err(Error::CoreError)?;
+                    let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
+                        .await
+                        .map_err(Error::PlanningCtxForSqlError)?;
+                    let is_streaming = streaming_override
+                        .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
+                    let schema = plan_ctx
+                        .sql_output_schema(query)
+                        .await
+                        .map_err(Error::CoreError)?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
@@ -381,8 +407,22 @@ impl FlightService for Service {
             .metadata()
             .get("amp-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
+
+        // Parse amp-stream header to allow controlling streaming via header instead of SQL
+        let streaming_override = request
+            .metadata()
+            .get("amp-stream")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| match s.to_lowercase().as_str() {
+                "true" | "1" => Some(true),
+                "false" | "0" => Some(false),
+                _ => None,
+            });
+
         let descriptor = request.into_inner();
-        let info = self.get_flight_info(descriptor, resume_watermark).await?;
+        let info = self
+            .get_flight_info(descriptor, resume_watermark, streaming_override)
+            .await?;
         Ok(Response::new(info))
     }
 
@@ -718,7 +758,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub fn encode_record_batch(
     batch: RecordBatch,
     app_metadata: Option<&serde_json::Value>,
@@ -788,7 +828,7 @@ fn split_batch_for_grpc_response(
 
 /// Errors that can occur during query execution
 #[derive(Error, Debug)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),
@@ -803,19 +843,19 @@ pub enum Error {
     ExecutionError(DataFusionError),
 
     #[error("error looking up datasets: {0}")]
-    DatasetStoreError(#[from] GetDatasetError),
+    DatasetStoreError(#[source] GetDatasetError),
 
     #[error("error loading catalog for SQL: {0}")]
-    CatalogForSqlError(#[from] CatalogForSqlError),
+    CatalogForSqlError(#[source] CatalogForSqlError),
 
     #[error("error loading physical catalog: {0}")]
-    GetPhysicalCatalogError(#[from] GetPhysicalCatalogError),
+    GetPhysicalCatalogError(#[source] GetPhysicalCatalogError),
 
     #[error("error creating planning context: {0}")]
-    PlanningCtxForSqlError(#[from] PlanningCtxForSqlError),
+    PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
 
     #[error(transparent)]
-    CoreError(#[from] CoreError),
+    CoreError(CoreError),
 
     #[error("invalid query: {0}")]
     InvalidQuery(String),

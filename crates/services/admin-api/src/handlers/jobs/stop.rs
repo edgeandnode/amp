@@ -4,7 +4,8 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use worker::JobId;
+use monitoring::logging;
+use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,
@@ -87,7 +88,7 @@ pub async fn handler(
     let id = match path {
         Ok(Path(id)) => id,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid job ID in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid job ID in path");
             return Err(Error::InvalidId { err }.into());
         }
     };
@@ -122,7 +123,7 @@ pub async fn handler(
             | scheduler::StopJobError::UpdateJobStatus(_)
             | scheduler::StopJobError::CommitTransaction(_)
             | scheduler::StopJobError::SendNotification(_) => {
-                tracing::error!(error=?err, job_id=%id, "Database error during stop operation");
+                tracing::error!(error = %err, error_source = logging::error_source(&err), job_id=%id, "Database error during stop operation");
                 Err(Error::StopJob { id, source: err }.into())
             }
         };

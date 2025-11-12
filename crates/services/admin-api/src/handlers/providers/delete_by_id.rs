@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
 };
 use dataset_store::providers::DeleteError;
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -63,7 +64,7 @@ pub async fn handler(
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
-            tracing::debug!(error=?err, "invalid provider name in path");
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid provider name in path");
             return Err(Error::InvalidName { err }.into());
         }
     };
@@ -88,7 +89,7 @@ pub async fn handler(
         Err(other) => {
             tracing::error!(
                 provider_name = %name,
-                error = %other,
+                error = %other, error_source = logging::error_source(&other),
                 "failed to delete provider"
             );
             Err(Error::StoreError(other).into())
@@ -129,7 +130,7 @@ pub enum Error {
     /// such as filesystem errors, permission issues, or other
     /// store-level problems during deletion.
     #[error("failed to delete provider configuration: {0}")]
-    StoreError(#[from] DeleteError),
+    StoreError(#[source] DeleteError),
 }
 
 impl IntoErrorResponse for Error {

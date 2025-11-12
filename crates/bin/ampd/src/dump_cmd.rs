@@ -13,9 +13,10 @@ use dataset_store::{
 use datasets_common::reference::Reference;
 use dump::EndBlock;
 use metadata_db::{MetadataDb, notification_multiplexer};
+use monitoring::telemetry::metrics::Meter;
 use static_assertions::const_assert;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn run(
     mut config: Config,
     metadata_db: MetadataDb,
@@ -27,7 +28,7 @@ pub async fn run(
     run_every_mins: Option<u64>,
     location: Option<String>,
     fresh: bool,
-    metrics_meter: Option<&monitoring::telemetry::metrics::Meter>,
+    metrics_meter: Option<Meter>,
 ) -> Result<(), BoxError> {
     if let Some(size_mb) = partition_size_mb {
         config.parquet.target_size.bytes = size_mb * 1024 * 1024;
@@ -61,7 +62,7 @@ pub async fn run(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn dump(
     config: Arc<Config>,
     metadata_db: MetadataDb,
@@ -73,7 +74,7 @@ pub async fn dump(
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
     fresh: bool,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
+    meter: Option<Meter>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let data_store = match new_location {
         Some(location) => {
@@ -118,13 +119,18 @@ pub async fn dump(
         };
 
         // Create metrics registry if meter is available
-        let metrics =
-            meter.map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
+        let metrics = meter
+            .as_ref()
+            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
 
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         if matches!(dataset.kind.as_str(), "sql" | "manifest") {
-            let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
+            let table_names: Vec<String> = dataset
+                .tables
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect();
             tracing::info!(
                 "Table dump order for dataset {}: {:?}",
                 dataset_ref,
@@ -158,6 +164,7 @@ pub async fn dump(
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
         notification_multiplexer,
+        meter,
     };
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets

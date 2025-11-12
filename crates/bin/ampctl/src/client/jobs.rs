@@ -2,7 +2,8 @@
 //!
 //! Provides methods for interacting with the `/jobs` endpoints of the admin API.
 
-use worker::JobId;
+use monitoring::logging;
+use worker::job::JobId;
 
 use super::{
     Client,
@@ -95,7 +96,7 @@ impl<'a> JobsClient<'a> {
         match status.as_u16() {
             200 => {
                 let job: JobInfo = response.json().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse job response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse job response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -109,7 +110,7 @@ impl<'a> JobsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -117,7 +118,7 @@ impl<'a> JobsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -182,12 +183,12 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             200 => {
-                tracing::info!("Job stop request processed successfully");
+                tracing::debug!("Job stop request processed successfully");
                 Ok(())
             }
             400 | 404 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     StopError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -195,7 +196,7 @@ impl<'a> JobsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     StopError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -264,12 +265,12 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Job deleted successfully");
+                tracing::debug!("Job deleted successfully");
                 Ok(())
             }
             400 | 409 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     DeleteByIdError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -277,7 +278,7 @@ impl<'a> JobsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     DeleteByIdError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -355,12 +356,12 @@ impl<'a> JobsClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Jobs deleted successfully");
+                tracing::debug!("Jobs deleted successfully");
                 Ok(())
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     DeleteByStatusError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -368,7 +369,7 @@ impl<'a> JobsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     DeleteByStatusError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -401,9 +402,9 @@ impl<'a> JobsClient<'a> {
         }
     }
 
-    /// List jobs with pagination.
+    /// List jobs with pagination and optional status filter.
     ///
-    /// GETs from `/jobs` endpoint with optional limit and last_job_id parameters.
+    /// GETs from `/jobs` endpoint with optional limit, last_job_id, and status parameters.
     ///
     /// # Errors
     ///
@@ -414,6 +415,7 @@ impl<'a> JobsClient<'a> {
         &self,
         limit: Option<usize>,
         last_job_id: Option<JobId>,
+        status: Option<&str>,
     ) -> Result<JobsResponse, ListError> {
         let mut url = self.client.base_url().join(jobs_list()).expect("valid URL");
 
@@ -425,6 +427,9 @@ impl<'a> JobsClient<'a> {
             }
             if let Some(last_job_id) = last_job_id {
                 query_pairs.append_pair("last_job_id", &last_job_id.to_string());
+            }
+            if let Some(status) = status {
+                query_pairs.append_pair("status", status);
             }
         }
 
@@ -447,7 +452,7 @@ impl<'a> JobsClient<'a> {
         match status.as_u16() {
             200 => {
                 let jobs_response = response.json::<JobsResponse>().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse jobs response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse jobs response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -457,7 +462,7 @@ impl<'a> JobsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -465,7 +470,7 @@ impl<'a> JobsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),

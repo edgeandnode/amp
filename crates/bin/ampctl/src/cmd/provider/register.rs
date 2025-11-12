@@ -19,6 +19,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
+use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 
 use crate::args::GlobalArgs;
@@ -38,6 +39,22 @@ pub struct Args {
     /// Path or URL to the provider TOML file (local path, file://, s3://, gs://, or az://)
     #[arg(value_name = "FILE", required = true, value_parser = clap::value_parser!(ProviderFilePath))]
     pub provider_file: ProviderFilePath,
+}
+
+/// Result of a provider registration operation.
+#[derive(serde::Serialize)]
+struct RegisterResult {
+    name: String,
+}
+
+impl std::fmt::Display for RegisterResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Provider registered successfully",
+            console::style("✓").green().bold()
+        )
+    }
 }
 
 /// Register a provider configuration via the admin API.
@@ -66,7 +83,11 @@ pub async fn run(
 
     register_provider(&global, &provider_name, &provider_toml).await?;
 
-    crate::success!("Provider registered successfully");
+    let result = RegisterResult {
+        name: provider_name,
+    };
+
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -97,7 +118,7 @@ async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error
                 path: provider_path.to_string(),
             }
         } else {
-            tracing::error!(path = %provider_path, error = %err, "Failed to read provider");
+            tracing::error!(path = %provider_path, error = %err, error_source = logging::error_source(&err), "Failed to read provider");
             Error::ProviderReadError {
                 path: provider_path.to_string(),
                 source: err,
@@ -117,14 +138,14 @@ async fn register_provider(
 ) -> Result<(), Error> {
     // Parse TOML content
     let toml_value: toml::Value = toml::from_str(provider_toml).map_err(|err| {
-        tracing::error!(error = %err, "Failed to parse provider TOML");
-        Error::TomlParseError { source: err }
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse provider TOML");
+        Error::TomlParseError(err)
     })?;
 
     // Convert TOML to JSON for API request
     let json_value: serde_json::Value = serde_json::to_value(&toml_value).map_err(|err| {
-        tracing::error!(error = %err, "Failed to convert TOML to JSON");
-        Error::TomlToJsonConversion { source: err }
+        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to convert TOML to JSON");
+        Error::TomlToJsonConversion(err)
     })?;
 
     // Validate that the JSON is an object
@@ -136,13 +157,13 @@ async fn register_provider(
     }
 
     // Create client and register provider
-    let client = global.build_client()?;
+    let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     client
         .providers()
         .register(provider_name, &json_value)
         .await
-        .map_err(Error::from)?;
+        .map_err(Error::ClientError)?;
 
     Ok(())
 }
@@ -170,11 +191,11 @@ pub enum Error {
 
     /// Failed to parse provider TOML
     #[error("failed to parse provider TOML")]
-    TomlParseError { source: toml::de::Error },
+    TomlParseError(#[source] toml::de::Error),
 
     /// Failed to convert TOML to JSON
     #[error("failed to convert TOML to JSON")]
-    TomlToJsonConversion { source: serde_json::Error },
+    TomlToJsonConversion(#[source] serde_json::Error),
 
     /// Invalid provider structure
     #[error("invalid provider structure: {message}")]
@@ -182,17 +203,15 @@ pub enum Error {
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError {
-        #[from]
-        source: crate::args::BuildClientError,
-    },
+    ClientBuildError(#[source] crate::args::BuildClientError),
 
     /// Error from the provider client
     #[error("provider registration failed")]
-    ClientError {
-        #[from]
-        source: crate::client::providers::RegisterError,
-    },
+    ClientError(#[source] crate::client::providers::RegisterError),
+
+    /// Failed to serialize result to JSON
+    #[error("failed to serialize result to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }
 
 /// Provider file path supporting local and remote storage.

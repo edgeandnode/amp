@@ -3,6 +3,7 @@
 use axum::{Json, extract::State, http::StatusCode};
 use dataset_store::DeleteManifestError;
 use futures::stream::{FuturesUnordered, StreamExt};
+use monitoring::logging;
 
 use crate::{
     ctx::Ctx,
@@ -55,7 +56,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<PruneResponse>, Erro
         .await
         .map_err(|err| {
             tracing::error!(
-                error = ?err,
+                error = %err, error_source = logging::error_source(&err),
                 "failed to list orphaned manifests"
             );
             Error(err)
@@ -90,35 +91,35 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<PruneResponse>, Erro
                     DeleteManifestError::TransactionBegin(err) => {
                         tracing::warn!(
                             manifest_hash = %hash,
-                            error = %err,
+                            error = %err, error_source = logging::error_source(&err),
                             "failed to begin transaction for manifest deletion"
                         );
                     }
                     DeleteManifestError::MetadataDbCheckLinks(err) => {
                         tracing::warn!(
                             manifest_hash = %hash,
-                            error = %err,
+                            error = %err, error_source = logging::error_source(&err),
                             "failed to check remaining manifest links"
                         );
                     }
                     DeleteManifestError::MetadataDbDelete(err) => {
                         tracing::warn!(
                             manifest_hash = %hash,
-                            error = %err,
+                            error = %err, error_source = logging::error_source(&err),
                             "failed to delete manifest from metadata database"
                         );
                     }
                     DeleteManifestError::ObjectStoreError(err) => {
                         tracing::warn!(
                             manifest_hash = %hash,
-                            error = %err,
+                            error = %err, error_source = logging::error_source(&err),
                             "failed to delete manifest file from object store"
                         );
                     }
                     DeleteManifestError::TransactionCommit(err) => {
                         tracing::warn!(
                             manifest_hash = %hash,
-                            error = %err,
+                            error = %err, error_source = logging::error_source(&err),
                             "failed to commit manifest deletion transaction"
                         );
                     }

@@ -13,10 +13,10 @@ const count = event("Count(uint256 count)")
 
 export default defineDataset(() => ({
   name: "example",
-  version: "0.1.0",
-  network: "mainnet",
+  version: "0.0.1",
+  network: "anvil",
   dependencies: {
-    anvil: "_/anvil@0.1.0",
+    anvil: "_/anvil@0.0.1",
   },
   tables: {
     counts: {

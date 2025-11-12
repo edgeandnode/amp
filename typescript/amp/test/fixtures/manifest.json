@@ -1,7 +1,7 @@
 {
   "kind": "manifest",
   "dependencies": {
-    "anvil": "_/anvil@0.1.0"
+    "anvil": "_/anvil@0.0.1"
   },
   "tables": {
     "counts": {

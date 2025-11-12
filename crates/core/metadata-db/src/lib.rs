@@ -135,7 +135,7 @@ impl MetadataDb {
     /// roll back when dropped unless explicitly committed with `.commit()`.
     #[instrument(skip(self), err)]
     pub async fn begin_txn(&self) -> Result<Transaction, Error> {
-        let tx = self.pool.begin().await.map_err(Error::DbError)?;
+        let tx = self.pool.begin().await.map_err(Error::Database)?;
         Ok(Transaction::new(tx))
     }
 
@@ -211,7 +211,7 @@ impl MetadataDb {
     ///
     /// Creates a new file metadata entry with the provided information. Uses
     /// ON CONFLICT DO NOTHING to make the operation idempotent.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn register_file(
         &self,
         location_id: LocationId,
@@ -233,7 +233,7 @@ impl MetadataDb {
             footer,
         )
         .await
-        .map_err(Error::DbError)
+        .map_err(Error::Database)
     }
 
     /// Streams file metadata for a specific location.
@@ -245,7 +245,7 @@ impl MetadataDb {
         location_id: LocationId,
     ) -> impl Stream<Item = Result<FileMetadataWithDetails, Error>> + '_ {
         files::stream_with_details(&*self.pool, location_id)
-            .map(|result| result.map_err(Error::DbError))
+            .map(|result| result.map_err(Error::Database))
     }
 
     /// List file metadata records for a specific location with cursor-based pagination support
@@ -261,12 +261,13 @@ impl MetadataDb {
     ) -> Result<Vec<FileMetadata>, Error> {
         match last_file_id {
             Some(file_id) => {
-                Ok(
-                    files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
-                        .await?,
-                )
+                files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
+                    .await
+                    .map_err(Error::Database)
             }
-            None => Ok(files::pagination::list_first_page(&*self.pool, location_id, limit).await?),
+            None => files::pagination::list_first_page(&*self.pool, location_id, limit)
+                .await
+                .map_err(Error::Database),
         }
     }
 
@@ -281,7 +282,7 @@ impl MetadataDb {
     ) -> Result<Option<FileMetadataWithDetails>, Error> {
         files::get_by_id_with_details(&*self.pool, file_id)
             .await
-            .map_err(Error::DbError)
+            .map_err(Error::Database)
     }
 
     /// Retrieves footer bytes for a specific file.
@@ -290,7 +291,7 @@ impl MetadataDb {
     pub async fn get_file_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
         files::get_footer_bytes_by_id(&*self.pool, file_id)
             .await
-            .map_err(Error::DbError)
+            .map_err(Error::Database)
     }
 
     /// Delete file metadata record by ID
@@ -299,7 +300,7 @@ impl MetadataDb {
     pub async fn delete_file(&self, file_id: FileId) -> Result<bool, Error> {
         files::delete(&*self.pool, file_id)
             .await
-            .map_err(Error::DbError)
+            .map_err(Error::Database)
     }
 }
 
@@ -323,7 +324,11 @@ impl MetadataDb {
          WHERE id = $1;
         ";
 
-        sqlx::query(sql).bind(file_id).execute(&*self.pool).await?;
+        sqlx::query(sql)
+            .bind(file_id)
+            .execute(&*self.pool)
+            .await
+            .map_err(Error::Database)?;
 
         Ok(())
     }
@@ -338,10 +343,11 @@ impl MetadataDb {
         RETURNING id;
         ";
 
-        Ok(sqlx::query_scalar(sql)
+        sqlx::query_scalar(sql)
             .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
             .fetch_all(&*self.pool)
-            .await?)
+            .await
+            .map_err(Error::Database)
     }
 
     /// Inserts or updates the GC manifest for the given file IDs.
@@ -374,7 +380,8 @@ impl MetadataDb {
             .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
             .bind(interval)
             .execute(&*self.pool)
-            .await?;
+            .await
+            .map_err(Error::Database)?;
 
         Ok(())
     }
@@ -396,7 +403,7 @@ impl MetadataDb {
         sqlx::query_as(sql)
             .bind(location_id)
             .fetch(&*self.pool)
-            .map_err(Error::DbError)
+            .map_err(Error::Database)
             .boxed()
     }
 }

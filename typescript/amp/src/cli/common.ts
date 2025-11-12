@@ -1,5 +1,6 @@
 import * as Options from "@effect/cli/Options"
 import * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 export const adminUrl = Options.text("admin-url").pipe(
@@ -22,3 +23,8 @@ export const configFile = Options.file("config", { exists: "yes" }).pipe(
   Options.withAlias("c"),
   Options.withDescription("The dataset definition config file"),
 )
+
+export const ExitCode = {
+  NonZero: Effect.sync(() => process.exit(1)),
+  Zero: Effect.sync(() => process.exit(0)),
+}

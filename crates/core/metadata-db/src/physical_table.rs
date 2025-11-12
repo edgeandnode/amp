@@ -7,10 +7,12 @@ use url::Url;
 
 pub mod events;
 mod location_id;
+mod name;
 pub(crate) mod sql;
 
-pub use self::location_id::{
-    LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+pub use self::{
+    location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
+    name::{Name as TableName, NameOwned as TableNameOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
@@ -24,7 +26,7 @@ use crate::{
 ///
 /// This operation is idempotent - if a location with the same URL already exists,
 /// its manifest_hash will be updated and the existing location ID will be returned.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
@@ -51,7 +53,7 @@ where
         active,
     )
     .await
-    .map_err(Into::into)
+    .map_err(Error::Database)
 }
 
 /// Get a physical table location by its ID
@@ -63,7 +65,9 @@ pub async fn get_by_id<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::get_by_id(exe, id.into()).await.map_err(Into::into)
+    sql::get_by_id(exe, id.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// Get a physical table location with full writer job details
@@ -77,7 +81,7 @@ where
 {
     sql::get_by_id_with_details(exe, id.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::Database)
 }
 
 /// Look up a location ID by its storage URL
@@ -89,7 +93,7 @@ pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, E
 where
     E: Executor<'c>,
 {
-    sql::url_to_id(exe, url).await.map_err(Into::into)
+    sql::url_to_id(exe, url).await.map_err(Error::Database)
 }
 
 /// Get the currently active physical table location for a given table
@@ -106,7 +110,7 @@ where
 {
     sql::get_active_physical_table(exe, table_id.manifest_hash, table_id.table)
         .await
-        .map_err(Into::into)
+        .map_err(Error::Database)
 }
 
 /// Mark all active locations for a table as inactive
@@ -125,7 +129,7 @@ where
 {
     sql::mark_inactive_by_table_id(exe, table_id.manifest_hash, table_id.table)
         .await
-        .map_err(Into::into)
+        .map_err(Error::Database)
 }
 
 /// Mark a specific location as active
@@ -153,7 +157,7 @@ where
         location_id.into(),
     )
     .await
-    .map_err(Into::into)
+    .map_err(Error::Database)
 }
 
 /// Get all physical table locations that were written by a specific job
@@ -167,7 +171,7 @@ where
 {
     sql::get_by_job_id(exe, job_id.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::Database)
 }
 
 /// Assign a job as the writer for multiple locations
@@ -185,7 +189,7 @@ where
 {
     sql::assign_job_writer(exe, locations, job_id.into())
         .await
-        .map_err(Into::into)
+        .map_err(Error::Database)
 }
 
 /// Delete a physical table location by its ID
@@ -204,7 +208,9 @@ pub async fn delete_by_id<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::delete_by_id(exe, id.into()).await.map_err(Into::into)
+    sql::delete_by_id(exe, id.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// List physical table locations with cursor-based pagination
@@ -224,7 +230,7 @@ where
         None => sql::list_first_page(exe, limit).await,
         Some(id) => sql::list_next_page(exe, limit, id.into()).await,
     }
-    .map_err(Into::into)
+    .map_err(Error::Database)
 }
 
 /// Listen for location change notifications
@@ -238,7 +244,7 @@ pub async fn listen_for_location_change_notif(
 ) -> Result<events::LocationNotifListener, Error> {
     events::listen_url(&metadata_db.url)
         .await
-        .map_err(Into::into)
+        .map_err(|err| Error::LocationNotificationSend(events::LocationNotifSendError(err)))
 }
 
 /// Send a location change notification
@@ -255,7 +261,7 @@ where
 {
     events::notify(exe, location_id.into())
         .await
-        .map_err(|err| Error::DbError(err.0))
+        .map_err(|err| Error::Database(err.0))
 }
 
 /// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
@@ -263,7 +269,20 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
     pub manifest_hash: ManifestHash<'a>,
-    pub table: &'a str,
+    pub table: TableName<'a>,
+}
+
+impl<'a> TableId<'a> {
+    /// Create a new TableId with flexible parameter types
+    pub fn new(
+        manifest_hash: impl Into<ManifestHash<'a>>,
+        table: impl Into<TableName<'a>>,
+    ) -> Self {
+        Self {
+            manifest_hash: manifest_hash.into(),
+            table: table.into(),
+        }
+    }
 }
 
 /// Basic location information from the database
@@ -279,7 +298,7 @@ pub struct PhysicalTable {
     pub dataset_name: DatasetNameOwned,
 
     /// Name of the table within the dataset
-    pub table_name: String,
+    pub table_name: TableNameOwned,
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,

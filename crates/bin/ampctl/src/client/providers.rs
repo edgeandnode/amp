@@ -2,6 +2,8 @@
 //!
 //! Provides methods for interacting with the `/providers` endpoints of the admin API.
 
+use monitoring::logging;
+
 use super::{
     Client,
     error::{ApiError, ErrorResponse},
@@ -101,7 +103,7 @@ impl<'a> ProvidersClient<'a> {
             201 => Ok(()),
             400 | 409 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -109,7 +111,7 @@ impl<'a> ProvidersClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -181,7 +183,7 @@ impl<'a> ProvidersClient<'a> {
         match status.as_u16() {
             200 => {
                 let provider: serde_json::Value = response.json().await.map_err(|err| {
-                    tracing::error!(error = %err, "Failed to parse provider response");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse provider response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to parse response: {}", err),
@@ -195,7 +197,7 @@ impl<'a> ProvidersClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -203,7 +205,7 @@ impl<'a> ProvidersClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -270,7 +272,7 @@ impl<'a> ProvidersClient<'a> {
             200 => {
                 let providers_response =
                     response.json::<ProvidersResponse>().await.map_err(|err| {
-                        tracing::error!(error = %err, "Failed to parse providers response");
+                        tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse providers response");
                         ListError::UnexpectedResponse {
                             status: status.as_u16(),
                             message: format!("Failed to parse response: {}", err),
@@ -281,7 +283,7 @@ impl<'a> ProvidersClient<'a> {
             }
             500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -289,7 +291,7 @@ impl<'a> ProvidersClient<'a> {
                 })?;
 
                 let _error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     ListError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -349,12 +351,12 @@ impl<'a> ProvidersClient<'a> {
 
         match status.as_u16() {
             204 => {
-                tracing::info!("Provider deleted successfully");
+                tracing::debug!("Provider deleted successfully");
                 Ok(())
             }
             400 | 404 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to read error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -362,7 +364,7 @@ impl<'a> ProvidersClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, "Failed to parse error response");
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
