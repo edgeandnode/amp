@@ -11,10 +11,11 @@ use common::{
     incrementalizer::incrementalize_plan,
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
-    query_context::{QueryEnv, parse_sql},
+    query_context::QueryEnv,
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
+use datasets_derived::sql_str::SqlStr;
 use futures::{
     FutureExt,
     stream::{self, BoxStream, StreamExt},
@@ -525,12 +526,17 @@ impl StreamingQuery {
         let hash_constraint = hash
             .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
-        let query = parse_sql(&format!(
+        let sql = format!(
             "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
             self.blocks_table.table_ref(),
             number,
             hash_constraint,
-        ))?;
+        );
+
+        // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
+        // for empty or invalid SQL. The format! macro ensures non-empty output.
+        let sql_str = SqlStr::new_unchecked(sql);
+        let query = common::sql::parse(&sql_str)?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         if results.num_rows() == 0 {

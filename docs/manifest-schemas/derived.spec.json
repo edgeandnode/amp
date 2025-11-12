@@ -140,6 +140,11 @@
         "filename"
       ]
     },
+    "SqlStr": {
+      "description": "A string intended to contain SQL, with minimal validation.\n\nThis type performs basic string validation but does **not** parse or validate\nSQL syntax. Actual SQL statement parsing is deferred to the query engine.\n\n[`SqlStr`] is a marker type that provides minimal guarantees: the string is\nnon-empty and contains at least one non-whitespace character.\n\n## Validation Rules\n\n[`SqlStr`] must:\n- **Not be empty** (minimum length of 1 character)\n- **Not be only whitespace** (must contain at least one non-whitespace character)\n\n## Non-Goals\n\nThis type does **not**:\n- Parse SQL syntax\n- Validate SQL statement correctness\n- Check for SQL injection vulnerabilities",
+      "type": "string",
+      "minLength": 1
+    },
     "Table": {
       "description": "Table definition within a derived dataset.\n\nDefines a table with its input source, schema, and network.",
       "type": "object",
@@ -191,7 +196,7 @@
       "properties": {
         "sql": {
           "description": "SQL query defining the view",
-          "type": "string"
+          "$ref": "#/$defs/SqlStr"
         }
       },
       "required": [

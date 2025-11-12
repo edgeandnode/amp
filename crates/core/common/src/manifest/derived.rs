@@ -23,18 +23,17 @@ use crate::{
             planning_ctx_for_sql_tables_with_deps, resolve_function_references,
         },
     },
-    query_context::{self, parse_sql},
     utils::dfs,
 };
 
 /// Extract all SQL queries from table views.
 pub fn queries(
     manifest: &Manifest,
-) -> Result<BTreeMap<TableName, parser::Statement>, query_context::Error> {
+) -> Result<BTreeMap<TableName, parser::Statement>, crate::sql::ParseSqlError> {
     let mut queries = BTreeMap::new();
     for (table_name, table) in &manifest.tables {
         let TableInput::View(query) = &table.input;
-        let query = parse_sql(&query.sql)?;
+        let query = crate::sql::parse(&query.sql)?;
         queries.insert(table_name.clone(), query);
     }
     Ok(queries)
@@ -45,15 +44,12 @@ pub fn queries(
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
 /// name, version, manifest_hash) must be provided externally as they are not part of the manifest.
-pub fn dataset(
-    manifest_hash: datasets_common::hash::Hash,
-    manifest: Manifest,
-) -> Result<Dataset, BoxError> {
+pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, BoxError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
             let TableInput::View(query) = &table.input;
-            let query = parse_sql(&query.sql)?;
+            let query = crate::sql::parse(&query.sql)?;
             queries.insert(table_name.clone(), query);
         }
         queries
@@ -234,10 +230,11 @@ pub async fn validate(
         let TableInput::View(View { sql }) = &table.input;
 
         // Parse SQL (validates single statement)
-        let stmt = parse_sql(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
-            table_name: table_name.clone(),
-            source: err,
-        })?;
+        let stmt =
+            crate::sql::parse(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
 
         // Extract table references
         let (table_refs, _) = resolve_table_references(&stmt, true).map_err(|err| {
@@ -330,7 +327,7 @@ pub enum ManifestValidationError {
     InvalidTableSql {
         table_name: TableName,
         #[source]
-        source: query_context::Error,
+        source: crate::sql::ParseSqlError,
     },
 
     /// Failed to resolve table references from SQL query

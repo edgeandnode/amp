@@ -33,7 +33,7 @@ use common::{
     },
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
-    query_context::{Error as CoreError, QueryEnv, parse_sql},
+    query_context::{Error as CoreError, QueryEnv},
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
@@ -42,6 +42,7 @@ use dataset_store::{
     DatasetStore, GetDatasetError, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
 };
+use datasets_derived::sql_str::SqlStr;
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
@@ -106,11 +107,12 @@ impl Service {
 
     pub async fn execute_query(
         &self,
-        sql: &str,
+        sql: impl AsRef<SqlStr>,
         is_streaming: Option<bool>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
-        let query = parse_sql(sql).map_err(Error::CoreError)?;
+        let query = common::sql::parse(sql.as_ref())
+            .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
         let dataset_store = self.dataset_store.clone();
         let catalog = catalog_for_sql(
             dataset_store.as_ref(),
@@ -140,7 +142,7 @@ impl Service {
             let error_code = result
                 .as_ref()
                 .err()
-                .map(|e| e.error_code())
+                .map(|err| err.error_code())
                 .unwrap_or("UNKNOWN_ERROR");
             metrics.record_query_error(error_code);
         }
@@ -217,7 +219,7 @@ impl Service {
                 self.config.server_microbatch_max_interval,
             )
             .await
-            .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+            .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;
 
             let stream = QueryResultStream::Incremental {
                 stream: query
@@ -245,22 +247,30 @@ impl Service {
         streaming_override: Option<bool>,
     ) -> Result<FlightInfo, Error> {
         let (ticket, schema) = match DescriptorType::try_from(descriptor.r#type)
-            .map_err(|e| Error::PbDecodeError(e.to_string()))?
+            .map_err(|err| Error::PbDecodeError(err.to_string()))?
         {
             DescriptorType::Cmd => {
                 let msg = Any::decode(descriptor.cmd.as_ref())?;
                 if let Some(sql_query) = msg
                     .unpack::<CommandStatementQuery>()
-                    .map_err(|e| Error::PbDecodeError(e.to_string()))?
+                    .map_err(|err| Error::PbDecodeError(err.to_string()))?
                 {
                     // The magic that turns a SQL string into a DataFusion logical plan that can be
                     // sent back over the wire:
+                    // - Validate SQL string (non-empty, meaningful content)
                     // - Parse the SQL query.
                     // - Infer depedencies and collect them into a catalog.
                     // - Build a DataFusion query context with empty tables from that catalog.
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
-                    let query = parse_sql(&sql_query.query).map_err(Error::CoreError)?;
+
+                    // Validate SQL string (non-empty, meaningful content)
+                    let sql_str = sql_query
+                        .query
+                        .parse::<SqlStr>()
+                        .map_err(|err| Error::InvalidQuery(err.to_string()))?;
+                    let query = common::sql::parse(&sql_str)
+                        .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
                     let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
                         .await
                         .map_err(Error::PlanningCtxForSqlError)?;
@@ -288,10 +298,10 @@ impl Service {
         };
 
         let ticket = Bytes::from(
-            bincode::encode_to_vec(&ticket, bincode::config::standard()).map_err(|e| {
+            bincode::encode_to_vec(&ticket, bincode::config::standard()).map_err(|err| {
                 Error::TicketEncodingError(DataFusionError::Plan(format!(
                     "Failed to serialize remote plan: {}",
-                    e
+                    err
                 )))
             })?,
         );
@@ -328,19 +338,25 @@ impl Service {
     }
 
     #[instrument(skip_all)]
-    async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
+    async fn do_get(&self, ticket: Ticket) -> Result<TonicStream<FlightData>, Error> {
         let (ticket, _) =
             bincode::decode_from_slice::<AmpTicket, _>(&ticket.ticket, bincode::config::standard())
-                .map_err(|e| {
+                .map_err(|err| {
                     Error::TicketDecodingError(DataFusionError::Plan(format!(
                         "Failed to deserialize remote plan: {}",
-                        e
+                        err
                     )))
                 })?;
 
+        // Validate SQL string (non-empty, meaningful content)
+        let sql_str = ticket
+            .query
+            .parse::<SqlStr>()
+            .map_err(|err| Error::InvalidQuery(err.to_string()))?;
+
         let stream = self
             .execute_query(
-                &ticket.query,
+                &sql_str,
                 Some(ticket.is_streaming),
                 ticket.resume_watermark.map(Into::into),
             )
@@ -362,16 +378,16 @@ impl FlightService for Service {
 
     async fn poll_flight_info(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
+        _request: Request<FlightDescriptor>,
     ) -> Result<Response<arrow_flight::PollInfo>, Status> {
-        return Err(Status::unimplemented("poll_flight_info"));
+        Err(Status::unimplemented("poll_flight_info"))
     }
 
     async fn do_exchange(
         &self,
         _request: Request<tonic::Streaming<FlightData>>,
     ) -> Result<Response<Self::DoExchangeStream>, Status> {
-        return Err(Status::unimplemented("do_exchange"));
+        Err(Status::unimplemented("do_exchange"))
     }
 
     async fn handshake(
@@ -385,7 +401,7 @@ impl FlightService for Service {
         &self,
         _request: Request<arrow_flight::Criteria>,
     ) -> Result<Response<Self::ListFlightsStream>, Status> {
-        return Err(Status::unimplemented("list_flights"));
+        Err(Status::unimplemented("list_flights"))
     }
 
     #[instrument(skip(self, request), fields(request_id = tracing::field::Empty))]
@@ -428,15 +444,15 @@ impl FlightService for Service {
 
     async fn get_schema(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
+        _request: Request<FlightDescriptor>,
     ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
-        return Err(Status::unimplemented("get_schema"));
+        Err(Status::unimplemented("get_schema"))
     }
 
     #[instrument(skip(self, request), fields(request_id = tracing::field::Empty))]
     async fn do_get(
         &self,
-        request: Request<arrow_flight::Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
         // Create a request ID using the Cloudflare ray-id or generate random hex string if not
         // present.
@@ -457,21 +473,21 @@ impl FlightService for Service {
         &self,
         _request: Request<tonic::Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        return Err(Status::unimplemented("do_put"));
+        Err(Status::unimplemented("do_put"))
     }
 
     async fn list_actions(
         &self,
         _request: Request<arrow_flight::Empty>,
     ) -> Result<Response<Self::ListActionsStream>, Status> {
-        return Err(Status::unimplemented("list_actions"));
+        Err(Status::unimplemented("list_actions"))
     }
 
     async fn do_action(
         &self,
         _request: Request<arrow_flight::Action>,
     ) -> Result<Response<Self::DoActionStream>, Status> {
-        return Err(Status::unimplemented("do_action"));
+        Err(Status::unimplemented("do_action"))
     }
 }
 
@@ -531,7 +547,7 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
 /// Wrap a query result stream with metrics tracking
 fn track_query_metrics(
     stream: QueryResultStream,
-    metrics: &Arc<crate::metrics::MetricsRegistry>,
+    metrics: &Arc<MetricsRegistry>,
     start_time: std::time::Instant,
 ) -> QueryResultStream {
     let metrics = metrics.clone();
@@ -817,7 +833,7 @@ fn split_batch_for_grpc_response(
 
     let mut offset = 0;
     while offset < batch.num_rows() {
-        let length = (rows_per_batch).min(batch.num_rows() - offset);
+        let length = rows_per_batch.min(batch.num_rows() - offset);
         out.push(batch.slice(offset, length));
 
         offset += length;

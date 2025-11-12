@@ -16,6 +16,7 @@ mod dataset_kind;
 pub mod dep_alias;
 pub mod dep_reference;
 pub mod manifest;
+pub mod sql_str;
 
 pub use self::{
     dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
