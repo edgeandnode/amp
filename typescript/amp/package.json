@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsc -b --force tsconfig.build.json",
     "build:studio": "cd ../studio && pnpm run build",
-    "copy-studio-dist": "node scripts/copy-studio-dist.ts",
+    "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
     "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
     "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio"
   },
@@ -78,6 +78,7 @@
     "@types/node": "^24.10.0",
     "apache-arrow": "^21.1.0",
     "effect": "^3.19.3",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.8"
   }
