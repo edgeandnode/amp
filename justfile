@@ -207,14 +207,12 @@ GEN_OPENAPI_SCHEMAS_OUTDIR := "docs/openapi-specs"
 gen:
     RUSTFLAGS="--cfg gen_schema --cfg gen_openapi_spec" cargo check --workspace
     @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}}
-    @cp -f $(ls -t target/debug/build/datasets-common-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/common.spec.json
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
     @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json
     @cp -f $(ls -t target/debug/build/admin-api-gen-*/out/openapi.spec.json | head -1) {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json
     @echo "Schemas generated and copied:"
-    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/common.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
@@ -222,14 +220,6 @@ gen:
     @echo "  {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json"
 
 ### JSON Schema generation
-
-# Generate the common dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-[group: 'codegen']
-gen-common-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema" cargo check -p datasets-common-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-common-gen-*/out/schema.json | head -1) {{DEST_DIR}}/common.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/common.spec.json"
 
 # Generate the common derived dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
 [group: 'codegen']
