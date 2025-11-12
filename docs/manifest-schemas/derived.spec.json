@@ -7,10 +7,13 @@
     "dependencies": {
       "description": "External dataset dependencies with version requirements",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/DepReference"
-      },
-      "default": {}
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-zA-Z][a-zA-Z0-9_]*$": {
+          "$ref": "#/$defs/DepReference"
+        }
+      }
     },
     "functions": {
       "description": "User-defined function definitions mapped by function name",

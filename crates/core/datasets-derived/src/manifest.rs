@@ -8,9 +8,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{dep_reference::DepReference, manifest::DataType, table_name::TableName};
+use datasets_common::{manifest::DataType, table_name::TableName};
 
-use crate::dataset_kind::DerivedDatasetKind;
+use crate::{dataset_kind::DerivedDatasetKind, dep_alias::DepAlias, dep_reference::DepReference};
 
 /// Complete manifest definition for a derived dataset.
 ///
@@ -26,7 +26,7 @@ pub struct Manifest {
 
     /// External dataset dependencies with version requirements
     #[serde(default)]
-    pub dependencies: BTreeMap<String, DepReference>,
+    pub dependencies: BTreeMap<DepAlias, DepReference>,
     /// Table definitions mapped by table name
     #[serde(default)]
     pub tables: BTreeMap<TableName, Table>,

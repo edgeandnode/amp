@@ -1,5 +1,6 @@
 use datafusion::error::DataFusionError;
 use datasets_common::{reference::Reference, table_name::TableName};
+use datasets_derived::dep_alias::DepAlias;
 
 use crate::{BoxError, catalog::sql::ResolveFunctionReferencesError};
 
@@ -103,6 +104,22 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         source: BoxError,
     },
 
+    /// Schema portion of table reference is not a valid dependency alias.
+    ///
+    /// This occurs when the schema/dataset portion of a table reference does not
+    /// conform to dependency alias rules (must start with letter, contain only
+    /// alphanumeric/underscore, and be <= 63 bytes).
+    #[error(
+        "In table '{table_name}': Invalid dependency alias '{invalid_alias}' in table reference '{table_ref}'"
+    )]
+    InvalidDependencyAliasForTableRef {
+        table_name: TableName,
+        invalid_alias: String,
+        table_ref: String,
+        #[source]
+        source: datasets_derived::dep_alias::DepAliasError,
+    },
+
     /// Dependency alias not found when processing table reference.
     ///
     /// This occurs when a table reference uses an alias that was not provided
@@ -112,7 +129,7 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
     )]
     DependencyAliasNotFoundForTableRef {
         table_name: TableName,
-        alias: String,
+        alias: DepAlias,
     },
 
     /// Dataset reference could not be found when loading dataset for function.
@@ -155,16 +172,32 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         source: BoxError,
     },
 
-    /// Dependency alias not found when processing function name.
+    /// Schema portion of function reference is not a valid dependency alias.
     ///
-    /// This occurs when a function name uses an alias that was not provided
+    /// This occurs when the schema/dataset portion of a function reference does not
+    /// conform to dependency alias rules (must start with letter, contain only
+    /// alphanumeric/underscore, and be <= 63 bytes).
+    #[error(
+        "In table '{table_name}': Invalid dependency alias '{invalid_alias}' in function reference '{func_ref}'"
+    )]
+    InvalidDependencyAliasForFunctionRef {
+        table_name: TableName,
+        invalid_alias: String,
+        func_ref: String,
+        #[source]
+        source: datasets_derived::dep_alias::DepAliasError,
+    },
+
+    /// Dependency alias not found when processing function reference.
+    ///
+    /// This occurs when a function reference uses an alias that was not provided
     /// in the dependencies map.
     #[error(
         "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
     )]
-    DependencyAliasNotFoundForFunction {
+    DependencyAliasNotFoundForFunctionRef {
         table_name: TableName,
-        alias: String,
+        alias: DepAlias,
     },
 
     /// Table not found in dataset.
@@ -318,13 +351,13 @@ pub enum PlanningCtxForSqlError {
         source: BoxError,
     },
 
-    /// Failed to parse dataset qualifier in function name.
+    /// Failed to parse dataset qualifier in function reference.
     ///
-    /// This occurs when a qualified function name's dataset portion cannot be parsed
+    /// This occurs when a qualified function reference's dataset portion cannot be parsed
     /// as a valid dataset reference.
-    #[error("Invalid function reference '{function}', could not parse dataset qualifier")]
+    #[error("Invalid function reference '{func_ref}', could not parse dataset qualifier")]
     InvalidFunctionReference {
-        function: String,
+        func_ref: String,
         #[source]
         source: datasets_common::partial_reference::PartialReferenceError,
     },
@@ -480,13 +513,13 @@ pub enum GetLogicalCatalogError {
         source: BoxError,
     },
 
-    /// Failed to parse dataset qualifier in function name.
+    /// Failed to parse dataset qualifier in function reference.
     ///
-    /// This occurs when a qualified function name's dataset portion cannot be parsed
+    /// This occurs when a qualified function reference's dataset portion cannot be parsed
     /// as a valid dataset reference.
-    #[error("Invalid function reference '{function}', could not parse dataset qualifier")]
+    #[error("Invalid function reference '{func_ref}', could not parse dataset qualifier")]
     InvalidFunctionReference {
-        function: String,
+        func_ref: String,
         #[source]
         source: datasets_common::partial_reference::PartialReferenceError,
     },

@@ -63,6 +63,7 @@ use datasets_common::{
     fqn::FullyQualifiedName, hash::Hash, partial_reference::PartialReference, reference::Reference,
     revision::Revision, table_name::TableName,
 };
+use datasets_derived::dep_alias::DepAlias;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 
@@ -264,7 +265,7 @@ pub async fn planning_ctx_for_sql(
                 let reference: Reference = schema
                     .parse::<PartialReference>()
                     .map_err(|err| PlanningCtxForSqlError::InvalidFunctionReference {
-                        function: func_ref.to_string(),
+                        func_ref: func_ref.to_string(),
                         source: err,
                     })?
                     .into();
@@ -504,7 +505,7 @@ async fn get_logical_catalog(
                 let reference: Reference = schema
                     .parse::<PartialReference>()
                     .map_err(|err| GetLogicalCatalogError::InvalidFunctionReference {
-                        function: func_ref.to_string(),
+                        func_ref: func_ref.to_string(),
                         source: err,
                     })?
                     .into();
@@ -621,7 +622,7 @@ async fn get_logical_catalog(
 pub async fn planning_ctx_for_sql_tables_with_deps(
     store: &impl DatasetAccess,
     references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)>,
-    dependencies: BTreeMap<String, (FullyQualifiedName, Hash)>,
+    dependencies: BTreeMap<DepAlias, (FullyQualifiedName, Hash)>,
 ) -> Result<PlanningContext, PlanningCtxForSqlTablesWithDepsError> {
     // Use hash-based map to deduplicate datasets across ALL tables
     // Inner map: table_ref string -> ResolvedTable (deduplicates table references)
@@ -652,6 +653,16 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                 }
             })?;
 
+            // Parse schema as DepAlias to validate it conforms to alias rules
+            let dep_alias: DepAlias = schema_str.parse().map_err(|err| {
+                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
+                    table_name: table_name.clone(),
+                    invalid_alias: schema_str.to_string(),
+                    table_ref: table_ref.to_string(),
+                    source: err,
+                }
+            })?;
+
             // Validate table name is a valid TableName
             let referenced_table_name: TableName = table_ref.table().parse().map_err(|err| {
                 PlanningCtxForSqlTablesWithDepsError::InvalidTableName {
@@ -663,10 +674,10 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             })?;
 
             // Lookup alias in dependencies map (schema_str = alias)
-            let (fqn, hash) = dependencies.get(schema_str).ok_or_else(|| {
+            let (fqn, hash) = dependencies.get(&dep_alias).ok_or_else(|| {
                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
                     table_name: table_name.clone(),
-                    alias: schema_str.to_string(),
+                    alias: dep_alias.clone(),
                 }
             })?;
 
@@ -725,11 +736,21 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             match func_ref {
                 FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
                 FunctionReference::Qualified { schema, function } => {
-                    // Lookup alias in dependencies map (schema_str = alias)
-                    let (fqn, hash) = dependencies.get(schema.as_ref()).ok_or_else(|| {
-                        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunction {
+                    // Parse schema as DepAlias to validate it conforms to alias rules
+                    let dep_alias: DepAlias = schema.as_ref().parse().map_err(|err| {
+                        PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
                             table_name: table_name.clone(),
-                            alias: schema.to_string(),
+                            invalid_alias: schema.to_string(),
+                            func_ref: func_ref.to_string(),
+                            source: err,
+                        }
+                    })?;
+
+                    // Lookup alias in dependencies map (schema_str = alias)
+                    let (fqn, hash) = dependencies.get(&dep_alias).ok_or_else(|| {
+                        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
+                            table_name: table_name.clone(),
+                            alias: dep_alias.clone(),
                         }
                     })?;
 
