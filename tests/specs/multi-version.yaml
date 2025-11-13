@@ -34,6 +34,17 @@
   config: v2.config.ts
   end: 15000000
 
+- name: register_multi_version_v3
+  dataset: multi_version
+  tag: "0.0.3"
+  config: v3.config.ts
+  end: 15000000
+
+- name: dump_multi_version_v3
+  dataset: test_namespace/multi_version@0.0.3
+  config: v3.config.ts
+  end: 15000000
+
 # Test queries with versioned dataset names
 - name: query_v1_versioned_name
   query: SELECT * FROM "_/multi_version@0.0.1".blocks ORDER BY block_num LIMIT 1
