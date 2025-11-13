@@ -5,11 +5,11 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
+use ampctl::client;
 use backon::{ExponentialBuilder, Retryable};
 use dataset_store::DatasetKind;
 use datasets_common::{manifest::TableSchema, reference::Reference};
 use monitoring::logging;
-use reqwest::Client;
 
 use crate::{config::SyncConfig, sql};
 
@@ -184,28 +184,17 @@ fn validate_table_name(name: &str) -> Result<(), FetchManifestError> {
 /// Errors that occur when fetching or parsing manifests
 #[derive(Debug, thiserror::Error)]
 pub enum FetchManifestError {
+    /// Failed to build ampctl client
+    #[error("Failed to build ampctl client")]
+    BuildClient(#[source] client::BuildError),
+
     /// Failed to fetch manifest from Admin API
-    #[error("Failed to fetch manifest from Admin API at '{url}' after retries")]
-    FetchFromApi {
-        url: String,
-        #[source]
-        source: reqwest::Error,
-    },
+    #[error("Failed to fetch manifest from Admin API")]
+    GetManifest(#[source] client::datasets::GetManifestError),
 
-    /// Admin API returned non-success status
-    #[error("Admin API returned status {status} for '{url}'")]
-    ApiStatusError {
-        status: reqwest::StatusCode,
-        url: String,
-    },
-
-    /// Failed to parse manifest JSON response (from reqwest)
-    #[error("Failed to parse manifest JSON response: {message}")]
-    ParseJsonHttp {
-        message: String,
-        #[source]
-        source: reqwest::Error,
-    },
+    /// Manifest not found (404)
+    #[error("Manifest not found for dataset")]
+    ManifestNotFound,
 
     /// Failed to parse manifest JSON (from serde)
     #[error("Failed to parse manifest JSON: {message}")]
@@ -235,16 +224,14 @@ impl FetchManifestError {
     /// Fatal errors fail immediately without retries.
     fn is_retryable(&self) -> bool {
         match self {
-            // Network errors
-            Self::FetchFromApi { .. } => true,
+            // Network and API errors are retryable
+            Self::GetManifest(_) => true,
 
-            // Http response errors
-            Self::ApiStatusError { .. } => true,
+            // Client build errors are not retryable
+            Self::BuildClient(_) => false,
 
-            // Json parse errors
-            Self::ParseJsonHttp { .. } => true,
-
-            // Schema/validation errors
+            // Schema/validation errors are not retryable
+            Self::ManifestNotFound => false,
             Self::ParseJsonSerde { .. } => false,
             Self::InvalidArrowType { .. } => false,
             Self::InvalidTableName { .. } => false,
@@ -276,53 +263,45 @@ pub async fn fetch_manifest(config: &SyncConfig) -> Result<Manifest, FetchManife
     // Convert PartialReference to full Reference by filling in defaults
     let dataset = config.dataset.to_full_reference();
 
-    let url = format!(
-        "{}/datasets/{}/{}/versions/{}/manifest",
-        config.amp_admin_api_addr,
-        dataset.namespace(),
-        dataset.name(),
-        dataset.revision()
-    );
-
     tracing::info!(
         dataset = %config.dataset,
-        url = %url,
+        admin_api = %config.amp_admin_api_addr,
         "fetching_manifest"
     );
 
-    // Create HTTP client (reused across retries)
-    let client = Client::new();
+    // Parse Admin API URL
+    let base_url = url::Url::parse(&config.amp_admin_api_addr)
+        .expect("amp_admin_api_addr should be a valid URL");
+
+    // Build ampctl client with optional authentication
+    let ampctl_client = if let Some(token) = &config.auth_token {
+        client::build(base_url)
+            .with_bearer_token(token.clone())
+            .build()
+            .map_err(FetchManifestError::BuildClient)?
+    } else {
+        client::Client::new(base_url)
+    };
 
     // Create retry-able fetch function
     let fetch = || async {
-        // Fetch response
-        let response =
-            client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| FetchManifestError::FetchFromApi {
-                    url: url.clone(),
-                    source: e,
-                })?;
-
-        // Check for HTTP errors
-        let status = response.status();
-        if !status.is_success() {
-            return Err(FetchManifestError::ApiStatusError {
-                status,
-                url: url.clone(),
-            });
-        }
-
-        // Get the full response text so we can parse it based on the kind
-        let text = response
-            .text()
+        // Fetch manifest using ampctl client
+        let manifest_json = ampctl_client
+            .datasets()
+            .get_manifest(&dataset)
             .await
-            .map_err(|e| FetchManifestError::ParseJsonHttp {
-                message: "Failed to read response text".to_string(),
+            .map_err(FetchManifestError::GetManifest)?;
+
+        // Handle 404 case
+        let manifest_json = manifest_json.ok_or(FetchManifestError::ManifestNotFound)?;
+
+        // Convert to JSON string for parsing
+        let text = serde_json::to_string(&manifest_json).map_err(|e| {
+            FetchManifestError::ParseJsonSerde {
+                message: "Failed to serialize manifest".to_string(),
                 source: e,
-            })?;
+            }
+        })?;
 
         // Parse the manifest from the text
         parse_manifest_from_text(&text, dataset.clone())

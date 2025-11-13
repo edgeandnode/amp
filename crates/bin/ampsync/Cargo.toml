@@ -23,6 +23,7 @@ snmalloc = ["dep:snmalloc-rs"]
 admin-api = { path = "../../services/admin-api" }
 alloy.workspace = true
 amp-client = { path = "../../client", features = ["postgres"] }
+ampctl = { path = "../ampctl" }
 anyhow.workspace = true
 arrow-array = { version = "56", default-features = false }
 arrow-schema = { version = "56" }
@@ -40,6 +41,8 @@ eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
+headers.workspace = true
+http.workspace = true
 lazy_static = "1.5.0"
 monitoring = { path = "../../core/monitoring" }
 pg_escape.workspace = true
@@ -60,6 +63,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tokio-util = "0.7.12"
 tracing.workspace = true
+url.workspace = true
 uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]

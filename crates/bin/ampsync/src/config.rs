@@ -1,3 +1,4 @@
+use ampctl::client::BearerToken;
 use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
 
@@ -77,4 +78,15 @@ pub struct SyncConfig {
     /// Can also be set via MANIFEST_FETCH_MAX_BACKOFF_SECS environment variable
     #[arg(long, env = "MANIFEST_FETCH_MAX_BACKOFF_SECS", default_value_t = 60)]
     pub manifest_fetch_max_backoff_secs: u64,
+
+    /// Authentication token for Admin API and Arrow Flight
+    ///
+    /// Bearer token for authenticating requests to both the Admin API (for manifest fetching)
+    /// and the Arrow Flight server (for data streaming).
+    ///
+    /// The token will be sent as an Authorization header: `Authorization: Bearer <token>`
+    ///
+    /// Can also be set via AMP_AUTH_TOKEN environment variable
+    #[arg(long, env = "AMP_AUTH_TOKEN")]
+    pub auth_token: Option<BearerToken>,
 }

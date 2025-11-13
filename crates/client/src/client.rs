@@ -256,6 +256,32 @@ impl AmpClient {
         Self { client }
     }
 
+    /// Set HTTP headers for all subsequent requests.
+    ///
+    /// This is useful for authentication and custom metadata.
+    /// Headers persist across all requests made by this client.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use http::header::{HeaderMap, HeaderName, HeaderValue};
+    ///
+    /// let mut client = AmpClient::from_endpoint("http://localhost:1602").await?;
+    /// let mut headers = HeaderMap::new();
+    /// headers.insert(
+    ///     HeaderName::from_static("authorization"),
+    ///     HeaderValue::from_static("Bearer my-token")
+    /// );
+    /// client.set_headers(&headers);
+    /// ```
+    pub fn set_headers(&mut self, headers: &http::HeaderMap) {
+        for (name, value) in headers.iter() {
+            self.client.set_header(
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            );
+        }
+    }
+
     /// Start building a streaming query.
     ///
     /// Returns a `StreamBuilder` that can be awaited directly for a `ProtocolStream`,
