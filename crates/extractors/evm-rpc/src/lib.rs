@@ -147,13 +147,3 @@ pub async fn client(
 
     Ok(client)
 }
-
-/// Automatically generate a README.md file with the schema whenever tests are executed.
-#[tokio::test]
-async fn print_schema_to_readme() {
-    fs_err::write(
-        "../../../docs/schemas/evm-rpc.md",
-        common::catalog::schema_to_markdown(tables::all("test_network")).await,
-    )
-    .unwrap();
-}

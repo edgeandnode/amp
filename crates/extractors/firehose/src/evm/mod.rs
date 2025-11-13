@@ -24,13 +24,3 @@ pub fn dataset(manifest_hash: datasets_common::hash::Hash, manifest: Manifest) -
         functions: vec![],
     }
 }
-
-/// Automatically generate a README.md file with the schema whenever tests are executed.
-#[tokio::test]
-async fn print_schema_to_readme() {
-    fs_err::write(
-        "../../../docs/schemas/firehose-evm.md",
-        common::catalog::schema_to_markdown(tables::all("test_network")).await,
-    )
-    .unwrap();
-}

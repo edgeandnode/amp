@@ -94,12 +94,3 @@ pub fn client(provider: ProviderConfig) -> BeaconClient {
         provider.rate_limit_per_minute,
     )
 }
-
-#[tokio::test]
-async fn print_schema_to_readme() {
-    fs_err::write(
-        "../../../docs/schemas/eth-beacon.md",
-        common::catalog::schema_to_markdown(all_tables("test_network".to_string())).await,
-    )
-    .unwrap();
-}
