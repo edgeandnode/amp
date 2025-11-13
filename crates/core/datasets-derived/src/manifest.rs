@@ -11,8 +11,10 @@ pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use datasets_common::{manifest::DataType, table_name::TableName};
 
 use crate::{
-    dataset_kind::DerivedDatasetKind, dep_alias::DepAlias, dep_reference::DepReference,
-    func_name::FuncName, sql_str::SqlStr,
+    dataset_kind::DerivedDatasetKind,
+    deps::{alias::DepAlias, reference::DepReference},
+    func_name::FuncName,
+    sql_str::SqlStr,
 };
 
 /// Complete manifest definition for a derived dataset.

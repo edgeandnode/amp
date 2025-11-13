@@ -8,7 +8,8 @@ use axum::{
 use common::{
     BoxError,
     catalog::{
-        errors::PlanningCtxForSqlTablesWithDepsError, sql::planning_ctx_for_sql_tables_with_deps,
+        errors::PlanningCtxForSqlTablesWithDepsError, logical::Function as LogicalFunction,
+        sql::planning_ctx_for_sql_tables_with_deps_and_funcs,
     },
     plan_visitors::prepend_special_block_num_field,
     query_context::Error as QueryContextError,
@@ -20,12 +21,15 @@ use common::{
 use datafusion::sql::parser::Statement;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
-    dep_alias::DepAlias,
-    dep_reference::{DepReference, HashOrVersion},
+    deps::{
+        alias::{DepAlias, DepAliasOrSelfRef},
+        reference::{DepReference, HashOrVersion},
+    },
     func_name::FuncName,
-    manifest::TableSchema,
+    manifest::{Function, TableSchema},
     sql_str::SqlStr,
 };
+use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
 
 use crate::{
@@ -33,12 +37,12 @@ use crate::{
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
-/// Type alias for table references map with dependency aliases
+/// Type alias for table references map with dependency aliases or self-references
 type TableReferencesMap = BTreeMap<
     TableName,
     (
         Vec<TableReference<DepAlias>>,
-        Vec<FunctionReference<DepAlias>>,
+        Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
 
@@ -231,9 +235,9 @@ pub async fn handler(
                     },
                 })?;
 
-            // Extract function references from the statement
-            let func_refs =
-                resolve_function_references::<DepAlias>(&stmt).map_err(|err| match &err {
+            // Extract function references from the statement (supports both external deps and self-references)
+            let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(
+                |err| match &err {
                     ResolveFunctionReferencesError::InvalidSchemaFormat { .. } => {
                         Error::InvalidDependencyAliasForFunctionRef {
                             table_name: table_name.clone(),
@@ -250,7 +254,8 @@ pub async fn handler(
                         table_name: table_name.clone(),
                         source: err,
                     },
-                })?;
+                },
+            )?;
 
             statements.insert(table_name.clone(), stmt);
             references.insert(table_name, (table_refs, func_refs));
@@ -259,46 +264,67 @@ pub async fn handler(
         (statements, references)
     };
 
+    // Convert Function to LogicalFunction for planning context
+    let logical_functions: BTreeMap<_, _> = functions
+        .into_iter()
+        .map(|(name, func)| {
+            let logical_func = LogicalFunction {
+                name: name.as_str().to_string(),
+                input_types: func.input_types.into_iter().map(|dt| dt.0).collect(),
+                output_type: func.output_type.0,
+                source: common::catalog::logical::FunctionSource {
+                    source: func.source.source,
+                    filename: func.source.filename,
+                },
+            };
+            (name, logical_func)
+        })
+        .collect();
+
     // Create planning context using resolved dependencies
-    // TODO: Verify that functions defined in config are actually used in table SQL statements
-    let planning_ctx =
-        planning_ctx_for_sql_tables_with_deps(ctx.dataset_store.as_ref(), references, dependencies)
-            .await
-            .map_err(|err| match &err {
-                PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
-                    Error::UnqualifiedTable(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
-                    Error::DatasetNotFound(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
-                    Error::DatasetNotFound(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
-                    Error::GetDataset(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
-                    Error::GetDataset(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
-                    Error::EthCallUdfCreation(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
-                    ..
-                } => Error::DependencyAliasNotFound(err),
-                PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
-                    ..
-                } => Error::DependencyAliasNotFound(err),
-                PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
-                    Error::TableNotFoundInDataset(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
-                    Error::FunctionNotFoundInDataset(err)
-                }
-                PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
-                    Error::EthCallNotAvailable(err)
-                }
-            })?;
+    let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
+        ctx.dataset_store.as_ref(),
+        references,
+        dependencies,
+        logical_functions,
+        IsolatePool::dummy(), // For schema validation only (no JS execution)
+    )
+    .await
+    .map_err(|err| match &err {
+        PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
+            Error::UnqualifiedTable(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
+            Error::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
+            Error::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
+            Error::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
+            Error::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
+            Error::EthCallUdfCreation(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
+            Error::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef { .. } => {
+            Error::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
+            Error::TableNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
+            Error::FunctionNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
+            Error::EthCallNotAvailable(err)
+        }
+    })?;
 
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
@@ -364,9 +390,12 @@ pub struct SchemaRequest {
     #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, String>))]
     pub dependencies: BTreeMap<DepAlias, DepReference>,
 
-    /// Function names defined in the dataset configuration
+    /// User-defined function definitions mapped by function name
     ///
-    /// Used to validate that functions are properly defined and available.
+    /// Maps function names to their complete definitions including input/output types
+    /// and implementation source code. These functions can be referenced in SQL queries
+    /// as bare function calls (e.g., `my_function(args)` without dataset qualification).
+    ///
     /// At least one of `tables` or `functions` must be provided.
     ///
     /// Function names must follow DataFusion UDF identifier rules:
@@ -374,8 +403,8 @@ pub struct SchemaRequest {
     /// - Contain only letters, digits (0-9), underscores (_), and dollar signs ($)
     /// - Maximum length of 255 bytes
     #[serde(default)]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    pub functions: Vec<FuncName>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, serde_json::Value>))]
+    pub functions: BTreeMap<FuncName, Function>,
 }
 
 /// Response returned by the schema endpoint
@@ -441,7 +470,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -455,7 +484,8 @@ enum Error {
         table_name: TableName,
         /// The underlying extraction error
         #[source]
-        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source:
+            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Dependency not found in dataset store
@@ -499,7 +529,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
     },
 
     /// Unqualified table reference
@@ -515,7 +545,7 @@ enum Error {
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
     InvalidTableName(
-        #[source] ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        #[source] ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
     ),
 
     /// Dataset reference not found
@@ -569,7 +599,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
     },
 
     /// Invalid dependency alias in function reference
@@ -584,7 +614,8 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source:
+            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Catalog-qualified function reference not supported
@@ -599,7 +630,8 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
+        source:
+            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Dependency alias not found

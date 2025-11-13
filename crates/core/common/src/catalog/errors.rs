@@ -2,7 +2,7 @@ use datasets_common::{
     hash_reference::HashReference, partial_reference::PartialReferenceError, reference::Reference,
     table_name::TableName,
 };
-use datasets_derived::dep_alias::{DepAlias, DepAliasError};
+use datasets_derived::deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRefError};
 
 use crate::{
     BoxError,
@@ -356,9 +356,9 @@ pub enum CatalogForSqlWithDepsError {
     /// This occurs when:
     /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
     /// - An EXPLAIN statement wraps an unsupported statement type
-    /// - Schema portion fails to parse as DepAlias
+    /// - Schema portion fails to parse as DepAlias or self reference
     #[error("Failed to resolve function references from SQL")]
-    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<DepAliasError>),
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<DepAliasOrSelfRefError>),
 
     /// Failed to get the physical catalog for the resolved tables and functions.
     ///
@@ -374,15 +374,15 @@ pub enum CatalogForSqlWithDepsError {
 /// Errors specific to get_physical_catalog_with_deps operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetPhysicalCatalogWithDepsError {
-    /// Failed to get the logical catalog with dependencies.
+    /// Failed to get the logical catalog with dependencies and functions.
     ///
-    /// This wraps errors from `get_logical_catalog_with_deps`, which can occur when:
+    /// This wraps errors from `get_logical_catalog_with_deps_and_funcs`, which can occur when:
     /// - Dataset names cannot be extracted from table references or function names
     /// - Dataset retrieval fails
     /// - UDF creation fails
     /// - Dependency aliases are invalid or not found
-    #[error("Failed to get logical catalog with dependencies: {0}")]
-    GetLogicalCatalogWithDeps(#[source] GetLogicalCatalogWithDepsError),
+    #[error("Failed to get logical catalog with dependencies and functions: {0}")]
+    GetLogicalCatalogWithDepsAndFuncs(#[source] GetLogicalCatalogWithDepsAndFuncsError),
 
     /// Failed to retrieve physical table metadata from the metadata database.
     ///
@@ -401,10 +401,10 @@ pub enum GetPhysicalCatalogWithDepsError {
     TableNotSynced { table: String },
 }
 
-/// Errors specific to get_logical_catalog_with_deps operations
+/// Errors specific to get_logical_catalog_with_deps_and_funcs operations
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::large_enum_variant)]
-pub enum GetLogicalCatalogWithDepsError {
+pub enum GetLogicalCatalogWithDepsAndFuncsError {
     /// Table is not qualified with a schema/dataset name.
     ///
     /// All tables must be qualified with a dataset reference in the schema portion.

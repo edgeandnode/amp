@@ -8,9 +8,10 @@ use datafusion::sql::parser;
 use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     DerivedDatasetKind, Manifest,
-    dep_alias::{DepAlias, DepAliasError},
+    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::{TableInput, View},
 };
+use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     BoxError, Dataset, Table as LogicalTable,
@@ -18,7 +19,7 @@ use crate::{
         dataset_access::DatasetAccess,
         errors::PlanningCtxForSqlTablesWithDepsError,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
-        sql::planning_ctx_for_sql_tables_with_deps,
+        sql::planning_ctx_for_sql_tables_with_deps_and_funcs,
     },
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
@@ -176,12 +177,12 @@ fn table_dependency_sort(
 
 /// Type alias for the table references map used in multi-table validation
 ///
-/// Maps table names to their SQL references (table refs and function refs) using dependency aliases.
+/// Maps table names to their SQL references (table refs and function refs) using dependency aliases or self-references.
 type TableReferencesMap = BTreeMap<
     TableName,
     (
         Vec<TableReference<DepAlias>>,
-        Vec<FunctionReference<DepAlias>>,
+        Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
 
@@ -261,8 +262,8 @@ pub async fn validate(
             },
         })?;
 
-        // Extract function references
-        let func_refs = resolve_function_references::<DepAlias>(&stmt).map_err(|err| {
+        // Extract function references (supports both external deps and self-references)
+        let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| {
             ManifestValidationError::FunctionReferenceResolution {
                 table_name: table_name.clone(),
                 source: err,
@@ -272,49 +273,74 @@ pub async fn validate(
         references.insert(table_name.clone(), (table_refs, func_refs));
     }
 
-    // Step 3: Create planning context to validate all table and function references
+    // Step 3: Convert manifest functions to LogicalFunction for validation
+    let logical_functions: BTreeMap<_, _> = manifest
+        .functions
+        .iter()
+        .map(|(name, f)| {
+            let logical_func = LogicalFunction {
+                name: name.as_str().to_string(),
+                input_types: f.input_types.iter().map(|dt| dt.0.clone()).collect(),
+                output_type: f.output_type.0.clone(),
+                source: LogicalFunctionSource {
+                    source: f.source.source.clone(),
+                    filename: f.source.filename.clone(),
+                },
+            };
+            (name.clone(), logical_func)
+        })
+        .collect();
+
+    // Step 4: Create planning context to validate all table and function references
     // This validates:
     // - All table references resolve to existing tables in dependencies
     // - All function references resolve to existing functions in dependencies
+    // - Bare function references can be created as UDFs or are assumed to be built-ins
     // - Table references use valid dataset aliases from dependencies
     // - Schema compatibility across dependencies
-    planning_ctx_for_sql_tables_with_deps(store, references, dependencies)
-        .await
-        .map_err(|err| match &err {
-            PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
-                ManifestValidationError::UnqualifiedTable(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
-                ManifestValidationError::DatasetNotFound(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
-                ManifestValidationError::DatasetNotFound(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
-                ManifestValidationError::GetDataset(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
-                ManifestValidationError::GetDataset(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
-                ManifestValidationError::EthCallUdfCreation(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
-                ManifestValidationError::DependencyAliasNotFound(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
-                ..
-            } => ManifestValidationError::DependencyAliasNotFound(err),
-            PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
-                ManifestValidationError::TableNotFoundInDataset(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
-                ManifestValidationError::FunctionNotFoundInDataset(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
-                ManifestValidationError::EthCallNotAvailable(err)
-            }
-        })?;
+    planning_ctx_for_sql_tables_with_deps_and_funcs(
+        store,
+        references,
+        dependencies,
+        logical_functions,
+        IsolatePool::dummy(), // For manifest validation only (no JS execution)
+    )
+    .await
+    .map_err(|err| match &err {
+        PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
+            ManifestValidationError::UnqualifiedTable(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
+            ManifestValidationError::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
+            ManifestValidationError::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
+            ManifestValidationError::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
+            ManifestValidationError::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
+            ManifestValidationError::EthCallUdfCreation(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
+            ManifestValidationError::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef { .. } => {
+            ManifestValidationError::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
+            ManifestValidationError::TableNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
+            ManifestValidationError::FunctionNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
+            ManifestValidationError::EthCallNotAvailable(err)
+        }
+    })?;
 
     Ok(())
 }
@@ -348,7 +374,7 @@ pub enum ManifestValidationError {
     FunctionReferenceResolution {
         table_name: TableName,
         #[source]
-        source: ResolveFunctionReferencesError<DepAliasError>,
+        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Dependency declared in manifest but not found in store

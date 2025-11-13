@@ -22,3 +22,24 @@ async fn basic_function() {
         .await
         .expect("Failed to run spec");
 }
+
+#[tokio::test]
+async fn function_in_table() {
+    logging::init();
+
+    let test_ctx = TestCtxBuilder::new("function_in_table")
+        .with_dataset_manifest("eth_firehose")
+        .with_dataset_snapshot("eth_firehose")
+        .with_provider_config("firehose_eth_mainnet")
+        .build()
+        .await
+        .expect("Failed to create test environment");
+    let mut client = test_ctx
+        .new_flight_client()
+        .await
+        .expect("Failed to connect FlightClient");
+
+    run_spec("function-in-table", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
+}

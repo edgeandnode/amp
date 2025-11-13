@@ -54,6 +54,12 @@ importers:
         specifier: workspace:*
         version: link:../../../typescript/amp
 
+  tests/datasets/function_in_table:
+    dependencies:
+      '@edgeandnode/amp':
+        specifier: workspace:*
+        version: link:../../../typescript/amp
+
   tests/datasets/intra_deps:
     dependencies:
       '@edgeandnode/amp':

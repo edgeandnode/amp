@@ -13,8 +13,7 @@
 //! See [`manifest::Manifest`] for the complete derived dataset specification.
 
 mod dataset_kind;
-pub mod dep_alias;
-pub mod dep_reference;
+pub mod deps;
 pub mod func_name;
 pub mod manifest;
 pub mod sql_str;
