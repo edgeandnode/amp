@@ -14,7 +14,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use monitoring::logging;
-use worker::job::JobId;
+use worker::job::{JobDescriptor, JobId};
 
 use crate::{args::GlobalArgs, client};
 
@@ -52,6 +52,9 @@ impl std::fmt::Display for ListResult {
             writeln!(f, "Jobs:")?;
             for job in &self.data.jobs {
                 writeln!(f, "  {} - {} ({})", job.id, job.status, job.node_id)?;
+                if let Some(descriptor) = show_dataset_descriptor(&job.descriptor) {
+                    writeln!(f, "    Descriptor: {descriptor}")?;
+                }
                 writeln!(f, "    Created: {}", job.created_at)?;
                 writeln!(f, "    Updated: {}", job.updated_at)?;
             }
@@ -61,6 +64,21 @@ impl std::fmt::Display for ListResult {
             }
             Ok(())
         }
+    }
+}
+
+fn show_dataset_descriptor(descriptor: &serde_json::Value) -> Option<String> {
+    let descriptor: JobDescriptor = serde_json::from_value(descriptor.clone()).ok()?;
+    match descriptor {
+        JobDescriptor::Dump {
+            dataset_namespace,
+            dataset_name,
+            manifest_hash,
+            ..
+        } => Some(format!(
+            "dump {dataset_namespace}/{dataset_name}@{}",
+            &manifest_hash.as_str()[..7],
+        )),
     }
 }
 
