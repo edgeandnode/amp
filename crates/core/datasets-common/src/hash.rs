@@ -16,7 +16,7 @@ use sha2::{Digest as _, Sha256};
 /// A valid hash must:
 /// - **Have exactly 64 characters** (64 hex digits)
 /// - **Contain only valid hex digits** (`0-9`, `a-f`, `A-F`)
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct Hash(

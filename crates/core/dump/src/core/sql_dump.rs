@@ -94,18 +94,20 @@
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
 
-use std::{sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::{
+        dataset_access::DatasetAccess,
         physical::{Catalog, PhysicalTable},
-        sql::catalog_for_sql,
+        sql::catalog_for_sql_with_deps,
     },
     metadata::{Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
-use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
+use datasets_common::hash_reference::HashReference;
+use datasets_derived::{Manifest as DerivedManifest, dep_alias::DepAlias, manifest::TableInput};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
@@ -154,17 +156,50 @@ pub async fn dump_table(
     // Parse the SQL query
     let query = common::sql::parse(query_sql)?;
 
+    // Resolve all dependencies from the manifest to HashReference
+    // This ensures SQL schema references map to the exact dataset versions
+    // specified in the manifest's dependencies
+    let mut dependencies: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
+
+    for (alias, dep_reference) in &manifest.dependencies {
+        // Convert DepReference to Reference for resolution
+        let reference = dep_reference.to_reference();
+
+        // Resolve reference to its manifest hash
+        let hash = ctx
+            .dataset_store
+            .resolve_dataset_reference(&reference)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to resolve dependency '{}' (reference: {}): {}",
+                    alias, reference, err
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "Dependency '{}' not found (reference: {})",
+                    alias, reference
+                )
+            })?;
+
+        let fqn = reference.into_fqn();
+        dependencies.insert(alias.clone(), (fqn, hash).into());
+    }
+
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     let dataset_store = ctx.dataset_store.clone();
+    let metadata_db = ctx.metadata_db.clone();
     let env = env.clone();
     let opts = opts.clone();
 
     join_set.spawn(async move {
-        let catalog = catalog_for_sql(
+        let catalog = catalog_for_sql_with_deps(
             dataset_store.as_ref(),
-            &ctx.metadata_db,
+            &metadata_db,
             &query,
             env.clone(),
+            dependencies,
         )
         .await?;
         let planning_ctx = PlanningContext::new(catalog.logical().clone());

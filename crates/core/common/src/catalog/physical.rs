@@ -15,7 +15,6 @@ use datafusion::{
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
-    sql::TableReference,
 };
 use datasets_common::table_name::TableName;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
@@ -33,6 +32,7 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
+    sql::TableReference,
     store::Store,
 };
 

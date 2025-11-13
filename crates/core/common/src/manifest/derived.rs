@@ -122,15 +122,15 @@ pub fn sort_tables_by_dependencies(
         // Filter to only include dependencies within the same dataset
         let mut table_deps: Vec<TableName> = vec![];
         for table_ref in table_refs {
-            match (table_ref.schema(), table_ref.table()) {
-                (None, table) if table != table_name => {
+            match &table_ref {
+                TableReference::Bare { table } if table.as_ref() != table_name => {
                     // Unqualified reference is assumed to be to a table in the same dataset
-                    if table_map.contains_key(table) {
-                        table_deps.push(table.clone());
+                    if table_map.contains_key(table.as_ref()) {
+                        table_deps.push(table.as_ref().clone());
                     }
                 }
                 _ => {
-                    // Reference to external dataset, ignore
+                    // Reference to external dataset or self-reference, ignore
                 }
             }
         }

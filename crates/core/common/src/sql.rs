@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use datafusion::{
+    common::utils::quote_identifier,
     error::DataFusionError,
     sql::{parser, parser::Statement},
 };
@@ -143,7 +144,7 @@ pub fn resolve_table_references(
 ///
 /// Table names are validated using [`datasets_common::table_name::TableName`] to ensure they
 /// conform to identifier rules. The validated names are stored in `Arc` for efficient cloning.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TableReference {
     /// An unqualified table reference, e.g., "orders", "customers"
     ///
@@ -179,15 +180,8 @@ impl TableReference {
     ///
     /// # Arguments
     /// * `schema` - The schema name
-    /// * `table_name` - The table name as a string slice
-    ///
-    /// # Panics
-    /// Panics if `table_name` is not a valid table name according to identifier rules.
-    /// For fallible construction, parse the table name first using `.parse()`.
-    pub fn partial(schema: impl Into<Arc<str>>, table_name: &str) -> Self {
-        let table = table_name
-            .parse()
-            .expect("table_name must be a valid identifier");
+    /// * `table` - The table name (already validated as TableName)
+    pub fn partial(schema: impl Into<Arc<str>>, table: TableName) -> Self {
         Self::Partial {
             schema: schema.into(),
             table: Arc::new(table),
@@ -219,6 +213,32 @@ impl TableReference {
             Self::Full { catalog, .. } => Some(catalog),
         }
     }
+
+    /// Returns a properly quoted string representation suitable for SQL
+    ///
+    /// Uses DataFusion's `quote_identifier` to ensure identifiers are properly escaped.
+    pub fn to_quoted_string(&self) -> String {
+        match self {
+            Self::Bare { table } => quote_identifier(table.as_str()).to_string(),
+            Self::Partial { schema, table } => {
+                format!(
+                    "{}.{}",
+                    quote_identifier(schema),
+                    quote_identifier(table.as_str())
+                )
+            }
+            Self::Full {
+                catalog,
+                schema,
+                table,
+            } => format!(
+                "{}.{}.{}",
+                quote_identifier(catalog),
+                quote_identifier(schema),
+                quote_identifier(table.as_str())
+            ),
+        }
+    }
 }
 
 impl std::fmt::Display for TableReference {
@@ -247,6 +267,40 @@ impl From<TableReference> for datafusion::sql::TableReference {
                 schema,
                 table,
             } => datafusion::sql::TableReference::full(catalog, schema, table.as_str()),
+        }
+    }
+}
+
+impl TryFrom<datafusion::sql::TableReference> for TableReference {
+    type Error = datasets_common::table_name::TableNameError;
+
+    fn try_from(value: datafusion::sql::TableReference) -> Result<Self, Self::Error> {
+        match value {
+            datafusion::sql::TableReference::Bare { table } => {
+                let table_name = table.parse::<TableName>()?;
+                Ok(TableReference::Bare {
+                    table: Arc::new(table_name),
+                })
+            }
+            datafusion::sql::TableReference::Partial { schema, table } => {
+                let table_name = table.parse::<TableName>()?;
+                Ok(TableReference::Partial {
+                    schema,
+                    table: Arc::new(table_name),
+                })
+            }
+            datafusion::sql::TableReference::Full {
+                catalog,
+                schema,
+                table,
+            } => {
+                let table_name = table.parse::<TableName>()?;
+                Ok(TableReference::Full {
+                    catalog,
+                    schema,
+                    table: Arc::new(table_name),
+                })
+            }
         }
     }
 }
@@ -377,7 +431,7 @@ pub fn resolve_function_references(
 ///
 /// Function names are validated using [`datasets_derived::func_name::FuncName`] to ensure they conform to
 /// DataFusion UDF identifier rules. The validated names are stored in `Arc` for efficient cloning.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FunctionReference {
     /// An unqualified function reference, e.g., "count", "sum"
     ///
