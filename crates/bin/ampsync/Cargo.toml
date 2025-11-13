@@ -23,6 +23,7 @@ snmalloc = ["dep:snmalloc-rs"]
 admin-api = { path = "../../services/admin-api" }
 alloy.workspace = true
 amp-client = { path = "../../client", features = ["postgres"] }
+ampctl = { path = "../ampctl" }
 anyhow.workspace = true
 arrow-array = { version = "56", default-features = false }
 arrow-schema = { version = "56" }
@@ -61,6 +62,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tokio-util = "0.7.12"
 tracing.workspace = true
+url.workspace = true
 uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]

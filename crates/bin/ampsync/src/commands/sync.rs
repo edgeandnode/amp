@@ -44,11 +44,12 @@ pub async fn run(config: SyncConfig) -> Result<()> {
         .await
         .context("Failed to create amp-client")?;
 
-    // Apply custom headers (e.g., for authentication)
-    if !config.headers.is_empty() {
-        let keys: Vec<_> = config.headers.keys().map(|k| k.as_str()).collect();
-        client.set_headers(&config.headers);
-        info!("Applied custom headers: {:?}", keys);
+    // Apply authentication if provided
+    if let Some(token) = &config.auth_token {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::AUTHORIZATION, token.as_header_value());
+        client.set_headers(&headers);
+        info!("Applied authentication token");
     }
 
     info!("Amp client initialized");

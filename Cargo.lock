@@ -907,6 +907,7 @@ dependencies = [
  "admin-api",
  "alloy",
  "amp-client",
+ "ampctl",
  "anyhow",
  "arrow-array",
  "arrow-schema",
@@ -940,6 +941,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
  "xxhash-rust",
 ]

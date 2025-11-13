@@ -1,48 +1,6 @@
+use ampctl::client::BearerToken;
 use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
-use http::header::{HeaderMap, HeaderName, HeaderValue};
-
-/// Errors that occur when parsing HTTP headers from CLI arguments
-#[derive(Debug, thiserror::Error)]
-pub enum ParseHeaderError {
-    /// Header string is not in the expected "key=value" format
-    ///
-    /// Headers must be specified as `key=value` pairs, for example:
-    /// `--header "authorization=Bearer token123"`
-    #[error("Invalid header format '{input}'. Expected format: key=value")]
-    InvalidFormat { input: String },
-
-    /// Header name contains invalid characters
-    ///
-    /// HTTP header names must be valid tokens containing only visible ASCII characters
-    /// (alphanumeric, hyphen, underscore, etc.) as defined in RFC 7230.
-    ///
-    /// Common causes:
-    /// - Header name contains spaces or special characters
-    /// - Header name contains non-ASCII characters
-    /// - Header name is empty
-    #[error("Invalid header name '{name}': {source}")]
-    InvalidHeaderName {
-        name: String,
-        #[source]
-        source: http::header::InvalidHeaderName,
-    },
-
-    /// Header value contains invalid characters
-    ///
-    /// HTTP header values must contain only visible ASCII characters (space, tab, or 33-126)
-    /// as defined in RFC 7230.
-    ///
-    /// Common causes:
-    /// - Header value contains newline characters
-    /// - Header value contains control characters
-    /// - Header value contains non-ASCII/UTF-8 characters
-    #[error("Invalid header value: {source}")]
-    InvalidHeaderValue {
-        #[source]
-        source: http::header::InvalidHeaderValue,
-    },
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "ampsync")]
@@ -121,43 +79,14 @@ pub struct SyncConfig {
     #[arg(long, env = "MANIFEST_FETCH_MAX_BACKOFF_SECS", default_value_t = 60)]
     pub manifest_fetch_max_backoff_secs: u64,
 
-    /// HTTP headers to include in Flight requests (format: key=value)
+    /// Authentication token for Admin API and Arrow Flight
     ///
-    /// Can be specified multiple times for multiple headers.
-    /// Commonly used for authentication: --header "authorization=Bearer <token>"
+    /// Bearer token for authenticating requests to both the Admin API (for manifest fetching)
+    /// and the Arrow Flight server (for data streaming).
     ///
-    /// Can also be set via AMP_FLIGHT_HEADERS environment variable (comma-separated):
-    ///   AMP_FLIGHT_HEADERS="authorization=Bearer abc123,x-api-key=xyz"
+    /// The token will be sent as an Authorization header: `Authorization: Bearer <token>`
     ///
-    /// Example:
-    ///   ampsync sync --header "authorization=Bearer abc123" --header "x-api-key=xyz"
-    #[arg(long = "header", env = "AMP_FLIGHT_HEADERS", value_delimiter = ',', value_parser = parse_header_to_map)]
-    pub headers: HeaderMap,
-}
-
-/// Parse a header string in the format "key=value" and return a HeaderMap
-///
-/// This function is used by clap to parse individual header arguments.
-/// Multiple headers can be specified and will be merged by clap.
-fn parse_header_to_map(s: &str) -> Result<HeaderMap, ParseHeaderError> {
-    let parts: Vec<&str> = s.splitn(2, '=').collect();
-    if parts.len() != 2 {
-        return Err(ParseHeaderError::InvalidFormat {
-            input: s.to_string(),
-        });
-    }
-
-    let name = HeaderName::from_bytes(parts[0].as_bytes()).map_err(|err| {
-        ParseHeaderError::InvalidHeaderName {
-            name: parts[0].to_string(),
-            source: err,
-        }
-    })?;
-
-    let value = HeaderValue::from_str(parts[1])
-        .map_err(|err| ParseHeaderError::InvalidHeaderValue { source: err })?;
-
-    let mut map = HeaderMap::new();
-    map.insert(name, value);
-    Ok(map)
+    /// Can also be set via AMP_AUTH_TOKEN environment variable
+    #[arg(long, env = "AMP_AUTH_TOKEN")]
+    pub auth_token: Option<BearerToken>,
 }
