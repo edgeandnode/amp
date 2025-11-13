@@ -1,10 +1,9 @@
 use std::{
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
+    collections::HashSet, sync::{Arc, atomic::Ordering}, time::Duration
 };
 
 use common::{
-    BoxError, ParquetFooterCache, catalog::physical::PhysicalTable, metadata::Generation,
+    BoxError, ParquetFooterCache, metadata::Generation,
 };
 use dataset_store::DatasetStore;
 use datasets_common::reference::Reference;
@@ -41,16 +40,7 @@ async fn sql_dataset_input_batch_size() {
         .await;
 
     // 4. Get catalog and count files
-    let catalog = test.catalog_for_dataset("sql_stream_ds").await.unwrap();
-
-    // Find the even_blocks table
-    let table = catalog
-        .tables()
-        .iter()
-        .find(|t| t.table_name() == "even_blocks")
-        .unwrap();
-
-    let file_count = table.files().await.unwrap().len();
+    let file_count = test.file_count("sql_stream_ds", "even_blocks").await;
 
     // 5. With batch size 1 and 4 blocks, we expect 4 files to be dumped (even if some are empty)
     // since microbatch_max_interval=1 should create one file per block even_blocks only includes
@@ -58,23 +48,18 @@ async fn sql_dataset_input_batch_size() {
     // empty files for odd blocks.
     assert_eq!(file_count, 4);
 
-    test.spawn_compaction_and_await_completion(table).await;
-
-    tokio::time::sleep(Duration::from_millis(150)).await; // Ensure file locks have expired
+    test.spawn_compaction_and_await_completion("sql_stream_ds", "even_blocks").await;
 
     // 6. After compaction, we expect an additional file to be created, with all data in it.
-    let file_count_after = table.files().await.unwrap().len();
+    let file_count_after = test.file_count("sql_stream_ds", "even_blocks").await;
+
     assert_eq!(file_count_after, 5);
 
-    test.spawn_collection_and_await_completion(table).await;
+    test.spawn_collection_and_await_completion("sql_stream_ds", "even_blocks").await;
+
     // 7. After collection, we expect the original 4 files to be deleted,
     // leaving only the compacted file.
-    let file_count_final = table
-        .object_store()
-        .list(Some(table.path()))
-        .collect::<Vec<_>>()
-        .await
-        .len();
+    let file_count_final = test.file_count("sql_stream_ds", "even_blocks").await;
     assert_eq!(file_count_final, 1);
 
     let mut test_client = test.new_flight_client().await.unwrap();
@@ -82,6 +67,7 @@ async fn sql_dataset_input_batch_size() {
         .run_query("select count(*) from sql_stream_ds.even_blocks", None)
         .await
         .unwrap();
+
     assert_eq!(res, serde_json::json!([{"count(*)": 2}]));
 }
 
@@ -167,9 +153,15 @@ impl TestCtx {
     }
 
     /// Spawn compaction for a table and wait for completion.
-    async fn spawn_compaction_and_await_completion(&self, table: &Arc<PhysicalTable>) {
+    async fn spawn_compaction_and_await_completion(&self, dataset: &str, table: &str) {
+        let catalog = self.catalog_for_dataset(dataset).await.unwrap();
+        let table = catalog
+            .tables()
+            .iter()
+            .find(|t| t.table_name() == table)
+            .unwrap();
+
         let config = self.ctx.daemon_server().config();
-        let length = table.files().await.unwrap().len();
         let mut opts = parquet_opts(&config.parquet);
         opts.compactor.active.swap(true, Ordering::SeqCst);
         opts.collector.active.swap(false, Ordering::SeqCst);
@@ -178,20 +170,26 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.compactor.algorithm.cooldown_duration = Duration::ZERO;
-        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        opts_mut.partition = SegmentSizeLimit::new(100, 0, 0, 0, Generation::default(), 10);
         let cache = self.cache.clone();
         let mut task = AmpCompactor::start(table, cache, &opts, None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await; // Ensure file locks have expired
+
+        tokio::time::sleep(Duration::from_millis(150)).await; // Ensure file locks have expired since they must be non-zero
     }
 
     /// Spawn collection for a table and wait for completion.
-    async fn spawn_collection_and_await_completion(&self, table: &Arc<PhysicalTable>) {
+    async fn spawn_collection_and_await_completion(&self, dataset: &str, table: &str) {
+        let catalog = self.catalog_for_dataset(dataset).await.unwrap();
+        let table = catalog
+            .tables()
+            .iter()
+            .find(|t| t.table_name() == table)
+            .unwrap();
         let config = self.ctx.daemon_server().config();
-        let length = table.files().await.unwrap().len();
         let mut opts = parquet_opts(&config.parquet);
         opts.compactor.active.swap(false, Ordering::SeqCst);
         opts.collector.active.swap(true, Ordering::SeqCst);
@@ -199,12 +197,37 @@ impl TestCtx {
         opts_mut.collector.file_lock_duration = Duration::ZERO;
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
-        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, 0, Generation::default(), 1.5);
         let cache = self.cache.clone();
         let mut task = AmpCompactor::start(table, cache, &opts, None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
         }
+    }
+
+    async fn files(&self, dataset: &str, table: &str) -> HashSet<String> {
+        let catalog = self.catalog_for_dataset(dataset).await.unwrap();
+        let table = catalog
+            .tables()
+            .iter()
+            .find(|t| t.table_name() == table)
+            .unwrap();
+
+        let objs = table
+            .object_store()
+            .list(Some(table.path()))
+            .collect::<Vec<_>>()
+            .await;
+
+        objs.into_iter()
+            .filter_map(|res| res.ok())
+            .filter_map(|obj| obj.location.filename().map(String::from))
+            .inspect(|file| tracing::debug!(file = %file, "Found file in object store"))
+            .collect()
+    }
+
+    async fn file_count(&self, dataset: &str, table: &str) -> usize {
+        self.files(dataset, table).await.len()
     }
 }

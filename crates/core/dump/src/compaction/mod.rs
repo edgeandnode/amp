@@ -109,6 +109,16 @@ impl AmpCollectorInnerTask {
         }
     }
 
+    fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        props: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
+        let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
+        tokio::spawn(task.run())
+    }
+
     fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
@@ -116,7 +126,7 @@ impl AmpCollectorInnerTask {
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
         let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
-        tokio::spawn(task.try_run())
+        tokio::spawn(futures::future::ok(task))
     }
 
     /// Run compaction followed by collection
@@ -246,6 +256,16 @@ impl AmpCompactorTask {
         Self { inner }
     }
 
+    pub fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        props: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
+        let inner: JoinHandle<Result<AmpCollectorInnerTask, AmpCompactorTaskError>> = AmpCollectorInnerTask::start_and_run(table, cache, props, metrics);
+        Self::new(inner)
+    }
+
     pub fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
@@ -262,6 +282,16 @@ impl AmpCompactorTask {
 }
 
 impl AmpCompactor {
+    pub fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
+        let task = AmpCompactorTask::start_and_run(table, cache, opts, metrics);
+        Self { task }
+    }
+
     pub fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,

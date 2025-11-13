@@ -287,7 +287,7 @@ async fn dump_sql_query(
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
-    let mut compactor = AmpCompactor::start(
+    let mut compactor = AmpCompactor::start_and_run(
         &physical_table,
         env.parquet_footer_cache.clone(),
         opts,

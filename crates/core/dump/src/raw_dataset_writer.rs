@@ -138,7 +138,7 @@ impl RawTableWriter {
             None => None,
         };
 
-        let amp_compactor = AmpCompactor::start(&table, cache, &opts, metrics.clone());
+        let amp_compactor = AmpCompactor::start_and_run(&table, cache, &opts, metrics.clone());
 
         Ok(Self {
             table,
