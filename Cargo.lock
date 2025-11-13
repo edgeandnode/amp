@@ -3662,27 +3662,42 @@ dependencies = [
 name = "datasets-eth-beacon-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-raw",
  "eth-beacon-datasets",
  "schemars 1.1.0",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "datasets-evm-rpc-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-raw",
  "evm-rpc-datasets",
  "schemars 1.1.0",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "datasets-firehose-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-raw",
  "firehose-datasets",
  "schemars 1.1.0",
  "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "datasets-raw"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "datafusion",
+ "tokio",
 ]
 
 [[package]]

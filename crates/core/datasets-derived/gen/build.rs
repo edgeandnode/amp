@@ -1,7 +1,9 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(gen_schema)]
+    #[cfg(gen_schema_manifest)]
     {
-        println!("cargo:warning=Config 'gen_schema' enabled: Running JSON schema generation");
+        println!(
+            "cargo:warning=Config 'gen_schema_manifest' enabled: Running JSON schema generation"
+        );
 
         let out_dir = std::env::var("OUT_DIR")?;
 
@@ -16,9 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             derived_manifest_schema_path
         );
     }
-    #[cfg(not(gen_schema))]
+    #[cfg(not(gen_schema_manifest))]
     {
-        println!("cargo:debug=Config 'gen_schema' not enabled: Skipping JSON schema generation");
+        println!(
+            "cargo:debug=Config 'gen_schema_manifest' not enabled: Skipping JSON schema generation"
+        );
     }
 
     Ok(())
