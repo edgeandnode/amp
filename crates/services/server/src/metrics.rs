@@ -40,6 +40,22 @@ pub struct MetricsRegistry {
 
     /// Total bytes sent incrementally via streaming queries
     pub streaming_bytes_sent: telemetry::metrics::Counter,
+
+    // Runtime metrics (per-query tokio task metrics)
+    /// Query runtime busy duration (CPU time) in milliseconds
+    pub query_runtime_busy_duration: telemetry::metrics::Histogram<f64>,
+
+    /// Query runtime idle duration (waiting time) in milliseconds
+    pub query_runtime_idle_duration: telemetry::metrics::Histogram<f64>,
+
+    /// Number of times query task was polled
+    pub query_runtime_poll_count: telemetry::metrics::Histogram<u64>,
+
+    /// Number of times query task was scheduled
+    pub query_runtime_scheduled_count: telemetry::metrics::Histogram<u64>,
+
+    /// Query CPU utilization ratio (0.0 to 1.0)
+    pub query_runtime_cpu_utilization: telemetry::metrics::Histogram<f64>,
 }
 
 impl MetricsRegistry {
@@ -115,6 +131,36 @@ impl MetricsRegistry {
                 "streaming_bytes_sent_total",
                 "Total bytes sent incrementally via streaming queries",
             ),
+            query_runtime_busy_duration: telemetry::metrics::Histogram::new_f64(
+                meter,
+                "query_runtime_busy_duration_milliseconds",
+                "Per-query tokio task busy duration (actual CPU time)",
+                "milliseconds",
+            ),
+            query_runtime_idle_duration: telemetry::metrics::Histogram::new_f64(
+                meter,
+                "query_runtime_idle_duration_milliseconds",
+                "Per-query tokio task idle duration (waiting time)",
+                "milliseconds",
+            ),
+            query_runtime_poll_count: telemetry::metrics::Histogram::new_u64(
+                meter,
+                "query_runtime_poll_count",
+                "Number of times query task was polled by tokio runtime",
+                "polls",
+            ),
+            query_runtime_scheduled_count: telemetry::metrics::Histogram::new_u64(
+                meter,
+                "query_runtime_scheduled_count",
+                "Number of times query task was scheduled for execution",
+                "schedules",
+            ),
+            query_runtime_cpu_utilization: telemetry::metrics::Histogram::new_f64(
+                meter,
+                "query_runtime_cpu_utilization",
+                "Query CPU utilization ratio (busy / total time)",
+                "ratio",
+            ),
         }
     }
 
@@ -156,5 +202,23 @@ impl MetricsRegistry {
     /// Record streaming query lifetime
     pub fn record_streaming_lifetime(&self, duration_millis: f64) {
         self.streaming_query_lifetime.record(duration_millis);
+    }
+
+    /// Record runtime metrics from a query's TaskMetrics.
+    ///
+    /// This captures per-query tokio task metrics including busy/idle time,
+    /// poll counts, and CPU utilization. These metrics provide insights into
+    /// query resource consumption at the runtime level.
+    pub fn record_query_runtime_metrics(&self, metrics: &monitoring::TaskMetrics) {
+        self.query_runtime_busy_duration
+            .record(metrics.busy_duration_ms());
+        self.query_runtime_idle_duration
+            .record(metrics.idle_duration_ms());
+        self.query_runtime_poll_count
+            .record(metrics.total_poll_count);
+        self.query_runtime_scheduled_count
+            .record(metrics.total_scheduled_count);
+        self.query_runtime_cpu_utilization
+            .record(metrics.cpu_utilization_f64());
     }
 }

@@ -1,0 +1,258 @@
+{
+  "dashboard": {
+    "title": "Amp Dump Operations",
+    "tags": ["amp", "dump", "ingestion"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Dump Throughput (records/sec)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(rate(records_extracted[5m])) by (dataset)",
+            "legendFormat": "{{dataset}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "rps",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Active Dump Operations",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "count(task_type{task_type=\"dump\"})",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 5, "color": "yellow" },
+                { "value": 10, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Total Records Extracted",
+        "type": "stat",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "sum(increase(records_extracted[1h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0,
+            "color": {
+              "mode": "palette-classic"
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Dump Duration by Dataset",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(elapsed_ms{task_type=\"dump\"}) by (dataset)",
+            "legendFormat": "{{dataset}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Dump CPU Utilization",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(runtime_cpu_utilization{task_type=\"dump\"}) by (dataset)",
+            "legendFormat": "{{dataset}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Block Range Coverage",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "block_range_end - block_range_start",
+            "legendFormat": "{{dataset}} - {{task_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 1,
+              "fillOpacity": 5
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Dump Parallelism (Threads Used)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(runtime_unique_threads{task_type=\"dump\"}) by (dataset)",
+            "legendFormat": "{{dataset}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 1,
+            "custom": {
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Dump Errors (Last 24h)",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(increase(dump_errors_total[24h])) by (dataset)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 1, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Recent Dump Operations",
+        "type": "table",
+        "gridPos": { "x": 0, "y": 32, "w": 24, "h": 10 },
+        "targets": [
+          {
+            "expr": "task_type{task_type=\"dump\"}",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "job": true,
+                "instance": true,
+                "task_type": true
+              },
+              "indexByName": {
+                "task_id": 0,
+                "dataset": 1,
+                "block_range_start": 2,
+                "block_range_end": 3,
+                "records_extracted": 4,
+                "elapsed_ms": 5,
+                "runtime_cpu_utilization": 6,
+                "runtime_unique_threads": 7
+              },
+              "renameByName": {
+                "task_id": "Task ID",
+                "dataset": "Dataset",
+                "block_range_start": "Start Block",
+                "block_range_end": "End Block",
+                "records_extracted": "Records",
+                "elapsed_ms": "Duration (ms)",
+                "runtime_cpu_utilization": "CPU %",
+                "runtime_unique_threads": "Threads"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Duration (ms)" },
+              "properties": [
+                { "id": "unit", "value": "ms" },
+                { "id": "custom.width", "value": 120 }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

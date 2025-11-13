@@ -1,0 +1,263 @@
+{
+  "dashboard": {
+    "title": "Amp Query Performance",
+    "tags": ["amp", "queries", "performance"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Query Latency (P50, P95, P99)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(elapsed_ms_bucket[5m])) by (le, task_type))",
+            "legendFormat": "P50 - {{task_type}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(elapsed_ms_bucket[5m])) by (le, task_type))",
+            "legendFormat": "P95 - {{task_type}}",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(elapsed_ms_bucket[5m])) by (le, task_type))",
+            "legendFormat": "P99 - {{task_type}}",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Query Rate (queries/sec)",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(rate(query_execution_total[5m])) by (task_type)",
+            "legendFormat": "{{task_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "CPU Utilization",
+        "type": "gauge",
+        "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "avg(runtime_cpu_utilization{task_type=\"query_execution\"})",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 50, "color": "yellow" },
+                { "value": 80, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Average Parallelism (Threads Used)",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "avg(runtime_unique_threads{task_type=\"query_execution\"})",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 2, "color": "yellow" },
+                { "value": 4, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Busy vs Idle Time",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 6 },
+        "targets": [
+          {
+            "expr": "avg(runtime_busy_ms{task_type=\"query_execution\"})",
+            "legendFormat": "Busy Time",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(runtime_idle_ms{task_type=\"query_execution\"})",
+            "legendFormat": "Idle Time",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "stacking": { "mode": "normal" }
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Query Plan Complexity Distribution",
+        "type": "barchart",
+        "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum by (plan_node_summary) (count_over_time(plan_total_nodes[1h]))",
+            "legendFormat": "{{plan_node_summary}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "xTickLabelRotation": -45
+        }
+      },
+      {
+        "id": 7,
+        "title": "Average Plan Nodes per Query",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 14, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(plan_total_nodes) by (task_type)",
+            "legendFormat": "{{task_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Top 10 Slowest Queries",
+        "type": "table",
+        "gridPos": { "x": 0, "y": 22, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "topk(10, elapsed_ms{task_type=\"query_execution\"})",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "elapsed_ms" },
+              "properties": [
+                { "id": "unit", "value": "ms" },
+                { "id": "custom.width", "value": 120 }
+              ]
+            },
+            {
+              "matcher": { "id": "byName", "options": "sql" },
+              "properties": [
+                { "id": "custom.width", "value": 400 }
+              ]
+            }
+          ]
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "job": true,
+                "instance": true
+              },
+              "indexByName": {
+                "task_id": 0,
+                "sql": 1,
+                "elapsed_ms": 2,
+                "runtime_cpu_utilization": 3,
+                "runtime_unique_threads": 4,
+                "plan_total_nodes": 5
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Poll Count Distribution",
+        "type": "heatmap",
+        "gridPos": { "x": 0, "y": 30, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(rate(runtime_poll_count_bucket[5m])) by (le)",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "calculate": true,
+          "cellGap": 2,
+          "color": {
+            "mode": "scheme",
+            "scheme": "Spectral",
+            "steps": 128
+          }
+        }
+      }
+    ]
+  }
+}

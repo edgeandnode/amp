@@ -1,0 +1,348 @@
+{
+  "dashboard": {
+    "title": "Amp System Overview",
+    "tags": ["amp", "overview", "system"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Operations Overview",
+        "type": "row",
+        "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "Total Operations (24h)",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "sum(increase(task_executions_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Query Operations",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "sum(increase(task_executions_total{task_type=\"query_execution\"}[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0,
+            "color": {
+              "mode": "fixed",
+              "fixedColor": "blue"
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Dump Operations",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "sum(increase(task_executions_total{task_type=\"dump\"}[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0,
+            "color": {
+              "mode": "fixed",
+              "fixedColor": "green"
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Error Rate",
+        "type": "stat",
+        "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "sum(rate(task_errors_total[5m]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "decimals": 2,
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 0.01, "color": "yellow" },
+                { "value": 0.1, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Operation Rate by Type",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(rate(task_executions_total[5m])) by (task_type)",
+            "legendFormat": "{{task_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Average Latency by Type",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(elapsed_ms) by (task_type)",
+            "legendFormat": "{{task_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Resource Utilization",
+        "type": "row",
+        "gridPos": { "x": 0, "y": 13, "w": 24, "h": 1 },
+        "collapsed": false
+      },
+      {
+        "id": 9,
+        "title": "Overall CPU Utilization",
+        "type": "gauge",
+        "gridPos": { "x": 0, "y": 14, "w": 8, "h": 8 },
+        "targets": [
+          {
+            "expr": "avg(runtime_cpu_utilization)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 50, "color": "yellow" },
+                { "value": 80, "color": "green" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 10,
+        "title": "System-Wide Parallelism",
+        "type": "timeseries",
+        "gridPos": { "x": 8, "y": 14, "w": 8, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(runtime_unique_threads) by (task_type)",
+            "legendFormat": "{{task_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "stacking": { "mode": "normal" }
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Busy vs Idle Ratio",
+        "type": "piechart",
+        "gridPos": { "x": 16, "y": 14, "w": 8, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(runtime_busy_ms)",
+            "legendFormat": "Busy",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(runtime_idle_ms)",
+            "legendFormat": "Idle",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "pieType": "pie",
+          "displayLabels": ["percent"],
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "values": ["value", "percent"]
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Performance Trends",
+        "type": "row",
+        "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 },
+        "collapsed": false
+      },
+      {
+        "id": 13,
+        "title": "Latency Percentiles (All Operations)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 23, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(elapsed_ms_bucket[5m])) by (le))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.90, sum(rate(elapsed_ms_bucket[5m])) by (le))",
+            "legendFormat": "P90",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(elapsed_ms_bucket[5m])) by (le))",
+            "legendFormat": "P95",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(elapsed_ms_bucket[5m])) by (le))",
+            "legendFormat": "P99",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 5
+            }
+          },
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "P99" },
+              "properties": [
+                { "id": "custom.lineWidth", "value": 3 }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 14,
+        "title": "Task Efficiency Score",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 31, "w": 24, "h": 4 },
+        "targets": [
+          {
+            "expr": "(avg(runtime_cpu_utilization) * avg(runtime_unique_threads)) / 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 2,
+            "mappings": [
+              {
+                "type": "range",
+                "options": {
+                  "from": 0,
+                  "to": 2,
+                  "result": {
+                    "text": "Low - Underutilized",
+                    "color": "red"
+                  }
+                }
+              },
+              {
+                "type": "range",
+                "options": {
+                  "from": 2,
+                  "to": 4,
+                  "result": {
+                    "text": "Good - Balanced",
+                    "color": "yellow"
+                  }
+                }
+              },
+              {
+                "type": "range",
+                "options": {
+                  "from": 4,
+                  "to": 100,
+                  "result": {
+                    "text": "Excellent - High Utilization",
+                    "color": "green"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "description": "Efficiency score = (CPU Utilization × Avg Threads Used) / 100. Higher is better."
+      }
+    ]
+  }
+}

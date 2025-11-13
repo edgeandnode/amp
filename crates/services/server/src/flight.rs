@@ -110,6 +110,7 @@ impl Service {
         is_streaming: Option<bool>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
+        // Parse and plan the query first to get the logical plan for instrumentation
         let query = parse_sql(sql).map_err(Error::from)?;
         let dataset_store = self.dataset_store.clone();
         let catalog = catalog_for_sql(
@@ -124,25 +125,42 @@ impl Service {
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx.plan_sql(query.clone()).await.map_err(Error::from)?;
 
-        let is_streaming =
+        let is_streaming_mode =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
-        let result = self
-            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
-            .await;
 
-        // Record execution error
-        if result.is_err()
-            && let Some(metrics) = &self.metrics
-        {
-            let error_code = result
-                .as_ref()
-                .err()
-                .map(|e| e.error_code())
-                .unwrap_or("UNKNOWN_ERROR");
-            metrics.record_query_error(error_code);
+        if let Some(metrics) = &self.metrics {
+            // Use generic task instrumentation with QueryExecution task type
+            let task_type = monitoring::TaskType::from_query(sql, plan.as_inner());
+            let instrumentation = monitoring::InstrumentedTaskExecution::new(task_type);
+
+            let execution_fut = self.execute_plan(
+                catalog,
+                dataset_store,
+                plan,
+                is_streaming_mode,
+                resume_watermark,
+            );
+
+            let (result, task_metrics) = instrumentation.execute(execution_fut).await;
+
+            metrics.record_query_runtime_metrics(&task_metrics);
+
+            // Record execution error if present
+            if let Err(e) = &result {
+                metrics.record_query_error(e.error_code());
+            }
+
+            result
+        } else {
+            self.execute_plan(
+                catalog,
+                dataset_store,
+                plan,
+                is_streaming_mode,
+                resume_watermark,
+            )
+            .await
         }
-
-        result
     }
 
     #[tracing::instrument(skip_all, err)]

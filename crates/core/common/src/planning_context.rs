@@ -167,6 +167,14 @@ impl DetachedLogicalPlan {
         self.0.schema().clone()
     }
 
+    /// Get a reference to the inner LogicalPlan for analysis purposes.
+    ///
+    /// Note: This plan still contains `PlanningTable` providers and cannot be executed
+    /// until it is attached to a `QueryContext` via `attach_to()`.
+    pub fn as_inner(&self) -> &LogicalPlan {
+        &self.0
+    }
+
     pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
         Ok(Self(propagate_block_num(self.0)?))
     }
