@@ -6,11 +6,11 @@ export default defineDataset(() => ({
   network: "mainnet",
   version: "0.0.3",
   dependencies: {
-    multi_version: "test_namespace/multi_version@0.0.2",
+    v2: "test_namespace/multi_version@0.0.2",
   },
   tables: {
     blocks: {
-      sql: "SELECT block_num, gas_limit, hash FROM multi_version.blocks",
+      sql: "SELECT block_num, gas_limit, hash FROM v2.blocks",
       network: "mainnet",
     },
   },
