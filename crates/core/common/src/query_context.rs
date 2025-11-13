@@ -260,7 +260,7 @@ impl QueryContext {
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let mut range: Option<RangeInclusive<BlockNum>> = None;
         for df_table_ref in extract_table_references_from_plan(plan)? {
-            let table_ref = TableReference::try_from(df_table_ref)?;
+            let table_ref: TableReference<String> = df_table_ref.try_into()?;
             range = match (range, self.get_synced_range_for_table(&table_ref)?) {
                 (None, range) | (range, None) => range,
                 (Some(a), Some(b)) => block_range_intersection(a, b),

@@ -1559,6 +1559,52 @@ async fn bare_builtin_function_succeeds() {
 }
 
 #[tokio::test]
+async fn function_with_catalog_qualification_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "function_with_catalog_qualification",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    // Catalog-qualified function (3 parts) - not supported
+    let sql_query = r#"SELECT catalog.schema.function(data) FROM eth.blocks"#;
+
+    //* When
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [("query", sql_query)],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail with catalog-qualified function"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    // The error should indicate catalog-qualified function (not supported)
+    assert_eq!(
+        response.error_code, "CATALOG_QUALIFIED_FUNCTION",
+        "should return CATALOG_QUALIFIED_FUNCTION for catalog-qualified function"
+    );
+    assert!(
+        response
+            .error_message
+            .contains("Catalog-qualified function references are not supported"),
+        "error message should mention catalog-qualified functions are not supported, got: {}",
+        response.error_message
+    );
+}
+
+#[tokio::test]
 async fn function_with_invalid_format_fails() {
     //* Given
     let ctx = TestCtx::setup(
@@ -1567,8 +1613,8 @@ async fn function_with_invalid_format_fails() {
     )
     .await;
 
-    // Catalog-qualified function (3 parts) - not supported
-    let sql_query = r#"SELECT catalog.schema.function(data) FROM eth.blocks"#;
+    // Invalid function format (4+ parts) - invalid format
+    let sql_query = r#"SELECT a.b.c.d(data) FROM eth.blocks"#;
 
     //* When
     let resp = ctx

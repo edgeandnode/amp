@@ -8,7 +8,7 @@ use datafusion::sql::parser;
 use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     DerivedDatasetKind, Manifest,
-    dep_alias::DepAlias,
+    dep_alias::{DepAlias, DepAliasError},
     manifest::{TableInput, View},
 };
 
@@ -21,8 +21,8 @@ use crate::{
         sql::planning_ctx_for_sql_tables_with_deps,
     },
     sql::{
-        FunctionReference, ResolveFunctionReferencesError, TableReference,
-        resolve_function_references, resolve_table_references,
+        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
+        TableReference, resolve_function_references, resolve_table_references,
     },
     utils::dfs,
 };
@@ -117,7 +117,7 @@ pub fn sort_tables_by_dependencies(
     }
 
     for (table_name, query) in queries {
-        let table_refs = resolve_table_references(query)?;
+        let table_refs = resolve_table_references::<String>(query)?;
 
         // Filter to only include dependencies within the same dataset
         let mut table_deps: Vec<TableName> = vec![];
@@ -174,6 +174,17 @@ fn table_dependency_sort(
     Ok(ordered)
 }
 
+/// Type alias for the table references map used in multi-table validation
+///
+/// Maps table names to their SQL references (table refs and function refs) using dependency aliases.
+type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAlias>>,
+    ),
+>;
+
 /// Validates a derived dataset manifest with comprehensive checks.
 ///
 /// This function performs deep validation of a manifest by:
@@ -221,8 +232,7 @@ pub async fn validate(
     }
 
     // Step 2: Parse all SQL queries and extract references
-    let mut references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)> =
-        BTreeMap::new();
+    let mut references: TableReferencesMap = BTreeMap::new();
 
     for (table_name, table) in &manifest.tables {
         let TableInput::View(View { sql }) = &table.input;
@@ -235,9 +245,15 @@ pub async fn validate(
             })?;
 
         // Extract table references
-        let table_refs = resolve_table_references(&stmt).map_err(|err| match &err {
-            crate::sql::ResolveTableReferencesError::InvalidTableName { .. } => {
+        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
+            ResolveTableReferencesError::InvalidTableName { .. } => {
                 ManifestValidationError::InvalidTableName(err)
+            }
+            ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                ManifestValidationError::CatalogQualifiedTableInSql {
+                    table_name: table_name.clone(),
+                    source: err,
+                }
             }
             _ => ManifestValidationError::TableReferenceResolution {
                 table_name: table_name.clone(),
@@ -246,7 +262,7 @@ pub async fn validate(
         })?;
 
         // Extract function references
-        let func_refs = resolve_function_references(&stmt).map_err(|err| {
+        let func_refs = resolve_function_references::<DepAlias>(&stmt).map_err(|err| {
             ManifestValidationError::FunctionReferenceResolution {
                 table_name: table_name.clone(),
                 source: err,
@@ -265,18 +281,9 @@ pub async fn validate(
     planning_ctx_for_sql_tables_with_deps(store, references, dependencies)
         .await
         .map_err(|err| match &err {
-            PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable { .. } => {
-                ManifestValidationError::CatalogQualifiedTable(err)
-            }
             PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
                 ManifestValidationError::UnqualifiedTable(err)
             }
-            PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef { .. } => {
-                ManifestValidationError::InvalidDependencyAliasForTableRef(err)
-            }
-            PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
-                ..
-            } => ManifestValidationError::InvalidDependencyAliasForFunctionRef(err),
             PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
                 ManifestValidationError::DatasetNotFound(err)
             }
@@ -333,7 +340,7 @@ pub enum ManifestValidationError {
     TableReferenceResolution {
         table_name: TableName,
         #[source]
-        source: crate::sql::ResolveTableReferencesError,
+        source: ResolveTableReferencesError<DepAliasError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -341,7 +348,7 @@ pub enum ManifestValidationError {
     FunctionReferenceResolution {
         table_name: TableName,
         #[source]
-        source: ResolveFunctionReferencesError,
+        source: ResolveFunctionReferencesError<DepAliasError>,
     },
 
     /// Dependency declared in manifest but not found in store
@@ -357,12 +364,17 @@ pub enum ManifestValidationError {
         source: BoxError,
     },
 
-    /// Catalog-qualified table reference not supported
+    /// Catalog-qualified table reference in SQL query
     ///
     /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
     /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error("Catalog-qualified table reference not supported: {0}")]
-    CatalogQualifiedTable(#[source] PlanningCtxForSqlTablesWithDepsError),
+    /// This error occurs during SQL parsing when a 3-part table reference is detected.
+    #[error("Catalog-qualified table reference in table '{table_name}': {source}")]
+    CatalogQualifiedTableInSql {
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasError>,
+    },
 
     /// Unqualified table reference
     ///
@@ -376,7 +388,7 @@ pub enum ManifestValidationError {
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
-    InvalidTableName(#[source] crate::sql::ResolveTableReferencesError),
+    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
 
     /// Dataset reference not found
     ///
@@ -423,20 +435,6 @@ pub enum ManifestValidationError {
     /// contain only alphanumeric/underscore, and be <= 63 bytes).
     #[error("Invalid dependency alias: {0}")]
     InvalidDependencyAlias(#[source] PlanningCtxForSqlTablesWithDepsError),
-
-    /// Invalid dependency alias in table reference
-    ///
-    /// The dependency alias in a table reference does not conform to alias rules
-    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    #[error("Invalid dependency alias in table reference: {0}")]
-    InvalidDependencyAliasForTableRef(#[source] PlanningCtxForSqlTablesWithDepsError),
-
-    /// Invalid dependency alias in function reference
-    ///
-    /// The dependency alias in a function reference does not conform to alias rules
-    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    #[error("Invalid dependency alias in function reference: {0}")]
-    InvalidDependencyAliasForFunctionRef(#[source] PlanningCtxForSqlTablesWithDepsError),
 
     /// Dependency alias not found
     ///

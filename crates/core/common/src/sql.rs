@@ -20,7 +20,7 @@ use datasets_derived::{func_name::FuncName, sql_str::SqlStr};
 /// details about the syntax issue. If the input is empty, contains only whitespace, or only
 /// semicolons, a `NoStatements` error is returned. If multiple SQL statements are provided
 /// (separated by semicolons), a `MultipleStatements` error is returned with the count.
-pub fn parse(sql: impl AsRef<SqlStr>) -> Result<parser::Statement, ParseSqlError> {
+pub fn parse(sql: impl AsRef<SqlStr>) -> Result<Statement, ParseSqlError> {
     let mut statements =
         parser::DFParser::parse_sql(sql.as_ref()).map_err(ParseSqlError::InvalidSyntax)?;
 
@@ -66,7 +66,8 @@ pub enum ParseSqlError {
 /// and wraps them in type-safe [`TableReference`] variants.
 ///
 /// Extracts table references and validates table names using [`datasets_common::table_name::TableName`].
-/// Fails fast if any table name has an invalid format.
+/// Schema names are parsed using the generic type `T`.
+/// Fails fast if any table name or schema name has an invalid format.
 ///
 /// Note: This function does not return CTEs (Common Table Expressions). CTEs are internal to
 /// the query and don't reference external tables.
@@ -75,9 +76,13 @@ pub enum ParseSqlError {
 /// - `table` → [`TableReference::Bare`] (unqualified table)
 /// - `schema.table` → [`TableReference::Partial`] (schema-qualified table)
 /// - `catalog.schema.table` → [`TableReference::Full`] (fully-qualified table)
-pub fn resolve_table_references(
+pub fn resolve_table_references<T>(
     stmt: &Statement,
-) -> Result<Vec<TableReference>, ResolveTableReferencesError> {
+) -> Result<Vec<TableReference<T>>, ResolveTableReferencesError<T::Err>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error,
+{
     // Call DataFusion's resolve_table_references with normalization enabled
     let (df_table_refs, _df_cte_refs) =
         datafusion::sql::resolve::resolve_table_references(stmt, true).map_err(|err| {
@@ -114,21 +119,29 @@ pub fn resolve_table_references(
         })?;
 
         // Construct our TableReference based on DataFusion's reference type
-        let table_ref = match df_ref {
+        let table_ref = match &df_ref {
             datafusion::sql::TableReference::Bare { .. } => TableReference::Bare {
                 table: Arc::new(table),
             },
-            datafusion::sql::TableReference::Partial { schema, .. } => TableReference::Partial {
-                schema,
-                table: Arc::new(table),
-            },
-            datafusion::sql::TableReference::Full {
-                catalog, schema, ..
-            } => TableReference::Full {
-                catalog,
-                schema,
-                table: Arc::new(table),
-            },
+            datafusion::sql::TableReference::Partial { schema, .. } => {
+                // Parse schema string into generic type T
+                let parsed_schema = schema.parse::<T>().map_err(|err| {
+                    ResolveTableReferencesError::InvalidSchemaFormat {
+                        table_ref: df_ref.to_string(),
+                        source: err,
+                    }
+                })?;
+                TableReference::Partial {
+                    schema: Arc::new(parsed_schema),
+                    table: Arc::new(table),
+                }
+            }
+            datafusion::sql::TableReference::Full { .. } => {
+                // Catalog-qualified table references are not supported
+                return Err(ResolveTableReferencesError::CatalogQualifiedTable {
+                    table_ref: df_ref.to_string(),
+                });
+            }
         };
 
         result.push(table_ref);
@@ -144,8 +157,11 @@ pub fn resolve_table_references(
 ///
 /// Table names are validated using [`datasets_common::table_name::TableName`] to ensure they
 /// conform to identifier rules. The validated names are stored in `Arc` for efficient cloning.
+///
+/// Schema names are generic over type `T` which defaults to `String`. Custom types implementing
+/// `FromStr` can be used for validated schema names.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TableReference {
+pub enum TableReference<T = String> {
     /// An unqualified table reference, e.g., "orders", "customers"
     ///
     /// Corresponds to SQL: `SELECT * FROM table`
@@ -157,31 +173,20 @@ pub enum TableReference {
     ///
     /// Corresponds to SQL: `SELECT * FROM schema.table`
     Partial {
-        /// The schema name containing the table
-        schema: Arc<str>,
-        /// The validated table name wrapped in Arc for efficient cloning
-        table: Arc<TableName>,
-    },
-    /// A fully resolved table reference, e.g., "catalog.schema.table"
-    ///
-    /// Corresponds to SQL: `SELECT * FROM catalog.schema.table`
-    Full {
-        /// The catalog name
-        catalog: Arc<str>,
-        /// The schema name containing the table
-        schema: Arc<str>,
+        /// The schema name containing the table (generic type T)
+        schema: Arc<T>,
         /// The validated table name wrapped in Arc for efficient cloning
         table: Arc<TableName>,
     },
 }
 
-impl TableReference {
+impl<T> TableReference<T> {
     /// Creates a partially qualified table reference (schema.table)
     ///
     /// # Arguments
     /// * `schema` - The schema name
     /// * `table` - The table name (already validated as TableName)
-    pub fn partial(schema: impl Into<Arc<str>>, table: TableName) -> Self {
+    pub fn partial(schema: impl Into<Arc<T>>, table: TableName) -> Self {
         Self::Partial {
             schema: schema.into(),
             table: Arc::new(table),
@@ -193,27 +198,22 @@ impl TableReference {
         match self {
             Self::Bare { table } => table,
             Self::Partial { table, .. } => table,
-            Self::Full { table, .. } => table,
         }
     }
 
     /// Returns the schema name if qualified, `None` otherwise.
-    pub fn schema(&self) -> Option<&str> {
+    pub fn schema(&self) -> Option<&T> {
         match self {
             Self::Bare { .. } => None,
             Self::Partial { schema, .. } => Some(schema),
-            Self::Full { schema, .. } => Some(schema),
         }
     }
+}
 
-    /// Returns the catalog name if fully qualified, `None` otherwise.
-    pub fn catalog(&self) -> Option<&str> {
-        match self {
-            Self::Bare { .. } | Self::Partial { .. } => None,
-            Self::Full { catalog, .. } => Some(catalog),
-        }
-    }
-
+impl<T> TableReference<T>
+where
+    T: AsRef<str>,
+{
     /// Returns a properly quoted string representation suitable for SQL
     ///
     /// Uses DataFusion's `quote_identifier` to ensure identifiers are properly escaped.
@@ -223,69 +223,66 @@ impl TableReference {
             Self::Partial { schema, table } => {
                 format!(
                     "{}.{}",
-                    quote_identifier(schema),
+                    quote_identifier(schema.as_ref().as_ref()),
                     quote_identifier(table.as_str())
                 )
             }
-            Self::Full {
-                catalog,
-                schema,
-                table,
-            } => format!(
-                "{}.{}.{}",
-                quote_identifier(catalog),
-                quote_identifier(schema),
-                quote_identifier(table.as_str())
-            ),
         }
     }
 }
 
-impl std::fmt::Display for TableReference {
+impl<T> std::fmt::Display for TableReference<T>
+where
+    T: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Bare { table } => write!(f, "{}", table),
             Self::Partial { schema, table } => write!(f, "{}.{}", schema, table),
-            Self::Full {
-                catalog,
-                schema,
-                table,
-            } => write!(f, "{}.{}.{}", catalog, schema, table),
         }
     }
 }
 
-impl From<TableReference> for datafusion::sql::TableReference {
-    fn from(value: TableReference) -> Self {
+impl<T> From<TableReference<T>> for datafusion::sql::TableReference
+where
+    T: AsRef<str>,
+{
+    fn from(value: TableReference<T>) -> Self {
         match value {
             TableReference::Bare { table } => datafusion::sql::TableReference::bare(table.as_str()),
             TableReference::Partial { schema, table } => {
-                datafusion::sql::TableReference::partial(schema, table.as_str())
+                datafusion::sql::TableReference::partial(schema.as_ref().as_ref(), table.as_str())
             }
-            TableReference::Full {
-                catalog,
-                schema,
-                table,
-            } => datafusion::sql::TableReference::full(catalog, schema, table.as_str()),
         }
     }
 }
 
-impl TryFrom<datafusion::sql::TableReference> for TableReference {
-    type Error = datasets_common::table_name::TableNameError;
+impl<T> TryFrom<datafusion::sql::TableReference> for TableReference<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error,
+{
+    type Error = TableReferenceConversionError<T::Err>;
 
     fn try_from(value: datafusion::sql::TableReference) -> Result<Self, Self::Error> {
         match value {
             datafusion::sql::TableReference::Bare { table } => {
-                let table_name = table.parse::<TableName>()?;
+                let table_name = table
+                    .parse::<TableName>()
+                    .map_err(TableReferenceConversionError::InvalidTableName)?;
                 Ok(TableReference::Bare {
                     table: Arc::new(table_name),
                 })
             }
             datafusion::sql::TableReference::Partial { schema, table } => {
-                let table_name = table.parse::<TableName>()?;
+                let table_name = table
+                    .parse::<TableName>()
+                    .map_err(TableReferenceConversionError::InvalidTableName)?;
+                let parsed_schema = schema
+                    .parse::<T>()
+                    .map_err(TableReferenceConversionError::InvalidSchemaFormat)?;
                 Ok(TableReference::Partial {
-                    schema,
+                    schema: Arc::new(parsed_schema),
                     table: Arc::new(table_name),
                 })
             }
@@ -294,22 +291,48 @@ impl TryFrom<datafusion::sql::TableReference> for TableReference {
                 schema,
                 table,
             } => {
-                let table_name = table.parse::<TableName>()?;
-                Ok(TableReference::Full {
-                    catalog,
-                    schema,
-                    table: Arc::new(table_name),
+                // Catalog-qualified table references are not supported
+                Err(TableReferenceConversionError::CatalogQualifiedTable {
+                    table_ref: format!("{}.{}.{}", catalog, schema, table),
                 })
             }
         }
     }
 }
 
+/// Errors that occur when converting DataFusion table references
+///
+/// This error type is used by the `TryFrom<datafusion::sql::TableReference>` implementation.
+#[derive(Debug, thiserror::Error)]
+pub enum TableReferenceConversionError<E = std::convert::Infallible> {
+    /// Table name has invalid format
+    ///
+    /// This occurs when a table name extracted from a DataFusion table reference
+    /// does not conform to identifier rules.
+    #[error("Invalid table name: {0}")]
+    InvalidTableName(#[source] datasets_common::table_name::TableNameError),
+
+    /// Schema name has invalid format
+    ///
+    /// This occurs when a schema name cannot be parsed into the target type `T`.
+    /// The underlying error from `T::FromStr` provides the specific validation failure.
+    #[error("Invalid schema format: {0}")]
+    InvalidSchemaFormat(#[source] E),
+
+    /// Table reference is catalog-qualified (not supported)
+    ///
+    /// This occurs when attempting to convert a DataFusion table reference that contains
+    /// a catalog qualifier (3 parts). Catalog-qualified references are not supported -
+    /// only bare table names (1 part) and schema-qualified names (2 parts) are allowed.
+    #[error("Catalog-qualified table references are not supported: {table_ref}")]
+    CatalogQualifiedTable { table_ref: String },
+}
+
 /// Errors that occur when resolving table references from SQL statements
 ///
 /// This error type is used by [`resolve_table_references`].
 #[derive(Debug, thiserror::Error)]
-pub enum ResolveTableReferencesError {
+pub enum ResolveTableReferencesError<E = std::convert::Infallible> {
     /// Table reference contains an invalid identifier
     ///
     /// This occurs when a table reference contains identifiers that are not valid
@@ -372,25 +395,55 @@ pub enum ResolveTableReferencesError {
         #[source]
         source: datasets_common::table_name::TableNameError,
     },
+
+    /// Schema name has invalid format
+    ///
+    /// This occurs when a schema name extracted from SQL cannot be parsed into
+    /// the target schema type. The schema type is determined by the generic parameter
+    /// `T` in `resolve_table_references<T>()`.
+    ///
+    /// When using the default `String` type, this error will never occur as the conversion
+    /// is infallible. When using a custom validated schema type, this error occurs if the
+    /// schema name fails validation according to the type's `FromStr` implementation.
+    #[error("Invalid schema format in reference '{table_ref}': {source}")]
+    InvalidSchemaFormat {
+        table_ref: String,
+        #[source]
+        source: E,
+    },
+
+    /// Table reference is catalog-qualified (not supported)
+    ///
+    /// This occurs when a table reference contains a catalog qualifier (3 parts).
+    /// Catalog-qualified references are not supported - only bare table names
+    /// (1 part) and schema-qualified names (2 parts) are allowed.
+    #[error("Catalog-qualified table references are not supported: {table_ref}")]
+    CatalogQualifiedTable { table_ref: String },
 }
 
 /// Resolves all function names from a SQL statement into structured [`FunctionReference`]s.
 ///
 /// Extracts function calls and resolves them into typed [`FunctionReference`] variants.
-/// Fails fast if any function name has an invalid format (more than 2 parts).
+/// Schema names are parsed using the generic type `T`.
+/// Fails fast if any function name has an invalid format (more than 2 parts) or if
+/// schema name parsing fails.
 ///
 /// Supported formats:
 /// - `function` → [`FunctionReference::Bare`] (built-in DataFusion functions)
 /// - `schema.function` → [`FunctionReference::Qualified`] (dataset UDFs)
 /// - `catalog.schema.function` → Error (not supported)
-pub fn resolve_function_references(
+pub fn resolve_function_references<T>(
     stmt: &Statement,
-) -> Result<Vec<FunctionReference>, ResolveFunctionReferencesError> {
-    let function_names = all_function_names(stmt)?;
+) -> Result<Vec<FunctionReference<T>>, ResolveFunctionReferencesError<T::Err>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error,
+{
+    let func_refs = all_function_refs(stmt)?;
 
-    let mut result = Vec::with_capacity(function_names.len());
-    for func_name in function_names {
-        let parts: Vec<_> = func_name.split('.').collect();
+    let mut result = Vec::with_capacity(func_refs.len());
+    for func_ref in func_refs {
+        let parts: Vec<_> = func_ref.split('.').collect();
         let func_ref = match parts.as_slice() {
             [function] => {
                 // Validate function name (one-time validation)
@@ -404,17 +457,36 @@ pub fn resolve_function_references(
             }
             [schema, function] => {
                 // Validate function name (one-time validation)
-                let validated = function.parse::<FuncName>().map_err(|err| {
+                let validated_func = function.parse::<FuncName>().map_err(|err| {
                     ResolveFunctionReferencesError::InvalidFunctionName {
                         function: function.to_string(),
                         source: err,
                     }
                 })?;
-                FunctionReference::qualified(schema.to_string(), validated)
+
+                // Parse schema string into generic type T
+                let validated_schema = schema.parse::<T>().map_err(|err| {
+                    ResolveFunctionReferencesError::InvalidSchemaFormat {
+                        function_ref: func_ref.clone(),
+                        source: err,
+                    }
+                })?;
+
+                FunctionReference::Qualified {
+                    schema: Arc::new(validated_schema),
+                    function: Arc::new(validated_func),
+                }
+            }
+            [_catalog, _schema, _function] => {
+                // Catalog-qualified function references are not supported
+                return Err(ResolveFunctionReferencesError::CatalogQualifiedFunction {
+                    function_ref: func_ref,
+                });
             }
             _ => {
+                // 4 or more parts - invalid format
                 return Err(ResolveFunctionReferencesError::InvalidFunctionFormat {
-                    function: func_name,
+                    function_ref: func_ref,
                 });
             }
         };
@@ -431,8 +503,11 @@ pub fn resolve_function_references(
 ///
 /// Function names are validated using [`datasets_derived::func_name::FuncName`] to ensure they conform to
 /// DataFusion UDF identifier rules. The validated names are stored in `Arc` for efficient cloning.
+///
+/// Schema names are generic over type `T` which defaults to `String`. Custom types implementing
+/// `FromStr` can be used for validated schema names.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum FunctionReference {
+pub enum FunctionReference<T = String> {
     /// An unqualified function reference, e.g., "count", "sum"
     ///
     /// These typically refer to built-in DataFusion functions.
@@ -444,14 +519,14 @@ pub enum FunctionReference {
     ///
     /// These refer to user-defined functions (UDFs) from specific datasets.
     Qualified {
-        /// The schema (dataset reference) containing the function
-        schema: Arc<str>,
+        /// The schema (dataset reference) containing the function (generic type T)
+        schema: Arc<T>,
         /// The validated function name wrapped in Arc for efficient cloning
         function: Arc<FuncName>,
     },
 }
 
-impl FunctionReference {
+impl<T> FunctionReference<T> {
     /// Creates a bare (unqualified) function reference from a validated function name.
     ///
     /// The function name must be validated before calling this method (via `FuncName::from_str`).
@@ -466,7 +541,7 @@ impl FunctionReference {
     ///
     /// The function name must be validated before calling this method (via `FuncName::from_str`).
     /// The validated name is wrapped in `Arc` for efficient cloning. The schema is assumed valid.
-    pub fn qualified(schema: impl Into<Arc<str>>, function: FuncName) -> Self {
+    pub fn qualified(schema: impl Into<Arc<T>>, function: FuncName) -> Self {
         Self::Qualified {
             schema: schema.into(),
             function: Arc::new(function),
@@ -482,7 +557,7 @@ impl FunctionReference {
     }
 
     /// Returns the schema name if qualified, `None` otherwise.
-    pub fn schema(&self) -> Option<&str> {
+    pub fn schema(&self) -> Option<&T> {
         match self {
             Self::Bare { .. } => None,
             Self::Qualified { schema, .. } => Some(schema),
@@ -490,7 +565,10 @@ impl FunctionReference {
     }
 }
 
-impl std::fmt::Display for FunctionReference {
+impl<T> std::fmt::Display for FunctionReference<T>
+where
+    T: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Bare { function } => write!(f, "{}", function),
@@ -503,7 +581,7 @@ impl std::fmt::Display for FunctionReference {
 ///
 /// This error type is used by [`resolve_function_references`].
 #[derive(Debug, thiserror::Error)]
-pub enum ResolveFunctionReferencesError {
+pub enum ResolveFunctionReferencesError<E = std::convert::Infallible> {
     /// Failed to extract function names from SQL statement
     ///
     /// This occurs when the underlying function name extraction fails,
@@ -511,18 +589,26 @@ pub enum ResolveFunctionReferencesError {
     #[error("Failed to resolve function references: {0}")]
     FunctionReferenceResolution(#[from] AllFunctionNamesError),
 
-    /// Function reference has invalid format (more than 2 parts)
+    /// Function reference is catalog-qualified (not supported)
     ///
-    /// This occurs when a function name contains 3 or more dot-separated parts,
-    /// such as `"catalog.schema.function"`. Currently, only bare functions
-    /// (1 part) and qualified functions (2 parts) are supported.
+    /// This occurs when a function name contains a catalog qualifier (3 parts).
+    /// Catalog-qualified references are not supported - only bare function names
+    /// (1 part) and schema-qualified names (2 parts) are allowed.
     ///
     /// # Examples
     ///
     /// - Valid: `"count"`, `"eth_mainnet.decode_log"`
     /// - Invalid: `"catalog.schema.function"`, `"a.b.c.d"`
-    #[error("Invalid function format (expected 1 or 2 parts, got more): {function}")]
-    InvalidFunctionFormat { function: String },
+    #[error("Catalog-qualified function references are not supported: {function_ref}")]
+    CatalogQualifiedFunction { function_ref: String },
+
+    /// Function reference has invalid format (wrong number of parts)
+    ///
+    /// This occurs when a function name contains 4 or more dot-separated parts.
+    /// Only bare functions (1 part), qualified functions (2 parts), and catalog-qualified
+    /// functions (3 parts - rejected separately) are recognized.
+    #[error("Invalid function format (expected 1-3 parts, got more): {function_ref}")]
+    InvalidFunctionFormat { function_ref: String },
 
     /// Function name has invalid format
     ///
@@ -543,6 +629,22 @@ pub enum ResolveFunctionReferencesError {
         #[source]
         source: datasets_derived::func_name::FuncNameError,
     },
+
+    /// Schema name has invalid format
+    ///
+    /// This occurs when a schema name in a qualified function reference cannot be parsed into
+    /// the target schema type. The schema type is determined by the generic parameter
+    /// `T` in `resolve_function_references<T>()`.
+    ///
+    /// When using the default `String` type, this error will never occur as the conversion
+    /// is infallible. When using a custom validated schema type, this error occurs if the
+    /// schema name fails validation according to the type's `FromStr` implementation.
+    #[error("Invalid schema format in function reference '{function_ref}': {source}")]
+    InvalidSchemaFormat {
+        function_ref: String,
+        #[source]
+        source: E,
+    },
 }
 
 /// Returns a list of all function names in the SQL statement.
@@ -553,7 +655,7 @@ pub enum ResolveFunctionReferencesError {
 ///
 /// This is an internal helper function. Use [`parse_function_names`] instead,
 /// which provides structured [`FunctionReference`] types.
-fn all_function_names(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesError> {
+fn all_function_refs(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesError> {
     use std::ops::ControlFlow;
 
     use datafusion::sql::sqlparser::ast::{Expr, Function, ObjectNamePart, Visit, Visitor};
@@ -609,7 +711,7 @@ fn all_function_names(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesE
 
 /// Errors that occur when extracting function names from SQL statements
 ///
-/// This error type is used by [`all_function_names`].
+/// This error type is used by [`all_function_refs`].
 #[derive(Debug, thiserror::Error)]
 pub enum AllFunctionNamesError {
     /// DML statements are not supported for function name extraction
