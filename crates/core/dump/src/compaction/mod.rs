@@ -262,7 +262,8 @@ impl AmpCompactorTask {
         props: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let inner: JoinHandle<Result<AmpCollectorInnerTask, AmpCompactorTaskError>> = AmpCollectorInnerTask::start_and_run(table, cache, props, metrics);
+        let inner: JoinHandle<Result<AmpCollectorInnerTask, AmpCompactorTaskError>> =
+            AmpCollectorInnerTask::start_and_run(table, cache, props, metrics);
         Self::new(inner)
     }
 

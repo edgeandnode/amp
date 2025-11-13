@@ -1,10 +1,10 @@
 use std::{
-    collections::HashSet, sync::{Arc, atomic::Ordering}, time::Duration
+    collections::HashSet,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
 };
 
-use common::{
-    BoxError, ParquetFooterCache, metadata::Generation,
-};
+use common::{BoxError, ParquetFooterCache, metadata::Generation};
 use dataset_store::DatasetStore;
 use datasets_common::reference::Reference;
 use dump::{
@@ -48,14 +48,16 @@ async fn sql_dataset_input_batch_size() {
     // empty files for odd blocks.
     assert_eq!(file_count, 4);
 
-    test.spawn_compaction_and_await_completion("sql_stream_ds", "even_blocks").await;
+    test.spawn_compaction_and_await_completion("sql_stream_ds", "even_blocks")
+        .await;
 
     // 6. After compaction, we expect an additional file to be created, with all data in it.
     let file_count_after = test.file_count("sql_stream_ds", "even_blocks").await;
 
     assert_eq!(file_count_after, 5);
 
-    test.spawn_collection_and_await_completion("sql_stream_ds", "even_blocks").await;
+    test.spawn_collection_and_await_completion("sql_stream_ds", "even_blocks")
+        .await;
 
     // 7. After collection, we expect the original 4 files to be deleted,
     // leaving only the compacted file.
