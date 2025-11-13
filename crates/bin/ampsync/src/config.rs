@@ -2,6 +2,48 @@ use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 
+/// Errors that occur when parsing HTTP headers from CLI arguments
+#[derive(Debug, thiserror::Error)]
+pub enum ParseHeaderError {
+    /// Header string is not in the expected "key=value" format
+    ///
+    /// Headers must be specified as `key=value` pairs, for example:
+    /// `--header "authorization=Bearer token123"`
+    #[error("Invalid header format '{input}'. Expected format: key=value")]
+    InvalidFormat { input: String },
+
+    /// Header name contains invalid characters
+    ///
+    /// HTTP header names must be valid tokens containing only visible ASCII characters
+    /// (alphanumeric, hyphen, underscore, etc.) as defined in RFC 7230.
+    ///
+    /// Common causes:
+    /// - Header name contains spaces or special characters
+    /// - Header name contains non-ASCII characters
+    /// - Header name is empty
+    #[error("Invalid header name '{name}': {source}")]
+    InvalidHeaderName {
+        name: String,
+        #[source]
+        source: http::header::InvalidHeaderName,
+    },
+
+    /// Header value contains invalid characters
+    ///
+    /// HTTP header values must contain only visible ASCII characters (space, tab, or 33-126)
+    /// as defined in RFC 7230.
+    ///
+    /// Common causes:
+    /// - Header value contains newline characters
+    /// - Header value contains control characters
+    /// - Header value contains non-ASCII/UTF-8 characters
+    #[error("Invalid header value: {source}")]
+    InvalidHeaderValue {
+        #[source]
+        source: http::header::InvalidHeaderValue,
+    },
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "ampsync")]
 #[command(version)]
@@ -93,21 +135,27 @@ pub struct SyncConfig {
     pub headers: HeaderMap,
 }
 
-/// Parse a header string and insert into HeaderMap
-fn parse_header_to_map(s: &str) -> Result<HeaderMap, String> {
+/// Parse a header string in the format "key=value" and return a HeaderMap
+///
+/// This function is used by clap to parse individual header arguments.
+/// Multiple headers can be specified and will be merged by clap.
+fn parse_header_to_map(s: &str) -> Result<HeaderMap, ParseHeaderError> {
     let parts: Vec<&str> = s.splitn(2, '=').collect();
     if parts.len() != 2 {
-        return Err(format!(
-            "Invalid header format '{}'. Expected format: key=value",
-            s
-        ));
+        return Err(ParseHeaderError::InvalidFormat {
+            input: s.to_string(),
+        });
     }
 
-    let name = HeaderName::from_bytes(parts[0].as_bytes())
-        .map_err(|e| format!("Invalid header name '{}': {}", parts[0], e))?;
+    let name = HeaderName::from_bytes(parts[0].as_bytes()).map_err(|err| {
+        ParseHeaderError::InvalidHeaderName {
+            name: parts[0].to_string(),
+            source: err,
+        }
+    })?;
 
-    let value =
-        HeaderValue::from_str(parts[1]).map_err(|e| format!("Invalid header value: {}", e))?;
+    let value = HeaderValue::from_str(parts[1])
+        .map_err(|err| ParseHeaderError::InvalidHeaderValue { source: err })?;
 
     let mut map = HeaderMap::new();
     map.insert(name, value);
