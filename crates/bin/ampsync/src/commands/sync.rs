@@ -47,11 +47,7 @@ pub async fn run(config: SyncConfig) -> Result<()> {
     // Apply custom headers (e.g., for authentication)
     if !config.headers.is_empty() {
         let keys: Vec<_> = config.headers.keys().map(|k| k.as_str()).collect();
-        let header_iter = config
-            .headers
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("")));
-        client.set_headers(header_iter);
+        client.set_headers(&config.headers);
         info!("Applied custom headers: {:?}", keys);
     }
 

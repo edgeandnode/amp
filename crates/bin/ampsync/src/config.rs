@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use http::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Parser, Debug)]
 #[command(name = "ampsync")]

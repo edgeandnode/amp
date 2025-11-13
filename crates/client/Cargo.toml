@@ -17,6 +17,7 @@ async-trait.workspace = true
 bytes.workspace = true
 common = { path = "../core/common" }
 futures.workspace = true
+http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx = { version = "0.8.3", features = [

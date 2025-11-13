@@ -263,20 +263,22 @@ impl AmpClient {
     ///
     /// # Example
     /// ```rust,ignore
+    /// use http::header::{HeaderMap, HeaderName, HeaderValue};
+    ///
     /// let mut client = AmpClient::from_endpoint("http://localhost:1602").await?;
-    /// client.set_headers([
-    ///     ("authorization", "Bearer my-token"),
-    ///     ("x-api-key", "my-key"),
-    /// ]);
+    /// let mut headers = HeaderMap::new();
+    /// headers.insert(
+    ///     HeaderName::from_static("authorization"),
+    ///     HeaderValue::from_static("Bearer my-token")
+    /// );
+    /// client.set_headers(&headers);
     /// ```
-    pub fn set_headers<K, V>(&mut self, headers: impl IntoIterator<Item = (K, V)>)
-    where
-        K: AsRef<str>,
-        V: AsRef<str>,
-    {
-        for (key, value) in headers {
-            self.client
-                .set_header(key.as_ref().to_string(), value.as_ref().to_string());
+    pub fn set_headers(&mut self, headers: &http::HeaderMap) {
+        for (name, value) in headers.iter() {
+            self.client.set_header(
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            );
         }
     }
 
