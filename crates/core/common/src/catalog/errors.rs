@@ -1,5 +1,8 @@
-use datasets_common::{hash_reference::HashReference, reference::Reference, table_name::TableName};
-use datasets_derived::dep_alias::DepAlias;
+use datasets_common::{
+    hash_reference::HashReference, partial_reference::PartialReferenceError, reference::Reference,
+    table_name::TableName,
+};
+use datasets_derived::dep_alias::{DepAlias, DepAliasError};
 
 use crate::{
     BoxError,
@@ -14,16 +17,18 @@ pub enum CatalogForSqlError {
     /// - Table references contain invalid identifiers
     /// - Table references have unsupported format (not 1-3 parts)
     /// - Table names don't conform to identifier rules
+    /// - Schema portion fails to parse as PartialReference
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] ResolveTableReferencesError),
+    TableReferenceResolution(#[source] ResolveTableReferencesError<PartialReferenceError>),
 
     /// Failed to extract function names from the SQL statement.
     ///
     /// This occurs when:
     /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
     /// - An EXPLAIN statement wraps an unsupported statement type
+    /// - Schema portion fails to parse as PartialReference
     #[error("Failed to resolve function references from SQL")]
-    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError),
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
     /// Failed to get the physical catalog for the resolved tables and functions.
     ///
@@ -41,19 +46,6 @@ pub enum CatalogForSqlError {
 /// a planning context for SQL tables with external dependencies.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanningCtxForSqlTablesWithDepsError {
-    /// Table reference is catalog-qualified.
-    ///
-    /// This occurs when a table reference includes a catalog qualifier.
-    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
-    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error(
-        "In table '{table_name}': Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
-    )]
-    CatalogQualifiedTable {
-        table_name: TableName,
-        table_ref: String,
-    },
-
     /// Table is not qualified with a schema/dataset name.
     ///
     /// All tables must be qualified with a dataset reference in the schema portion.
@@ -90,22 +82,6 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         source: BoxError,
     },
 
-    /// Schema portion of table reference is not a valid dependency alias.
-    ///
-    /// This occurs when the schema/dataset portion of a table reference does not
-    /// conform to dependency alias rules (must start with letter, contain only
-    /// alphanumeric/underscore, and be <= 63 bytes).
-    #[error(
-        "In table '{table_name}': Invalid dependency alias '{invalid_alias}' in table reference '{table_ref}'"
-    )]
-    InvalidDependencyAliasForTableRef {
-        table_name: TableName,
-        invalid_alias: String,
-        table_ref: String,
-        #[source]
-        source: datasets_derived::dep_alias::DepAliasError,
-    },
-
     /// Dependency alias not found when processing table reference.
     ///
     /// This occurs when a table reference uses an alias that was not provided
@@ -114,6 +90,18 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         "In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
     )]
     DependencyAliasNotFoundForTableRef {
+        table_name: TableName,
+        alias: DepAlias,
+    },
+
+    /// Dependency alias not found when processing function reference.
+    ///
+    /// This occurs when a function reference uses an alias that was not provided
+    /// in the dependencies map.
+    #[error(
+        "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
+    )]
+    DependencyAliasNotFoundForFunctionRef {
         table_name: TableName,
         alias: DepAlias,
     },
@@ -181,34 +169,6 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         reference: HashReference,
     },
 
-    /// Schema portion of function reference is not a valid dependency alias.
-    ///
-    /// This occurs when the schema/dataset portion of a function reference does not
-    /// conform to dependency alias rules (must start with letter, contain only
-    /// alphanumeric/underscore, and be <= 63 bytes).
-    #[error(
-        "In table '{table_name}': Invalid dependency alias '{invalid_alias}' in function reference '{func_ref}'"
-    )]
-    InvalidDependencyAliasForFunctionRef {
-        table_name: TableName,
-        invalid_alias: String,
-        func_ref: String,
-        #[source]
-        source: datasets_derived::dep_alias::DepAliasError,
-    },
-
-    /// Dependency alias not found when processing function reference.
-    ///
-    /// This occurs when a function reference uses an alias that was not provided
-    /// in the dependencies map.
-    #[error(
-        "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
-    )]
-    DependencyAliasNotFoundForFunctionRef {
-        table_name: TableName,
-        alias: DepAlias,
-    },
-
     /// Table not found in dataset.
     ///
     /// This occurs when the table name is referenced in the SQL query but the
@@ -235,8 +195,9 @@ pub enum PlanningCtxForSqlError {
     /// - Table references contain invalid identifiers
     /// - Table references have unsupported format (not 1-3 parts)
     /// - Table names don't conform to identifier rules
+    /// - Schema portion fails to parse as PartialReference
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] ResolveTableReferencesError),
+    TableReferenceResolution(#[source] ResolveTableReferencesError<PartialReferenceError>),
 
     /// Failed to extract function names from the SQL statement.
     ///
@@ -244,18 +205,9 @@ pub enum PlanningCtxForSqlError {
     /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
     /// - An EXPLAIN statement wraps an unsupported statement type
     /// - A function name has an invalid format (more than 2 parts)
+    /// - Schema portion fails to parse as PartialReference
     #[error("Failed to resolve function references from SQL")]
-    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError),
-
-    /// Table reference is catalog-qualified.
-    ///
-    /// This occurs when a table reference includes a catalog qualifier.
-    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
-    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error(
-        "Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
-    )]
-    CatalogQualifiedTable { table_ref: String },
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
     /// Table is not qualified with a schema/dataset name.
     ///
@@ -263,17 +215,6 @@ pub enum PlanningCtxForSqlError {
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
-
-    /// Failed to parse schema portion of table reference as PartialReference.
-    ///
-    /// This occurs when the schema portion of a table reference cannot be parsed
-    /// as a valid dataset reference (namespace/name@version format).
-    #[error("Invalid schema reference '{schema}' in table reference")]
-    InvalidSchemaReference {
-        schema: String,
-        #[source]
-        source: datasets_common::partial_reference::PartialReferenceError,
-    },
 
     /// Failed to resolve dataset reference to a hash.
     ///
@@ -335,17 +276,6 @@ pub enum PlanningCtxForSqlError {
         reference: HashReference,
         #[source]
         source: BoxError,
-    },
-
-    /// Failed to parse dataset qualifier in function reference.
-    ///
-    /// This occurs when a qualified function reference's dataset portion cannot be parsed
-    /// as a valid dataset reference.
-    #[error("Invalid function reference '{func_ref}', could not parse dataset qualifier")]
-    InvalidFunctionReference {
-        func_ref: String,
-        #[source]
-        source: datasets_common::partial_reference::PartialReferenceError,
     },
 
     /// Table not found in dataset.
@@ -417,16 +347,18 @@ pub enum CatalogForSqlWithDepsError {
     /// - Table references contain invalid identifiers
     /// - Table references have unsupported format (not 1-3 parts)
     /// - Table names don't conform to identifier rules
+    /// - Schema portion fails to parse as DepAlias
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] ResolveTableReferencesError),
+    TableReferenceResolution(#[source] ResolveTableReferencesError<DepAliasError>),
 
     /// Failed to extract function names from the SQL statement.
     ///
     /// This occurs when:
     /// - The SQL statement contains DML operations (CreateExternalTable, CopyTo)
     /// - An EXPLAIN statement wraps an unsupported statement type
+    /// - Schema portion fails to parse as DepAlias
     #[error("Failed to resolve function references from SQL")]
-    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError),
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<DepAliasError>),
 
     /// Failed to get the physical catalog for the resolved tables and functions.
     ///
@@ -473,35 +405,12 @@ pub enum GetPhysicalCatalogWithDepsError {
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::large_enum_variant)]
 pub enum GetLogicalCatalogWithDepsError {
-    /// Table reference is catalog-qualified.
-    ///
-    /// This occurs when a table reference includes a catalog qualifier.
-    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
-    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error(
-        "Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
-    )]
-    CatalogQualifiedTable { table_ref: String },
-
     /// Table is not qualified with a schema/dataset name.
     ///
     /// All tables must be qualified with a dataset reference in the schema portion.
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
-
-    /// Schema portion of table reference is not a valid dependency alias.
-    ///
-    /// This occurs when the schema/dataset portion of a table reference does not
-    /// conform to dependency alias rules (must start with letter, contain only
-    /// alphanumeric/underscore, and be <= 63 bytes).
-    #[error("Invalid dependency alias '{invalid_alias}' in table reference '{table_ref}'")]
-    InvalidDependencyAliasForTableRef {
-        invalid_alias: String,
-        table_ref: String,
-        #[source]
-        source: datasets_derived::dep_alias::DepAliasError,
-    },
 
     /// Dependency alias not found when processing table reference.
     ///
@@ -530,19 +439,6 @@ pub enum GetLogicalCatalogWithDepsError {
         reference: HashReference,
         #[source]
         source: BoxError,
-    },
-
-    /// Schema portion of function reference is not a valid dependency alias.
-    ///
-    /// This occurs when the schema/dataset portion of a function reference does not
-    /// conform to dependency alias rules (must start with letter, contain only
-    /// alphanumeric/underscore, and be <= 63 bytes).
-    #[error("Invalid dependency alias '{invalid_alias}' in function reference '{func_ref}'")]
-    InvalidDependencyAliasForFunctionRef {
-        invalid_alias: String,
-        func_ref: String,
-        #[source]
-        source: datasets_derived::dep_alias::DepAliasError,
     },
 
     /// Dependency alias not found when processing function reference.
@@ -619,33 +515,12 @@ pub enum GetLogicalCatalogWithDepsError {
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::large_enum_variant)]
 pub enum GetLogicalCatalogError {
-    /// Table reference is catalog-qualified.
-    ///
-    /// This occurs when a table reference includes a catalog qualifier.
-    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
-    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error(
-        "Catalog-qualified table '{table_ref}' not supported, tables must only be qualified with a dataset"
-    )]
-    CatalogQualifiedTable { table_ref: String },
-
     /// Table is not qualified with a schema/dataset name.
     ///
     /// All tables must be qualified with a dataset reference in the schema portion.
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
-
-    /// Failed to parse schema portion of table reference as PartialReference.
-    ///
-    /// This occurs when the schema portion of a table reference cannot be parsed
-    /// as a valid dataset reference (namespace/name@version format).
-    #[error("Invalid schema reference '{schema}' in table reference")]
-    InvalidSchemaReference {
-        schema: String,
-        #[source]
-        source: datasets_common::partial_reference::PartialReferenceError,
-    },
 
     /// Failed to resolve dataset reference to a hash.
     ///
@@ -707,17 +582,6 @@ pub enum GetLogicalCatalogError {
         reference: HashReference,
         #[source]
         source: BoxError,
-    },
-
-    /// Failed to parse dataset qualifier in function reference.
-    ///
-    /// This occurs when a qualified function reference's dataset portion cannot be parsed
-    /// as a valid dataset reference.
-    #[error("Invalid function reference '{func_ref}', could not parse dataset qualifier")]
-    InvalidFunctionReference {
-        func_ref: String,
-        #[source]
-        source: datasets_common::partial_reference::PartialReferenceError,
     },
 
     /// Function not found in dataset.

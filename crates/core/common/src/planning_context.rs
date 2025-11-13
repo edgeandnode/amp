@@ -21,6 +21,7 @@ use crate::{
     BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     plan_visitors::{is_incremental, propagate_block_num},
     query_context::{Error, default_catalog_name},
+    sql::TableReference,
 };
 
 /// A context for planning SQL queries.
@@ -147,7 +148,9 @@ impl DetachedLogicalPlan {
                 }) if source.table_type() == TableType::Base
                     && source.get_logical_plan().is_none() =>
                 {
-                    let table_ref = crate::sql::TableReference::try_from(table_name.clone())
+                    let table_ref: TableReference<String> = table_name
+                        .clone()
+                        .try_into()
                         .map_err(|e| DataFusionError::External(Box::new(e)))?;
                     let provider = ctx
                         .get_table(&table_ref)

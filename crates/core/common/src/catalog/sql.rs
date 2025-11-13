@@ -127,9 +127,9 @@ pub async fn catalog_for_sql(
     query: &Statement,
     env: QueryEnv,
 ) -> Result<Catalog, CatalogForSqlError> {
-    let table_refs =
-        resolve_table_references(query).map_err(CatalogForSqlError::TableReferenceResolution)?;
-    let func_refs = resolve_function_references(query)
+    let table_refs = resolve_table_references::<PartialReference>(query)
+        .map_err(CatalogForSqlError::TableReferenceResolution)?;
+    let func_refs = resolve_function_references::<PartialReference>(query)
         .map_err(CatalogForSqlError::FunctionReferenceResolution)?;
 
     get_physical_catalog(store, metadata_db, table_refs, func_refs, &env)
@@ -178,9 +178,9 @@ pub async fn catalog_for_sql_with_deps(
     env: QueryEnv,
     dependencies: BTreeMap<DepAlias, HashReference>,
 ) -> Result<Catalog, CatalogForSqlWithDepsError> {
-    let table_refs = resolve_table_references(query)
+    let table_refs = resolve_table_references::<DepAlias>(query)
         .map_err(CatalogForSqlWithDepsError::TableReferenceResolution)?;
-    let func_refs = resolve_function_references(query)
+    let func_refs = resolve_function_references::<DepAlias>(query)
         .map_err(CatalogForSqlWithDepsError::FunctionReferenceResolution)?;
 
     get_physical_catalog_with_deps(
@@ -224,9 +224,9 @@ pub async fn planning_ctx_for_sql(
     query: &Statement,
 ) -> Result<PlanningContext, PlanningCtxForSqlError> {
     // Get table and function references from the SQL query
-    let table_refs = resolve_table_references(query)
+    let table_refs = resolve_table_references::<PartialReference>(query)
         .map_err(PlanningCtxForSqlError::TableReferenceResolution)?;
-    let func_refs = resolve_function_references(query)
+    let func_refs = resolve_function_references::<PartialReference>(query)
         .map_err(PlanningCtxForSqlError::FunctionReferenceResolution)?;
 
     // Use hash-based map to deduplicate datasets and collect resolved tables
@@ -244,21 +244,9 @@ pub async fn planning_ctx_for_sql(
                     table_ref: table_ref.to_string(),
                 });
             }
-            TableReference::Full { .. } => {
-                return Err(PlanningCtxForSqlError::CatalogQualifiedTable {
-                    table_ref: table_ref.to_string(),
-                });
-            }
             TableReference::Partial { schema, table } => {
-                // Parse schema to PartialReference -> Reference
-                let partial_ref: PartialReference = schema.parse().map_err(|err| {
-                    PlanningCtxForSqlError::InvalidSchemaReference {
-                        schema: schema.to_string(),
-                        source: err,
-                    }
-                })?;
-
-                let reference: Reference = partial_ref.into();
+                // Schema is already parsed as PartialReference, convert to Reference
+                let reference: Reference = schema.as_ref().clone().into();
 
                 // Resolve reference to hash
                 let hash = store
@@ -281,11 +269,15 @@ pub async fn planning_ctx_for_sql(
                 // Create HashReference from resolved FQN and hash
                 let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
+                // Convert table_ref to use String schema for internal data structures
+                let table_ref_string =
+                    TableReference::partial(schema.to_string(), table.as_ref().clone());
+
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
                     .entry(hash.clone())
                     .or_default()
-                    .entry(table_ref.clone())
+                    .entry(table_ref_string.clone())
                 else {
                     continue;
                 };
@@ -312,9 +304,12 @@ pub async fn planning_ctx_for_sql(
                         reference: hash_ref,
                     })?;
 
-                // Create ResolvedTable with the original schema string from SQL
-                let resolved_table =
-                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
+                // Create ResolvedTable with the converted string-based table reference
+                let resolved_table = ResolvedTable::new(
+                    table_ref_string.clone(),
+                    dataset_table.clone(),
+                    dataset.clone(),
+                );
 
                 // Insert into vacant entry
                 entry.insert(resolved_table);
@@ -324,20 +319,11 @@ pub async fn planning_ctx_for_sql(
 
     // Part 2: Process function names (load datasets for UDFs only)
     for func_ref in func_refs {
-        match func_ref {
+        match &func_ref {
             FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
-            FunctionReference::Qualified {
-                ref schema,
-                ref function,
-            } => {
-                // Parse schema part to PartialReference -> Reference
-                let reference: Reference = schema
-                    .parse::<PartialReference>()
-                    .map_err(|err| PlanningCtxForSqlError::InvalidFunctionReference {
-                        func_ref: func_ref.to_string(),
-                        source: err,
-                    })?
-                    .into();
+            FunctionReference::Qualified { schema, function } => {
+                // Schema is already parsed as PartialReference, convert to Reference
+                let reference: Reference = schema.as_ref().clone().into();
 
                 // Resolve reference to hash
                 let hash = store
@@ -366,8 +352,12 @@ pub async fn planning_ctx_for_sql(
                         reference: hash_ref.clone(),
                     })?;
 
+                // Convert func_ref to use String schema for internal data structures
+                let func_ref_string =
+                    FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
+
                 // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
-                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref.clone())
+                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref_string)
                 else {
                     continue;
                 };
@@ -375,7 +365,7 @@ pub async fn planning_ctx_for_sql(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
-                        .eth_call_for_dataset(schema, &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), &dataset)
                         .await
                         .map_err(|err| PlanningCtxForSqlError::EthCallUdfCreation {
                             reference: hash_ref.clone(),
@@ -422,8 +412,8 @@ pub async fn planning_ctx_for_sql(
 async fn get_physical_catalog(
     store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
-    table_refs: impl IntoIterator<Item = TableReference>,
-    function_refs: impl IntoIterator<Item = FunctionReference>,
+    table_refs: impl IntoIterator<Item = TableReference<PartialReference>>,
+    function_refs: impl IntoIterator<Item = FunctionReference<PartialReference>>,
     env: &QueryEnv,
 ) -> Result<Catalog, GetPhysicalCatalogError> {
     let logical_catalog = get_logical_catalog(store, table_refs, function_refs, &env.isolate_pool)
@@ -460,8 +450,8 @@ async fn get_physical_catalog(
 async fn get_physical_catalog_with_deps(
     store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
-    table_refs: impl IntoIterator<Item = TableReference>,
-    function_refs: impl IntoIterator<Item = FunctionReference>,
+    table_refs: impl IntoIterator<Item = TableReference<DepAlias>>,
+    function_refs: impl IntoIterator<Item = FunctionReference<DepAlias>>,
     env: &QueryEnv,
     dependencies: &BTreeMap<DepAlias, HashReference>,
 ) -> Result<Catalog, GetPhysicalCatalogWithDepsError> {
@@ -508,8 +498,8 @@ async fn get_physical_catalog_with_deps(
 /// derived dataset dumps.
 async fn get_logical_catalog(
     store: &impl DatasetAccess,
-    table_refs: impl IntoIterator<Item = TableReference>,
-    func_refs: impl IntoIterator<Item = FunctionReference>,
+    table_refs: impl IntoIterator<Item = TableReference<PartialReference>>,
+    func_refs: impl IntoIterator<Item = FunctionReference<PartialReference>>,
     isolate_pool: &IsolatePool,
 ) -> Result<LogicalCatalog, GetLogicalCatalogError> {
     let table_refs = table_refs.into_iter().collect::<Vec<_>>();
@@ -530,21 +520,9 @@ async fn get_logical_catalog(
                     table_ref: table_ref.to_string(),
                 });
             }
-            TableReference::Full { .. } => {
-                return Err(GetLogicalCatalogError::CatalogQualifiedTable {
-                    table_ref: table_ref.to_string(),
-                });
-            }
             TableReference::Partial { schema, table } => {
-                // Parse schema to PartialReference -> Reference
-                let partial_ref: PartialReference = schema.parse().map_err(|err| {
-                    GetLogicalCatalogError::InvalidSchemaReference {
-                        schema: schema.to_string(),
-                        source: err,
-                    }
-                })?;
-
-                let reference: Reference = partial_ref.into();
+                // Schema is already parsed as PartialReference, convert to Reference
+                let reference: Reference = schema.as_ref().clone().into();
 
                 // Resolve reference to hash
                 let hash = store
@@ -567,11 +545,15 @@ async fn get_logical_catalog(
                 // Create HashReference from resolved FQN and hash
                 let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
+                // Convert table_ref to use String schema for internal data structures
+                let table_ref_string =
+                    TableReference::partial(schema.to_string(), table.as_ref().clone());
+
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
                     .entry(hash.clone())
                     .or_default()
-                    .entry(table_ref.clone())
+                    .entry(table_ref_string.clone())
                 else {
                     continue;
                 };
@@ -598,9 +580,12 @@ async fn get_logical_catalog(
                         reference: hash_ref,
                     })?;
 
-                // Create ResolvedTable with the original schema string from SQL
-                let resolved_table =
-                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
+                // Create ResolvedTable with the converted string-based table reference
+                let resolved_table = ResolvedTable::new(
+                    table_ref_string.clone(),
+                    dataset_table.clone(),
+                    dataset.clone(),
+                );
 
                 // Insert into vacant entry
                 entry.insert(resolved_table);
@@ -613,14 +598,8 @@ async fn get_logical_catalog(
         match &func_ref {
             FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
             FunctionReference::Qualified { schema, function } => {
-                // Parse schema part to PartialReference -> Reference
-                let reference: Reference = schema
-                    .parse::<PartialReference>()
-                    .map_err(|err| GetLogicalCatalogError::InvalidFunctionReference {
-                        func_ref: func_ref.to_string(),
-                        source: err,
-                    })?
-                    .into();
+                // Schema is already parsed as PartialReference, convert to Reference
+                let reference: Reference = schema.as_ref().clone().into();
 
                 // Resolve reference to hash
                 let hash = store
@@ -649,8 +628,12 @@ async fn get_logical_catalog(
                         reference: hash_ref.clone(),
                     })?;
 
+                // Convert func_ref to use String schema for internal data structures
+                let func_ref_string =
+                    FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
+
                 // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
-                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref.clone())
+                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref_string)
                 else {
                     continue;
                 };
@@ -658,7 +641,7 @@ async fn get_logical_catalog(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
-                        .eth_call_for_dataset(schema, &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), &dataset)
                         .await
                         .map_err(|err| GetLogicalCatalogError::EthCallUdfCreation {
                             reference: hash_ref.clone(),
@@ -712,8 +695,8 @@ async fn get_logical_catalog(
 /// This function is part of the catalog construction pipeline for derived dataset execution.
 async fn get_logical_catalog_with_deps(
     store: &impl DatasetAccess,
-    table_refs: impl IntoIterator<Item = TableReference>,
-    func_refs: impl IntoIterator<Item = FunctionReference>,
+    table_refs: impl IntoIterator<Item = TableReference<DepAlias>>,
+    func_refs: impl IntoIterator<Item = FunctionReference<DepAlias>>,
     isolate_pool: &IsolatePool,
     dependencies: &BTreeMap<DepAlias, HashReference>,
 ) -> Result<LogicalCatalog, GetLogicalCatalogWithDepsError> {
@@ -735,33 +718,23 @@ async fn get_logical_catalog_with_deps(
                     table_ref: table_ref.to_string(),
                 });
             }
-            TableReference::Full { .. } => {
-                return Err(GetLogicalCatalogWithDepsError::CatalogQualifiedTable {
-                    table_ref: table_ref.to_string(),
-                });
-            }
             TableReference::Partial { schema, table } => {
-                // Parse schema as DepAlias to validate it conforms to alias rules
-                let dep_alias: DepAlias = schema.parse().map_err(|err| {
-                    GetLogicalCatalogWithDepsError::InvalidDependencyAliasForTableRef {
-                        invalid_alias: schema.to_string(),
-                        table_ref: table_ref.to_string(),
-                        source: err,
+                // Schema is already parsed as DepAlias, lookup in dependencies map
+                let hash_ref = dependencies.get(schema.as_ref()).ok_or_else(|| {
+                    GetLogicalCatalogWithDepsError::DependencyAliasNotFoundForTableRef {
+                        alias: schema.as_ref().clone(),
                     }
                 })?;
 
-                // Lookup alias in dependencies map (schema_str = alias)
-                let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
-                    GetLogicalCatalogWithDepsError::DependencyAliasNotFoundForTableRef {
-                        alias: dep_alias.clone(),
-                    }
-                })?;
+                // Convert table_ref to use String schema for internal data structures
+                let table_ref_string =
+                    TableReference::partial(schema.to_string(), table.as_ref().clone());
 
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
                     .entry(hash_ref.hash().clone())
                     .or_default()
-                    .entry(table_ref.clone())
+                    .entry(table_ref_string.clone())
                 else {
                     continue;
                 };
@@ -792,9 +765,12 @@ async fn get_logical_catalog_with_deps(
                         reference: hash_ref.clone(),
                     })?;
 
-                // Create ResolvedTable with the original alias as the schema name
-                let resolved_table =
-                    ResolvedTable::new(table_ref.clone(), dataset_table.clone(), dataset.clone());
+                // Create ResolvedTable with the converted string-based table reference
+                let resolved_table = ResolvedTable::new(
+                    table_ref_string.clone(),
+                    dataset_table.clone(),
+                    dataset.clone(),
+                );
 
                 // Insert into vacant entry
                 entry.insert(resolved_table);
@@ -807,19 +783,10 @@ async fn get_logical_catalog_with_deps(
         match &func_ref {
             FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
             FunctionReference::Qualified { schema, function } => {
-                // Parse schema as DepAlias to validate it conforms to alias rules
-                let dep_alias: DepAlias = schema.parse().map_err(|err| {
-                    GetLogicalCatalogWithDepsError::InvalidDependencyAliasForFunctionRef {
-                        invalid_alias: schema.to_string(),
-                        func_ref: func_ref.to_string(),
-                        source: err,
-                    }
-                })?;
-
-                // Lookup alias in dependencies map (schema_str = alias)
-                let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
+                // Schema is already parsed as DepAlias, lookup in dependencies map
+                let hash_ref = dependencies.get(schema.as_ref()).ok_or_else(|| {
                     GetLogicalCatalogWithDepsError::DependencyAliasNotFoundForFunctionRef {
-                        alias: dep_alias.clone(),
+                        alias: schema.as_ref().clone(),
                     }
                 })?;
 
@@ -839,11 +806,15 @@ async fn get_logical_catalog_with_deps(
                         },
                     )?;
 
+                // Convert func_ref to use String schema for internal data structures
+                let func_ref_string =
+                    FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
+
                 // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
                 let Entry::Vacant(entry) = udfs
                     .entry(hash_ref.hash().clone())
                     .or_default()
-                    .entry(func_ref.clone())
+                    .entry(func_ref_string)
                 else {
                     continue;
                 };
@@ -851,7 +822,7 @@ async fn get_logical_catalog_with_deps(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
-                        .eth_call_for_dataset(schema, &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), &dataset)
                         .await
                         .map_err(|err| {
                             GetLogicalCatalogWithDepsError::EthCallUdfCreationForFunction {
@@ -889,6 +860,17 @@ async fn get_logical_catalog_with_deps(
             .collect(),
     })
 }
+
+/// Type alias for the table references map used in multi-table validation
+///
+/// Maps table names to their SQL references (table refs and function refs) using dependency aliases.
+type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAlias>>,
+    ),
+>;
 
 /// Creates a planning context for multi-table schema validation with pre-resolved dependencies.
 ///
@@ -930,7 +912,7 @@ async fn get_logical_catalog_with_deps(
 /// making it suitable for fast manifest validation during dataset registration.
 pub async fn planning_ctx_for_sql_tables_with_deps(
     store: &impl DatasetAccess,
-    references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)>,
+    references: TableReferencesMap,
     dependencies: BTreeMap<DepAlias, HashReference>,
 ) -> Result<PlanningContext, PlanningCtxForSqlTablesWithDepsError> {
     // Use hash-based map to deduplicate datasets across ALL tables
@@ -951,38 +933,24 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                         table_ref: table_ref.to_string(),
                     });
                 }
-                TableReference::Full { .. } => {
-                    return Err(
-                        PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable {
-                            table_name,
-                            table_ref: table_ref.to_string(),
-                        },
-                    );
-                }
                 TableReference::Partial { schema, table } => {
-                    // Parse schema as DepAlias to validate it conforms to alias rules
-                    let dep_alias: DepAlias = schema.parse().map_err(|err| {
-                        PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
+                    // Schema is already parsed as DepAlias, lookup in dependencies map
+                    let hash_ref = dependencies.get(schema.as_ref()).ok_or_else(|| {
+                        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
                             table_name: table_name.clone(),
-                            invalid_alias: schema.to_string(),
-                            table_ref: table_ref.to_string(),
-                            source: err,
+                            alias: schema.as_ref().clone(),
                         }
                     })?;
 
-                    // Lookup alias in dependencies map (schema_str = alias)
-                    let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
-                        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef {
-                            table_name: table_name.clone(),
-                            alias: dep_alias.clone(),
-                        }
-                    })?;
+                    // Convert table_ref to use String schema for internal data structures
+                    let table_ref_string =
+                        TableReference::partial(schema.to_string(), table.as_ref().clone());
 
                     // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                     let Entry::Vacant(entry) = tables
                         .entry(hash_ref.hash().clone())
                         .or_default()
-                        .entry(table_ref.clone())
+                        .entry(table_ref_string.clone())
                     else {
                         continue;
                     };
@@ -1018,9 +986,9 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                             }
                         })?;
 
-                    // Create ResolvedTable with the original alias as the schema name
+                    // Create ResolvedTable with the converted string-based table reference
                     let resolved_table = ResolvedTable::new(
-                        table_ref.clone(),
+                        table_ref_string.clone(),
                         dataset_table.clone(),
                         dataset.clone(),
                     );
@@ -1036,21 +1004,11 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
             match &func_ref {
                 FunctionReference::Bare { .. } => continue, // Built-in DataFusion function
                 FunctionReference::Qualified { schema, function } => {
-                    // Parse schema as DepAlias to validate it conforms to alias rules
-                    let dep_alias: DepAlias = schema.parse().map_err(|err| {
-                        PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
-                            table_name: table_name.clone(),
-                            invalid_alias: schema.to_string(),
-                            func_ref: func_ref.to_string(),
-                            source: err,
-                        }
-                    })?;
-
-                    // Lookup alias in dependencies map (schema_str = alias)
-                    let hash_ref = dependencies.get(&dep_alias).ok_or_else(|| {
+                    // Schema is already parsed as DepAlias, lookup in dependencies map
+                    let hash_ref = dependencies.get(schema.as_ref()).ok_or_else(|| {
                         PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
                             table_name: table_name.clone(),
-                            alias: dep_alias.clone(),
+                            alias: schema.as_ref().clone(),
                         }
                     })?;
 
@@ -1072,11 +1030,15 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                             }
                         })?;
 
+                    // Convert func_ref to use String schema for internal data structures
+                    let func_ref_string =
+                        FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
+
                     // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
                     let Entry::Vacant(entry) = udfs
                         .entry(hash_ref.hash().clone())
                         .or_default()
-                        .entry(func_ref.clone())
+                        .entry(func_ref_string)
                     else {
                         continue;
                     };
@@ -1084,7 +1046,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps(
                     // Get the UDF for this function reference
                     let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                         store
-                            .eth_call_for_dataset(schema, &dataset)
+                            .eth_call_for_dataset(&schema.to_string(), &dataset)
                             .await
                             .map_err(|err| {
                                 PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction {

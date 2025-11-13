@@ -33,6 +33,15 @@ use crate::{
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
+/// Type alias for table references map with dependency aliases
+type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAlias>>,
+    ),
+>;
+
 /// Handler for the `POST /schema` endpoint
 ///
 /// Analyzes SQL queries and returns the output schema without executing the query.
@@ -63,6 +72,7 @@ use crate::{
 /// - `INVALID_TABLE_NAME`: Table name violates SQL identifier rules
 /// - `INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF`: Dependency alias in table reference is invalid
 /// - `INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF`: Dependency alias in function reference is invalid
+/// - `CATALOG_QUALIFIED_FUNCTION`: Function uses unsupported catalog qualification
 /// - `DEPENDENCY_ALIAS_NOT_FOUND`: Referenced alias not in dependencies
 /// - `DATASET_NOT_FOUND`: Referenced dataset does not exist
 /// - `GET_DATASET_ERROR`: Failed to retrieve dataset from store
@@ -189,8 +199,7 @@ pub async fn handler(
     // Parse all SQL queries from tables and extract table references and function names
     let (statements, references) = {
         let mut statements: BTreeMap<TableName, Statement> = BTreeMap::new();
-        let mut references: BTreeMap<TableName, (Vec<TableReference>, Vec<FunctionReference>)> =
-            BTreeMap::new();
+        let mut references = TableReferencesMap::new();
 
         for (table_name, sql_query) in tables {
             let stmt = common::sql::parse(&sql_query).map_err(|err| Error::InvalidTableSql {
@@ -199,23 +208,49 @@ pub async fn handler(
             })?;
 
             // Extract table references from the statement
-            let table_refs = resolve_table_references(&stmt).map_err(|err| match &err {
-                ResolveTableReferencesError::InvalidTableName { .. } => {
-                    Error::InvalidTableName(err)
-                }
-                _ => Error::TableReferenceResolution {
-                    table_name: table_name.clone(),
-                    source: err,
-                },
-            })?;
+            let table_refs =
+                resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
+                    ResolveTableReferencesError::InvalidTableName { .. } => {
+                        Error::InvalidTableName(err)
+                    }
+                    ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                        Error::CatalogQualifiedTable {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    ResolveTableReferencesError::InvalidSchemaFormat { .. } => {
+                        Error::InvalidDependencyAliasForTableRef {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    _ => Error::TableReferenceResolution {
+                        table_name: table_name.clone(),
+                        source: err,
+                    },
+                })?;
 
             // Extract function references from the statement
-            let func_refs = resolve_function_references(&stmt).map_err(|err| {
-                Error::FunctionReferenceResolution {
-                    table_name: table_name.clone(),
-                    source: err,
-                }
-            })?;
+            let func_refs =
+                resolve_function_references::<DepAlias>(&stmt).map_err(|err| match &err {
+                    ResolveFunctionReferencesError::InvalidSchemaFormat { .. } => {
+                        Error::InvalidDependencyAliasForFunctionRef {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    ResolveFunctionReferencesError::CatalogQualifiedFunction { .. } => {
+                        Error::CatalogQualifiedFunction {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    _ => Error::FunctionReferenceResolution {
+                        table_name: table_name.clone(),
+                        source: err,
+                    },
+                })?;
 
             statements.insert(table_name.clone(), stmt);
             references.insert(table_name, (table_refs, func_refs));
@@ -230,18 +265,9 @@ pub async fn handler(
         planning_ctx_for_sql_tables_with_deps(ctx.dataset_store.as_ref(), references, dependencies)
             .await
             .map_err(|err| match &err {
-                PlanningCtxForSqlTablesWithDepsError::CatalogQualifiedTable { .. } => {
-                    Error::CatalogQualifiedTable(err)
-                }
                 PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
                     Error::UnqualifiedTable(err)
                 }
-                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForTableRef {
-                    ..
-                } => Error::InvalidDependencyAliasForTableRef(err),
-                PlanningCtxForSqlTablesWithDepsError::InvalidDependencyAliasForFunctionRef {
-                    ..
-                } => Error::InvalidDependencyAliasForFunctionRef(err),
                 PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
                     Error::DatasetNotFound(err)
                 }
@@ -415,7 +441,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError,
+        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -429,7 +455,7 @@ enum Error {
         table_name: TableName,
         /// The underlying extraction error
         #[source]
-        source: ResolveFunctionReferencesError,
+        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
     },
 
     /// Dependency not found in dataset store
@@ -465,8 +491,16 @@ enum Error {
     ///
     /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
     /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    #[error(transparent)]
-    CatalogQualifiedTable(PlanningCtxForSqlTablesWithDepsError),
+    ///
+    /// This error is detected during table reference resolution from SQL.
+    #[error("Catalog-qualified table in '{table_name}': {source}")]
+    CatalogQualifiedTable {
+        /// The table name that contains the catalog-qualified reference
+        table_name: TableName,
+        /// The underlying resolution error
+        #[source]
+        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+    },
 
     /// Unqualified table reference
     ///
@@ -480,7 +514,9 @@ enum Error {
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
-    InvalidTableName(#[source] ResolveTableReferencesError),
+    InvalidTableName(
+        #[source] ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+    ),
 
     /// Dataset reference not found
     ///
@@ -525,15 +561,46 @@ enum Error {
     ///
     /// The dependency alias in a table reference does not conform to alias rules
     /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    #[error(transparent)]
-    InvalidDependencyAliasForTableRef(PlanningCtxForSqlTablesWithDepsError),
+    ///
+    /// This error is detected during table reference resolution from SQL.
+    #[error("Invalid dependency alias in table reference in '{table_name}': {source}")]
+    InvalidDependencyAliasForTableRef {
+        /// The table name that contains the invalid alias
+        table_name: TableName,
+        /// The underlying resolution error
+        #[source]
+        source: ResolveTableReferencesError<datasets_derived::dep_alias::DepAliasError>,
+    },
 
     /// Invalid dependency alias in function reference
     ///
     /// The dependency alias in a function reference does not conform to alias rules
     /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    #[error(transparent)]
-    InvalidDependencyAliasForFunctionRef(PlanningCtxForSqlTablesWithDepsError),
+    ///
+    /// This error is detected during function reference resolution from SQL.
+    #[error("Invalid dependency alias in function reference in '{table_name}': {source}")]
+    InvalidDependencyAliasForFunctionRef {
+        /// The table name that contains the invalid alias
+        table_name: TableName,
+        /// The underlying resolution error
+        #[source]
+        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
+    },
+
+    /// Catalog-qualified function reference not supported
+    ///
+    /// Only dataset-qualified functions are supported (e.g., `dataset.function`).
+    /// Catalog-qualified functions (e.g., `catalog.schema.function`) are not supported.
+    ///
+    /// This error is detected during function reference resolution from SQL.
+    #[error("Catalog-qualified function in '{table_name}': {source}")]
+    CatalogQualifiedFunction {
+        /// The table name that contains the catalog-qualified function reference
+        table_name: TableName,
+        /// The underlying resolution error
+        #[source]
+        source: ResolveFunctionReferencesError<datasets_derived::dep_alias::DepAliasError>,
+    },
 
     /// Dependency alias not found
     ///
@@ -586,13 +653,16 @@ impl IntoErrorResponse for Error {
             Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
             Error::DependencyResolution { .. } => "DEPENDENCY_RESOLUTION",
-            Error::CatalogQualifiedTable(_) => "CATALOG_QUALIFIED_TABLE",
+            Error::CatalogQualifiedTable { .. } => "CATALOG_QUALIFIED_TABLE",
             Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
             Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
-            Error::InvalidDependencyAliasForTableRef(_) => "INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF",
-            Error::InvalidDependencyAliasForFunctionRef(_) => {
+            Error::InvalidDependencyAliasForTableRef { .. } => {
+                "INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF"
+            }
+            Error::InvalidDependencyAliasForFunctionRef { .. } => {
                 "INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF"
             }
+            Error::CatalogQualifiedFunction { .. } => "CATALOG_QUALIFIED_FUNCTION",
             Error::DatasetNotFound(_) => "DATASET_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::EthCallUdfCreation(_) => "ETH_CALL_UDF_CREATION_ERROR",
@@ -613,11 +683,12 @@ impl IntoErrorResponse for Error {
             Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
             Error::DependencyResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CatalogQualifiedTable(_) => StatusCode::BAD_REQUEST,
+            Error::CatalogQualifiedTable { .. } => StatusCode::BAD_REQUEST,
             Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidDependencyAliasForTableRef(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidDependencyAliasForFunctionRef(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForTableRef { .. } => StatusCode::BAD_REQUEST,
+            Error::InvalidDependencyAliasForFunctionRef { .. } => StatusCode::BAD_REQUEST,
+            Error::CatalogQualifiedFunction { .. } => StatusCode::BAD_REQUEST,
             Error::DatasetNotFound(_) => StatusCode::NOT_FOUND,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::EthCallUdfCreation(_) => StatusCode::INTERNAL_SERVER_ERROR,
