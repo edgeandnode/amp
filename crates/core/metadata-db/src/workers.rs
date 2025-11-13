@@ -88,15 +88,25 @@ where
 
 /// Establish a dedicated connection to the metadata DB, and return a future that loops
 /// forever, updating the worker's heartbeat in the dedicated DB connection.
+/// This connection also holds a PG advisory lock, ensuring unique worker node IDs.
 ///
 /// If the initial connection fails, an error is returned.
 pub async fn heartbeat_loop(
     metadata_db: &MetadataDb,
     node_id: impl Into<WorkerNodeIdOwned>,
 ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
+    let node_id = node_id.into();
+
     let mut conn = Connection::connect(&metadata_db.url).await?;
 
-    let node_id = node_id.into();
+    let lock_acquired = sql::lock_node_id(&mut conn, node_id.clone())
+        .await
+        .map_err(Error::Database)?;
+
+    if !lock_acquired {
+        return Err(Error::WorkerNodeIdInUse(node_id));
+    }
+
     let fut = async move {
         let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);

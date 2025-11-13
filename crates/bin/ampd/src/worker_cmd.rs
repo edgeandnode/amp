@@ -28,7 +28,7 @@ pub enum Error {
     ///
     /// This occurs during the initialization phase (registration, heartbeat
     /// setup, notification listener setup, or bootstrap).
-    #[error("Worker initialization failed: {0}")]
+    #[error("Worker initialization failed")]
     Init(#[source] worker::service::InitError),
 
     /// Worker runtime error.

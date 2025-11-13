@@ -50,3 +50,23 @@ where
     ordered.push(node.clone());
     Ok(())
 }
+
+/// Builds an error chain string from an error and its sources.
+///
+/// Walks through the error source chain and returns a formatted string
+/// containing the chain of error causes.
+pub fn build_error_chain(err: &dyn std::error::Error) -> String {
+    let mut error_chain = Vec::new();
+
+    let mut current = err;
+    while let Some(source) = current.source() {
+        error_chain.push(source.to_string());
+        current = source;
+    }
+
+    if error_chain.is_empty() {
+        String::new()
+    } else {
+        format!(" | Caused by: {}", error_chain.join(" -> "))
+    }
+}

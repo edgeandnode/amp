@@ -61,6 +61,7 @@ enum Command {
 async fn main() {
     if let Err(err) = main_inner().await {
         // Manually print the error so we can control the format.
+        let err = common::utils::build_error_chain(&*err);
         eprintln!("Exiting with error: {err}");
         std::process::exit(1);
     }
