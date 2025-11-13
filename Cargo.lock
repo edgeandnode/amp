@@ -924,6 +924,7 @@ dependencies = [
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
+ "headers",
  "http",
  "lazy_static",
  "mockito",
