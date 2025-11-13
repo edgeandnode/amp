@@ -50,8 +50,7 @@ You’ll learn how to:
 
 To get started in the playground:
 
-1. Open **Datasets → edgeandnode → ethereum_mainnet → 0.0.1**
-2. Click **Playground** to open the SQL editor for this dataset
+1. Open **Datasets → edgeandnode → ethereum_mainnet → 0.0.1**. When you click the dataset card, the Playground editor opens automatically.
 
 ## Authentication
 
@@ -83,6 +82,8 @@ For backend services and dapps, generate an access token:
 amp auth token
 ```
 
+You can also set a custom duration using the `--duration` flag, which accepts values like "30 days".
+
 This command:
 
 - Issues an access token bound to your Amp account / workspace
@@ -95,7 +96,7 @@ Once you have a token (Privy-backed CLI session or a token from amp auth token),
 
 ```bash
 Copy code
-curl -X POST "https://gateway.amp.edgeandnode.com/v1/query" \
+curl -X POST "https://gateway.amp.staging.edgeandnode.com/api" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,7 +130,6 @@ In the Amp Playground:
 
 ```sql
 -- Basic transaction query
--- Basic transaction query
 SELECT
   hash AS transaction_hash,
   from_address,
@@ -137,7 +137,7 @@ SELECT
   value / 1e18 AS value_eth,  -- Convert wei to ETH
   gas AS gas_limit,
   gas_price / 1e9 AS gas_price_gwei  -- Convert wei to gwei
-FROM transactions
+FROM "edgeandnode/ethereum_mainnet@0.0.1".transactions
 WHERE block_number > 18000000
 LIMIT 100;
 ```
