@@ -40,6 +40,20 @@ Simplified control of the logging verbosity level is offered by the `AMP_LOG` en
 the values `error`, `warn`, `info`, `debug` or `trace`. The default value is `debug`. The standard
 `RUST_LOG` env var can be used for finer-grained log filtering.
 
+## OpenTelemetry
+
+OpenTelemetry configuration supports compression control via environment variables:
+
+- `AMP_CONFIG_OPENTELEMETRY_COMPRESSION`: Override compression setting from config
+- `OTLP_TRACES_COMPRESSION`: Control compression for traces only
+- `OTLP_METRICS_COMPRESSION`: Control compression for metrics only
+
+Supported values:
+- `none` (default): Disables compression (useful for debugging and development)
+- `gzip`: Enables gzip compression for optimal performance
+
+For more details, see the [telemetry documentation](telemetry.md).
+
 # Configuring object stores
 
 All directory configurations (the `*_dir` keys) support both filesystem and object store locations.

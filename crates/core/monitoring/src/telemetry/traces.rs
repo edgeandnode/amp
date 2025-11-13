@@ -4,10 +4,16 @@ pub use opentelemetry_sdk::trace::SdkTracerProvider;
 pub type Result = std::result::Result<SdkTracerProvider, ExporterBuildError>;
 
 /// Create a new OpenTelemetry tracer provider set up with the given URL and gRPC transport.
-pub fn provider(url: String, trace_ratio: f64) -> Result {
+pub fn provider(url: String, trace_ratio: f64, compression: Option<String>) -> Result {
     let resource = opentelemetry_sdk::Resource::builder()
         .with_attribute(opentelemetry::KeyValue::new("service.name", "tracing"))
         .build();
+
+    if matches!(compression.as_deref(), Some("gzip")) {
+        tracing::warn!(
+            "requested gzip compression for traces; programmatic compression is not supported in this version. set OTLP_TRACES_COMPRESSION=gzip instead"
+        );
+    }
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()

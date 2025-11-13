@@ -15,12 +15,23 @@ pub type Result = std::result::Result<(SdkMeterProvider, Meter), ExporterBuildEr
 const AMP_METER: &str = "amp-meter";
 
 /// Starts a periodic OpenTelemetry metrics exporter over binary HTTP transport.
-pub fn start(url: String, export_interval: Option<Duration>) -> Result {
+pub fn start(
+    url: String,
+    export_interval: Option<Duration>,
+    compression: Option<String>,
+) -> Result {
+    if matches!(compression.as_deref(), Some("gzip")) {
+        tracing::warn!(
+            "requested gzip compression for metrics; programmatic compression is not supported in this version. set OTLP_METRICS_COMPRESSION=gzip instead"
+        );
+    }
+
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
         .with_endpoint(url)
         .build()?;
+
     // If not set, use the default periodic exporter value.
     let export_interval = export_interval.unwrap_or(DEFAULT_METRICS_EXPORT_INTERVAL);
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
