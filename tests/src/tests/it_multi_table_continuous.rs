@@ -31,14 +31,12 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     // Dump raw dataset (dependency)
     let anvil_ref = "_/anvil_rpc@0.0.0";
     test_helpers::dump_dataset(
-        test_ctx.daemon_server().config(),
-        test_ctx.metadata_db(),
+        test_ctx.daemon_server().config().clone(),
+        test_ctx.metadata_db().clone(),
         anvil_ref
             .parse()
             .expect("Failed to parse dataset reference"),
         5,
-        1,
-        None,
     )
     .await
     .expect("Failed to dump anvil_rpc");
@@ -56,14 +54,12 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     let metadata_db = test_ctx.metadata_db().clone();
     let dump_handle = tokio::spawn(async move {
         test_helpers::dump_dataset(
-            &config,
-            &metadata_db,
+            config,
+            metadata_db,
             "_/sql_over_anvil_1@0.0.0"
                 .parse()
                 .expect("Failed to parse dataset reference"),
             u64::MAX,
-            1,
-            None,
         )
         .await
     });
@@ -80,14 +76,12 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
 
     // Update raw dataset with new blocks
     test_helpers::dump_dataset(
-        test_ctx.daemon_server().config(),
-        test_ctx.metadata_db(),
+        test_ctx.daemon_server().config().clone(),
+        test_ctx.metadata_db().clone(),
         anvil_ref
             .parse()
             .expect("Failed to parse dataset reference"),
         8,
-        1,
-        None,
     )
     .await
     .expect("Failed to dump anvil_rpc with new blocks");
