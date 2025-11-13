@@ -405,65 +405,97 @@ impl<S: BlockStreamer> DumpPartition<S> {
     }
 
     async fn run_range(&self, range: RangeInclusive<BlockNum>) -> Result<(), BoxError> {
-        let stream = {
-            let block_streamer = self.block_streamer.clone();
-            block_streamer
-                .block_stream(*range.start(), *range.end())
-                .await
+        // Get dataset name for instrumentation
+        let dataset = self.catalog.tables()[0]
+            .job_labels()
+            .dataset_name
+            .to_string();
+
+        // Track records extracted
+        let records_extracted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        // Create task type for instrumentation
+        let task_type = monitoring::TaskType::Dump {
+            dataset: dataset.clone(),
+            block_range: (*range.start(), *range.end()),
+            records_extracted: None, // Will be set later
         };
 
-        // limit the missing table ranges to the partition range
-        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
-            Default::default();
-        for (table, ranges) in &self.missing_ranges_by_table {
-            let entry = missing_ranges_by_table.entry(table.clone()).or_default();
-            for missing in ranges {
-                let start = BlockNum::max(*missing.start(), *range.start());
-                let end = BlockNum::min(*missing.end(), *range.end());
-                if start <= end {
-                    entry.push(start..=end);
+        let instrumentation = monitoring::InstrumentedTaskExecution::new(task_type);
+        let records_counter = records_extracted.clone();
+
+        let dump_fut = async move {
+            let stream = {
+                let block_streamer = self.block_streamer.clone();
+                block_streamer
+                    .block_stream(*range.start(), *range.end())
+                    .await
+            };
+
+            // limit the missing table ranges to the partition range
+            let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
+                Default::default();
+            for (table, ranges) in &self.missing_ranges_by_table {
+                let entry = missing_ranges_by_table.entry(table.clone()).or_default();
+                for missing in ranges {
+                    let start = BlockNum::max(*missing.start(), *range.start());
+                    let end = BlockNum::min(*missing.end(), *range.end());
+                    if start <= end {
+                        entry.push(start..=end);
+                    }
                 }
             }
-        }
 
-        let mut writer = RawDatasetWriter::new(
-            self.catalog.clone(),
-            self.metadata_db.clone(),
-            self.parquet_opts.clone(),
-            missing_ranges_by_table,
-            self.metrics.clone(),
-        )?;
+            let mut writer = RawDatasetWriter::new(
+                self.catalog.clone(),
+                self.metadata_db.clone(),
+                self.parquet_opts.clone(),
+                missing_ranges_by_table,
+                self.metrics.clone(),
+            )?;
 
-        let mut stream = std::pin::pin!(stream);
-        while let Some(dataset_rows) = stream.try_next().await? {
-            for table_rows in dataset_rows {
-                if let Some(ref metrics) = self.metrics {
+            let mut stream = std::pin::pin!(stream);
+            while let Some(dataset_rows) = stream.try_next().await? {
+                for table_rows in dataset_rows {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                    let table_name = table_rows.table.name();
-                    let block_num = table_rows.block_num();
-                    let physical_table = self
-                        .catalog
-                        .tables()
-                        .iter()
-                        .find(|t| t.table_name() == table_name)
-                        .expect("table should exist");
-                    let location_id = *physical_table.location_id();
-                    // Record rows only (bytes tracked separately in writer)
-                    metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
-                    // Update latest block gauge
-                    metrics.set_latest_block(block_num, table_name.to_string(), location_id);
+                    records_counter
+                        .fetch_add(num_rows as usize, std::sync::atomic::Ordering::Relaxed);
+
+                    if let Some(ref metrics) = self.metrics {
+                        let table_name = table_rows.table.name();
+                        let block_num = table_rows.block_num();
+                        let physical_table = self
+                            .catalog
+                            .tables()
+                            .iter()
+                            .find(|t| t.table_name() == table_name)
+                            .expect("table should exist");
+                        let location_id = *physical_table.location_id();
+                        // Record rows only (bytes tracked separately in writer)
+                        metrics.record_ingestion_rows(
+                            num_rows,
+                            table_name.to_string(),
+                            location_id,
+                        );
+                        // Update latest block gauge
+                        metrics.set_latest_block(block_num, table_name.to_string(), location_id);
+                    }
+
+                    writer.write(table_rows).await?;
                 }
 
-                writer.write(table_rows).await?;
+                self.progress_reporter.block_covered();
             }
 
-            self.progress_reporter.block_covered();
-        }
+            // Close the last part file for each table, checking for any errors.
+            writer.close().await?;
 
-        // Close the last part file for each table, checking for any errors.
-        writer.close().await?;
+            Ok(())
+        };
 
-        Ok(())
+        // Execute with instrumentation
+        let (result, _metrics) = instrumentation.execute(dump_fut).await;
+        result
     }
 }
 

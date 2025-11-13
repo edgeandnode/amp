@@ -1,5 +1,17 @@
+pub mod instrumented_task;
 pub mod logging;
+pub mod plan_histogram;
+pub mod runtime_metrics;
+pub mod task_id;
+pub mod task_runtime_context;
+pub mod task_type;
 pub mod telemetry;
+
+// Re-export commonly used types
+pub use instrumented_task::{InstrumentedTaskExecution, InstrumentedTaskGuard};
+pub use task_id::TaskId;
+pub use task_runtime_context::{TASK_CONTEXT, TaskMetrics, TaskRuntimeContext};
+pub use task_type::TaskType;
 
 pub type TelemetryKit = (
     Option<telemetry::traces::SdkTracerProvider>,

@@ -109,6 +109,7 @@ tokio = { version = "1.36.0", features = [
     "rt-multi-thread",
     "parking_lot",
 ] }
+tokio-metrics = "0.3"
 tokio-stream = "0.1.17"
 tokio-util = { version = "0.7.15", features = ["rt"] }
 toml = "0.8.10"
