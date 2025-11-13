@@ -15,17 +15,21 @@ New to Amp? Start here:
 ### Core Concepts
 
 #### [Operational Modes](modes.md)
+
 Complete guide to Amp's operational modes and deployment patterns:
-- **Serverless Mode**: On-demand extraction using `ampd dump`
+
 - **Distributed Mode**: Separate server and worker components for production
 - **Development Mode**: Combined server + worker for local testing
 - Deployment patterns and architecture diagrams
 
 #### [Configuration Guide](config.md)
+
 Detailed configuration reference for all Amp components and settings.
 
 #### [Upgrading Guide](upgrading.md)
+
 Process for upgrading Amp between versions:
+
 - Database migration workflows
 - Upgrade procedures for different deployment types
 - Troubleshooting and best practices
@@ -33,7 +37,9 @@ Process for upgrading Amp between versions:
 ### Data Sources & Schemas
 
 #### [Dataset Definition Schemas](dataset-def-schemas/README.md)
+
 JSON schemas for defining datasets:
+
 - Common dataset fields
 - EVM RPC datasets
 - Firehose datasets
@@ -46,7 +52,9 @@ JSON schemas for defining datasets:
 - **[Ethereum Beacon Chain Schema](schemas/eth-beacon.md)** - Schema for Ethereum consensus layer data
 
 #### [User-Defined Functions (UDFs)](udfs.md)
+
 Custom SQL functions available in Amp queries:
+
 - EVM decoding functions
 - RPC call functions
 - Attestation functions
@@ -55,13 +63,17 @@ Custom SQL functions available in Amp queries:
 ### Operations
 
 #### [Telemetry](telemetry.md)
+
 Observability and monitoring:
+
 - OpenTelemetry integration
 - Metrics and tracing
 - Logging configuration
 
 #### [Reorgs](reorgs.md)
+
 Understanding and handling blockchain reorganizations:
+
 - How Amp detects and handles reorgs
 - Impact on data consistency
 - Best practices
@@ -69,6 +81,7 @@ Understanding and handling blockchain reorganizations:
 ### Reference
 
 #### [Glossary](glossary.md)
+
 Definitions of key terms and concepts used throughout Amp.
 
 ## See Also

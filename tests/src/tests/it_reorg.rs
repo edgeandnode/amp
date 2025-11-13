@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::testlib::{
     ctx::{TestCtx, TestCtxBuilder},
     fixtures::{BlockInfo, DatasetPackage, FlightClient},
-    helpers as test_helpers,
+    helpers::{self as test_helpers, dump},
 };
 
 #[tokio::test]
@@ -122,7 +122,7 @@ async fn dump_finalized() {
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
             let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
-            ampd::dump_cmd::dump(
+            dump(
                 config,
                 metadata_db,
                 dataset_ref,

@@ -7,12 +7,14 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ## Architecture Overview
 
 ### Data Flow
+
 1. **Extract**: Pull data from blockchain sources (EVM RPC, Firehose, etc.)
 2. **Transform**: Process data using SQL queries with custom UDFs
 3. **Store**: Save as Parquet files (columnar format optimized for analytics)
 4. **Serve**: Provide query interfaces (Arrow Flight gRPC, JSON Lines HTTP)
 
 ### Technology Stack
+
 - **Language**: Rust
 - **Query Engine**: Apache DataFusion
 - **Storage Format**: Apache Parquet
@@ -22,18 +24,21 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ## Key Components
 
 ### 1. Main Binary (`ampd`)
+
 - Central command dispatcher
 - Commands:
-  - `dump`: Extract data from sources to Parquet
   - `dev`: Start development server
   - `server`: Start query servers
   - `worker`: Run distributed worker node
+  - `controller`: Run controller with Admin API
 
 ### 2. Data Extraction (`dump`)
+
 - Parallel extraction with configurable workers
 - Resumable extraction (tracks progress)
 
 ### 3. Query Serving (`server`)
+
 - **Arrow Flight Server** (port 1602): High-performance binary protocol
 - **JSON Lines Server** (port 1603): Simple HTTP interface
 - Features:
@@ -43,11 +48,13 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ### 4. Data Sources
 
 #### EVM RPC (`evm-rpc-datasets`)
+
 - Connects to Ethereum-compatible JSON-RPC endpoints
 - Tables: blocks, transactions, logs
 - Batched requests for efficiency
 
 #### Firehose (`firehose-datasets`)
+
 - StreamingFast Firehose protocol (gRPC)
 - Real-time blockchain data streaming
 - Tables: blocks, transactions, logs, calls
@@ -56,6 +63,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ### 5. Core Libraries
 
 #### `common`
+
 - Shared utilities and abstractions
 - Configuration management
 - EVM-specific UDFs (User-Defined Functions)
@@ -63,6 +71,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - Attestation support
 
 #### `metadata-db`
+
 - PostgreSQL-based metadata storage
 - Tracks:
   - File metadata
@@ -72,6 +81,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - Uses LISTEN/NOTIFY for distributed coordination
 
 #### `dataset-store`
+
 - Dataset management
 - SQL dataset support
 - Manifest parsing
@@ -80,16 +90,19 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ## Configuration
 
 ### Environment Variables
+
 - `AMP_CONFIG`: Path to main config file
 - `AMP_LOG`: Logging level (error/warn/info/debug/trace)
 - `AMP_CONFIG_*`: Override config values
 
 ### Key Directories
+
 1. **manifests_dir**: Dataset manifests (input)
 2. **providers_dir**: External service configs
 3. **data_dir**: Parquet file storage (output)
 
 ### Storage Support
+
 - Local filesystem
 - S3-compatible stores
 - Google Cloud Storage
@@ -98,6 +111,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 ## SQL Capabilities
 
 ### Custom UDFs (User-Defined Functions)
+
 - `evm_decode_log`: Decode EVM event logs
 - `evm_topic`: Get event topic hash
 - `eth_call`: Execute RPC calls during queries
@@ -106,24 +120,21 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - `attestation_hash`: Generate data attestations
 
 ### Dataset Definition
+
 - Raw datasets: Direct extraction from sources
 - SQL datasets: Views over other datasets
 - Materialized views for performance
 
 ## Usage Examples
 
-### Dump Command
-```bash
-# Extract first 4 million blocks with 2 parallel jobs
-cargo run --release -p ampd -- dump --dataset eth_firehose -e 4000000 -j 2
-```
-
 ### Query via HTTP
+
 ```bash
 curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 ```
 
 ### Python Integration
+
 - Arrow Flight client available
 - Marimo notebook examples provided
 
@@ -148,12 +159,13 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 This project uses three complementary documentation systems. Understanding their roles helps AI agents navigate efficiently:
 
 | Documentation                  | Purpose                  | Content Focus                                                                                                                    |
-|--------------------------------|--------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | **AGENTS.md** (this file)      | **WHY** and **WHAT**     | Project architecture, policies, goals, and principles. Answers "What is this project?" and "Why do we do things this way?"       |
 | **Skills** (`.claude/skills/`) | **HOW** and **WHEN**     | Command-line operations and justfile usage. Answers "How do I run commands?" and "When should I use each command?"               |
 | **Patterns** (`.patterns/`)    | **HOW** (implementation) | Code implementation patterns, standards, and guidelines. Answers "How do I write quality code that follows project conventions?" |
 
 **Navigation Guide for AI Agents:**
+
 - Need to understand the project? → Read this file (AGENTS.md)
 - Need to run a command? → Check Skills (`.claude/skills/<skill-name>/SKILL.md`)
 - Need to write code? → Consult Patterns ([`.patterns/README.md`](.patterns/README.md))
@@ -195,17 +207,17 @@ is NOT available in the justfile.**
 When determining which command to run, follow this strict hierarchy:
 
 1. **Priority 1: Skills** (`.claude/skills/`)
-    - Skills are the **SINGLE SOURCE OF TRUTH** for all command execution
-    - If Skills document a command, use it EXACTLY as shown
-    - Skills override any other guidance in AGENTS.md or elsewhere
+   - Skills are the **SINGLE SOURCE OF TRUTH** for all command execution
+   - If Skills document a command, use it EXACTLY as shown
+   - Skills override any other guidance in AGENTS.md or elsewhere
 
 2. **Priority 2: AGENTS.md workflow**
-    - High-level workflow guidance (when to format, check, test)
-    - Refers you to Skills for specific commands
+   - High-level workflow guidance (when to format, check, test)
+   - Refers you to Skills for specific commands
 
 3. **Priority 3: Everything else**
-    - Other documentation is supplementary
-    - When in conflict, Skills always win
+   - Other documentation is supplementary
+   - When in conflict, Skills always win
 
 #### Workflow Gate: Check Skills First
 
@@ -257,12 +269,14 @@ Each Skill file contains:
 **Follow this workflow when implementing features or fixing bugs:**
 
 #### 1. Research Phase
+
 - Understand the codebase and existing patterns
 - Identify related modules and dependencies
 - Review test files and usage examples
 - Consult `.patterns/` for relevant implementation patterns
 
 #### 2. Planning Phase
+
 - Create detailed implementation plan
 - Identify validation checkpoints
 - Consider edge cases and error handling
@@ -292,27 +306,27 @@ Development Progress:
 1. **Write code** following patterns from `.patterns/`
 
 2. **Format immediately** (MANDATORY after EVERY edit):
-    - **Check Skill**: `.claude/skills/code-format/SKILL.md`
-    - **Command**: `just fmt-file <file>` after editing ANY Rust or TypeScript file
-    - **Validation**: Run `just fmt-rs-check` to verify no formatting changes remain
+   - **Check Skill**: `.claude/skills/code-format/SKILL.md`
+   - **Command**: `just fmt-file <file>` after editing ANY Rust or TypeScript file
+   - **Validation**: Run `just fmt-rs-check` to verify no formatting changes remain
 
 3. **Check compilation**:
-    - **Check Skill**: `.claude/skills/code-check/SKILL.md`
-    - **Command**: `just check-crate <crate-name>` after changes
-    - **Must pass**: Fix all compilation errors
-    - **Validation**: Ensure zero errors before proceeding
+   - **Check Skill**: `.claude/skills/code-check/SKILL.md`
+   - **Command**: `just check-crate <crate-name>` after changes
+   - **Must pass**: Fix all compilation errors
+   - **Validation**: Ensure zero errors before proceeding
 
 4. **Lint with clippy**:
-    - **Check Skill**: `.claude/skills/code-check/SKILL.md`
-    - **Command**: `just clippy-crate <crate-name>`
+   - **Check Skill**: `.claude/skills/code-check/SKILL.md`
+   - **Command**: `just clippy-crate <crate-name>`
    - **Must pass**: Fix all clippy warnings
-    - **Validation**: Re-run until zero warnings before proceeding
+   - **Validation**: Re-run until zero warnings before proceeding
 
 5. **Run tests**:
-    - **Check Skill**: `.claude/skills/code-test/SKILL.md`
-    - **Command**: `just test-local` to validate changes
-    - **Must pass**: Fix all test failures
-    - **Validation**: All tests green
+   - **Check Skill**: `.claude/skills/code-test/SKILL.md`
+   - **Command**: `just test-local` to validate changes
+   - **Must pass**: Fix all test failures
+   - **Validation**: All tests green
 
 6. **Iterate**: If any validation fails → fix → return to step 2
 
@@ -333,6 +347,7 @@ Edit File → [Check Skills: format] → just fmt-file
 **Remember**: Every command comes from Skills. If unsure, check Skills first.
 
 #### 4. Completion Phase
+
 - Ensure all automated checks pass (format, check, clippy, tests)
 - Review changes against patterns and security guidelines
 - Document any warnings you couldn't fix and why
@@ -340,6 +355,7 @@ Edit File → [Check Skills: format] → just fmt-file
 ### 📐 Code Implementation Patterns Reference
 
 **AI agents should consult patterns when writing code:**
+
 - **General patterns**: [.patterns/README.md](.patterns/README.md)
   - Cargo workspace patterns (crate creation, dependency management)
   - Testing patterns (test structure, naming conventions)
@@ -357,6 +373,7 @@ Edit File → [Check Skills: format] → just fmt-file
 ### 🎯 Core Development Principles
 
 **ALL AI agents MUST follow these principles:**
+
 - **Research → Plan → Implement**: Never jump straight to coding
 - **Pattern compliance**: Always follow established patterns from `.patterns/`
 - **Zero tolerance for errors**: All automated checks must pass
@@ -377,7 +394,7 @@ Edit File → [Check Skills: format] → just fmt-file
 **You've learned the complete workflow. Here's what to remember:**
 
 | What             | Where               | When                               |
-|------------------|---------------------|------------------------------------|
+| ---------------- | ------------------- | ---------------------------------- |
 | **Run commands** | `.claude/skills/`   | Check Skills BEFORE any command    |
 | **Write code**   | `.patterns/`        | Follow patterns for implementation |
 | **Format**       | `just fmt-file`     | IMMEDIATELY after each edit        |

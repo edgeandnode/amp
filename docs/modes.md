@@ -8,87 +8,24 @@ Amp provides several commands that can be combined into different deployment pat
 
 ### Core Commands
 
-1. **`dump`** - Direct, synchronous extraction of dataset data to Parquet files
-2. **`server`** - Query server providing Arrow Flight and JSON Lines interfaces
-3. **`worker`** - Standalone worker process for executing scheduled extraction jobs
-4. **`controller`** - Controller service providing the Admin API for job management
-5. **`migrate`** - Run database migrations on the metadata database
+1. **`server`** - Query server providing Arrow Flight and JSON Lines interfaces
+2. **`worker`** - Standalone worker process for executing scheduled extraction jobs
+3. **`controller`** - Controller service providing the Admin API for job management
+4. **`migrate`** - Run database migrations on the metadata database
 
 ### Operational Modes
 
-Amp supports three primary operational modes:
+Amp supports two primary operational modes:
 
-1. **Serverless Mode**: Ephemeral, on-demand extraction using `ampd dump` for cloud functions, scheduled jobs, or CI/CD pipelines
-2. **Single-Node Mode**: Combined controller, server and embedded worker using `ampd dev` for local development and testing
-3. **Distributed Mode**: Separate `ampd controller`, `ampd server` and `ampd worker` processes coordinating via metadata DB for production deployments
+1. **Single-Node Mode**: Combined controller, server and embedded worker using `ampd dev` for local development and testing
+2. **Distributed Mode**: Separate `ampd controller`, `ampd server` and `ampd worker` processes coordinating via metadata DB for production deployments
 
 ### Common Deployment Patterns
 
-1. **Serverless Mode**: Direct extraction using `ampd dump`
-2. **Server-Only Mode**: Query serving without extraction workers (distributed, read-only)
-3. **Controller-Only Mode**: Management interface without query server or workers
-4. **Development Mode**: Combined server + embedded worker `ampd dev` (single-node)
-5. **Controller + Server + Workers**: Separate server and worker processes coordinating via metadata DB (distributed)
-
-## Serverless Mode
-
-### Purpose
-
-Serverless mode performs immediate, on-demand extraction of blockchain data from configured sources using the `ampd dump` command. Extraction runs as an ephemeral process that exits upon completion. This is a synchronous operation that runs until completion (or the specified end block) and then exits.
-
-### When to Use
-
-- **One-off data extraction**: Extract a specific range of blocks for analysis
-- **Initial dataset population**: Bootstrap a new dataset with historical data
-- **Testing and development**: Quickly verify dataset configurations
-- **Scheduled jobs**: Run periodic dumps via cron or similar schedulers
-- **CI/CD pipelines**: Extract data as part of automated workflows
-
-### Key Features
-
-- **Parallel extraction**: Configure multiple worker jobs (`-j`) for faster extraction
-- **Resumable**: Automatically continues from last extracted block if interrupted
-- **Dependency resolution**: Automatically dumps required upstream datasets
-- **Flexible targeting**: Extract single datasets or multiple via comma-separated list or manifest
-- **Progress tracking**: Uses metadata DB to track extraction progress
-
-### Basic Usage
-
-```bash
-# Extract a single dataset (using dev tag)
-ampd dump --dataset my_namespace/eth_mainnet@dev
-
-# Extract with parallel jobs up to block 4M
-ampd dump --dataset my_namespace/eth_mainnet@1.0.0 --end-block 4000000 --n-jobs 4
-
-# Extract multiple datasets
-ampd dump --dataset my_namespace/eth_mainnet@latest,my_namespace/uniswap_v3@latest
-
-# Extract from a manifest file
-ampd dump --dataset ./datasets/production.json
-
-# Start fresh (discard existing progress)
-ampd dump --dataset my_namespace/eth_mainnet@dev --fresh
-
-# Run periodically (every 30 minutes)
-ampd dump --dataset my_namespace/eth_mainnet@latest --run-every-mins 30
-```
-
-### Behavior
-
-1. **Initialization**: Loads dataset definitions and resolves dependencies
-2. **Progress Check**: Reads metadata DB to find last extracted block
-3. **Extraction**: Pulls data from source (RPC, Firehose, etc.)
-4. **Writing**: Writes Parquet files to configured data directory
-5. **Metadata Update**: Records progress and file metadata in database
-6. **Completion**: Exits when end block reached or stopped
-
-### Dataset Types Supported
-
-- **EVM RPC**: Ethereum-compatible JSON-RPC endpoints
-- **Firehose**: StreamingFast Firehose protocol
-- **Eth Beacon**: Ethereum Beacon Chain (consensus layer)
-- **SQL Datasets**: Derived datasets via SQL transformations over other datasets
+1. **Server-Only Mode**: Query serving without extraction workers (distributed, read-only)
+2. **Controller-Only Mode**: Management interface without query server or workers
+3. **Development Mode**: Combined server + embedded worker `ampd dev` (single-node)
+4. **Controller + Server + Workers**: Separate server and worker processes coordinating via metadata DB (distributed)
 
 ## Distributed Mode
 
@@ -474,7 +411,7 @@ ampd dev
 
 - Read-only query serving
 - Separation of concerns (queries vs extraction)
-- Datasets populated by external processes (e.g., serverless dump jobs)
+- Datasets populated by external extraction processes
 - Multiple query replicas for load balancing
 
 **Operational mode:** Distributed (query component only)
@@ -600,16 +537,6 @@ ampd worker --node-id eu-west-1-worker
 
 ## Choosing Between Modes
 
-### Use Serverless Mode (Dump Command) When:
-
-- One-off data extraction
-- CI/CD or automated scripts
-- Testing dataset configurations
-- Bootstrapping new datasets
-- External schedulers (cron, Kubernetes CronJob, Lambda)
-- Event-driven extraction workflows
-- Cost-optimized sporadic extraction
-
 ### Use Single-Node Mode (Development) When:
 
 - Local development
@@ -623,7 +550,7 @@ ampd worker --node-id eu-west-1-worker
 **Query-only server:**
 
 - Read-only query serving
-- Datasets populated by serverless jobs
+- Datasets populated by external extraction processes
 - Multiple query replicas needed
 - Separating read from write workloads
 
@@ -650,9 +577,8 @@ ampd worker --node-id eu-west-1-worker
 
 ### Stage 1: Development & Testing
 
-- **Mode:** Serverless + Single-Node
-- Use `ampd dump` for initial testing (serverless mode)
-- Use `ampd dev` for local query testing (single-node mode)
+- **Mode:** Single-Node
+- Use `ampd dev` for local development and testing
 - Single machine, minimal setup
 - **Not for production use**
 
@@ -689,7 +615,6 @@ ampd worker --node-id eu-west-1-worker
 Different operational modes can coexist in the same deployment:
 
 - Run **distributed mode** (controller + server + workers) for continuous ingestion and queries
-- Use **serverless mode** (`ampd dump`) for ad-hoc extractions or manual backfills
 - Deploy query-only servers (distributed, read-only) in regions without extraction needs
 - Deploy controller-only for management in secure/private networks
 

@@ -47,7 +47,6 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use ampd::dump_cmd::dump;
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::{
@@ -62,7 +61,7 @@ use metadata_db::MetadataDb;
 use monitoring::logging;
 use tests::testlib::{
     fixtures::{DaemonConfigBuilder, TempMetadataDb},
-    helpers as test_helpers,
+    helpers::{self as test_helpers, dump},
 };
 
 /// Number of parallel jobs to use during blessing operations.

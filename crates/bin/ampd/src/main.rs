@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use ampd::{dev_cmd, dump_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
+use ampd::{dev_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
 use datasets_common::reference::Reference;
-use dump::EndBlock;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -23,54 +22,6 @@ struct Args {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 enum Command {
-    Dump {
-        /// The name or path of the dataset to dump. This will be looked up in the dataset definition directory.
-        /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset_name>`.
-        #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
-        dataset: Reference,
-
-        /// If set to true, only the listed datasets will be dumped in the order they are listed.
-        /// By default, dump listed datasets and their dependencies, ordered such that each dataset
-        /// will be dumped after all datasets they depend on.
-        #[arg(long, env = "DUMP_IGNORE_DEPS")]
-        ignore_deps: bool,
-
-        /// The block number to end at, inclusive.
-        ///
-        /// Accepts:
-        /// - Positive integer (e.g., "1000000"): Stop at this specific block number
-        /// - "latest": Stop at the latest available block
-        /// - Negative integer (e.g., "-100"): Stop 100 blocks before latest
-        /// - Omitted: Continuous dumping (only supported for single dataset)
-        ///
-        /// When combined with --run-every-mins, omitting this defaults to "latest".
-        #[arg(long, short, env = "DUMP_END_BLOCK")]
-        end_block: Option<EndBlock>,
-
-        /// How many parallel writers to run. Defaults to 1. Each writer will be responsible for an
-        /// equal number of blocks. Example: If start = 0, end = 10_000_000 and max_writers = 10, then each
-        /// writer will be responsible for a contiguous section of 1 million blocks.
-        #[arg(long, short = 'j', default_value = "1", env = "DUMP_MAX_WRITERS")]
-        max_writers: u16,
-
-        /// The size of each partition in MB. Once the size is reached, a new part file is created. This
-        /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
-        /// but will correlate with this value. Defaults to 4 GB.
-        #[arg(long, env = "DUMP_PARTITION_SIZE_MB")]
-        partition_size_mb: Option<u64>,
-
-        /// How often to run the dump job in minutes. By default will run once and exit.
-        #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
-        run_every_mins: Option<u64>,
-
-        /// The location of the dump. If not specified, the dump will be written to the default location in AMP_DATA_DIR.
-        #[arg(long)]
-        location: Option<String>,
-
-        /// Overwrite existing location and dump to a new, fresh directory
-        #[arg(long, env = "DUMP_FRESH")]
-        fresh: bool,
-    },
     Dev {
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
@@ -162,42 +113,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 flight_server,
                 jsonl_server,
                 admin_server,
-                metrics_meter,
-            )
-            .await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
-        }
-        Command::Dump {
-            end_block,
-            max_writers,
-            partition_size_mb,
-            dataset,
-            ignore_deps,
-            run_every_mins,
-            location,
-            fresh,
-        } => {
-            let config = load_config(config_path.as_ref(), false).await?;
-            let metadata_db = config.metadata_db().await?;
-
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
-
-            let result = dump_cmd::run(
-                config,
-                metadata_db,
-                dataset,
-                ignore_deps,
-                end_block,
-                max_writers,
-                partition_size_mb,
-                run_every_mins,
-                location,
-                fresh,
                 metrics_meter,
             )
             .await;
