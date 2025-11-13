@@ -1,9 +1,12 @@
-use ampd::dump_cmd::dump;
 use datasets_common::reference::Reference;
 use dump::EndBlock;
 use monitoring::logging;
 
-use crate::testlib::{ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers};
+use crate::testlib::{
+    ctx::TestCtxBuilder,
+    fixtures::SnapshotContext,
+    helpers::{self as test_helpers, dump},
+};
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {

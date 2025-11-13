@@ -23,23 +23,27 @@ curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
 ```
 
 This script downloads and runs `ampup init`, which:
+
 - Sets up the Amp installation directory (`$AMP_DIR` or `~/.amp`)
 - Configures your shell's PATH
 - Installs the latest version of `ampd` by default
 
 **Key Features**:
+
 - **Version management**: Install, list, switch between, and uninstall versions
 - **Binary distribution**: Downloads pre-built binaries from GitHub releases
 - **Build from source**: Can build and install from local or remote Git repositories
 - **Cross-platform**: Supports Linux and macOS (x86_64 and aarch64)
 
 **When to Use**:
+
 - **Initial setup**: Setting up Amp on a new system
 - **Version management**: Upgrading or downgrading Amp versions
 - **Testing**: Managing multiple Amp versions for testing or compatibility
 - **Production deployments**: Installing specific versions for production environments
 
 **Common Commands**:
+
 ```bash
 # Install latest version
 ampup install
@@ -63,24 +67,23 @@ ampup build --path /path/to/amp-repo
 
 **Purpose**: `ampd` is the core Amp daemon that handles data extraction, transformation, and query serving. It is a multi-mode executable that can run in different operational configurations depending on deployment needs.
 
-**Operational Modes**: `ampd` supports three primary operational modes, each suited for different deployment patterns:
+**Operational Modes**: `ampd` supports two primary operational modes, each suited for different deployment patterns:
 
-1. **Serverless Mode** (`ampd dump`) - Direct, synchronous extraction to Parquet files
-2. **Single-Node Mode** (`ampd dev`) - Combined server + worker for local development
-3. **Distributed Mode** - Separate controller, server, and worker processes for production
+1. **Single-Node Mode** (`ampd dev`) - Combined server + worker for local development
+2. **Distributed Mode** - Separate controller, server, and worker processes for production
 
 For detailed information about operational modes, deployment patterns, and scaling strategies, see [Operational Modes](modes.md).
 
 **Key Commands**:
+
 - `ampd dev` - Start development server with embedded worker (single-node mode)
 - `ampd server` - Run query server (Arrow Flight + JSON Lines)
 - `ampd controller` - Run the controller responsible for job scheduling and exposing the engine administration interface
 - `ampd worker` - Run extraction worker process
-- `ampd dump` - Extract data directly to Parquet files (serverless mode)
 
 **When to Use**:
+
 - **Development**: Use `ampd dev` for local testing and prototyping
-- **One-off extraction**: Use `ampd dump` for one-off or scheduled extractions
 - **Production extraction and serving**: Use distributed mode (`server`, `controller`, `worker`) for scalable deployments
 
 ### `ampctl` - Administration and Control CLI
@@ -99,6 +102,7 @@ For detailed information about operational modes, deployment patterns, and scali
 - **Schema Analysis**: Validate SQL queries against registered datasets; infer output schemas; extract network dependencies
 
 **When to Use**:
+
 - **Dataset management**: Managing datasets and providers in production environments
 - **Job control**: Monitoring and controlling extraction jobs
 - **Storage inspection**: Inspecting storage locations and file metadata
@@ -114,12 +118,14 @@ For detailed information about operational modes, deployment patterns, and scali
 **Target Audience**: Dataset developers, data engineers, and developers building applications on top of Amp. Unlike `ampctl` which focuses on infrastructure operations, `amp` provides a development-focused workflow for dataset iteration and exploration.
 
 **Key Features**:
+
 - **Developer experience**: Streamlined workflow for dataset development and testing
 - **TypeScript-based**: Implemented in TypeScript for consistency with the SDK
 - **Engine administration integration**: Communicates with the Amp engine via the engine administration interface
 - **Interactive tooling**: Provides interactive features for dataset exploration and debugging
 
 **When to Use**:
+
 - **Dataset development**: Developing and testing new datasets locally
 - **Query iteration**: Iterating on dataset SQL queries and transformations
 - **Schema exploration**: Exploring dataset schemas and metadata
@@ -138,6 +144,7 @@ For detailed information about operational modes, deployment patterns, and scali
 **Target Audience**: Application developers who want to integrate Amp datasets with PostgreSQL-based applications, ORMs, and analytics tools.
 
 **Key Features**:
+
 - **Real-time streaming**: Continuously syncs dataset changes as they occur
 - **Automatic schema management**: Fetches schemas from the engine administration interface and creates PostgreSQL tables automatically
 - **Version polling**: Automatically detects and loads new dataset versions (hot-reload support)
@@ -145,12 +152,14 @@ For detailed information about operational modes, deployment patterns, and scali
 - **Progress checkpointing**: Resumes from last processed block on restart
 
 **When to Use**:
+
 - **PostgreSQL integration**: Integrate Amp datasets with existing PostgreSQL-based applications
 - **Analytics and reporting**: Enable SQL-based analytics and reporting on blockchain data
 - **Standard tooling**: Build applications using standard PostgreSQL tools (ORMs, query builders)
 - **Low-latency access**: Provide low-latency access to blockchain data for web applications
 
 **Basic Usage**:
+
 ```bash
 # Set environment variables
 export AMP_DATASET_NAME=eth_mainnet
