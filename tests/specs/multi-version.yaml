@@ -23,6 +23,28 @@
   config: v2.config.ts
   end: 15000000
 
+- name: register_multi_version_v2_namespaced
+  dataset: multi_version
+  tag: "0.0.2"
+  config: v2_namespaced.config.ts
+  end: 15000000
+
+- name: dump_multi_version_v2_namespaced
+  dataset: test_namespace/multi_version@0.0.2
+  config: v2.config.ts
+  end: 15000000
+
+- name: register_multi_version_v3
+  dataset: multi_version
+  tag: "0.0.3"
+  config: v3.config.ts
+  end: 15000000
+
+- name: dump_multi_version_v3
+  dataset: test_namespace/multi_version@0.0.3
+  config: v3.config.ts
+  end: 15000000
+
 # Test queries with versioned dataset names
 - name: query_v1_versioned_name
   query: SELECT * FROM "_/multi_version@0.0.1".blocks ORDER BY block_num LIMIT 1
@@ -36,6 +58,20 @@
   results: |
     [
       {"_block_num":15000000,"block_num":15000000,"gas_limit":30000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138"}
+    ]
+
+- name: query_v2_namespaced
+  query: SELECT * FROM "test_namespace/multi_version@0.0.2".blocks ORDER BY block_num LIMIT 1
+  results: |
+    [
+      {"_block_num":15000000,"block_num":15000000,"gas_limit":30000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138"}
+    ]
+
+- name: query_v3
+  query: SELECT * FROM "test_namespace/multi_version@0.0.3".blocks ORDER BY block_num LIMIT 1
+  results: |
+    [
+      {"_block_num":15000000,"block_num":15000000,"gas_limit":30000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
     ]
 
 # Test queries with non-versioned dataset names (should point to latest version)

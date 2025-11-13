@@ -154,12 +154,15 @@ impl AmpCli {
 }
 
 /// Execute an Amp CLI command with common setup and error handling.
+#[tracing::instrument(skip(admin_url), err)]
 async fn run_amp_command(
     admin_url: &str,
     path: &Path,
     args: &[&str],
     command_name: &str,
 ) -> Result<(), BoxError> {
+    tracing::debug!("Executing amp command");
+
     let status = tokio::process::Command::new("pnpm")
         .args(args)
         .env("AMP_ADMIN_URL", admin_url)
