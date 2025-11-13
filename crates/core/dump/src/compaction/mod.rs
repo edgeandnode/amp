@@ -109,6 +109,16 @@ impl AmpCollectorInnerTask {
         }
     }
 
+    fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        props: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
+        let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
+        tokio::spawn(task.run())
+    }
+
     fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
@@ -116,7 +126,7 @@ impl AmpCollectorInnerTask {
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
         let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
-        tokio::spawn(task.try_run())
+        tokio::spawn(futures::future::ok(task))
     }
 
     /// Run compaction followed by collection
@@ -125,7 +135,23 @@ impl AmpCollectorInnerTask {
     /// regardless of the configured intervals or if either are
     /// enabled.
     pub async fn run(self) -> TaskResult<Self> {
-        Ok(self.compact().await?.collect().await?)
+        let task_after_compact = match self.clone().compact().await {
+            Ok(task) => task,
+            Err(err) if Self::is_compactor_cancellation(&err) => {
+                tracing::warn!("Compaction task cancelled: {}", err);
+                return Ok(self);
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        match task_after_compact.collect().await {
+            Ok(task) => Ok(task),
+            Err(err) if Self::is_collector_cancellation(&err) => {
+                tracing::warn!("Collection task cancelled: {}", err);
+                Ok(self)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Try to run compaction followed by collection
@@ -136,7 +162,21 @@ impl AmpCollectorInnerTask {
     /// and/or neither respective interval has elapsed this is
     /// a no-op
     pub async fn try_run(self) -> TaskResult<Self> {
-        self.try_compact().await?.try_collect().await
+        match self.clone().try_compact().await {
+            Ok(task) => match task.try_collect().await {
+                Ok(task) => Ok(task),
+                Err(err) if Self::is_cancellation_task_error(&err) => {
+                    tracing::warn!("Collection task cancelled: {}", err);
+                    Ok(self)
+                }
+                Err(err) => Err(err),
+            },
+            Err(err) if Self::is_cancellation_task_error(&err) => {
+                tracing::warn!("Compaction task cancelled: {}", err);
+                Ok(self)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     async fn collect(mut self) -> CollectionResult<Self> {
@@ -181,6 +221,26 @@ impl AmpCollectorInnerTask {
             Ok(self)
         }
     }
+
+    fn is_compactor_cancellation(err: &CompactorError) -> bool {
+        matches!(err, CompactorError::Join(join_err) if join_err.is_cancelled())
+    }
+
+    fn is_collector_cancellation(err: &CollectorError) -> bool {
+        matches!(err, CollectorError::Join(join_err) if join_err.is_cancelled())
+    }
+
+    fn is_cancellation_task_error(err: &AmpCompactorTaskError) -> bool {
+        match err {
+            AmpCompactorTaskError::Join(join_err) => join_err.is_cancelled(),
+            AmpCompactorTaskError::Compaction(compactor_err) => {
+                Self::is_compactor_cancellation(compactor_err)
+            }
+            AmpCompactorTaskError::Collection(collector_err) => {
+                Self::is_collector_cancellation(collector_err)
+            }
+        }
+    }
 }
 
 pub struct AmpCompactor {
@@ -194,6 +254,17 @@ pub struct AmpCompactorTask {
 impl AmpCompactorTask {
     fn new(inner: JoinHandle<TaskResult<AmpCollectorInnerTask>>) -> Self {
         Self { inner }
+    }
+
+    pub fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        props: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
+        let inner: JoinHandle<Result<AmpCollectorInnerTask, AmpCompactorTaskError>> =
+            AmpCollectorInnerTask::start_and_run(table, cache, props, metrics);
+        Self::new(inner)
     }
 
     pub fn start(
@@ -212,6 +283,16 @@ impl AmpCompactorTask {
 }
 
 impl AmpCompactor {
+    pub fn start_and_run(
+        table: &Arc<PhysicalTable>,
+        cache: ParquetFooterCache,
+        opts: &Arc<WriterProperties>,
+        metrics: Option<Arc<MetricsRegistry>>,
+    ) -> Self {
+        let task = AmpCompactorTask::start_and_run(table, cache, opts, metrics);
+        Self { task }
+    }
+
     pub fn start(
         table: &Arc<PhysicalTable>,
         cache: ParquetFooterCache,
