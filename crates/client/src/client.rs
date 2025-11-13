@@ -256,6 +256,30 @@ impl AmpClient {
         Self { client }
     }
 
+    /// Set HTTP headers for all subsequent requests.
+    ///
+    /// This is useful for authentication and custom metadata.
+    /// Headers persist across all requests made by this client.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let mut client = AmpClient::from_endpoint("http://localhost:1602").await?;
+    /// client.set_headers([
+    ///     ("authorization", "Bearer my-token"),
+    ///     ("x-api-key", "my-key"),
+    /// ]);
+    /// ```
+    pub fn set_headers<K, V>(&mut self, headers: impl IntoIterator<Item = (K, V)>)
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        for (key, value) in headers {
+            self.client
+                .set_header(key.as_ref().to_string(), value.as_ref().to_string());
+        }
+    }
+
     /// Start building a streaming query.
     ///
     /// Returns a `StreamBuilder` that can be awaited directly for a `ProtocolStream`,

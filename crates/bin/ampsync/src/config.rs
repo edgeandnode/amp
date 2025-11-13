@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Parser, Debug)]
 #[command(name = "ampsync")]
@@ -77,4 +78,38 @@ pub struct SyncConfig {
     /// Can also be set via MANIFEST_FETCH_MAX_BACKOFF_SECS environment variable
     #[arg(long, env = "MANIFEST_FETCH_MAX_BACKOFF_SECS", default_value_t = 60)]
     pub manifest_fetch_max_backoff_secs: u64,
+
+    /// HTTP headers to include in Flight requests (format: key=value)
+    ///
+    /// Can be specified multiple times for multiple headers.
+    /// Commonly used for authentication: --header "authorization=Bearer <token>"
+    ///
+    /// Can also be set via AMP_FLIGHT_HEADERS environment variable (comma-separated):
+    ///   AMP_FLIGHT_HEADERS="authorization=Bearer abc123,x-api-key=xyz"
+    ///
+    /// Example:
+    ///   ampsync sync --header "authorization=Bearer abc123" --header "x-api-key=xyz"
+    #[arg(long = "header", env = "AMP_FLIGHT_HEADERS", value_delimiter = ',', value_parser = parse_header_to_map)]
+    pub headers: HeaderMap,
+}
+
+/// Parse a header string and insert into HeaderMap
+fn parse_header_to_map(s: &str) -> Result<HeaderMap, String> {
+    let parts: Vec<&str> = s.splitn(2, '=').collect();
+    if parts.len() != 2 {
+        return Err(format!(
+            "Invalid header format '{}'. Expected format: key=value",
+            s
+        ));
+    }
+
+    let name = HeaderName::from_bytes(parts[0].as_bytes())
+        .map_err(|e| format!("Invalid header name '{}': {}", parts[0], e))?;
+
+    let value =
+        HeaderValue::from_str(parts[1]).map_err(|e| format!("Invalid header value: {}", e))?;
+
+    let mut map = HeaderMap::new();
+    map.insert(name, value);
+    Ok(map)
 }

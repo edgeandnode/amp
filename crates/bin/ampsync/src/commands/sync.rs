@@ -40,9 +40,21 @@ pub async fn run(config: SyncConfig) -> Result<()> {
     info!("All tables created");
 
     // Create streaming client
-    let client = AmpClient::from_endpoint(&config.amp_flight_addr)
+    let mut client = AmpClient::from_endpoint(&config.amp_flight_addr)
         .await
         .context("Failed to create amp-client")?;
+
+    // Apply custom headers (e.g., for authentication)
+    if !config.headers.is_empty() {
+        let keys: Vec<_> = config.headers.keys().map(|k| k.as_str()).collect();
+        let header_iter = config
+            .headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("")));
+        client.set_headers(header_iter);
+        info!("Applied custom headers: {:?}", keys);
+    }
+
     info!("Amp client initialized");
 
     // Spawn streaming tasks
