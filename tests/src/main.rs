@@ -54,22 +54,15 @@ use dataset_store::{
     providers::ProviderConfigsStore,
 };
 use datasets_common::reference::Reference;
-use dump::{EndBlock, consistency_check};
+use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use monitoring::logging;
 use tests::testlib::{
     fixtures::{DaemonConfigBuilder, TempMetadataDb},
-    helpers::{self as test_helpers, dump},
+    helpers as test_helpers,
 };
-
-/// Number of parallel jobs to use during blessing operations.
-///
-/// Set to 1 to ensure deterministic, reproducible output for test snapshots.
-/// This prevents race conditions and ensures blessed datasets are identical
-/// across different runs and environments.
-const BLESS_JOB_COUNT: u16 = 1;
 
 /// Command-line interface for test support operations.
 ///
@@ -289,26 +282,14 @@ async fn bless(
 
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
-    let physical_tables = dump(
-        config,
-        metadata_db,
-        dataset.clone(),
-        true,                    // force_reprocess
-        EndBlock::Absolute(end), // end_block
-        BLESS_JOB_COUNT,         // max_writers
-        None,                    // start_block
-        None,                    // microbatch_max_interval
-        None,                    // microbatch_max_rows
-        false,                   // skip_consistency_check
-        None,                    // meter
-    )
-    .await
-    .map_err(|err| {
-        format!(
-            "Failed to dump dataset '{}' to block {}: {}",
-            dataset, end, err
-        )
-    })?;
+    let physical_tables = test_helpers::dump_dataset(config, metadata_db, dataset.clone(), end)
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to dump dataset '{}' to block {}: {}",
+                dataset, end, err
+            )
+        })?;
 
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");

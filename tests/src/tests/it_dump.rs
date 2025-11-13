@@ -1,12 +1,7 @@
 use datasets_common::reference::Reference;
-use dump::EndBlock;
 use monitoring::logging;
 
-use crate::testlib::{
-    ctx::TestCtxBuilder,
-    fixtures::SnapshotContext,
-    helpers::{self as test_helpers, dump},
-};
+use crate::testlib::{ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers};
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {
@@ -52,18 +47,11 @@ async fn evm_rpc_single_dump() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -129,18 +117,11 @@ async fn eth_beacon_single_dump() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -206,18 +187,11 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -283,18 +257,11 @@ async fn evm_rpc_base_single_dump() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -360,18 +327,11 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -437,18 +397,11 @@ async fn eth_firehose_single_dump() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");
@@ -514,18 +467,11 @@ async fn base_firehose_single_dump() {
     // * When
     // Dump the dataset and create a snapshot from it
     let dumped = {
-        let dumped_tables = dump(
+        let dumped_tables = test_helpers::dump_dataset(
             test_env.daemon_server().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
-            true,                      // ignore_deps
-            EndBlock::Absolute(block), // end_block
-            1,                         // max_writers
-            None,                      // run_every_mins
-            None,                      // microbatch_max_interval_override
-            None,                      // new_location
-            false,                     // fresh
-            None,                      // meter
+            block,
         )
         .await
         .expect("Failed to dump dataset");

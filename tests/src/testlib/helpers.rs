@@ -36,8 +36,13 @@ use super::fixtures::SnapshotContext;
 /// dependency resolution, physical table setup, and calling the extraction
 /// functions. It was previously part of the `ampd dump` CLI command but is
 /// now only used internally by tests.
+///
+/// **Note**: This is an internal function with full control over all parameters.
+/// Most test code should use the simpler `dump_dataset` or `dump_dataset_continuous`
+/// functions instead. This function is only exposed for advanced test scenarios that
+/// need fine-grained control over dump behavior.
 #[expect(clippy::too_many_arguments)]
-pub async fn dump(
+pub async fn dump_internal(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     dataset: Reference,
@@ -184,31 +189,62 @@ pub async fn dump(
 
 /// Extract blockchain data from a dataset source and save as Parquet files.
 ///
-/// This function runs the full ETL extraction pipeline for a specified dataset,
-/// extracting data from the configured source (RPC, Firehose, etc.) and saving
-/// it as Parquet files in the test environment's data directory.
+/// This is the primary function for dumping datasets in tests. It runs the full
+/// ETL extraction pipeline for a specified dataset, extracting data from the
+/// configured source (RPC, Firehose, etc.) and saving it as Parquet files.
 ///
-/// Returns the physical tables that were created during the dump process.
+/// This function uses sensible defaults for test scenarios:
+/// - Ignores dataset dependencies (dumps only the specified dataset)
+/// - Uses single-writer mode (max_writers = 1) for deterministic results
+/// - Does not use continuous dumping mode
+/// - Does not create fresh table revisions (reuses existing when possible)
 pub async fn dump_dataset(
-    config: &Arc<Config>,
-    metadata_db: &MetadataDb,
+    config: Arc<Config>,
+    metadata_db: MetadataDb,
     dataset: Reference,
-    end: u64,
-    max_writers: u16,
-    microbatch_max_interval: impl Into<Option<u64>>,
+    end_block: u64,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    dump(
-        config.clone(),
-        metadata_db.clone(),
+    dump_internal(
+        config,
+        metadata_db,
         dataset,
-        true,
-        EndBlock::Absolute(end),
-        max_writers,
-        None,
-        microbatch_max_interval.into(),
-        None,
-        false,
-        None,
+        true,                          // ignore_deps
+        EndBlock::Absolute(end_block), // end_block
+        1,                             // max_writers (single-writer for determinism)
+        None,                          // run_every_mins (no continuous mode)
+        None,                          // microbatch_max_interval_override
+        None,                          // new_location
+        false,                         // fresh
+        None,                          // meter
+    )
+    .await
+}
+
+/// Extract blockchain data in continuous mode, polling at regular intervals.
+///
+/// This function is similar to `dump_dataset` but runs in continuous mode,
+/// repeatedly polling for new data at the specified interval. This is useful
+/// for testing reorg detection and continuous extraction scenarios.
+///
+/// The function will run indefinitely until an error occurs or the task is cancelled.
+pub async fn dump_dataset_continuous(
+    config: Arc<Config>,
+    metadata_db: MetadataDb,
+    dataset: Reference,
+    run_every_mins: u64,
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    dump_internal(
+        config,
+        metadata_db,
+        dataset,
+        true,                 // ignore_deps
+        EndBlock::None,       // end_block (continuous mode)
+        1,                    // max_writers
+        Some(run_every_mins), // run_every_mins (enable continuous mode)
+        None,                 // microbatch_max_interval_override
+        None,                 // new_location
+        false,                // fresh
+        None,                 // meter
     )
     .await
 }

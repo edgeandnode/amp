@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::testlib::{
     ctx::{TestCtx, TestCtxBuilder},
     fixtures::{BlockInfo, DatasetPackage, FlightClient},
-    helpers::{self as test_helpers, dump},
+    helpers as test_helpers,
 };
 
 #[tokio::test]
@@ -122,7 +122,7 @@ async fn dump_finalized() {
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
             let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
-            dump(
+            test_helpers::dump_internal(
                 config,
                 metadata_db,
                 dataset_ref,
@@ -450,12 +450,10 @@ impl ReorgTestCtx {
     async fn dump(&self, dataset: &str, end: BlockNum) {
         let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
         test_helpers::dump_dataset(
-            self.ctx.daemon_server().config(),
-            self.ctx.metadata_db(),
+            self.ctx.daemon_server().config().clone(),
+            self.ctx.metadata_db().clone(),
             dataset_ref,
             end,
-            1,
-            None,
         )
         .await
         .expect("Failed to dump dataset");

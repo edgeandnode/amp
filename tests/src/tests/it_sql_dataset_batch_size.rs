@@ -139,13 +139,18 @@ impl TestCtx {
         microbatch_max_interval: impl Into<Option<u64>>,
     ) {
         let dataset_ref: Reference = dataset.parse().unwrap();
-        test_helpers::dump_dataset(
-            self.ctx.daemon_server().config(),
-            self.ctx.metadata_db(),
+        test_helpers::dump_internal(
+            self.ctx.daemon_server().config().clone(),
+            self.ctx.metadata_db().clone(),
             dataset_ref,
-            end,
+            true,                          // ignore_deps
+            dump::EndBlock::Absolute(end), // end_block
             max_writers,
-            microbatch_max_interval,
+            None,                           // run_every_mins
+            microbatch_max_interval.into(), // microbatch_max_interval_override
+            None,                           // new_location
+            false,                          // fresh
+            None,                           // meter
         )
         .await
         .expect("Failed to dump dataset");
