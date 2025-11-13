@@ -77,7 +77,7 @@ fn show_dataset_descriptor(descriptor: &serde_json::Value) -> Option<String> {
             ..
         } => Some(format!(
             "dump {dataset_namespace}/{dataset_name}@{}",
-            manifest_hash.as_str()[..7].to_string(),
+            &manifest_hash.as_str()[..7],
         )),
     }
 }
