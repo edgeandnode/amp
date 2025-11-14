@@ -2,9 +2,30 @@
   dataset: basic_function
   tag: "0.0.0"
 
+- name: query_basic_function_with_namespace_and_version
+  query: SELECT "_/basic_function@0.0.0".testString()
+  results: |
+    [
+      {"\"_/basic_function@0.0.0\".testString()":"I'm a function"}
+    ]
+
 - name: query_basic_function
   query: SELECT basic_function.testString()
   results: |
     [
       {"basic_function.testString()":"I'm a function"}
+    ]
+
+- name: query_basic_function_partial_ref_underscore
+  query: SELECT "_/basic_function".testString()
+  results: |
+    [
+      {"\"_/basic_function\".testString()":"I'm a function"}
+    ]
+
+- name: query_basic_function_with_version
+  query: SELECT "basic_function@0.0.0".testString()
+  results: |
+    [
+      {"\"basic_function@0.0.0\".testString()":"I'm a function"}
     ]
