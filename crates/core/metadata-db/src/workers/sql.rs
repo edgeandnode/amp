@@ -47,6 +47,24 @@ where
     Ok(())
 }
 
+/// Locks a PG advisory lock on the given worker node ID.
+///
+/// Returns whether a lock on the given node ID was successfully acquired.
+///
+/// Notes on correct usage:
+/// - You _must_ handle the boolean return value to correctly use this function.
+/// - The lock will be held for as long as the connection is kept open.
+///   Therefore, the `exe` connection should be held for the lifetime of the worker.
+pub async fn lock_node_id<'c, E>(exe: E, id: NodeId<'_>) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT pg_try_advisory_lock(hashtextextended($1, 0))
+    "#};
+    sqlx::query_scalar(query).bind(id).fetch_one(exe).await
+}
+
 /// Returns a worker by its node ID.
 ///
 /// Returns `None` if no worker with the given node_id exists.

@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use common::utils::error_with_causes;
 use fs_err as fs;
 
 // Submodules of the step implementations
@@ -143,8 +144,8 @@ pub enum LoadTestSpecError {
 ///
 /// Walks through the error source chain and formats a comprehensive error message.
 pub fn fail_with_error(err: &dyn std::error::Error, prefix: &str) -> String {
-    let err_chain = build_error_chain(err);
-    format!("{}: {}{}", prefix, err, err_chain)
+    let err_chain = error_with_causes(err);
+    format!("{}: {}", prefix, err_chain)
 }
 
 /// Runs test specification steps.
@@ -179,25 +180,4 @@ pub async fn run_spec(
     }
 
     Ok(())
-}
-
-/// Builds an error chain string from an error and its sources.
-///
-/// Walks through the error source chain and returns a formatted string
-/// containing the chain of error causes.
-#[doc(hidden)]
-pub fn build_error_chain(err: &dyn std::error::Error) -> String {
-    let mut error_chain = Vec::new();
-
-    let mut current = err;
-    while let Some(source) = current.source() {
-        error_chain.push(source.to_string());
-        current = source;
-    }
-
-    if error_chain.is_empty() {
-        String::new()
-    } else {
-        format!(" | Caused by: {}", error_chain.join(" -> "))
-    }
 }

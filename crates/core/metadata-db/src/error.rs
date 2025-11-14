@@ -1,6 +1,6 @@
 //! Error types for metadata database operations
 
-use crate::{db::ConnError, physical_table::events::LocationNotifSendError};
+use crate::{WorkerNodeIdOwned, db::ConnError, physical_table::events::LocationNotifSendError};
 
 /// Errors that can occur when interacting with the metadata database
 ///
@@ -150,6 +150,10 @@ pub enum Error {
     /// See `JobStatusUpdateError` for specific transition validation errors.
     #[error("Job status update error: {0}")]
     JobStatusUpdate(#[source] crate::jobs::JobStatusUpdateError),
+
+    /// The specified worker node ID is already in use
+    #[error("Worker node ID is already in use: {0}")]
+    WorkerNodeIdInUse(WorkerNodeIdOwned),
 }
 
 impl Error {
