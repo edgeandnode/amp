@@ -414,7 +414,7 @@ pub enum ResolveTableReferencesError<E = std::convert::Infallible> {
     /// - Table name is empty
     ///
     /// Valid table name format: `[a-zA-Z_][a-zA-Z0-9_$]*` (max 255 bytes)
-    #[error("Invalid table name in reference '{table_ref}': {source}")]
+    #[error("Invalid table name in reference '{table_ref}'")]
     InvalidTableName {
         table_ref: String,
         #[source]

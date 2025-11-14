@@ -36,7 +36,7 @@ pub enum CatalogForSqlError {
     /// - Dataset retrieval fails
     /// - Physical table metadata cannot be retrieved
     /// - Tables have not been synced
-    #[error("Failed to get physical catalog: {0}")]
+    #[error("Failed to get physical catalog")]
     GetPhysicalCatalog(#[source] GetPhysicalCatalogError),
 }
 
@@ -315,7 +315,7 @@ pub enum GetPhysicalCatalogError {
     /// - Dataset names cannot be extracted from table references or function names
     /// - Dataset retrieval fails
     /// - UDF creation fails
-    #[error("Failed to get logical catalog: {0}")]
+    #[error("Failed to get logical catalog")]
     GetLogicalCatalog(#[source] GetLogicalCatalogError),
 
     /// Failed to retrieve physical table metadata from the metadata database.
@@ -323,8 +323,12 @@ pub enum GetPhysicalCatalogError {
     /// This occurs when querying the metadata database for the active physical
     /// location of a table fails due to database connection issues, query errors,
     /// or other database-related problems.
-    #[error("Failed to retrieve physical table metadata for table '{table}': {source}")]
-    PhysicalTableRetrieval { table: String, source: BoxError },
+    #[error("Failed to retrieve physical table metadata for table '{table}'")]
+    PhysicalTableRetrieval {
+        table: String,
+        #[source]
+        source: BoxError,
+    },
 
     /// Table has not been synced and no physical location exists.
     ///

@@ -235,17 +235,18 @@ pub enum GetDatasetError {
     ///
     /// This occurs during the initial validation of the dataset name string before
     /// any database or manifest operations are performed.
-    #[error("Invalid dataset name '{name}': {source}")]
-    InvalidDatasetName { name: String, source: NameError },
+    #[error("Invalid dataset name")]
+    InvalidDatasetName(#[source] NameError),
 
     /// Failed to retrieve the latest version for a dataset from the metadata database.
     ///
     /// This occurs when no specific version is provided and the system attempts to
     /// query the metadata database for the most recent version of the dataset.
-    #[error("Failed to get latest version for dataset '{namespace}/{name}': {source}")]
+    #[error("Failed to get latest version for dataset '{namespace}/{name}'")]
     GetLatestVersion {
         namespace: String,
         name: String,
+        #[source]
         source: metadata_db::Error,
     },
 
@@ -255,7 +256,7 @@ pub enum GetDatasetError {
     /// like "latest" or "dev") to a concrete manifest hash. The resolution involves querying
     /// the metadata database and may fail due to connection issues, database unavailability,
     /// or permission problems.
-    #[error("Failed to resolve revision for dataset '{reference}': {source}")]
+    #[error("Failed to resolve revision for dataset '{reference}'")]
     ResolveRevision {
         reference: Reference,
         #[source]
@@ -270,7 +271,7 @@ pub enum GetDatasetError {
     /// - Manifest parsing errors (invalid JSON/TOML, schema mismatches)
     /// - Dataset kind parsing errors
     /// - Derived dataset creation errors
-    #[error("Failed to load dataset '{reference}' by manifest hash: {source}")]
+    #[error("Failed to load dataset '{reference}' by manifest hash")]
     LoadDatasetByHash {
         reference: Reference,
         #[source]
@@ -286,11 +287,12 @@ pub enum GetDatasetError {
     ///
     /// Can happen during parsing of the common manifest or any dataset-specific
     /// manifest type (EVM RPC, Firehose, Derived, SQL).
-    #[error("Failed to parse manifest for dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
+    #[error("Failed to parse manifest for dataset '{namespace}/{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
     ManifestParseError {
         namespace: String,
         name: String,
         version: Option<String>,
+        #[source]
         source: ManifestParseError,
     },
 
@@ -312,11 +314,12 @@ pub enum GetDatasetError {
     /// This occurs when processing a derived dataset manifest, which may fail due to
     /// invalid SQL queries, dependency resolution issues, or logical errors in the
     /// dataset definition.
-    #[error("Failed to create Derived dataset '{namespace}/{name}' version '{}': {source}", version.as_deref().unwrap_or("latest"))]
+    #[error("Failed to create Derived dataset '{namespace}/{name}' version '{}'", version.as_deref().unwrap_or("latest"))]
     DerivedCreationError {
         namespace: String,
         name: String,
         version: Option<String>,
+        #[source]
         source: BoxError,
     },
 
