@@ -467,8 +467,10 @@ where
     let func_refs = all_function_refs(stmt)?;
 
     let mut result = Vec::with_capacity(func_refs.len());
-    for func_ref in func_refs {
-        let parts: Vec<_> = func_ref.split('.').collect();
+    for parts in func_refs {
+        // Reconstruct dotted string only for error messages
+        let func_ref_str = parts.join(".");
+
         let func_ref = match parts.as_slice() {
             [function] => {
                 // Validate function name (one-time validation)
@@ -492,7 +494,7 @@ where
                 // Parse schema string into generic type T
                 let validated_schema = schema.parse::<T>().map_err(|err| {
                     ResolveFunctionReferencesError::InvalidSchemaFormat {
-                        function_ref: func_ref.clone(),
+                        function_ref: func_ref_str.clone(),
                         source: err,
                     }
                 })?;
@@ -505,13 +507,13 @@ where
             [_catalog, _schema, _function] => {
                 // Catalog-qualified function references are not supported
                 return Err(ResolveFunctionReferencesError::CatalogQualifiedFunction {
-                    function_ref: func_ref,
+                    function_ref: func_ref_str,
                 });
             }
             _ => {
                 // 4 or more parts - invalid format
                 return Err(ResolveFunctionReferencesError::InvalidFunctionFormat {
-                    function_ref: func_ref,
+                    function_ref: func_ref_str,
                 });
             }
         };
@@ -707,19 +709,24 @@ pub enum ResolveFunctionReferencesError<E = std::convert::Infallible> {
     },
 }
 
-/// Returns a list of all function names in the SQL statement.
+/// Returns a list of all function names in the SQL statement as structured parts.
+///
+/// Each function is returned as a Vec<String> where each element is a part of the
+/// qualified name (e.g., ["schema", "function"] for schema.function).
+///
+/// This preserves the original identifier boundaries, which is crucial for identifiers
+/// that contain special characters like dots (e.g., "namespace/name@0.0.0").
 ///
 /// Errors in case of some DML statements.
 ///
 /// ## Note
 ///
-/// This is an internal helper function. Use [`parse_function_names`] instead,
+/// This is an internal helper function. Use [`resolve_function_references`] instead,
 /// which provides structured [`FunctionReference`] types.
-fn all_function_refs(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesError> {
+fn all_function_refs(stmt: &Statement) -> Result<Vec<Vec<String>>, AllFunctionNamesError> {
     use std::ops::ControlFlow;
 
     use datafusion::sql::sqlparser::ast::{Expr, Function, ObjectNamePart, Visit, Visitor};
-    use itertools::Itertools;
 
     struct FunctionCollector {
         functions: Vec<Function>,
@@ -764,7 +771,7 @@ fn all_function_refs(stmt: &Statement) -> Result<Vec<String>, AllFunctionNamesEr
                     ObjectNamePart::Identifier(ident) => Some(ident.value),
                     ObjectNamePart::Function(_) => None,
                 })
-                .join(".")
+                .collect::<Vec<_>>()
         })
         .collect())
 }
@@ -797,4 +804,413 @@ pub enum AllFunctionNamesError {
     /// - EXPLAIN wrapping another EXPLAIN statement
     #[error("Unsupported statement type in EXPLAIN")]
     UnsupportedStatementInExplain,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod all_function_refs_tests {
+        use super::*;
+
+        /// Helper to parse SQL string into a Statement
+        fn parse_sql(sql: &str) -> Statement {
+            let sql_str = sql.parse::<SqlStr>().expect("SQL string should be valid");
+            parse(&sql_str).expect("SQL should parse successfully")
+        }
+
+        #[test]
+        fn basic_function_with_namespace_and_version() {
+            //* Given
+            let stmt = parse_sql(r#"SELECT "_/basic_function@0.0.0".testString()"#);
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "_/basic_function@0.0.0",
+                "first part should be namespace with version"
+            );
+            assert_eq!(
+                functions[0][1], "testString",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn basic_function_simple_qualified() {
+            //* Given
+            let stmt = parse_sql("SELECT basic_function.testString()");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "basic_function",
+                "first part should be schema"
+            );
+            assert_eq!(
+                functions[0][1], "testString",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn basic_function_partial_ref_underscore() {
+            //* Given
+            let stmt = parse_sql(r#"SELECT "_/basic_function".testString()"#);
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "_/basic_function",
+                "first part should be namespace with underscore prefix"
+            );
+            assert_eq!(
+                functions[0][1], "testString",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn basic_function_with_version() {
+            //* Given
+            let stmt = parse_sql(r#"SELECT "basic_function@0.0.0".testString()"#);
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "basic_function@0.0.0",
+                "first part should be schema with version"
+            );
+            assert_eq!(
+                functions[0][1], "testString",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn function_in_table_fqn_namespace() {
+            //* Given
+            let stmt = parse_sql(
+                r#"SELECT "freecandylabs/function_in_table".addSuffix(miner_tagged) as double_tagged FROM "freecandylabs/function_in_table".blocks_with_suffix LIMIT 1"#,
+            );
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "freecandylabs/function_in_table",
+                "first part should be namespace with slash"
+            );
+            assert_eq!(
+                functions[0][1], "addSuffix",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn function_in_table_fqn_with_version() {
+            //* Given
+            let stmt = parse_sql(
+                r#"SELECT "freecandylabs/function_in_table@0.0.0".addSuffix(miner_tagged) as triple_tagged FROM "freecandylabs/function_in_table".blocks_with_suffix LIMIT 1"#,
+            );
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "freecandylabs/function_in_table@0.0.0",
+                "first part should be full namespace with version"
+            );
+            assert_eq!(
+                functions[0][1], "addSuffix",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn bare_function_no_schema() {
+            //* Given
+            let stmt = parse_sql("SELECT count(*) FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 1, "should have 1 part");
+            assert_eq!(functions[0][0], "count", "should be bare function name");
+        }
+
+        #[test]
+        fn multiple_functions_in_query() {
+            //* Given
+            let stmt =
+                parse_sql("SELECT count(*), sum(value), schema.custom_func(id) FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 3, "should extract all three functions");
+            assert_eq!(functions[0].len(), 1, "first function should have 1 part");
+            assert_eq!(functions[0][0], "count", "first function should be count");
+            assert_eq!(functions[1].len(), 1, "second function should have 1 part");
+            assert_eq!(functions[1][0], "sum", "second function should be sum");
+            assert_eq!(functions[2].len(), 2, "third function should have 2 parts");
+            assert_eq!(functions[2][0], "schema", "third function schema part");
+            assert_eq!(functions[2][1], "custom_func", "third function name part");
+        }
+
+        #[test]
+        fn nested_function_calls() {
+            //* Given
+            let stmt = parse_sql("SELECT upper(lower(name)) FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 2, "should extract both nested functions");
+            assert_eq!(functions[0].len(), 1, "first function should have 1 part");
+            assert_eq!(functions[0][0], "upper", "should extract outer function");
+            assert_eq!(functions[1].len(), 1, "second function should have 1 part");
+            assert_eq!(functions[1][0], "lower", "should extract inner function");
+        }
+
+        #[test]
+        fn function_in_where_clause() {
+            //* Given
+            let stmt = parse_sql("SELECT * FROM my_table WHERE custom.validate(field) = true");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(
+                functions.len(),
+                1,
+                "should extract function from WHERE clause"
+            );
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(functions[0][0], "custom", "first part should be schema");
+            assert_eq!(
+                functions[0][1], "validate",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn function_in_join_condition() {
+            //* Given
+            let stmt = parse_sql("SELECT * FROM t1 JOIN t2 ON schema.compare(t1.id, t2.id)");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(
+                functions.len(),
+                1,
+                "should extract function from JOIN condition"
+            );
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(functions[0][0], "schema", "first part should be schema");
+            assert_eq!(
+                functions[0][1], "compare",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn no_functions_in_simple_select() {
+            //* Given
+            let stmt = parse_sql("SELECT id, name FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert!(
+                functions.is_empty(),
+                "should return empty list when no functions present"
+            );
+        }
+
+        #[test]
+        fn explain_statement_with_functions() {
+            //* Given
+            let stmt = parse_sql("EXPLAIN SELECT count(*), schema.func() FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(
+                functions.len(),
+                2,
+                "should extract functions from EXPLAIN statement"
+            );
+        }
+
+        #[test]
+        fn create_external_table_returns_error() {
+            //* Given
+            let stmt = parse_sql("CREATE EXTERNAL TABLE test STORED AS CSV LOCATION 'file.csv'");
+
+            //* When
+            let result = all_function_refs(&stmt);
+
+            //* Then
+            assert!(result.is_err(), "should return error for DML statement");
+            let error = result.expect_err("should be DmlNotSupported error");
+            assert!(
+                matches!(error, AllFunctionNamesError::DmlNotSupported),
+                "should return DmlNotSupported error, got {:?}",
+                error
+            );
+        }
+
+        #[test]
+        fn special_characters_in_namespace() {
+            //* Given
+            let stmt = parse_sql(r#"SELECT "org/dataset@1.2.3".process_data(field) FROM my_table"#);
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "org/dataset@1.2.3",
+                "first part should preserve special characters in namespace"
+            );
+            assert_eq!(
+                functions[0][1], "process_data",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn double_quoted_identifiers() {
+            //* Given
+            let stmt = parse_sql(r#"SELECT "my-schema"."my-function"() FROM my_table"#);
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract exactly one function");
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(
+                functions[0][0], "my-schema",
+                "first part should preserve double-quoted identifier"
+            );
+            assert_eq!(
+                functions[0][1], "my-function",
+                "second part should preserve double-quoted identifier"
+            );
+        }
+
+        #[test]
+        fn aggregate_function_with_distinct() {
+            //* Given
+            let stmt = parse_sql("SELECT count(DISTINCT id) FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract aggregate function");
+            assert_eq!(functions[0].len(), 1, "should have 1 part");
+            assert_eq!(
+                functions[0][0], "count",
+                "should extract function with DISTINCT modifier"
+            );
+        }
+
+        #[test]
+        fn window_function() {
+            //* Given
+            let stmt = parse_sql("SELECT row_number() OVER (ORDER BY id) FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(functions.len(), 1, "should extract window function");
+            assert_eq!(functions[0].len(), 1, "should have 1 part");
+            assert_eq!(
+                functions[0][0], "row_number",
+                "should extract window function name"
+            );
+        }
+
+        #[test]
+        fn function_in_case_expression() {
+            //* Given
+            let stmt =
+                parse_sql("SELECT CASE WHEN schema.validate(x) THEN 1 ELSE 0 END FROM my_table");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(
+                functions.len(),
+                1,
+                "should extract function from CASE expression"
+            );
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(functions[0][0], "schema", "first part should be schema");
+            assert_eq!(
+                functions[0][1], "validate",
+                "second part should be function name"
+            );
+        }
+
+        #[test]
+        fn function_with_subquery() {
+            //* Given
+            let stmt = parse_sql("SELECT schema.transform((SELECT value FROM t2)) FROM t1");
+
+            //* When
+            let functions = all_function_refs(&stmt).expect("function extraction should succeed");
+
+            //* Then
+            assert_eq!(
+                functions.len(),
+                1,
+                "should extract function with subquery argument"
+            );
+            assert_eq!(functions[0].len(), 2, "should have 2 parts");
+            assert_eq!(functions[0][0], "schema", "first part should be schema");
+            assert_eq!(
+                functions[0][1], "transform",
+                "second part should be function name"
+            );
+        }
+    }
 }

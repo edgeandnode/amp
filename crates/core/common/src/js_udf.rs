@@ -3,6 +3,7 @@ use std::{any::Any, sync::Arc};
 use async_trait::async_trait;
 use datafusion::{
     arrow::datatypes::DataType,
+    common::utils::quote_identifier,
     error::DataFusionError,
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
@@ -63,8 +64,13 @@ impl JsUdf {
         };
 
         // Create UDF name based on whether schema is provided
+        // Use quote_identifier to ensure the schema part is properly quoted when it contains
+        // special characters (e.g., "namespace/dataset@0.0.0" becomes "\"namespace/dataset@0.0.0\"")
+        // This matches how DataFusion's query planner resolves qualified function references
         let udf_name = match catalog_schema.into() {
-            Some(schema) if !schema.is_empty() => format!("{}.{}", schema, function_name),
+            Some(schema) if !schema.is_empty() => {
+                format!("{}.{}", quote_identifier(&schema), function_name)
+            }
             _ => function_name.to_string(),
         };
 

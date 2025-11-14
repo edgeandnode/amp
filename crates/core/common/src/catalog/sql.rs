@@ -802,29 +802,14 @@ async fn get_logical_catalog_with_deps_and_funcs(
     for func_ref in func_refs {
         match &func_ref {
             FunctionReference::Bare { function } => {
-                // Check if function is defined in the functions map
-                if let Some(func_def) = functions.get(function) {
-                    // Skip if function reference is already resolved (optimization)
-                    let Entry::Vacant(entry) = self_udfs.entry(func_ref.clone()) else {
-                        continue;
-                    };
-
-                    // Create UDF from Function definition using JsUdf
-                    // No schema for bare functions - they use unqualified names
-                    let udf = AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                        isolate_pool.clone(),
-                        None, // No schema for bare functions
-                        func_def.source.source.clone(),
-                        func_def.source.filename.clone().into(),
-                        Arc::from(function.as_ref().as_str()),
-                        func_def.input_types.clone(),
-                        func_def.output_type.clone(),
-                    )))
-                    .into_scalar_udf();
-
-                    entry.insert(udf);
-                }
-                // If function not in functions map, it's a built-in DataFusion function - skip
+                // Skip bare functions - they are built-in DataFusion functions
+                // Only functions defined in the `functions` map should be registered as UDFs,
+                // but bare function references in SQL are always built-in functions
+                tracing::debug!(
+                    function=%function.as_ref(),
+                    "Skipping bare function reference - assumed to be built-in DataFusion function"
+                );
+                continue;
             }
             FunctionReference::Qualified { schema, function } => {
                 // Match on schema type: DepAlias (external dependency) or SelfRef (same-dataset function)
@@ -1087,47 +1072,24 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
             }
         }
 
-        // Part 2: Process function references for this table (load datasets for UDFs only)
+        // Part 2: Process function references for this table (load datasets for qualified UDFs only)
         for func_ref in func_refs {
             match &func_ref {
                 FunctionReference::Bare { function } => {
-                    // Check if function is defined in the functions map
-                    if let Some(func_def) = functions.get(function) {
-                        // Skip if function reference is already resolved (optimization)
-                        let Entry::Vacant(entry) = self_udfs.entry(func_ref.clone()) else {
-                            continue;
-                        };
-
-                        // Create UDF from Function definition using JsUdf
-                        // No schema for bare functions - they use unqualified names
-                        let udf = AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                            isolate_pool.clone(),
-                            None, // No schema for bare functions
-                            func_def.source.source.clone(),
-                            func_def.source.filename.clone().into(),
-                            Arc::from(function.as_ref().as_str()),
-                            func_def.input_types.clone(),
-                            func_def.output_type.clone(),
-                        )))
-                        .into_scalar_udf();
-
-                        entry.insert(udf);
-                    } else {
-                        // Function not in functions map - assume it's a built-in function
-                        tracing::debug!(
-                            table=%table_name,
-                            function=%function.as_ref(),
-                            "Bare function not defined in functions map; assuming built-in function"
-                        );
-
-                        // TODO: Check if function is actually a DataFusion built-in or other system function
-                        //  to catch typos and provide better error messages
-                    }
+                    // Skip bare functions - they are built-in DataFusion functions
+                    // Only functions defined in the `functions` map should be registered as UDFs,
+                    // but bare function references in SQL are always built-in functions
+                    tracing::debug!(
+                        table=%table_name,
+                        function=%function.as_ref(),
+                        "Skipping bare function reference - assumed to be built-in DataFusion function"
+                    );
+                    continue;
                 }
                 FunctionReference::Qualified { schema, function } => {
                     // Match on schema type: DepAlias (external dependency) or SelfRef (same-dataset function)
                     match schema.as_ref() {
-                        datasets_derived::deps::alias::DepAliasOrSelfRef::DepAlias(dep_alias) => {
+                        DepAliasOrSelfRef::DepAlias(dep_alias) => {
                             // External dependency reference - lookup in dependencies map
                             let hash_ref = dependencies.get(dep_alias).ok_or_else(|| {
                                 PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef {
@@ -1195,7 +1157,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
 
                             entry.insert(udf);
                         }
-                        datasets_derived::deps::alias::DepAliasOrSelfRef::SelfRef => {
+                        DepAliasOrSelfRef::SelfRef => {
                             // Same-dataset function reference (self.function_name)
                             // Look up function in the functions map (defined in this dataset)
                             if let Some(func_def) = functions.get(function) {
