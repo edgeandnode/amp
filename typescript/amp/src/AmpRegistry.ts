@@ -351,8 +351,8 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       const { dependencies, manifest, metadata } = context
       const { description, keywords, license, name, namespace, readme, repository, sources, visibility } = metadata
 
-      // derived from the tables in the dataset manifest
-      const indexingChains = Object.values(manifest.tables).map((table) => table.network)
+      // derived from the tables in the dataset manifest (unique chains only)
+      const indexingChains = [...new Set(Object.values(manifest.tables).map((table) => table.network))]
 
       // Check if dataset exists (try public first, then owned/private)
       const maybeDataset = yield* getDatasetWithFallback(auth, namespace, name)
