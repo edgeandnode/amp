@@ -490,7 +490,7 @@ export type GenrateTokenDuration = typeof GenrateTokenDuration.Type
 export class SchemaRequest extends Schema.Class<SchemaRequest>("SchemaRequest")({
   tables: Schema.Record({ key: Schema.String, value: Schema.String }),
   dependencies: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
-  functions: Schema.optional(Schema.Array(Schema.String)),
+  functions: Schema.optional(Schema.Record({ key: Schema.String, value: FunctionDefinition })),
 }) {}
 
 export class TableSchemaWithNetworks extends Schema.Class<TableSchemaWithNetworks>("TableSchemaWithNetworks")({

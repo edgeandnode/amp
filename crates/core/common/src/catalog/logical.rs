@@ -9,7 +9,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{partial_reference::PartialReference, table_name::TableName};
-use datasets_derived::{dep_alias::DepAlias, dep_reference::DepReference};
+use datasets_derived::deps::{alias::DepAlias, reference::DepReference};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 

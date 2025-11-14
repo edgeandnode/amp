@@ -182,10 +182,6 @@ pub enum TableReference<T = String> {
 
 impl<T> TableReference<T> {
     /// Creates a partially qualified table reference (schema.table)
-    ///
-    /// # Arguments
-    /// * `schema` - The schema name
-    /// * `table` - The table name (already validated as TableName)
     pub fn partial(schema: impl Into<Arc<T>>, table: TableName) -> Self {
         Self::Partial {
             schema: schema.into(),
@@ -206,6 +202,35 @@ impl<T> TableReference<T> {
         match self {
             Self::Bare { .. } => None,
             Self::Partial { schema, .. } => Some(schema),
+        }
+    }
+}
+
+impl<T> TableReference<T>
+where
+    T: std::fmt::Display,
+{
+    /// Converts this table reference to a `TableReference<String>`
+    pub fn to_string_reference(&self) -> TableReference<String> {
+        match self {
+            Self::Bare { table } => TableReference::Bare {
+                table: Arc::clone(table),
+            },
+            Self::Partial { schema, table } => TableReference::Partial {
+                schema: Arc::new(schema.to_string()),
+                table: Arc::clone(table),
+            },
+        }
+    }
+
+    /// Converts this table reference into a `TableReference<String>` by consuming it
+    pub fn into_string_reference(self) -> TableReference<String> {
+        match self {
+            Self::Bare { table } => TableReference::Bare { table },
+            Self::Partial { schema, table } => TableReference::Partial {
+                schema: Arc::new(schema.to_string()),
+                table,
+            },
         }
     }
 }
@@ -561,6 +586,41 @@ impl<T> FunctionReference<T> {
         match self {
             Self::Bare { .. } => None,
             Self::Qualified { schema, .. } => Some(schema),
+        }
+    }
+}
+
+impl<T> FunctionReference<T>
+where
+    T: std::fmt::Display,
+{
+    /// Converts this function reference to a `FunctionReference<String>`
+    ///
+    /// This is useful when you need to work with string-typed function references
+    /// regardless of the original schema type `T`.
+    pub fn to_string_reference(&self) -> FunctionReference<String> {
+        match self {
+            Self::Bare { function } => FunctionReference::Bare {
+                function: Arc::clone(function),
+            },
+            Self::Qualified { schema, function } => FunctionReference::Qualified {
+                schema: Arc::new(schema.to_string()),
+                function: Arc::clone(function),
+            },
+        }
+    }
+
+    /// Converts this function reference into a `FunctionReference<String>` by consuming it
+    ///
+    /// This is more efficient than `to_string_reference()` when the original value
+    /// is no longer needed, as it can reuse the function `Arc` without cloning.
+    pub fn into_string_reference(self) -> FunctionReference<String> {
+        match self {
+            Self::Bare { function } => FunctionReference::Bare { function },
+            Self::Qualified { schema, function } => FunctionReference::Qualified {
+                schema: Arc::new(schema.to_string()),
+                function,
+            },
         }
     }
 }

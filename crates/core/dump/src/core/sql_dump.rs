@@ -97,7 +97,8 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
+    BlockNum, BoxError, DetachedLogicalPlan, Function as LogicalFunction, PlanningContext,
+    QueryContext,
     catalog::{
         dataset_access::DatasetAccess,
         physical::{Catalog, PhysicalTable},
@@ -107,7 +108,7 @@ use common::{
     query_context::QueryEnv,
 };
 use datasets_common::hash_reference::HashReference;
-use datasets_derived::{Manifest as DerivedManifest, dep_alias::DepAlias, manifest::TableInput};
+use datasets_derived::{Manifest as DerivedManifest, deps::alias::DepAlias, manifest::TableInput};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
@@ -193,20 +194,39 @@ pub async fn dump_table(
     let env = env.clone();
     let opts = opts.clone();
 
-    join_set.spawn(async move {
-        let catalog = catalog_for_sql_with_deps(
-            dataset_store.as_ref(),
-            &metadata_db,
-            &query,
-            env.clone(),
-            dependencies,
-        )
-        .await?;
-        let planning_ctx = PlanningContext::new(catalog.logical().clone());
+    // Convert manifest functions to common::catalog::logical::Function format
+    let functions = manifest
+        .functions
+        .iter()
+        .map(|(name, func)| {
+            let logical_func = LogicalFunction {
+                name: name.as_str().to_string(),
+                input_types: func.input_types.iter().map(|dt| dt.0.clone()).collect(),
+                output_type: func.output_type.0.clone(),
+                source: common::catalog::logical::FunctionSource {
+                    source: func.source.source.clone(),
+                    filename: func.source.filename.clone(),
+                },
+            };
+            (name.clone(), logical_func)
+        })
+        .collect();
 
+    let catalog = catalog_for_sql_with_deps(
+        dataset_store.as_ref(),
+        &metadata_db,
+        &query,
+        env.clone(),
+        dependencies,
+        functions,
+    )
+    .await?;
+    let planning_ctx = PlanningContext::new(catalog.logical().clone());
+
+    join_set.spawn(async move {
         let plan = planning_ctx.plan_sql(query.clone()).await?;
-        if let Err(e) = plan.is_incremental() {
-            return Err(format!("syncing table {table_name} is not supported: {e}",).into());
+        if let Err(err) = plan.is_incremental() {
+            return Err(format!("syncing table {table_name} is not supported: {err}",).into());
         }
 
         let Some(start) = catalog.earliest_block().await? else {

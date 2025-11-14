@@ -52,16 +52,25 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           const configTables = config.tables ?? {}
           const configFunctions = config.functions ?? {}
 
-          // Extract function names from config
-          const functionNames = Object.keys(configFunctions)
+          // Build function definitions map from config
+          const functionsMap = Object.fromEntries(
+            Object.entries(configFunctions).map(([name, func]) => [
+              name,
+              new Model.FunctionDefinition({
+                source: func.source,
+                inputTypes: func.inputTypes,
+                outputType: func.outputType,
+              }),
+            ]),
+          )
 
           // If no tables and no functions, skip schema request entirely
-          if (Object.keys(configTables).length === 0 && functionNames.length === 0) {
+          if (Object.keys(configTables).length === 0 && Object.keys(functionsMap).length === 0) {
             return []
           }
 
           // If no tables but we have functions, still skip schema request
-          // (functions-only validation happens server-side, returns empty schema)
+          // (when functions-only validation happens server-side, returns empty schema)
           if (Object.keys(configTables).length === 0) {
             return []
           }
@@ -75,7 +84,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           const request = new Model.SchemaRequest({
             tables: tableSqlMap,
             dependencies: config.dependencies,
-            functions: functionNames.length > 0 ? functionNames : undefined,
+            functions: Object.keys(functionsMap).length > 0 ? functionsMap : undefined,
           })
 
           const response = yield* client.getOutputSchema(request, maybeAccessToken).pipe(

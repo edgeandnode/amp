@@ -50,7 +50,7 @@ impl std::hash::Hash for JsUdf {
 impl JsUdf {
     pub fn new(
         isolate_pool: IsolatePool,
-        catalog_schema: String,
+        catalog_schema: impl Into<Option<String>>,
         code: Arc<str>,
         script_name: Arc<str>,
         function_name: Arc<str>,
@@ -61,9 +61,16 @@ impl JsUdf {
             type_signature: TypeSignature::Exact(input_types),
             volatility: Volatility::Immutable,
         };
+
+        // Create UDF name based on whether schema is provided
+        let udf_name = match catalog_schema.into() {
+            Some(schema) if !schema.is_empty() => format!("{}.{}", schema, function_name),
+            _ => function_name.to_string(),
+        };
+
         Self {
             isolate_pool,
-            udf_name: format!("{}.{}", catalog_schema, function_name),
+            udf_name,
             code,
             script_name,
             function_name,

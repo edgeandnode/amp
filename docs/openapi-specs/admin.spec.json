@@ -1964,11 +1964,12 @@
             }
           },
           "functions": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "description": "User-defined function definitions mapped by function name\n\nMaps function names to their complete definitions including input/output types\nand implementation source code. These functions can be referenced in SQL queries\nas bare function calls (e.g., `my_function(args)` without dataset qualification).\n\nAt least one of `tables` or `functions` must be provided.\n\nFunction names must follow DataFusion UDF identifier rules:\n- Start with a letter (a-z, A-Z) or underscore (_)\n- Contain only letters, digits (0-9), underscores (_), and dollar signs ($)\n- Maximum length of 255 bytes",
+            "additionalProperties": {},
+            "propertyNames": {
               "type": "string"
-            },
-            "description": "Function names defined in the dataset configuration\n\nUsed to validate that functions are properly defined and available.\nAt least one of `tables` or `functions` must be provided.\n\nFunction names must follow DataFusion UDF identifier rules:\n- Start with a letter (a-z, A-Z) or underscore (_)\n- Contain only letters, digits (0-9), underscores (_), and dollar signs ($)\n- Maximum length of 255 bytes"
+            }
           },
           "tables": {
             "type": "object",
