@@ -279,7 +279,7 @@ pub struct OpenTelemetryConfig {
         deserialize_with = "deserialize_duration"
     )]
     pub metrics_export_interval: Option<Duration>,
-    /// Remote OpenTelemetry traces collector endpoint. Traces are sent over gRPC.
+    /// Remote OpenTelemetry traces collector endpoint. Traces are sent over HTTP.
     pub trace_url: Option<String>,
     /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
     pub trace_ratio: Option<f64>,
