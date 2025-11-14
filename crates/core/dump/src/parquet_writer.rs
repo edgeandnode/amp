@@ -59,6 +59,7 @@ pub struct ParquetFileWriter {
     file_url: Url,
     filename: String,
     table: Arc<PhysicalTable>,
+    max_row_group_bytes: usize,
 }
 
 impl ParquetFileWriter {
@@ -66,8 +67,8 @@ impl ParquetFileWriter {
         table: Arc<PhysicalTable>,
         opts: &WriterProperties,
         start: BlockNum,
+        max_row_group_bytes: usize,
     ) -> Result<ParquetFileWriter, BoxError> {
-        // TODO: We need to make file names unique when we start handling non-finalized blocks.
         let filename = {
             // Pad `start` to 9 digits for lexicographical sorting.
             // Add a 64-bit hex value from a crytpo RNG to avoid name conflicts from chain reorgs.
@@ -83,11 +84,25 @@ impl ParquetFileWriter {
             file_url,
             filename,
             table,
+            max_row_group_bytes,
         })
     }
 
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
-        self.writer.write(batch).await
+        self.writer.write(batch).await?;
+
+        // Criteria: If adding another batch of this size would exceed the max row group size, flush now.
+        let forecasted_size = self.writer.in_progress_size() + batch.get_array_memory_size();
+        if forecasted_size >= self.max_row_group_bytes {
+            trace!(
+                "flushing row group for {} (in-progress size: {} bytes)",
+                self.filename,
+                self.writer.in_progress_size()
+            );
+            self.writer.flush().await?;
+        }
+
+        Ok(())
     }
 
     #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]

@@ -1,11 +1,16 @@
 # Sample of a configuration. Copy this file and edit it. Set the environment variable `AMP_CONFIG`
 # to its location. See the CONFIG.md for more context.
-# 
+#
 # Note that using a config file is not mandatory. You can alternatively provide some or all values
 # through env vars. See the 'Using env vars' section of CONFIG.md for how to do this.
 #
 # When using filesystem paths, any relative paths will be resolved from the directory of this file.
 
+# ================================
+# Top-level configuration fields
+# ================================
+
+# Storage paths
 # Where the extracted datasets are stored.
 data_dir = "<config_dir/data>"
 
@@ -16,53 +21,46 @@ providers_dir = "<config_dir/providers>"
 # Path to a directory containing dataset manifest files.
 manifests_dir = "<config_dir/manifests>"
 
-# Connection to the metadata DB. Optional. If not set, a temporary postgres DB will be provided.
+# Memory and performance
+# max_mem_mb = 0        # How much memory the server can use in MB. 0 means unlimited (default: 0)
+# spill_location = []   # Paths for DataFusion temporary files for spill-to-disk (default: [])
+
+# Operational timing
+# poll_interval_secs = 1.0                 # Polling interval for new blocks during dump in seconds (default: 1.0)
+# microbatch_max_interval = 100000         # Max interval for derived dataset dump microbatches in microseconds (default: 100000)
+# server_microbatch_max_interval = 1000    # Max interval for streaming server microbatches in microseconds (default: 1000)
+
+# Service addresses
+# flight_addr = "0.0.0.0:1602"      # Arrow Flight RPC server address (default: "0.0.0.0:1602")
+# jsonl_addr = "0.0.0.0:1603"       # JSON Lines server address (default: "0.0.0.0:1603")
+# admin_api_addr = "0.0.0.0:1610"   # Admin API server address (default: "0.0.0.0:1610")
+
+# ================================
+# Table sections
+# ================================
+
+# Database configuration
+# If not set, a temporary postgres DB will be provided.
 # To opt out of this default behavior, set `ALLOW_TEMP_DB` to `false` in the environment.
 # By default, temporary DBs will be created and persisted in the OS temp directory.
-metadata_db_url = "postgres://<pg_url>"
+[metadata_db]
+url = "postgres://<pg_url>"
+# pool_size = 10       # Size of the connection pool (default: 10)
+# auto_migrate = true  # Automatically run database migrations on startup (default: true)
 
-# Metadata DB configuration (optional)
-# [metadata_db]
-# Database connection URL - alternative to metadata_db_url above
-# url = "postgres://<pg_url>"
+# Observability
+[opentelemetry]
+# metrics_url = "http://localhost:4318/v1/metrics"     # Remote OpenTelemetry metrics collector endpoint (binary HTTP)
+# metrics_export_interval_secs = 60.0                  # Interval in seconds to export metrics
+# trace_url = "http://localhost:4318/v1/traces"        # Remote OpenTelemetry traces collector endpoint (HTTP)
+# trace_ratio = 1.0                                    # Ratio of traces to sample (default: 1.0)
 
-# Size of the connection pool (default: 10)
-# pool_size = 10
-
-# Interval (in seconds) for polling the blockchain for new blocks during dump operations.
-# This controls how often the system checks for new blocks when running in continuous mode.
-# Lower values provide more responsive updates but may increase load on the blockchain provider.
-# (default: 1 second)
-# poll_interval_secs = 1.0
-
-# How much memory the server can use in MB. Setting this to 0, the default, means unlimited.
-# max_mem_mb = 0
-
-# Paths where DataFusion can create temporary files, enabling spill-to-disk when aggregation or join
-# state exceeds the memory limit.
-#
-# spill_location = []
-
-# Service addresses (optional - defaults shown below)
-# Arrow Flight RPC server address
-# flight_addr = "0.0.0.0:1602"
-
-# JSON Lines server address  
-# jsonl_addr = "0.0.0.0:1603"
-
-# Admin API server address
-# admin_api_addr = "0.0.0.0:1610"
-
-# Writer/Parquet configuration (renamed from [parquet] to [writer], optional)
-# [writer]
-# Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
-# compression = "zstd(1)"
-
-# Enable bloom filters (default: false)
-# bloom_filters = false
-
-# Parquet metadata cache size in MB (default: 1024)
-# cache_size_mb = 1024
+# Writer/Parquet configuration
+[writer]
+# compression = "zstd(1)"    # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
+# bloom_filters = false      # Enable bloom filters (default: false)
+# cache_size_mb = 1024       # Parquet metadata cache size in MB (default: 1024)
+# max_row_group_mb = 512     # Max row group size in MB (default: 512)
 
 # Target partition size configuration
 # Overflow is a tuning parameter that provides some flexibility for some cases,
@@ -73,49 +71,25 @@ metadata_db_url = "postgres://<pg_url>"
 # depending on factors like table width, value cardinality, compression ratios, etc.
 # So adjusting Overflow provides a mechanism to reflect the realities of the data
 # at rest while configuring the compaction algorithm.
-# Examples:
-# overflow = "1"      # 1x target size (default)
-# overflow = "1.5"    # 1.5x target size
-
-# Target bytes per file - 2GB (default: 2147483648 or 2GB)
-# Note: nozzle dump commpand may optionally override this if a partition_size_mb is provided
+# overflow = "1"         # Overflow multiplier: 1x target size (default: "1"), can use "1.5" for 1.5x, etc.
+# bytes = 2147483648     # Target bytes per file - 2GB (default: 2147483648)
+# rows = 0               # Target rows per file, 0 means no limit (default: 0)
+# Note: nozzle dump command may optionally override bytes if partition_size_mb is provided
 # or if the NOZZLE_PARTITION_SIZE_MB env var is set.
-# bytes = 2147483648
 
-# Target rows per file, 0 means no limit (default: 0)
-# rows = 0
+# File compactor
+[writer.compactor]
+# active = false                  # Enable or disable the compactor (default: false)
+# metadata_concurrency = 2        # Max concurrent metadata operations (default: 2)
+# write_concurrency = 2           # Max concurrent compaction write operations (default: 2)
+# min_interval = 1.0              # Interval in seconds to run the compactor (default: 1.0)
+# cooldown_duration = 1024.0      # Base cooldown duration in seconds (default: 1024.0)
+# overflow = "1"                  # Eager compaction overflow (default: "1")
+# bytes = 0                       # Eager compaction byte threshold (default: 0)
+# rows = 0                        # Eager compaction row threshold (default: 0)
 
-# File compactor configuration (nested under writerl, optional)
-# [writer.compactor]
-# Enable or disable the compactor (default: false)
-# active = false
-
-# The maximum number of concurrent metadata operations (default: 2)
-# metadata_concurrency = 2
-
-# The maximum number of concurrent compaction write operations (default: 2)
-# write_concurrency = 2
-
-# The interval (in seconds) at which to run the compactor (default: 1 second)
-# min_interval = 1.0
-
-# Compaction algorithm configuration
-# Base cooldown duration (in seconds) (default: 1024 seconds)
-# cooldown_duration = 1024.0
-
-# Eager compaction limits (when to compact eagerly)
-# overflow = 1 # Overflow configuration (default: 1)
-# blocks = 0  # Block threshold for eager compaction (default: 0)
-# bytes = 0  # Byte threshold for eager compaction (default: 0)
-# rows = 0  # Row threshold for eager compaction (default: 0)
-
-# Garbage collector configuration (nested under writer, optional)
-# [writer.collector]
-# Enable or disable the collector (default: false)
-# active = false
-
-# The interval (in seconds) at which to run the garbage collector (default: 5 seconds)
-# min_interval = 5.0
-
-# The duration (in seconds) for which to hold a deletion lock on compacted files (default: 1800 seconds = 30 minutes)
-# deletion_lock_duration = 1800.0
+# Garbage collector
+[writer.collector]
+# active = false                   # Enable or disable the collector (default: false)
+# min_interval = 30.0              # Interval in seconds to run the garbage collector (default: 30.0)
+# deletion_lock_duration = 1800.0  # Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)
