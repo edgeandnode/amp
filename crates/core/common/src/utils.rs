@@ -55,9 +55,8 @@ where
 ///
 /// Walks through the error source chain and returns a formatted string
 /// containing the chain of error causes.
-pub fn build_error_chain(err: &dyn std::error::Error) -> String {
+pub fn error_with_causes(err: &dyn std::error::Error) -> String {
     let mut error_chain = Vec::new();
-
     let mut current = err;
     while let Some(source) = current.source() {
         error_chain.push(source.to_string());
@@ -65,8 +64,8 @@ pub fn build_error_chain(err: &dyn std::error::Error) -> String {
     }
 
     if error_chain.is_empty() {
-        String::new()
+        err.to_string()
     } else {
-        format!(" | Caused by: {}", error_chain.join(" -> "))
+        format!("{} | Caused by: {}", err, error_chain.join(" -> "))
     }
 }
