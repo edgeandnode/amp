@@ -24,6 +24,7 @@ pub struct WriterProperties {
     pub collector: CollectorProperties,
     pub partition: SegmentSizeLimit,
     pub cache_size_mb: usize,
+    pub max_row_group_bytes: usize,
 }
 
 pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterProperties> {
@@ -49,6 +50,7 @@ pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterPropert
     let compactor = CompactorProperties::from(config);
     let partition = SegmentSizeLimit::from(&config.target_size);
     let cache_size_mb = (config.cache_size_mb * 1024 * 1024) as usize;
+    let max_row_group_bytes = (config.max_row_group_mb * 1024 * 1024) as usize;
 
     WriterProperties {
         parquet,
@@ -56,6 +58,7 @@ pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterPropert
         collector,
         partition,
         cache_size_mb,
+        max_row_group_bytes,
     }
     .into()
 }

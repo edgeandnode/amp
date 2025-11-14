@@ -76,6 +76,9 @@ pub struct ParquetConfig {
     /// Parquet metadata cache size in MB (default: 1024)
     #[serde(default = "default_cache_size_mb")]
     pub cache_size_mb: u64,
+    /// Max row group size in MB (default: 512)
+    #[serde(default = "default_max_row_group_mb")]
+    pub max_row_group_mb: u64,
     /// Target partition size configuration (flattened fields: overflow, bytes, rows)
     #[serde(
         alias = "file_size",
@@ -96,6 +99,7 @@ impl Default for ParquetConfig {
             compression: default_compression(),
             bloom_filters: false,
             cache_size_mb: default_cache_size_mb(),
+            max_row_group_mb: default_max_row_group_mb(),
             target_size: SizeLimitConfig::default_upper_limit(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
@@ -277,6 +281,10 @@ fn default_compression() -> Compression {
 
 fn default_cache_size_mb() -> u64 {
     1024 // 1GB default cache size
+}
+
+fn default_max_row_group_mb() -> u64 {
+    512 // 512MB default row group size
 }
 
 fn deserialize_compression<'de, D>(deserializer: D) -> Result<Compression, D::Error>

@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use common::{
     BlockNum, BoxError, ParquetFooterCache, RawTableRows,
+    arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::BlockRange},
     parquet::file::metadata::ParquetMetaData,
@@ -134,6 +135,7 @@ impl RawTableWriter {
                 table.clone(),
                 opts.as_ref(),
                 *range.start(),
+                opts.max_row_group_bytes,
             )?),
             None => None,
         };
@@ -173,7 +175,12 @@ impl RawTableWriter {
                 .ranges_to_write
                 .last()
                 .map(|range| {
-                    ParquetFileWriter::new(self.table.clone(), self.opts.as_ref(), *range.start())
+                    ParquetFileWriter::new(
+                        self.table.clone(),
+                        self.opts.as_ref(),
+                        *range.start(),
+                        self.opts.max_row_group_bytes,
+                    )
                 })
                 .transpose()?;
             self.current_file = new_file;
@@ -223,6 +230,7 @@ impl RawTableWriter {
                 self.table.clone(),
                 self.opts.as_ref(),
                 block_num,
+                self.opts.max_row_group_bytes,
             )?);
             self.current_file = new_file;
         }
@@ -230,13 +238,7 @@ impl RawTableWriter {
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
 
-        if let Some(ref metrics) = self.metrics {
-            let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
-            let table_name = self.table.table_name().to_string();
-            let location_id = self.table.location_id();
-            // Record bytes only (rows tracked separately)
-            metrics.record_ingestion_bytes(num_bytes, table_name, *location_id);
-        }
+        self.post_write_metrics(rows);
 
         self.current_range = match self.current_range.take() {
             None => Some(table_rows.range),
@@ -280,6 +282,15 @@ impl RawTableWriter {
         self.compactor.try_run()?;
 
         Ok(metadata)
+    }
+
+    fn post_write_metrics(&self, rows: &RecordBatch) {
+        if let Some(ref metrics) = self.metrics {
+            let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
+            let table_name = self.table.table_name().to_string();
+            let location_id = self.table.location_id();
+            metrics.record_write_call(num_bytes, table_name, *location_id);
+        }
     }
 }
 

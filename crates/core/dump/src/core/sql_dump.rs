@@ -337,7 +337,12 @@ async fn dump_sql_query(
     };
 
     let mut microbatch_start = start;
-    let mut writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
+    let mut writer = ParquetFileWriter::new(
+        physical_table.clone(),
+        opts,
+        microbatch_start,
+        opts.max_row_group_bytes,
+    )?;
 
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
@@ -365,7 +370,7 @@ async fn dump_sql_query(
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
                     metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
-                    metrics.record_ingestion_bytes(num_bytes, table_name.to_string(), location_id);
+                    metrics.record_write_call(num_bytes, table_name.to_string(), location_id);
                 }
             }
             QueryMessage::BlockComplete(_) => {
@@ -394,7 +399,12 @@ async fn dump_sql_query(
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
-                writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
+                writer = ParquetFileWriter::new(
+                    physical_table.clone(),
+                    opts,
+                    microbatch_start,
+                    opts.max_row_group_bytes,
+                )?;
 
                 if let Some(ref metrics) = metrics {
                     metrics.record_file_written(table_name.to_string(), location_id);

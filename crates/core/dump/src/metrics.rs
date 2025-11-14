@@ -22,6 +22,9 @@ pub struct MetricsRegistry {
     /// Total bytes written across all dataset types
     pub bytes_written: telemetry::metrics::Counter,
 
+    /// Total write calls made across all dataset types
+    pub write_calls: telemetry::metrics::Counter,
+
     /// Latest block number successfully dumped for a dataset/table
     pub latest_block: telemetry::metrics::Gauge<u64>,
 
@@ -78,6 +81,11 @@ impl MetricsRegistry {
                 meter,
                 "bytes_written_total",
                 "Total bytes written for datasets (uncompressed)",
+            ),
+            write_calls: telemetry::metrics::Counter::new(
+                meter,
+                "write_calls_total",
+                "Total number of write calls made to dataset writers",
             ),
             latest_block: telemetry::metrics::Gauge::new_u64(
                 meter,
@@ -191,13 +199,14 @@ impl MetricsRegistry {
     }
 
     /// Record bytes written
-    pub(crate) fn record_ingestion_bytes(&self, bytes: u64, table: String, location_id: i64) {
+    pub(crate) fn record_write_call(&self, bytes: u64, table: String, location_id: i64) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
             telemetry::metrics::KeyValue::new("location_id", location_id),
         ]);
         self.bytes_written.inc_by_with_kvs(bytes, &kv_pairs);
+        self.write_calls.inc_with_kvs(&kv_pairs);
     }
 
     /// Record a file being written

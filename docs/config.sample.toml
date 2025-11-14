@@ -60,6 +60,7 @@ url = "postgres://<pg_url>"
 # compression = "zstd(1)"    # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
 # bloom_filters = false      # Enable bloom filters (default: false)
 # cache_size_mb = 1024       # Parquet metadata cache size in MB (default: 1024)
+# max_row_group_mb = 512     # Max row group size in MB (default: 512)
 
 # Target partition size configuration
 # Overflow is a tuning parameter that provides some flexibility for some cases,
