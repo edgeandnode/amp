@@ -31,6 +31,11 @@ impl Hash {
         &self.0
     }
 
+    /// Returns a compact version of the hash (first 7 characters)
+    pub fn compact(&self) -> &str {
+        &self.0[..7]
+    }
+
     /// Consumes the Hash and returns the inner String
     pub fn into_inner(self) -> String {
         self.0

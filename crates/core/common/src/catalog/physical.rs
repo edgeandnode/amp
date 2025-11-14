@@ -491,6 +491,27 @@ impl PhysicalTable {
         self.table.table_ref()
     }
 
+    /// Returns a compact table reference with shortened hash
+    pub fn table_ref_compact(&self) -> String {
+        format!("{}.{}", self.dataset_ref_compact(), self.table.name())
+    }
+
+    /// Returns a compact dataset reference with shortened hash
+    fn dataset_ref_compact(&self) -> String {
+        match self.table.table_ref().schema() {
+            Some(schema_str) => {
+                // Parse the schema string as a PartialReference
+                match schema_str.parse::<datasets_common::partial_reference::PartialReference>() {
+                    Ok(partial_ref) => partial_ref.compact(),
+                    // If parsing fails, return the original string
+                    Err(_) => schema_str.to_string(),
+                }
+            }
+            // If no schema, return empty string (shouldn't happen for physical tables)
+            None => String::new(),
+        }
+    }
+
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         let sorted_by = self.table().table().sorted_by();
         self.schema()

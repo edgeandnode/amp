@@ -77,6 +77,21 @@ impl PartialReference {
         (self.namespace, self.name, self.revision)
     }
 
+    /// Returns a compact string representation with shortened hash
+    pub fn compact(&self) -> String {
+        let mut result = String::new();
+        if let Some(namespace) = &self.namespace {
+            result.push_str(namespace.as_ref());
+            result.push('/');
+        }
+        result.push_str(self.name.as_ref());
+        if let Some(revision) = &self.revision {
+            result.push('@');
+            result.push_str(&revision.compact());
+        }
+        result
+    }
+
     /// Convert this partial reference to a full `Reference` by filling in defaults.
     ///
     /// - Missing namespace defaults to global namespace (`_`).

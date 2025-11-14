@@ -93,7 +93,7 @@ impl Compactor {
         }
     }
 
-    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref()))]
+    #[tracing::instrument(skip_all, fields(table = self.table.table_ref_compact()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         if !self.opts.compactor.active.load(Ordering::SeqCst) {
             return Ok(self);
