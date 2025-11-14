@@ -2,6 +2,7 @@
 //!
 //! Handles internal and external checks of blocks using the ve crate.
 //!
+//!
 //! # Configuration
 //!
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
@@ -42,7 +43,8 @@ pub enum VerifyMode {
 
 /// Verify internal and external dataset blocks using ve crate.
 ///
-/// This function currently validates that the header of blocks from the dataset
+/// This function currently validates that the dataset exists and prints a
+/// placeholder message for the ve-based verification logic.
 #[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, reference = %reference, limit = %limit))]
 pub async fn run(
     Args {
@@ -89,7 +91,7 @@ pub async fn run(
         }
 
         VerifyMode::HeaderAccumulators => {
-            //            let _path = data_path.ok_or(Error::MissingExternalPath)?;
+            let _path = accumulators_path.ok_or(Error::MissingExternalPath);
             unimplemented!("internal_verify_header_accumulators is not implemented yet")
         }
     }
@@ -138,4 +140,8 @@ pub enum Error {
     /// Verification failed
     #[error("verification error")]
     VerifyError(#[source] anyhow::Error),
+
+    /// Verification failed
+    #[error("accumulator not found")]
+    MissingExternalPath(#[source] anyhow::Error),
 }

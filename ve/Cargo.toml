@@ -14,7 +14,7 @@ serde_json = "1.0"
 sqlx = "0.8.6"
 tree_hash = "0.10.0"
 tree_hash_derive = "0.10.0"
-amp-client = {path = "../crates/client/amp-client"}
+amp-client = {path = "../crates/client"}
 vee = { git = "https://github.com/semiotic-ai/veemon.git", branch = "main", package = "vee" }
 prost.workspace = true
 prost-build.workspace = true
