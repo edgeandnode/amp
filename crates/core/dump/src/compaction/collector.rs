@@ -62,7 +62,7 @@ impl Collector {
         }
     }
 
-    #[tracing::instrument(skip_all, err, fields(location_id=%self.table.location_id(), table=%self.table.table_ref()))]
+    #[tracing::instrument(skip_all, err, fields(location_id=%self.table.location_id(), table=self.table.table_ref_compact()))]
     pub(super) async fn collect(self) -> CollectionResult<Self> {
         let table_name: Arc<str> = Arc::from(self.table.table_name().as_str());
 

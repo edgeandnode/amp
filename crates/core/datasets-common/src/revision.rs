@@ -77,6 +77,14 @@ impl Revision {
             _ => None,
         }
     }
+
+    /// Returns a compact display format (shortened hash for Hash variant)
+    pub fn compact(&self) -> String {
+        match self {
+            Revision::Hash(hash) => hash.compact().to_string(),
+            other => other.to_string(),
+        }
+    }
 }
 
 impl From<Version> for Revision {

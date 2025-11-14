@@ -184,7 +184,7 @@ impl<'a> CompactionPlan<'a> {
 impl<'a> Stream for CompactionPlan<'a> {
     type Item = CompactionGroup;
 
-    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref(), group_count = self.group_count + 1))]
+    #[tracing::instrument(skip_all, fields(table = self.table.table_ref_compact(), group_count = self.group_count + 1))]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
