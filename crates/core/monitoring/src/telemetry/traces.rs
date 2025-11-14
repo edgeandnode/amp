@@ -1,16 +1,17 @@
-use opentelemetry_otlp::{ExporterBuildError, WithExportConfig};
+use opentelemetry_otlp::{ExporterBuildError, Protocol, WithExportConfig};
 pub use opentelemetry_sdk::trace::SdkTracerProvider;
 
 pub type Result = std::result::Result<SdkTracerProvider, ExporterBuildError>;
 
-/// Create a new OpenTelemetry tracer provider set up with the given URL and gRPC transport.
+/// Create a new OpenTelemetry tracer provider set up with the given URL and HTTP transport.
 pub fn provider(url: String, trace_ratio: f64) -> Result {
     let resource = opentelemetry_sdk::Resource::builder()
         .with_attribute(opentelemetry::KeyValue::new("service.name", "tracing"))
         .build();
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
+        .with_http()
+        .with_protocol(Protocol::HttpBinary)
         .with_endpoint(url)
         .build()?;
 
