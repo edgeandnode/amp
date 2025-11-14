@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
+use arrow_flight::{FlightData, flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient};
 use async_stream::try_stream;
 use common::{
     BlockNum,
@@ -18,7 +18,7 @@ use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::{
     Streaming,
-    transport::{ClientTlsConfig, Endpoint},
+    transport::{ClientTlsConfig, Endpoint, Uri},
 };
 
 use crate::{
@@ -232,20 +232,52 @@ impl AmpClient {
     /// Create a new AmpClient by connecting to the given endpoint.
     ///
     /// # Arguments
-    /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602" or "https://example.com")
+    /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602" or "https://example.com/api/")
     ///
     /// TLS is automatically enabled for HTTPS URLs using native root certificates.
     pub async fn from_endpoint(endpoint: &str) -> Result<Self, Error> {
-        let mut endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
+        let uri: Uri = endpoint.parse().map_err(|e| {
+            Error::Status(Box::new(tonic::Status::invalid_argument(format!("Invalid URI: {}", e))))
+        })?;
+        let scheme = uri.scheme_str().ok_or_else(|| {
+            Error::Status(Box::new(tonic::Status::invalid_argument("Missing scheme in endpoint URL")))
+        })?;
+        let authority = uri.authority().ok_or_else(|| {
+            Error::Status(Box::new(tonic::Status::invalid_argument("Missing authority in endpoint URL")))
+        })?;
 
-        if endpoint.uri().scheme_str() == Some("https") {
+        let path_prefix = uri.path();
+        let path_prefix = if path_prefix == "/" || path_prefix.is_empty() {
+            None
+        } else {
+            Some(path_prefix.trim_end_matches('/').to_string())
+        };
+
+        let base_url = format!("{}://{}", scheme, authority);
+        let mut endpoint: Endpoint = base_url.parse().map_err(Error::Transport)?;
+
+        if scheme == "https" {
             endpoint = endpoint
                 .tls_config(ClientTlsConfig::new().with_native_roots())
                 .map_err(Error::Transport)?;
         }
 
         let channel = endpoint.connect().await.map_err(Error::Transport)?;
-        let client = FlightSqlServiceClient::new(channel);
+
+        // Create FlightServiceClient with origin if path prefix exists
+        let flight_client = if let Some(prefix) = path_prefix {
+            // Build full origin URI with path prefix
+            let origin_str = format!("{}://{}{}", scheme, authority, prefix);
+            let origin: Uri = origin_str.parse().map_err(|e| {
+                Error::Status(Box::new(tonic::Status::invalid_argument(format!("Invalid origin URI: {}", e))))
+            })?;
+            FlightServiceClient::with_origin(channel, origin)
+        } else {
+            FlightServiceClient::new(channel)
+        };
+
+        let client = FlightSqlServiceClient::new_from_inner(flight_client);
+
         Ok(Self { client })
     }
 
