@@ -64,19 +64,19 @@ fn default_auto_migrate() -> bool {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ParquetConfig {
+    /// Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
     #[serde(
         default = "default_compression",
         deserialize_with = "deserialize_compression"
     )]
     pub compression: Compression,
+    /// Enable bloom filters (default: false)
     #[serde(default)]
     pub bloom_filters: bool,
+    /// Parquet metadata cache size in MB (default: 1024)
     #[serde(default = "default_cache_size_mb")]
     pub cache_size_mb: u64,
-    #[serde(default)]
-    pub compactor: CompactorConfig,
-    #[serde(alias = "garbage_collector", default)]
-    pub collector: CollectorConfig,
+    /// Target partition size configuration (flattened fields: overflow, bytes, rows)
     #[serde(
         alias = "file_size",
         flatten,
@@ -84,6 +84,10 @@ pub struct ParquetConfig {
         deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
     )]
     pub target_size: SizeLimitConfig,
+    #[serde(default)]
+    pub compactor: CompactorConfig,
+    #[serde(alias = "garbage_collector", default)]
+    pub collector: CollectorConfig,
 }
 
 impl Default for ParquetConfig {
@@ -92,9 +96,9 @@ impl Default for ParquetConfig {
             compression: default_compression(),
             bloom_filters: false,
             cache_size_mb: default_cache_size_mb(),
+            target_size: SizeLimitConfig::default_upper_limit(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
-            target_size: SizeLimitConfig::default_upper_limit(),
         }
     }
 }
@@ -102,30 +106,38 @@ impl Default for ParquetConfig {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct CollectorConfig {
+    /// Enable or disable the collector (default: false)
     pub active: bool,
-    pub min_interval: ConfigDuration<30>, // 30 seconds
-    pub deletion_lock_duration: ConfigDuration<1800>, // 30 minutes
+    /// Interval in seconds to run the garbage collector (default: 30.0)
+    pub min_interval: ConfigDuration<30>,
+    /// Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)
+    pub deletion_lock_duration: ConfigDuration<1800>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactorConfig {
+    /// Enable or disable the compactor (default: false)
     pub active: bool,
+    /// Max concurrent metadata operations (default: 2)
+    pub metadata_concurrency: usize,
+    /// Max concurrent compaction write operations (default: 2)
+    pub write_concurrency: usize,
+    /// Interval in seconds to run the compactor (default: 1.0)
+    pub min_interval: ConfigDuration<1>,
+    /// Compaction algorithm configuration (flattened fields: cooldown_duration, overflow, bytes, rows)
     #[serde(flatten)]
     pub algorithm: CompactionAlgorithmConfig,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub min_interval: ConfigDuration<1>,
 }
 
 impl Default for CompactorConfig {
     fn default() -> Self {
         Self {
             active: false,
-            algorithm: CompactionAlgorithmConfig::default(),
             metadata_concurrency: 2,
             write_concurrency: 2,
             min_interval: ConfigDuration::default(),
+            algorithm: CompactionAlgorithmConfig::default(),
         }
     }
 }
@@ -133,7 +145,9 @@ impl Default for CompactorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactionAlgorithmConfig {
+    /// Base cooldown duration in seconds (default: 1024.0)
     pub cooldown_duration: ConfigDuration<1024>,
+    /// Eager compaction limits (flattened fields: overflow, bytes, rows)
     #[serde(
         flatten,
         default = "SizeLimitConfig::default_eager_limit",
@@ -155,10 +169,13 @@ impl Default for CompactionAlgorithmConfig {
 pub struct SizeLimitConfig {
     pub file_count: u32,
     pub generation: u64,
+    /// Overflow multiplier: 1x target size (default: "1"), can use "1.5" for 1.5x, etc.
     pub overflow: Overflow,
     #[serde(skip)]
     pub blocks: u64,
+    /// Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)
     pub bytes: u64,
+    /// Target rows per file, 0 means no limit (default: 0)
     pub rows: u64,
 }
 
@@ -234,9 +251,12 @@ impl SizeLimitConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetadataDbConfig {
+    /// Database connection URL
     pub url: Option<String>,
+    /// Size of the connection pool (default: 10)
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+    /// Automatically run database migrations on startup (default: true)
     #[serde(default = "default_auto_migrate")]
     pub auto_migrate: bool,
 }
@@ -342,27 +362,51 @@ impl Default for BuildInfo {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
+    // Storage paths
+    /// Where the extracted datasets are stored.
     data_dir: String,
+    /// Path to a providers directory. Each provider is configured as a separate toml file in this directory.
     providers_dir: String,
+    /// Path to a directory containing dataset manifest files.
     #[serde(default, alias = "dataset_defs_dir")]
     manifests_dir: String,
 
+    // Memory and performance
+    /// How much memory the server can use in MB. 0 means unlimited (default: 0)
+    #[serde(default)]
+    pub max_mem_mb: usize,
+    /// Paths for DataFusion temporary files for spill-to-disk (default: [])
+    #[serde(default)]
+    pub spill_location: Vec<PathBuf>,
+
+    // Operational timing
+    /// Polling interval for new blocks during dump in seconds (default: 1.0)
+    pub poll_interval_secs: ConfigDuration<1>,
+    /// Max interval for derived dataset dump microbatches in microseconds (default: 100000)
+    pub microbatch_max_interval: Option<u64>,
+    /// Max interval for streaming server microbatches in microseconds (default: 1000)
+    pub server_microbatch_max_interval: Option<u64>,
+
+    // Service addresses
+    /// Arrow Flight RPC server address (default: "0.0.0.0:1602")
+    pub flight_addr: Option<String>,
+    /// JSON Lines server address (default: "0.0.0.0:1603")
+    pub jsonl_addr: Option<String>,
+    /// Admin API server address (default: "0.0.0.0:1610")
+    pub admin_api_addr: Option<String>,
+
+    // Database configuration (legacy top-level field + table)
+    /// Connection to the metadata DB (legacy, prefer metadata_db.url)
     pub metadata_db_url: Option<String>,
     #[serde(default)]
     pub metadata_db: MetadataDbConfig,
-    #[serde(default)]
-    pub max_mem_mb: usize,
-    #[serde(default)]
-    pub spill_location: Vec<PathBuf>,
-    pub microbatch_max_interval: Option<u64>,
-    pub server_microbatch_max_interval: Option<u64>,
-    pub flight_addr: Option<String>,
-    pub jsonl_addr: Option<String>,
-    pub admin_api_addr: Option<String>,
+
+    // Observability
     pub opentelemetry: Option<OpenTelemetryConfig>,
+
+    // Writer/Parquet configuration
     #[serde(default)]
     pub writer: ParquetConfig,
-    pub poll_interval_secs: ConfigDuration<1>,
 }
 
 impl ConfigFile {
