@@ -1,0 +1,28 @@
+[package]
+name = "ve"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread","macros"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+common = { path = "../crates/core/common" }
+anyhow = "1.0"
+serde_json = "1.0"
+sqlx = "0.8.6"
+tree_hash = "0.10.0"
+tree_hash_derive = "0.10.0"
+amp-client = {path = "../crates/client/amp-client"}
+vee = { git = "https://github.com/semiotic-ai/veemon.git", branch = "main", package = "vee" }
+prost.workspace = true
+prost-build.workspace = true
+arrow-flight.workspace = true
+typed-arrow = { version = "0.4.2", features = ["views"] }
+arrow-array = { version = "56", default-features = false }
+datasets-common = { path = "../crates/core/datasets-common" }
+
+tonic.workspace = true
+futures.workspace = true
+

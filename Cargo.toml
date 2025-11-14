@@ -28,6 +28,7 @@ members = [
     "crates/services/controller",
     "crates/services/server",
     "crates/services/worker",
+    "ve",
     "tests",
 ]
 

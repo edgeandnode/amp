@@ -5,6 +5,7 @@ pub mod inspect;
 pub mod list;
 pub mod manifest;
 pub mod register;
+pub mod verify;
 pub mod versions;
 
 /// Dataset management subcommands.
@@ -44,6 +45,10 @@ pub enum Commands {
     /// Get the manifest JSON for a dataset
     #[command(after_help = include_str!("dataset/manifest__after_help.md"))]
     Manifest(manifest::Args),
+
+    /// Verify internal checks of blocks using ve crate
+    #[command(after_help = include_str!("dataset/verify__after_help.md"))]
+    Verify(verify::Args),
 }
 
 /// Execute the dataset command with the given subcommand.
@@ -55,6 +60,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Versions(args) => versions::run(args).await?,
         Commands::Manifest(args) => manifest::run(args).await?,
+        Commands::Verify(args) => verify::run(args).await?,
     }
     Ok(())
 }
