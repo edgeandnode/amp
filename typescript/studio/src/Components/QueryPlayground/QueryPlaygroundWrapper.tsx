@@ -4,9 +4,7 @@ import { Toast } from "@base-ui-components/react/toast"
 import { Button, ButtonGroup, CopyButton, Keyboard, TabSet, ToggleButton } from "@graphprotocol/gds-react"
 import {
   CheckCircleIcon,
-  CopySimpleIcon,
   PlusIcon,
-  SidebarRightIcon,
   SidebarRightInteractiveIcon,
   WarningIcon,
   XIcon,
@@ -48,7 +46,7 @@ const AmpStudioQueryEditorForm = Schema.Struct({
     Schema.Struct({
       query: Schema.String,
       tab: Schema.String,
-    })
+    }),
   ),
 })
 type AmpStudioQueryEditorForm = typeof AmpStudioQueryEditorForm.Type
@@ -177,19 +175,21 @@ export function QueryPlaygroundWrapper() {
                       <TabSet.Tab className="pe-6" value={idx}>
                         {query.tab || ""}
                       </TabSet.Tab>
-                      {queryField.state.value.length > 1 ? (
-                        <Button
-                          variant="naked"
-                          className="absolute inset-y-0 end-0 my-auto"
-                          onClick={() => {
-                            queryField.removeValue(idx)
-                            // set the active tab to curr - 1
-                            form.setFieldValue("activeTab", Math.max(idx - 1, 0))
-                          }}
-                        >
-                          <XIcon size={3} alt="Close tab" />
-                        </Button>
-                      ) : null}
+                      {queryField.state.value.length > 1 ?
+                        (
+                          <Button
+                            variant="naked"
+                            className="absolute inset-y-0 end-0 my-auto"
+                            onClick={() => {
+                              queryField.removeValue(idx)
+                              // set the active tab to curr - 1
+                              form.setFieldValue("activeTab", Math.max(idx - 1, 0))
+                            }}
+                          >
+                            <XIcon size={3} alt="Close tab" />
+                          </Button>
+                        ) :
+                        null}
                     </div>
                   ))}
                   <TabSet.Tab
@@ -218,7 +218,7 @@ export function QueryPlaygroundWrapper() {
               <div
                 className={classNames(
                   "grid flex-1",
-                  navbarOpen ? "grid-cols-1 md:grid-cols-5 2xl:grid-cols-4" : "grid-cols-1"
+                  navbarOpen ? "grid-cols-1 md:grid-cols-5 2xl:grid-cols-4" : "grid-cols-1",
                 )}
               >
                 <div
@@ -266,60 +266,64 @@ export function QueryPlaygroundWrapper() {
                   </div>
 
                   <div className="flex-1 overflow-auto">
-                    {tableData ? (
-                      <table className="m-4 w-full">
-                        <thead className="border-border-muted border-b">
-                          <tr className="divide-border-muted divide-x">
-                            {tableData.formattedHeaders.map((header, colIdx) => (
-                              <th
-                                key={header.key}
-                                scope="col"
-                                className={classNames(
-                                  "text-fg-muted text-12 py-2 font-mono capitalize",
-                                  colIdx === 0 ? "pr-3 pl-4 sm:pl-0" : "px-3"
-                                )}
-                              >
-                                {header.display}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-border-muted divide-y">
-                          {tableData.rows.map((record, rowIdx) => (
-                            <tr key={rowIdx} className="divide-border-muted divide-x">
-                              {tableData.columns.map((column, colIdx) => {
-                                const value = record[column]
+                    {tableData ?
+                      (
+                        <table className="m-4 w-full">
+                          <thead className="border-border-muted border-b">
+                            <tr className="divide-border-muted divide-x">
+                              {tableData.formattedHeaders.map((header, colIdx) => (
+                                <th
+                                  key={header.key}
+                                  scope="col"
+                                  className={classNames(
+                                    "text-fg-muted text-12 py-2 font-mono capitalize",
+                                    colIdx === 0 ? "pr-3 pl-4 sm:pl-0" : "px-3",
+                                  )}
+                                >
+                                  {header.display}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-border-muted divide-y">
+                            {tableData.rows.map((record, rowIdx) => (
+                              <tr key={rowIdx} className="divide-border-muted divide-x">
+                                {tableData.columns.map((column, colIdx) => {
+                                  const value = record[column]
 
-                                return (
-                                  <td
-                                    key={column}
-                                    className={classNames(
-                                      "py-4 whitespace-nowrap",
-                                      colIdx === 0
-                                        ? "text-16 text-fg-default pr-3 pl-4 sm:pl-0"
-                                        : "text-14 text-fg-elevated px-3"
-                                    )}
-                                  >
-                                    {value == null
-                                      ? null
-                                      : typeof value === "object"
+                                  return (
+                                    <td
+                                      key={column}
+                                      className={classNames(
+                                        "py-4 whitespace-nowrap",
+                                        colIdx === 0
+                                          ? "text-16 text-fg-default pr-3 pl-4 sm:pl-0"
+                                          : "text-14 text-fg-elevated px-3",
+                                      )}
+                                    >
+                                      {value == null
+                                        ? null
+                                        : typeof value === "object"
                                         ? JSON.stringify(value)
                                         : String(value)}
-                                  </td>
-                                )
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : data != null && data.length === 0 ? (
-                      <div className="flex items-center justify-center py-8 text-fg-muted">No results found</div>
-                    ) : null}
-                    {error != null ? (
-                      <div className="w-full px-4">
-                        <ErrorMessages id="data" errors={[{ message: error.message }]} />
-                      </div>
-                    ) : null}
+                                    </td>
+                                  )
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) :
+                      data != null && data.length === 0 ?
+                      <div className="flex items-center justify-center py-8 text-fg-muted">No results found</div> :
+                      null}
+                    {error != null ?
+                      (
+                        <div className="w-full px-4">
+                          <ErrorMessages id="data" errors={[{ message: error.message }]} />
+                        </div>
+                      ) :
+                      null}
                   </div>
                 </div>
                 <div
@@ -328,7 +332,7 @@ export function QueryPlaygroundWrapper() {
                     "transition-[opacity,transform] duration-300 ease-in-out",
                     navbarOpen
                       ? "opacity-100 translate-x-0"
-                      : "opacity-0 translate-x-full pointer-events-none hidden md:block"
+                      : "opacity-0 translate-x-full pointer-events-none hidden md:block",
                   )}
                   style={{
                     overflow: navbarOpen ? "auto" : "hidden",
@@ -391,11 +395,17 @@ LIMIT 10;`.trim()
             >
               <div className="flex items-start">
                 <div className="size-6">
-                  {toast.type === "error" ? (
-                    <WarningIcon alt="" size={4} variant="fill" className="text-sonja-600" aria-hidden="true" />
-                  ) : (
-                    <CheckCircleIcon alt="" size={4} variant="fill" className="text-starfield-600" aria-hidden="true" />
-                  )}
+                  {toast.type === "error" ?
+                    <WarningIcon alt="" size={4} variant="fill" className="text-sonja-600" aria-hidden="true" /> :
+                    (
+                      <CheckCircleIcon
+                        alt=""
+                        size={4}
+                        variant="fill"
+                        className="text-starfield-600"
+                        aria-hidden="true"
+                      />
+                    )}
                 </div>
                 <div className="ml-2 flex w-0 flex-1 flex-col gap-y-1.5">
                   <Toast.Title className="text-14" />

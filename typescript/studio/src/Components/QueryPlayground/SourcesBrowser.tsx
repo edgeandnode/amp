@@ -28,7 +28,12 @@ export function SourcesBrowser({ onSourceSelected: onTableSelected }: Readonly<S
                 <FolderOpenIcon className="group-data-panel-open:block hidden" aria-hidden="true" size={5} alt="" />
                 <span className="text-14">{source.source}</span>
               </Accordion.Trigger>
-              <Button variant="naked" size="large" onClick={() => onTableSelected(source)}>
+              <Button
+                variant="naked"
+                size="large"
+                onClick={() =>
+                  onTableSelected(source)}
+              >
                 <PlusIcon alt={`Add ${source.source}`} size={4} aria-hidden="true" />
               </Button>
             </Accordion.Header>

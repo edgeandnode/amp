@@ -34,12 +34,14 @@ function HomePage() {
         <div className="sticky top-0 z-40 flex items-center h-16 bg-bg-subtle border-b border-border-muted px-4">
           <Breadcrumbs>
             <Breadcrumbs.Item>Local Studio</Breadcrumbs.Item>
-            {data != null ? (
-              <Breadcrumbs.Item>
-                {/* TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately. */}
-                <p className="text-white text-16">{("name" in data ? data.name : "unknown") as string}</p>
-              </Breadcrumbs.Item>
-            ) : null}
+            {data != null ?
+              (
+                <Breadcrumbs.Item>
+                  {/* TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately. */}
+                  <p className="text-white text-16">{("name" in data ? data.name : "unknown") as string}</p>
+                </Breadcrumbs.Item>
+              ) :
+              null}
           </Breadcrumbs>
         </div>
 

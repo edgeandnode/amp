@@ -1,6 +1,6 @@
 "use client"
 
-import { Button, Keyboard, type ButtonProps } from "@graphprotocol/gds-react"
+import { Button, type ButtonProps, Keyboard } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
 
 import { classNames } from "@/utils/classnames"
@@ -36,22 +36,24 @@ export function SubmitButton({ children, status, ...rest }: SubmitButtonProps) {
           addonAfter={<Keyboard>{ctrlKey}⏎</Keyboard>}
           className={classNames(
             "data-[state=error]:bg-status-error-default data-[state=error]:hover:bg-status-error-elevated",
-            "data-[state=success]:bg-status-success-default data-[state=success]:hover:bg-status-success-elevated"
+            "data-[state=success]:bg-status-success-default data-[state=success]:hover:bg-status-success-elevated",
           )}
         >
-          {status === "success" ? (
-            <>
-              <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
-              {children}
-            </>
-          ) : status === "error" ? (
-            <>
-              <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
-              Error
-            </>
-          ) : (
-            children
-          )}
+          {status === "success" ?
+            (
+              <>
+                <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                {children}
+              </>
+            ) :
+            status === "error" ?
+            (
+              <>
+                <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                Error
+              </>
+            ) :
+            children}
         </Button>
       )}
     </form.Subscribe>
