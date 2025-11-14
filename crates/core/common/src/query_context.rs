@@ -46,6 +46,7 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::TableReference,
+    utils::error_with_causes,
 };
 
 pub fn default_catalog_name() -> ScalarValue {
@@ -82,7 +83,7 @@ pub enum Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let err = self.to_string();
+        let err = error_with_causes(&self);
         let status = match self {
             Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,

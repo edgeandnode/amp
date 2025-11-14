@@ -34,6 +34,7 @@ use common::{
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
+    utils::error_with_causes,
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
@@ -855,19 +856,19 @@ pub enum Error {
     #[error("unsupported flight descriptor command: {0}")]
     UnsupportedFlightDescriptorCommand(String),
 
-    #[error("query execution error: {0}")]
-    ExecutionError(DataFusionError),
+    #[error("query execution error")]
+    ExecutionError(#[source] DataFusionError),
 
-    #[error("error looking up datasets: {0}")]
+    #[error("error looking up datasets")]
     DatasetStoreError(#[source] GetDatasetError),
 
-    #[error("error loading catalog for SQL: {0}")]
+    #[error("error loading catalog for SQL")]
     CatalogForSqlError(#[source] CatalogForSqlError),
 
-    #[error("error loading physical catalog: {0}")]
+    #[error("error loading physical catalog")]
     GetPhysicalCatalogError(#[source] GetPhysicalCatalogError),
 
-    #[error("error creating planning context: {0}")]
+    #[error("error creating planning context")]
     PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
 
     #[error(transparent)]
@@ -879,11 +880,11 @@ pub enum Error {
     #[error("streaming query execution error: {0}")]
     StreamingExecutionError(String),
 
-    #[error("ticket encoding error: {0}")]
-    TicketEncodingError(DataFusionError),
+    #[error("ticket encoding error")]
+    TicketEncodingError(#[source] DataFusionError),
 
-    #[error("ticket decoding error: {0}")]
-    TicketDecodingError(DataFusionError),
+    #[error("ticket decoding error")]
+    TicketDecodingError(#[source] DataFusionError),
 }
 
 impl Error {
@@ -919,10 +920,10 @@ impl From<prost::DecodeError> for Error {
     }
 }
 
-fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
+fn datafusion_error_to_status(e: &DataFusionError, message: String) -> Status {
     match e {
-        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
-        _ => Status::internal(outer.to_string()),
+        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(message),
+        _ => Status::internal(message),
     }
 }
 
@@ -955,7 +956,7 @@ impl IntoResponse for Error {
         };
         let res = json!({
             "error_code": self.error_code(),
-            "error_message": self.to_string(),
+            "error_message": error_with_causes(&self)
         });
 
         (status_code, res.to_string()).into_response()
@@ -964,34 +965,33 @@ impl IntoResponse for Error {
 
 impl From<Error> for Status {
     fn from(e: Error) -> Self {
+        let message = error_with_causes(&e);
         match &e {
-            Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
-            Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
-            Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
-            Error::DatasetStoreError(_) => Status::internal(e.to_string()),
+            Error::PbDecodeError(_) => Status::invalid_argument(message),
+            Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(message),
+            Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(message),
+            Error::DatasetStoreError(_) => Status::internal(message),
 
-            Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
-            Error::CoreError(CoreError::SqlParseError(_)) => {
-                Status::invalid_argument(e.to_string())
-            }
-            Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
-            Error::CoreError(CoreError::ConfigError(_)) => Status::internal(e.to_string()),
-            Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(e.to_string()),
+            Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(message),
+            Error::CoreError(CoreError::SqlParseError(_)) => Status::invalid_argument(message),
+            Error::CoreError(CoreError::DatasetError(_)) => Status::internal(message),
+            Error::CoreError(CoreError::ConfigError(_)) => Status::internal(message),
+            Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(message),
 
             Error::CoreError(
                 CoreError::PlanningError(df)
                 | CoreError::ExecutionError(df)
                 | CoreError::MetaTableError(df),
-            ) => datafusion_error_to_status(&e, df),
+            ) => datafusion_error_to_status(df, message),
 
-            Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
-            Error::StreamingExecutionError(_) => Status::internal(e.to_string()),
-            Error::CatalogForSqlError(_) => Status::internal(e.to_string()),
-            Error::GetPhysicalCatalogError(_) => Status::internal(e.to_string()),
-            Error::PlanningCtxForSqlError(_) => Status::internal(e.to_string()),
-            Error::InvalidQuery(_) => Status::invalid_argument(e.to_string()),
-            Error::TicketEncodingError(_) => Status::invalid_argument(e.to_string()),
-            Error::TicketDecodingError(_) => Status::invalid_argument(e.to_string()),
+            Error::ExecutionError(df) => datafusion_error_to_status(df, message),
+            Error::StreamingExecutionError(_) => Status::internal(message),
+            Error::CatalogForSqlError(_) => Status::internal(message),
+            Error::GetPhysicalCatalogError(_) => Status::internal(message),
+            Error::PlanningCtxForSqlError(_) => Status::internal(message),
+            Error::InvalidQuery(_) => Status::invalid_argument(message),
+            Error::TicketEncodingError(_) => Status::invalid_argument(message),
+            Error::TicketDecodingError(_) => Status::invalid_argument(message),
         }
     }
 }

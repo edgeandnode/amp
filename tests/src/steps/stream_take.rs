@@ -67,10 +67,8 @@ impl SqlTestResult {
                 results: expected_json_str,
                 record_batch_count,
             } => {
-                let expected: serde_json::Value = serde_json::from_str(expected_json_str)
-                    .unwrap_or_else(|err| panic!("failed to parse expected JSON: {err}"));
-                let (actual, actual_batch_count) =
-                    actual_result.expect("expected success, got error");
+                let expected: serde_json::Value = serde_json::from_str(expected_json_str)?;
+                let (actual, actual_batch_count) = actual_result?;
 
                 pretty_assertions::assert_str_eq!(
                     actual.to_string(),
