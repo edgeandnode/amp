@@ -34,10 +34,10 @@ export const customThemeDefinition: monacoType.editor.IStandaloneThemeData = {
     },
   ],
   colors: {
-    "editor.background": "#06060b",
+    "editor.background": "#080618",
     "editor.foreground": "#f4f6ff",
     "editor.selectionBackground": "#281C5C",
-    "editor.lineHighlightBackground": "#0a0a10",
+    "editor.lineHighlightBackground": "#080618",
     "editorCursor.foreground": "#ffef60",
     "editorLineNumber.foreground": "#848192",
     "editorLineNumber.activeForeground": "#f4f6ff",
