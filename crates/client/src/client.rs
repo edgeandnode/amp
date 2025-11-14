@@ -16,7 +16,10 @@ use common::{
 };
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
-use tonic::{Streaming, transport::Endpoint};
+use tonic::{
+    Streaming,
+    transport::{ClientTlsConfig, Endpoint},
+};
 
 use crate::{
     cdc::CdcStreamBuilder,
@@ -229,9 +232,18 @@ impl AmpClient {
     /// Create a new AmpClient by connecting to the given endpoint.
     ///
     /// # Arguments
-    /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602")
+    /// - `endpoint`: gRPC endpoint URL (e.g., "http://localhost:1602" or "https://example.com")
+    ///
+    /// TLS is automatically enabled for HTTPS URLs using native root certificates.
     pub async fn from_endpoint(endpoint: &str) -> Result<Self, Error> {
-        let endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
+        let mut endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
+
+        if endpoint.uri().scheme_str() == Some("https") {
+            endpoint = endpoint
+                .tls_config(ClientTlsConfig::new().with_native_roots())
+                .map_err(Error::Transport)?;
+        }
+
         let channel = endpoint.connect().await.map_err(Error::Transport)?;
         let client = FlightSqlServiceClient::new(channel);
         Ok(Self { client })
