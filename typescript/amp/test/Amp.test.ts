@@ -91,7 +91,13 @@ Testing.layer((it) => {
       const api = yield* Admin.Admin
       const request = new Model.SchemaRequest({
         tables: { query: "SELECT * FROM anvil.transactions" },
-        dependencies: { anvil: "_/anvil@0.0.1" },
+        dependencies: {
+          anvil: new Model.DatasetReference({
+            namespace: "_",
+            name: "anvil",
+            revision: "0.0.1",
+          }),
+        },
       })
       const result = yield* api.getOutputSchema(request)
       assertInstanceOf(result, Model.SchemaResponse)

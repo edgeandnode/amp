@@ -3,12 +3,11 @@ import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import { type Client, createClient, type Transport } from "@connectrpc/connect"
 import * as Template from "@effect/platform/Template"
 import type { RecordBatch } from "apache-arrow"
-import { RecordBatchReader } from "apache-arrow"
+import { RecordBatchReader, tableFromIPC } from "apache-arrow"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Model from "../Model.ts"
@@ -18,20 +17,9 @@ import * as FlightSql from "../proto/FlightSql_pb.ts"
 export * as Flight from "../proto/Flight_pb.ts"
 export * as FlightSql from "../proto/FlightSql_pb.ts"
 
-/**
- * A record batch with metadata.
- */
-export class ResponseBatch extends Data.TaggedClass("ResponseBatch")<{
-  data: RecordBatch
-  metadata: Model.RecordBatchMetadata
-}> {}
-
-/**
- * Error type for the Arrow Flight service.
- */
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
-  cause?: unknown
-  message: string
+  method: string
+  cause: unknown
 }> {}
 
 /**
@@ -44,17 +32,108 @@ export class ArrowFlight extends Context.Tag("Amp/ArrowFlight")<ArrowFlight, {
   readonly client: Client<typeof Flight.FlightService>
 
   /**
-   * A stream of record batches from a sql query.
+   * A stream of protocol messages from a sql query.
+   *
+   * Implements stateless reorg detection by comparing incoming block ranges.
    *
    * @param sql - The sql query to execute.
-   * @param watermark - Optional resume watermark for streaming.
-   * @returns A stream of record batches.
+   * @param resume - Optional block ranges to resume from.
+   * @returns A stream of protocol messages.
    */
   readonly stream: {
-    (sql: TemplateStringsArray): Stream.Stream<ResponseBatch, ArrowFlightError>
-    (sql: string): Stream.Stream<ResponseBatch, ArrowFlightError>
+    (
+      sql: TemplateStringsArray,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
+    (
+      sql: string,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
+  }
+
+  /**
+   * A batch query from a sql query.
+   *
+   * @param sql - The sql query to execute.
+   * @param resume - Optional block ranges to resume from.
+   * @returns A stream of record batches.
+   */
+  readonly query: {
+    (
+      sql: TemplateStringsArray,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<RecordBatch, ArrowFlightError>
+    (
+      sql: string,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<RecordBatch, ArrowFlightError>
   }
 }>() {}
+
+const createResponseStream: (
+  client: Client<typeof Flight.FlightService>,
+  sql: string | TemplateStringsArray,
+  stream?: boolean,
+  resume?: ReadonlyArray<Model.BlockRange>,
+) => Effect.Effect<Stream.Stream<Model.ResponseBatch, ArrowFlightError>, ArrowFlightError> = Effect.fn(
+  function*(client, sql, stream, resume) {
+    const query = typeof sql === "string" ? sql : yield* Template.make(sql)
+    const cmd = create(FlightSql.CommandStatementQuerySchema, { query })
+    const any = anyPack(FlightSql.CommandStatementQuerySchema, cmd)
+    const descriptor = create(Flight.FlightDescriptorSchema, {
+      type: Flight.FlightDescriptor_DescriptorType.CMD,
+      cmd: toBinary(AnySchema, any),
+    })
+
+    const [ticket, schema] = yield* Effect.tryPromise({
+      try: async (signal) => {
+        const headers = new Headers({
+          ...(stream ? { "amp-stream": "true" } : {}),
+          ...(resume !== undefined ? { "amp-resume": blockRangesToResumeWatermark(resume) } : {}),
+        })
+
+        const info = await client.getFlightInfo(descriptor, { signal, headers })
+        const ticket = info.endpoint[0]?.ticket
+        if (ticket === undefined) {
+          throw new Error("Missing flight ticket in response")
+        }
+
+        const table = tableFromIPC(info.schema)
+        return [ticket, table.schema] as const
+      },
+      catch: (cause) => new ArrowFlightError({ cause, method: "getFlightInfo" }),
+    })
+
+    const request = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
+      resume(Effect.sync(() => client.doGet(ticket, { signal })))
+    })
+
+    let meta: Uint8Array
+    const ipc = Stream.fromAsyncIterable(request, (cause) => new ArrowFlightError({ cause, method: "doGet" })).pipe(
+      Stream.map((data) => {
+        // NOTE: This is a hack to forward the app metadata through the stream.
+        meta = data.appMetadata
+        return flightDataToIpc(data)
+      }),
+      Stream.toReadableStream(),
+    )
+
+    const reader = yield* Effect.tryPromise({
+      catch: (cause) => new ArrowFlightError({ cause, method: "doGet" }),
+      try: () => RecordBatchReader.from(ipc),
+    })
+
+    const decode = Schema.decodeSync(Model.RecordBatchMetadataFromFlight)
+    return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause, method: "doGet" })).pipe(
+      Stream.map((data) => {
+        // NOTE: This is a hack but our schemas are stable and the `RecordBatch` constructor creates new schema instances for no reason.
+        ;(data as any).schema = schema
+        const metadata = decode(meta)
+        return new Model.ResponseBatch({ data, metadata })
+      }),
+    )
+  },
+)
 
 /**
  * Creates a new Arrow Flight service instance.
@@ -65,58 +144,28 @@ export class ArrowFlight extends Context.Tag("Amp/ArrowFlight")<ArrowFlight, {
 export const make = (transport: Transport) => {
   const client = createClient(Flight.FlightService, transport)
   const stream: {
-    (sql: TemplateStringsArray): Stream.Stream<ResponseBatch, ArrowFlightError>
-    (sql: string): Stream.Stream<ResponseBatch, ArrowFlightError>
-  } = (sql) =>
-    Effect.gen(function*() {
-      const query = typeof sql === "string" ? sql : yield* Template.make(sql)
-      const cmd = create(FlightSql.CommandStatementQuerySchema, { query })
-      const any = anyPack(FlightSql.CommandStatementQuerySchema, cmd)
-      const descriptor = create(Flight.FlightDescriptorSchema, {
-        type: Flight.FlightDescriptor_DescriptorType.CMD,
-        cmd: toBinary(AnySchema, any),
-      })
+    (
+      sql: TemplateStringsArray,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
+    (
+      sql: string,
+      resume?: ReadonlyArray<Model.BlockRange>,
+    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
+  } = (sql, resume) => createResponseStream(client, sql, true, resume).pipe(Stream.unwrap)
 
-      const info = yield* Effect.tryPromise({
-        try: (signal) => client.getFlightInfo(descriptor, { signal }),
-        catch: (cause) => new ArrowFlightError({ cause, message: "Failed to get flight info" }),
-      })
+  const query = (
+    sql: TemplateStringsArray | string,
+  ): Stream.Stream<RecordBatch, ArrowFlightError> => {
+    const responses = createResponseStream(client, sql, true).pipe(
+      Stream.unwrap,
+      Stream.map((response) => response.data),
+    )
 
-      const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(
-        Option.match({
-          onNone: () => new ArrowFlightError({ message: "No flight ticket found" }),
-          onSome: (ticket) => Effect.succeed(ticket),
-        }),
-      )
+    return responses
+  }
 
-      const request = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
-        resume(Effect.sync(() => client.doGet(ticket, { signal })))
-      })
-
-      const meta: Array<Uint8Array> = []
-      const ipc = Stream.fromAsyncIterable(request, (cause) =>
-        new ArrowFlightError({ cause, message: "Failed to get flight data" })).pipe(
-          Stream.map((data) => {
-            meta.push(data.appMetadata)
-            return flightDataToIpc(data)
-          }),
-          Stream.toReadableStream(),
-        )
-
-      const reader = yield* Effect.tryPromise({
-        catch: (cause) =>
-          new ArrowFlightError({ cause, message: "Failed to get flight data" }),
-        try: () => RecordBatchReader.from(ipc),
-      })
-
-      return Stream.fromAsyncIterable(reader, (cause) =>
-        new ArrowFlightError({ cause, message: "Failed to read record batches" })).pipe(Stream.map((data) => {
-          const metadata = parseMetadata(meta.shift()!)
-          return new ResponseBatch({ data, metadata })
-        }))
-    }).pipe(Stream.unwrap)
-
-  return { client, stream }
+  return { client, stream, query }
 }
 
 /**
@@ -126,6 +175,24 @@ export const make = (transport: Transport) => {
  * @returns A layer for the Arrow Flight service.
  */
 export const layer = (transport: Transport) => Layer.sync(ArrowFlight, () => make(transport))
+
+/**
+ * Converts a list of block ranges into a resume watermark string.
+ *
+ * @param ranges - The block ranges to convert.
+ * @returns A resume watermark string.
+ */
+const blockRangesToResumeWatermark = (ranges: ReadonlyArray<Model.BlockRange>): string => {
+  const watermarks: Record<string, { number: number; hash: string }> = {}
+  for (const range of ranges) {
+    watermarks[range.network] = {
+      number: range.numbers.end,
+      hash: range.hash,
+    }
+  }
+
+  return JSON.stringify(watermarks)
+}
 
 /**
  * Converts a `FlightData` payload into Apache Arrow IPC format.
@@ -145,17 +212,5 @@ const flightDataToIpc = (data: Flight.FlightData) => {
   const bytes = new Uint8Array(buf)
   bytes.set(data.dataHeader, 8)
   bytes.set(data.dataBody, 8 + data.dataHeader.length + padding)
-
   return bytes
-}
-
-const textDecoder = new TextDecoder()
-const decodeMetadata = Schema.decodeUnknownSync(Model.RecordBatchMetadata)
-
-/**
- * Parses the response batch metadata from a Uint8Array.
- */
-const parseMetadata = (bytes: Uint8Array): Model.RecordBatchMetadata => {
-  const text = textDecoder.decode(bytes)
-  return text === "" ? new Model.RecordBatchMetadata({ ranges: [] }) : decodeMetadata(JSON.parse(text))
 }

@@ -3,13 +3,12 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Admin from "./api/Admin.ts"
 import * as Auth from "./Auth.ts"
-import * as ManifestContext from "./ManifestContext.ts"
 import * as Model from "./Model.ts"
 
 export interface ManifestBuildResult {
   metadata: Model.DatasetMetadata
   manifest: Model.DatasetDerived
-  dependencies: ReadonlyArray<Model.DatasetReference>
+  dependencies: Model.DatasetDependencyMap
 }
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
@@ -141,10 +140,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           functions: Object.fromEntries(functions),
         })
 
-        // Parse all dependencies
-        const dependencies = yield* ManifestContext.parseDependencies(config.dependencies)
-
-        return { metadata, manifest, dependencies }
+        return { metadata, manifest, dependencies: config.dependencies }
       })
 
     return { build }

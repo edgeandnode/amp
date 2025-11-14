@@ -399,8 +399,8 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                 version_tag: versionTag,
                 manifest,
                 kind: manifest.kind,
-                ancestors: Array.map(dependencies, (dep) =>
-                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
+                ancestors: Array.map(Object.values(dependencies), (dep) =>
+                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceString),
                 changelog,
               }),
             )
@@ -447,8 +447,8 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                 version_tag: versionTag,
                 manifest,
                 kind: manifest.kind,
-                ancestors: Array.map(dependencies, (dep) =>
-                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
+                ancestors: Array.map(Object.values(dependencies), (dep) =>
+                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceString),
                 changelog,
               }),
             }),
@@ -475,7 +475,7 @@ export const layer = AmpRegistryService.Default
 export class AmpRegistryDatasetVersionAncestryDto extends Schema.Class<AmpRegistryDatasetVersionAncestryDto>(
   "Amp/Registry/Models/AmpRegistryDatasetVersionAncestryDto",
 )({
-  dataset_reference: Model.DatasetReferenceStr,
+  dataset_reference: Model.DatasetReferenceString,
 }) {}
 
 export class AmpRegistryDatasetVersionDto
@@ -483,7 +483,7 @@ export class AmpRegistryDatasetVersionDto
     status: Schema.Literal("draft", "published", "deprecated", "archived"),
     created_at: Schema.String,
     version_tag: Model.DatasetRevision,
-    dataset_reference: Model.DatasetReferenceStr,
+    dataset_reference: Model.DatasetReferenceString,
     changelog: Schema.String.pipe(Schema.optionalWith({ nullable: true })),
     ancestors: Schema.Array(AmpRegistryDatasetVersionAncestryDto).pipe(Schema.optionalWith({ nullable: true })),
     descendants: Schema.Array(AmpRegistryDatasetVersionAncestryDto).pipe(Schema.optionalWith({ nullable: true })),
@@ -505,7 +505,7 @@ export class AmpRegistryDatasetDto
     source: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
     visibility: Schema.Literal("private", "public"),
     owner: Schema.Union(Schema.NonEmptyTrimmedString, Model.Address),
-    dataset_reference: Model.DatasetReferenceStr.pipe(Schema.optionalWith({ nullable: true })),
+    dataset_reference: Model.DatasetReferenceString.pipe(Schema.optionalWith({ nullable: true })),
     latest_version: AmpRegistryDatasetVersionDto.pipe(Schema.optionalWith({ nullable: true })),
     versions: Schema.Array(AmpRegistryDatasetVersionDto).pipe(Schema.optionalWith({ nullable: true })),
   })
@@ -558,7 +558,7 @@ export class AmpRegistryInsertDatasetVersionDto
     version_tag: Model.DatasetRevision,
     manifest: Model.DatasetManifest,
     kind: Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose"),
-    ancestors: Schema.Array(Model.DatasetReferenceStr),
+    ancestors: Schema.Array(Model.DatasetReferenceString),
   })
 {}
 

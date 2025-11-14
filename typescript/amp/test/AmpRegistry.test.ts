@@ -82,7 +82,7 @@ const mockManifestContext: ManifestContext.DatasetContext = {
     visibility: "public",
   }),
   manifest: mockManifest,
-  dependencies: [],
+  dependencies: {},
 }
 
 const mockErrorResponse = AmpRegistry.AmpRegistryErrorResponseDto.make({
@@ -1357,13 +1357,13 @@ describe("AmpRegistryService", () => {
 
         const contextWithDependencies: ManifestContext.DatasetContext = {
           ...mockManifestContext,
-          dependencies: [
-            Model.DatasetReference.make({
+          dependencies: {
+            mainnet: Model.DatasetReference.make({
               namespace: "edgeandnode",
               name: "mainnet",
               revision: "1.0.0",
             }),
-          ],
+          },
         }
 
         const result = yield* service.publishFlow({
@@ -1427,7 +1427,7 @@ describe("AmpRegistryService", () => {
             // status and visibility will use defaults
           }),
           manifest: mockManifest,
-          dependencies: [],
+          dependencies: {},
         }
 
         const result = yield* service.publishFlow({

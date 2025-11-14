@@ -13,7 +13,7 @@ export const deploy = Command.make("deploy", {
   args: {
     reference: Options.text("reference").pipe(
       Options.withDescription("The dataset reference to deploy (<namespace>/<name>@<revision>)"),
-      Options.withSchema(Model.DatasetReferenceStr),
+      Options.withSchema(Model.DatasetReferenceFromString),
       Options.optional,
     ),
     configFile: configFile.pipe(Options.optional),
@@ -29,32 +29,24 @@ export const deploy = Command.make("deploy", {
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const admin = yield* Admin.Admin
-
-      // Determine dataset name and revision
-      let namespace: Model.DatasetNamespace
-      let name: Model.DatasetName
-      let revision: Model.DatasetRevision
-
-      if (Option.isSome(args.reference)) {
-        // Parse the reference to extract name and revision
-        const ref = yield* Model.parseDatasetReference(args.reference.value)
-        namespace = ref.namespace
-        name = ref.name
-        revision = ref.revision
-      } else {
-        // Get dataset from ManifestContext and use "dev" tag
-        const context = yield* ManifestContext.ManifestContext
-        namespace = context.metadata.namespace
-        name = context.metadata.name
-        revision = "dev" as const
-      }
+      const dataset = yield* Option.match(args.reference, {
+        onSome: (dataset) => Effect.succeed(dataset),
+        onNone: () =>
+          ManifestContext.ManifestContext.pipe(Effect.map(({ metadata }) =>
+            new Model.DatasetReference({
+              name: metadata.name,
+              namespace: metadata.namespace,
+              revision: "dev",
+            })
+          )),
+      })
 
       // Deploy the dataset
-      yield* admin.deployDataset(namespace, name, revision, {
+      yield* admin.deployDataset(dataset.namespace, dataset.name, dataset.revision, {
         endBlock: Option.getOrUndefined(args.endBlock),
       })
 
-      yield* Console.log(`Deployment started for dataset ${namespace}/${name}@${revision}`)
+      yield* Console.log(`Deployment started for dataset ${dataset.namespace}/${dataset.name}@${dataset.revision}`)
     }),
   ),
   Command.provide(({ args }) =>
