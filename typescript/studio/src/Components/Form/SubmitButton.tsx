@@ -1,6 +1,6 @@
 "use client"
 
-import { Button, type ButtonProps } from "@graphprotocol/gds-react"
+import { Button, Keyboard, type ButtonProps } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
 
 import { classNames } from "@/utils/classnames"
@@ -33,31 +33,25 @@ export function SubmitButton({ children, status, ...rest }: SubmitButtonProps) {
           disabled={!state.canSubmit || !state.valid}
           data-state={status}
           variant={rest.variant || "secondary"}
-          addonAfter={
-            <span className="ml-4 rounded-4 border bg-space-1500 border-space-1300 text-white py-1 px-1.5 flex flex-col items-center justify-center">
-              {ctrlKey}⏎
-            </span>
-          }
+          addonAfter={<Keyboard>{ctrlKey}⏎</Keyboard>}
           className={classNames(
-            "data-[state=error]:bg-red-600 data-[state=error]:hover:bg-red-500 data-[state=error]:focus-visible:bg-red-500 data-[state=success]:focus-visible:bg-green-500",
-            "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
+            "data-[state=error]:bg-status-error-default data-[state=error]:hover:bg-status-error-elevated",
+            "data-[state=success]:bg-status-success-default data-[state=success]:hover:bg-status-success-elevated"
           )}
         >
-          {status === "success" ?
-            (
-              <>
-                <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
-                {children}
-              </>
-            ) :
-            status === "error" ?
-            (
-              <>
-                <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
-                Error
-              </>
-            ) :
-            children}
+          {status === "success" ? (
+            <>
+              <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
+              {children}
+            </>
+          ) : status === "error" ? (
+            <>
+              <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
+              Error
+            </>
+          ) : (
+            children
+          )}
         </Button>
       )}
     </form.Subscribe>

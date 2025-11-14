@@ -6,11 +6,11 @@ export function ErrorMessages({
   errors: Array<string | { message: string }>
 }>) {
   return (
-    <div id={id} className="mt-2 flex flex-col gap-y-1 w-full">
+    <div id={id} className="mt-2 flex flex-col gap-1">
       {errors.map((error, idx) => {
         const key = `${id}__errorMessage__${idx}`
         return (
-          <div key={key} className="text-14 text-sonja-600 w-full">
+          <div key={key} className="text-14 text-status-error-default">
             {typeof error === "string" ? error : error.message}
           </div>
         )
