@@ -36,7 +36,7 @@ export const deploy = Command.make("deploy", {
             new Model.DatasetReference({
               name: metadata.name,
               namespace: metadata.namespace,
-              revision: "dev",
+              revision: Model.DatasetTag.make("dev"),
             })
           )),
       })

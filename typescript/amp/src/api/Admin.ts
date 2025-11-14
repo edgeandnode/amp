@@ -366,7 +366,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
     namespace: Model.DatasetNamespace,
     name: Model.DatasetName,
     manifest: Model.DatasetManifest,
-    version?: Model.DatasetVersion | undefined,
+    version?: Model.DatasetRevision | undefined,
     bearerToken?: string | undefined,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
@@ -477,7 +477,7 @@ export const make = Effect.fn(function*(url: string) {
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       manifest: Model.DatasetManifest,
-      version?: Model.DatasetVersion | undefined,
+      version?: Model.DatasetRevision | undefined,
       bearerToken?: string,
     ) {
       const request = client.dataset.registerDataset({

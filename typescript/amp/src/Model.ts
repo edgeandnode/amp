@@ -11,8 +11,6 @@ export class TableDefinition extends Schema.Class<TableDefinition>(
 
 export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
-export const DEFAULT_NAMESPACE = "_"
-
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
     title: "Network",
@@ -28,10 +26,13 @@ export const DatasetNamespace = Schema.String.pipe(
   Schema.annotations({
     title: "DatasetNamespace",
     description:
-      `the namespace/owner of the dataset. If not specified, defaults to "${DEFAULT_NAMESPACE}". Must contain only lowercase letters, digits, and underscores.`,
+      `the namespace/owner of the dataset. If not specified, defaults to "_". Must contain only lowercase letters, digits, and underscores.`,
     examples: ["edgeandnode", "0xdeadbeef", "my_org", "_"],
   }),
+  Schema.brand("DatasetNamespace"),
 )
+
+export const DEFAULT_NAMESPACE = DatasetNamespace.make("_")
 
 export type DatasetName = typeof DatasetName.Type
 export const DatasetName = Schema.String.pipe(
@@ -43,6 +44,7 @@ export const DatasetName = Schema.String.pipe(
       "the name of the dataset (must start with lowercase letter or underscore, followed by lowercase letters, digits, or underscores)",
     examples: ["uniswap"],
   }),
+  Schema.brand("DatasetName"),
 )
 
 export type DatasetKind = typeof DatasetKind.Type
@@ -52,6 +54,7 @@ export const DatasetKind = Schema.Literal("manifest", "evm-rpc", "eth-beacon", "
     description: "the kind of dataset",
     examples: ["manifest", "evm-rpc", "eth-beacon", "firehose"],
   }),
+  Schema.brand("DatasetKind"),
 )
 
 export type DatasetVersion = typeof DatasetVersion.Type
@@ -64,6 +67,7 @@ export const DatasetVersion = Schema.String.pipe(
     description: "a semantic version number (e.g. \"4.1.3\")",
     examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123", "1.0.0+1234567890"],
   }),
+  Schema.brand("DatasetVersion"),
 )
 
 export type DatasetHash = typeof DatasetHash.Type
@@ -75,40 +79,38 @@ export const DatasetHash = Schema.String.pipe(
     description: "a 32-byte SHA-256 hash (64 hex characters)",
     examples: ["b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"],
   }),
+  Schema.brand("DatasetHash"),
 )
 
-export type DatasetLatestTag = typeof DatasetLatestTag.Type
-export const DatasetLatestTag = Schema.Literal("latest").pipe(
+export type DatasetTag = typeof DatasetTag.Type
+export const DatasetTag = Schema.Literal("latest", "dev").pipe(
   Schema.annotations({
-    title: "DatasetLatestTag",
-    description: "the 'latest' tag pointing to the most recent version",
+    title: "DatasetTag",
+    description: "a tag for a dataset version",
+    examples: ["latest", "dev"],
   }),
-)
-
-export type DatasetDevTag = typeof DatasetDevTag.Type
-export const DatasetDevTag = Schema.Literal("dev").pipe(
-  Schema.annotations({
-    title: "DatasetDevTag",
-    description: "the 'dev' tag for development versions",
-  }),
+  Schema.brand("DatasetTag"),
 )
 
 export type DatasetRevision =
-  | DatasetLatestTag
-  | DatasetDevTag
+  | DatasetTag
   | DatasetVersion
   | DatasetHash
 
 export const DatasetRevision: Schema.Schema<DatasetRevision, string> = Schema.Union(
   DatasetVersion,
   DatasetHash,
-  DatasetLatestTag,
-  DatasetDevTag,
+  DatasetTag,
 ).pipe(
   Schema.annotations({
     title: "DatasetRevision",
     description: "a dataset revision reference (semver tag, 64-char hex hash, 'latest', or 'dev')",
-    examples: ["1.0.0", "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", "latest", "dev"],
+    examples: [
+      DatasetVersion.make("1.0.0"),
+      DatasetHash.make("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
+      DatasetTag.make("latest"),
+      DatasetTag.make("dev"),
+    ],
   }),
 )
 

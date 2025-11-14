@@ -14,7 +14,7 @@ export const register = Command.make("register", {
   args: {
     tag: Options.text("tag").pipe(
       Options.withDescription("Dataset version (semver) or 'dev' tag"),
-      Options.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetDevTag)),
+      Options.withSchema(Schema.Union(Model.DatasetVersion, Model.DatasetTag)),
       Options.optional,
     ),
     configFile: configFile.pipe(Options.optional),
