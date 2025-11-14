@@ -1,10 +1,10 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf, sync::Arc, time::Duration};
 
 use datafusion::{
     error::DataFusionError,
     execution::{
         disk_manager::{DiskManagerBuilder, DiskManagerMode},
-        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
+        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool, TrackConsumersPool},
         runtime_env::RuntimeEnvBuilder,
     },
     parquet::{
@@ -511,12 +511,7 @@ impl Config {
 
         let memory_pool: Option<Arc<dyn MemoryPool>> = if self.max_mem_mb > 0 {
             let max_mem_bytes = self.max_mem_mb * 1024 * 1024;
-
-            if spill_allowed {
-                Some(Arc::new(FairSpillPool::new(max_mem_bytes)))
-            } else {
-                Some(Arc::new(GreedyMemoryPool::new(max_mem_bytes)))
-            }
+            make_memory_pool(spill_allowed, max_mem_bytes)
         } else {
             None
         };
@@ -555,6 +550,24 @@ impl Config {
         )
         .await
         .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
+    }
+}
+
+fn make_memory_pool(
+    spill_allowed: bool,
+    max_mem_bytes: usize,
+) -> Option<Arc<dyn MemoryPool + 'static>> {
+    let report_top_k_consumers = NonZeroUsize::new(5).unwrap();
+    if spill_allowed {
+        Some(Arc::new(TrackConsumersPool::new(
+            FairSpillPool::new(max_mem_bytes),
+            report_top_k_consumers,
+        )))
+    } else {
+        Some(Arc::new(TrackConsumersPool::new(
+            GreedyMemoryPool::new(max_mem_bytes),
+            report_top_k_consumers,
+        )))
     }
 }
 
