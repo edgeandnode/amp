@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Model from "../Model.ts"
+import * as Model from "../Model.js"
 import * as Flight from "../proto/Flight_pb.ts"
 import * as FlightSql from "../proto/FlightSql_pb.ts"
 
@@ -75,7 +75,7 @@ const createResponseStream: (
   sql: string | TemplateStringsArray,
   stream?: boolean,
   resume?: ReadonlyArray<Model.BlockRange>,
-) => Effect.Effect<Stream.Stream<Model.ResponseBatch, ArrowFlightError>, ArrowFlightError> = Effect.fn(
+) => Effect.Effect<Stream.Stream<[RecordBatch, Uint8Array], ArrowFlightError>, ArrowFlightError> = Effect.fn(
   function*(client, sql, stream, resume) {
     const query = typeof sql === "string" ? sql : yield* Template.make(sql)
     const cmd = create(FlightSql.CommandStatementQuerySchema, { query })
@@ -88,7 +88,7 @@ const createResponseStream: (
     const [ticket, schema] = yield* Effect.tryPromise({
       try: async (signal) => {
         const headers = new Headers({
-          ...(stream ? { "amp-stream": "true" } : {}),
+          ...(stream === true ? { "amp-stream": "true" } : {}),
           ...(resume !== undefined ? { "amp-resume": blockRangesToResumeWatermark(resume) } : {}),
         })
 
@@ -123,13 +123,11 @@ const createResponseStream: (
       try: () => RecordBatchReader.from(ipc),
     })
 
-    const decode = Schema.decodeSync(Model.RecordBatchMetadataFromFlight)
     return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause, method: "doGet" })).pipe(
       Stream.map((data) => {
         // NOTE: This is a hack but our schemas are stable and the `RecordBatch` constructor creates new schema instances for no reason.
         ;(data as any).schema = schema
-        const metadata = decode(meta)
-        return new Model.ResponseBatch({ data, metadata })
+        return [data, meta] as const
       }),
     )
   },
@@ -142,6 +140,7 @@ const createResponseStream: (
  * @returns A new Arrow Flight service instance.
  */
 export const make = (transport: Transport) => {
+  const decode = Schema.decodeSync(Model.RecordBatchMetadataFromFlight)
   const client = createClient(Flight.FlightService, transport)
   const stream: {
     (
@@ -152,14 +151,18 @@ export const make = (transport: Transport) => {
       sql: string,
       resume?: ReadonlyArray<Model.BlockRange>,
     ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
-  } = (sql, resume) => createResponseStream(client, sql, true, resume).pipe(Stream.unwrap)
+  } = (sql, resume) =>
+    createResponseStream(client, sql, true, resume).pipe(
+      Stream.unwrap,
+      Stream.map(([data, metadata]) => new Model.ResponseBatch({ data, metadata: decode(metadata) })),
+    )
 
   const query = (
     sql: TemplateStringsArray | string,
   ): Stream.Stream<RecordBatch, ArrowFlightError> => {
-    const responses = createResponseStream(client, sql, true).pipe(
+    const responses = createResponseStream(client, sql).pipe(
       Stream.unwrap,
-      Stream.map((response) => response.data),
+      Stream.map(([data]) => data),
     )
 
     return responses

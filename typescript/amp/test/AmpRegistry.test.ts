@@ -65,7 +65,13 @@ const mockNewVersionDto = AmpRegistry.AmpRegistryDatasetVersionDto.make({
 
 const mockManifest = Model.DatasetDerived.make({
   kind: "manifest",
-  dependencies: {},
+  dependencies: {
+    mainnet: Model.DatasetReference.make({
+      namespace: Model.DatasetNamespace.make("edgeandnode"),
+      name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
+      revision: Model.DatasetVersion.make("1.0.0"),
+    }),
+  },
   tables: {},
   functions: {},
 })
@@ -82,7 +88,6 @@ const mockManifestContext: ManifestContext.DatasetContext = {
     visibility: "public",
   }),
   manifest: mockManifest,
-  dependencies: {},
 }
 
 const mockErrorResponse = AmpRegistry.AmpRegistryErrorResponseDto.make({
@@ -1372,21 +1377,21 @@ describe("AmpRegistryService", () => {
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: Model.DatasetName.make("mainnet"),
+                network: Model.Network.make("mainnet"),
               }),
               transactions: Model.Table.make({
                 input: Model.TableInput.make({ sql: "SELECT * FROM transactions" }),
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: Model.DatasetName.make("mainnet"),
+                network: Model.Network.make("mainnet"),
               }),
               logs: Model.Table.make({
                 input: Model.TableInput.make({ sql: "SELECT * FROM logs" }),
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: "sepolia",
+                network: Model.Network.make("sepolia"),
               }),
             },
             functions: {},
@@ -1447,20 +1452,9 @@ describe("AmpRegistryService", () => {
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
-        const contextWithDependencies: ManifestContext.DatasetContext = {
-          ...mockManifestContext,
-          dependencies: {
-            mainnet: Model.DatasetReference.make({
-              namespace: Model.DatasetNamespace.make("edgeandnode"),
-              name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
-              revision: Model.DatasetVersion.make("1.0.0"),
-            }),
-          },
-        }
-
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
-          context: contextWithDependencies,
+          context: mockManifestContext,
           versionTag: Model.DatasetVersion.make("1.1.0"),
         })
 
@@ -1519,7 +1513,6 @@ describe("AmpRegistryService", () => {
             // status and visibility will use defaults
           }),
           manifest: mockManifest,
-          dependencies: {},
         }
 
         const result = yield* service.publishFlow({

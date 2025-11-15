@@ -1,14 +1,11 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Admin from "./api/Admin.ts"
-import * as Auth from "./Auth.ts"
 import * as Model from "./Model.ts"
 
 export interface ManifestBuildResult {
   metadata: Model.DatasetMetadata
   manifest: Model.DatasetDerived
-  dependencies: Model.DatasetDependencyMap
 }
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
@@ -18,15 +15,13 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 }> {}
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/ManifestBuilder", {
-  dependencies: [Auth.layer],
   effect: Effect.gen(function*() {
     const client = yield* Admin.Admin
-    const auth = yield* Auth.AuthService
     const build = (config: Model.DatasetConfig) =>
       Effect.gen(function*() {
         // Extract metadata
         const metadata = new Model.DatasetMetadata({
-          namespace: config.namespace ?? Model.DEFAULT_NAMESPACE,
+          namespace: config.namespace ?? Model.DatasetNamespace.make("_"),
           name: config.name,
           readme: config.readme,
           repository: config.repository,
@@ -36,15 +31,6 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           visibility: config.private ? "private" : "public",
           sources: config.sources,
         })
-
-        // Check if the user is authenticated.
-        // This is required for fetching the output schema from the public cluster controller.
-        const maybeAccessToken = yield* auth.get().pipe(
-          Effect.map(Option.match({
-            onNone: () => undefined,
-            onSome: (storage) => storage.accessToken,
-          })),
-        )
 
         // Build manifest tables - send all tables in one request
         const tables = yield* Effect.gen(function*() {
@@ -80,13 +66,13 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           )
 
           // Call schema endpoint with all tables and functions at once
-          const request = new Model.SchemaRequest({
+          const request = new Admin.GetOutputSchemaPayload({
             tables: tableSqlMap,
             dependencies: config.dependencies,
             functions: Object.keys(functionsMap).length > 0 ? functionsMap : undefined,
           })
 
-          const response = yield* client.getOutputSchema(request, maybeAccessToken).pipe(
+          const response = yield* client.getOutputSchema(request).pipe(
             Effect.catchAll((cause) =>
               Effect.fail(
                 new ManifestBuilderError({
@@ -117,7 +103,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
               })
             }
 
-            const network = tableSchema.networks[0]
+            const network = Model.Network.make(tableSchema.networks[0])
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({ input, schema: tableSchema.schema, network })
 
@@ -140,7 +126,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
           functions: Object.fromEntries(functions),
         })
 
-        return { metadata, manifest, dependencies: config.dependencies }
+        return { metadata, manifest }
       })
 
     return { build }

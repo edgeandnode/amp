@@ -15,7 +15,6 @@ export class ManifestContextError extends Data.TaggedError("ManifestContextError
 export interface DatasetContext {
   metadata: Model.DatasetMetadata
   manifest: Model.DatasetManifest
-  dependencies: Model.DatasetDependencyMap
 }
 
 export const ManifestContext = Context.GenericTag<DatasetContext>("Amp/ManifestContext")
@@ -30,7 +29,6 @@ const fromConfigFile = (file: string) =>
     return {
       metadata: buildResult.metadata,
       manifest: buildResult.manifest,
-      dependencies: buildResult.dependencies,
     }
   })
 

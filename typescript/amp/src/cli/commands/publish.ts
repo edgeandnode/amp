@@ -55,8 +55,6 @@ export const publish = Command.make("publish", {
         metadata.name,
         context.manifest,
         args.tag,
-        // Admin API running on the test cluster requires passing the Authoriztion Bearer token to the request
-        authStorage.accessToken,
       ).pipe(
         Effect.tap(() => Console.info("Dataset successfully registered with Amp")),
       )
@@ -64,7 +62,7 @@ export const publish = Command.make("publish", {
       yield* Console.info(
         `Deploying your Dataset to Amp ${metadata.namespace}/${metadata.name}@${args.tag}. This will start indexing`,
       )
-      yield* client.deployDataset(metadata.namespace, metadata.name, args.tag, undefined, authStorage.accessToken).pipe(
+      yield* client.deployDataset(metadata.namespace, metadata.name, args.tag).pipe(
         Effect.tap(() => Console.info("Dataset successfully deployed to Amp")),
         Effect.catchTag("DatasetNotFound", (e) =>
           Console.error(

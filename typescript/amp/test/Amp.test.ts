@@ -56,7 +56,6 @@ Testing.layer((it) => {
       yield* Testing.waitForJobCompletion(job.jobId)
 
       const response = yield* admin.getDatasetVersion(namespace, name, Model.DatasetTag.make("dev"))
-      assertInstanceOf(response, Model.DatasetVersionInfo)
       deepStrictEqual(response.name, name)
     }),
   )
@@ -65,12 +64,8 @@ Testing.layer((it) => {
     "can fetch a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetVersion(
-        Model.DatasetNamespace.make("_"),
-        Model.DatasetName.make("anvil"),
-        Model.DatasetTag.make("dev"),
-      )
-      assertInstanceOf(result, Model.DatasetVersionInfo)
+      const dataset = Model.DatasetReference.decode("anvil")
+      const result = yield* api.getDatasetVersion(dataset.namespace, dataset.name, dataset.revision)
       assertEquals(result.namespace, "_")
       assertEquals(result.name, "anvil")
       assertEquals(result.revision, "dev")
@@ -82,14 +77,11 @@ Testing.layer((it) => {
     "can fetch the manifest for an evm-rpc dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetManifest(
-        Model.DatasetNamespace.make("_"),
-        Model.DatasetName.make("anvil"),
-        Model.DatasetVersion.make("0.0.1"),
-      )
+      const dataset = Model.DatasetReference.decode("anvil@0.0.1")
+      const result = yield* api.getDatasetManifest(dataset.namespace, dataset.name, dataset.revision)
       assertEquals(result.kind, "evm-rpc")
       assertEquals(result.network, "anvil")
-      deepStrictEqual(typeof result.tables, "object")
+      assertEquals(typeof result.tables, "object")
     }),
   )
 
@@ -97,18 +89,14 @@ Testing.layer((it) => {
     "can fetch the output schema of a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const request = new Model.SchemaRequest({
+      const request = new Admin.GetOutputSchemaPayload({
         tables: { query: "SELECT * FROM anvil.transactions" },
         dependencies: {
-          anvil: new Model.DatasetReference({
-            namespace: Model.DatasetNamespace.make("_"),
-            name: Model.DatasetName.make("anvil"),
-            revision: Model.DatasetVersion.make("0.0.1"),
-          }),
+          anvil: Model.DatasetReference.decode("anvil/0.0.1"),
         },
       })
       const result = yield* api.getOutputSchema(request)
-      assertInstanceOf(result, Model.SchemaResponse)
+      assertInstanceOf(result, Admin.GetOutputSchemaResponse)
       assertInstanceOf(result.schemas.query, Model.TableSchemaWithNetworks)
     }),
   )
@@ -120,36 +108,22 @@ Testing.layer((it) => {
       const fixtures = yield* Fixtures.Fixtures
 
       // Register and dump the example manifest.
-      const namespace = Model.DatasetNamespace.make("_")
-      const name = Model.DatasetName.make("example")
-      const version = Model.DatasetVersion.make("0.0.1")
+      const {
+        name,
+        namespace,
+        revision,
+      } = Model.DatasetReference.decode("example@0.0.1")
 
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetDerived)
-      yield* admin.registerDataset(
-        namespace,
-        name,
-        dataset,
-        version,
-      )
-
-      const job = yield* admin.deployDataset(
-        namespace,
-        name,
-        version,
-        {
-          endBlock: "5",
-        },
-      )
+      yield* admin.registerDataset(namespace, name, dataset, revision)
+      const job = yield* admin.deployDataset(namespace, name, revision, {
+        endBlock: "5",
+      })
 
       // Wait for the job to complete
       yield* Testing.waitForJobCompletion(job.jobId)
 
-      const response = yield* admin.getDatasetVersion(
-        namespace,
-        name,
-        Model.DatasetTag.make("dev"),
-      )
-      assertInstanceOf(response, Model.DatasetVersionInfo)
+      const response = yield* admin.getDatasetVersion(namespace, name, revision)
       deepStrictEqual(response.name, "example")
     }),
   )
@@ -158,11 +132,8 @@ Testing.layer((it) => {
     "can fetch the schema for a dataset version",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetManifest(
-        Model.DatasetNamespace.make("_"),
-        Model.DatasetName.make("example"),
-        Model.DatasetTag.make("dev"),
-      )
+      const dataset = Model.DatasetReference.decode("example")
+      const result = yield* api.getDatasetManifest(dataset.namespace, dataset.name, dataset.revision)
       assertEquals(result.kind, "manifest")
       assertEquals(result.network, undefined)
       deepStrictEqual(typeof result.tables, "object")
@@ -175,9 +146,9 @@ Testing.layer((it) => {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasets()
       const example = result.datasets.find((dataset) => dataset.name === "example")
-      assertInstanceOf(example, Model.DatasetSummary)
+      assertInstanceOf(example, Admin.GetDatasetsResponse)
       const anvil = result.datasets.find((dataset) => dataset.name === "anvil")
-      assertInstanceOf(anvil, Model.DatasetSummary)
+      assertInstanceOf(anvil, Admin.GetDatasetsResponse)
     }),
   )
 

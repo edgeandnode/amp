@@ -38,7 +38,7 @@ export const query = Command.make("query", {
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const flight = yield* ArrowFlight.ArrowFlight
-      const table = yield* flight.stream(args.query).pipe(
+      const table = yield* flight.query(args.query).pipe(
         Stream.runCollect,
         Effect.map((_) => Chunk.toArray(_)),
         Effect.map((array) =>

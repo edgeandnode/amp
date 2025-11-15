@@ -3,20 +3,15 @@ import * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
 import { isAddress } from "viem"
 
-export class TableDefinition extends Schema.Class<TableDefinition>(
-  "TableDefinition",
-)({
-  sql: Schema.String,
-}) {}
-
 export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
     title: "Network",
-    description: "the network of a dataset or provider",
-    examples: ["eth_mainnet"],
+    description: "a blockchain network",
+    examples: ["mainnet"],
   }),
+  Schema.brand("Network"),
 )
 
 export type DatasetNamespace = typeof DatasetNamespace.Type
@@ -31,8 +26,6 @@ export const DatasetNamespace = Schema.String.pipe(
   }),
   Schema.brand("DatasetNamespace"),
 )
-
-export const DEFAULT_NAMESPACE = DatasetNamespace.make("_")
 
 export type DatasetName = typeof DatasetName.Type
 export const DatasetName = Schema.String.pipe(
@@ -92,12 +85,8 @@ export const DatasetTag = Schema.Literal("latest", "dev").pipe(
   Schema.brand("DatasetTag"),
 )
 
-export type DatasetRevision =
-  | DatasetTag
-  | DatasetVersion
-  | DatasetHash
-
-export const DatasetRevision: Schema.Schema<DatasetRevision, string> = Schema.Union(
+export type DatasetRevision = typeof DatasetRevision.Type
+export const DatasetRevision = Schema.Union(
   DatasetVersion,
   DatasetHash,
   DatasetTag,
@@ -115,7 +104,7 @@ export const DatasetRevision: Schema.Schema<DatasetRevision, string> = Schema.Un
 )
 
 export type DatasetReferenceString = typeof DatasetReferenceString.Type
-export const DatasetReferenceString: Schema.Schema<string, string> = Schema.String.pipe(
+export const DatasetReferenceString = Schema.String.pipe(
   Schema.pattern(/^[a-z0-9_]+\/[a-z_][a-z0-9_]*@.+$/),
   Schema.annotations({
     title: "DatasetReferenceString",
@@ -124,7 +113,6 @@ export const DatasetReferenceString: Schema.Schema<string, string> = Schema.Stri
       "edgeandnode/mainnet@1.0.0",
       "edgeandnode/mainnet@latest",
       "edgeandnode/mainnet@dev",
-      "0xdeadbeef/eth_firehose@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
     ],
   }),
 )
@@ -133,7 +121,15 @@ export class DatasetReference extends Schema.Class<DatasetReference>("DatasetRef
   namespace: DatasetNamespace,
   name: DatasetName,
   revision: DatasetRevision,
-}) {}
+}) {
+  static decode(value: string): DatasetReference {
+    return Schema.decodeSync(DatasetReferenceFromString)(value)
+  }
+
+  encode(this: DatasetReference) {
+    return Schema.encodeSync(DatasetReferenceFromString)(this)
+  }
+}
 
 export const DatasetReferenceFromString: Schema.Schema<DatasetReference, string> = DatasetReferenceString.pipe(
   Schema.transformOrFail(DatasetReference, {
@@ -224,29 +220,9 @@ export class FunctionDefinition extends Schema.Class<FunctionDefinition>("Functi
   outputType: Schema.String,
 }) {}
 
-export type DatasetTableMap = typeof DatasetTableMap.Type
-export const DatasetTableMap = Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(
-  Schema.annotations({
-    title: "Table Map",
-    description: "a map of table names to their definitions",
-  }),
-)
-
-export type DatasetDependencyMap = typeof DatasetDependencyMap.Type
-export const DatasetDependencyMap = Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }).pipe(
-  Schema.annotations({
-    title: "Dependency Reference Map",
-    description: "a map of dataset names to their references",
-  }),
-)
-
-export type DatasetFunctionDefinitionMap = typeof DatasetFunctionDefinitionMap.Type
-export const DatasetFunctionDefinitionMap = Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(
-  Schema.annotations({
-    title: "Function Definition Map",
-    description: "a map of function names to their definitions",
-  }),
-)
+export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinition")({
+  sql: Schema.String,
+}) {}
 
 export class DatasetMetadata extends Schema.Class<DatasetMetadata>("DatasetMetadata")({
   namespace: DatasetNamespace,
@@ -274,9 +250,9 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>("DatasetConfig")(
   sources: Schema.Array(DatasetSource).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   private: Schema.Boolean.pipe(Schema.optional),
-  dependencies: DatasetDependencyMap,
-  tables: DatasetTableMap.pipe(Schema.optional),
-  functions: DatasetFunctionDefinitionMap.pipe(Schema.optional),
+  dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }),
+  tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
+  functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
 }, {
   title: "Dataset Configuration",
   description: "configuration for a dataset",
@@ -298,32 +274,6 @@ export class DatasetInfo extends Schema.Class<DatasetInfo>("DatasetInfo")({
   name: DatasetName,
   kind: DatasetKind,
   tables: Schema.Array(TableInfo),
-}) {}
-
-export class DatasetVersionInfo extends Schema.Class<DatasetVersionInfo>("DatasetVersionInfo")({
-  namespace: Schema.String,
-  name: DatasetName,
-  revision: Schema.String,
-  manifestHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("manifest_hash")),
-  kind: Schema.String,
-}) {}
-
-export class DatasetSummary extends Schema.Class<DatasetSummary>("DatasetSummary")({
-  namespace: Schema.String,
-  name: Schema.String,
-  latestVersion: Schema.optional(Schema.String).pipe(Schema.fromKey("latest_version")),
-  versions: Schema.Array(Schema.String),
-}) {}
-
-export class DatasetsResponse extends Schema.Class<DatasetsResponse>("DatasetsResponse")({
-  datasets: Schema.Array(DatasetSummary),
-}) {}
-
-/**
- * Response for listing versions of a specific dataset
- */
-export class DatasetVersionsResponse extends Schema.Class<DatasetVersionsResponse>("DatasetVersionsResponse")({
-  versions: Schema.Array(DatasetVersion),
 }) {}
 
 export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
@@ -369,7 +319,7 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionMa
 
 export class DatasetDerived extends Schema.Class<DatasetDerived>("DatasetDerived")({
   kind: Schema.Literal("manifest"),
-  dependencies: DatasetDependencyMap,
+  dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
 }) {}
@@ -377,24 +327,24 @@ export class DatasetDerived extends Schema.Class<DatasetDerived>("DatasetDerived
 export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")({
   kind: Schema.Literal("evm-rpc"),
   network: Network,
-  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
-  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  startBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalizedBlocksOnly: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
 export class DatasetEthBeacon extends Schema.Class<DatasetEthBeacon>("DatasetEthBeacon")({
   kind: Schema.Literal("eth-beacon"),
   network: Network,
-  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
-  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  startBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalizedBlocksOnly: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
 export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFirehose")({
   kind: Schema.Literal("firehose"),
   network: Network,
-  start_block: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
-  finalized_blocks_only: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
+  startBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  finalizedBlocksOnly: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
@@ -417,6 +367,9 @@ export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider
   kind: Schema.Literal("evm-rpc"),
   network: Network,
   url: Schema.URL,
+}, {
+  title: "EvmRpcProvider",
+  description: "an evm-rpc provider definition",
 }) {}
 
 export const Provider = Schema.Union(EvmRpcProvider).pipe(
@@ -465,31 +418,63 @@ export class JobInfo extends Schema.Class<JobInfo>("JobInfo")({
   descriptor: Schema.Any,
 }) {}
 
+export const BlockNumber = Schema.NonNegativeInt.pipe(
+  Schema.annotations({
+    title: "BlockNumber",
+    description: "a block number",
+  }),
+  Schema.brand("BlockNumber"),
+)
+
 export class BlockRange extends Schema.Class<BlockRange>("BlockRange")({
-  network: Schema.String,
+  network: Network,
   numbers: Schema.Struct({
     start: Schema.Number,
     end: Schema.Number,
   }),
   hash: Schema.String,
   prevHash: Schema.String.pipe(Schema.optional),
+}, {
+  title: "BlockRange",
+  description: "a range of blocks on a given network",
 }) {}
+
+export type BlockRanges = typeof BlockRanges.Type
+export const BlockRanges = Schema.Array(BlockRange).pipe(
+  Schema.annotations({
+    title: "BlockRanges",
+    description: "an array of block ranges",
+  }),
+)
 
 /**
  * Invalidation range for reorgs.
  */
 export class InvalidationRange extends Schema.Class<InvalidationRange>("InvalidationRange")({
-  network: Schema.String,
+  network: Network,
   numbers: Schema.Struct({
-    start: Schema.Number,
-    end: Schema.Number,
+    start: BlockNumber,
+    end: BlockNumber,
   }),
+}, {
+  title: "InvalidationRange",
+  description: "a range of blocks to invalidate for a given network",
 }) {}
 
+export type InvalidationRanges = typeof InvalidationRanges.Type
+export const InvalidationRanges = Schema.Array(InvalidationRange).pipe(
+  Schema.annotations({
+    title: "InvalidationRanges",
+    description: "an array of invalidation ranges",
+  }),
+)
+
 export class RecordBatchMetadata extends Schema.Class<RecordBatchMetadata>("RecordBatchMetadata")({
-  ranges: Schema.Array(BlockRange),
-  // rangesComplete: Schema.Boolean.pipe(Schema.propertySignature, Schema.fromKey("ranges_complete")),
+  ranges: BlockRanges,
   rangesComplete: Schema.Boolean.pipe(Schema.propertySignature, Schema.fromKey("ranges_complete")),
+}, {
+  title: "RecordBatchMetadata",
+  description: "the metadata carrying the information about the block ranges covered by this batch",
 }) {}
 
 const decoder = new TextDecoder()
@@ -512,19 +497,6 @@ export const parseRecordBatchMetadata: <A, R>(
 
 export const RecordBatchMetadataFromFlight = parseRecordBatchMetadata(Schema.Uint8ArrayFromSelf)
 
-export class DumpResponse extends Schema.Class<DumpResponse>("DumpResponse")({
-  jobId: JobId.pipe(Schema.propertySignature, Schema.fromKey("job_id")),
-}) {}
-
-export class DeployRequest extends Schema.Class<DeployRequest>("DeployRequest")({
-  endBlock: Schema.optional(Schema.NullOr(Schema.String)).pipe(Schema.fromKey("end_block")),
-  parallelism: Schema.optional(Schema.Number),
-}) {}
-
-export class DeployResponse extends Schema.Class<DeployResponse>("DeployResponse")({
-  jobId: JobId.pipe(Schema.propertySignature, Schema.fromKey("job_id")),
-}) {}
-
 export const GenrateTokenDuration = Schema.String.pipe(
   Schema.pattern(
     /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
@@ -532,22 +504,12 @@ export const GenrateTokenDuration = Schema.String.pipe(
 )
 export type GenrateTokenDuration = typeof GenrateTokenDuration.Type
 
-export class SchemaRequest extends Schema.Class<SchemaRequest>("SchemaRequest")({
-  tables: Schema.Record({ key: Schema.String, value: Schema.String }),
-  dependencies: DatasetDependencyMap.pipe(Schema.optional),
-  functions: DatasetFunctionDefinitionMap.pipe(Schema.optional),
-}) {}
-
 export class TableSchemaWithNetworks extends Schema.Class<TableSchemaWithNetworks>("TableSchemaWithNetworks")({
   schema: TableSchema,
   networks: Schema.Array(Schema.String),
 }) {}
 
-export class SchemaResponse extends Schema.Class<SchemaResponse>("SchemaResponse")({
-  schemas: Schema.Record({ key: Schema.String, value: TableSchemaWithNetworks }),
-}) {}
-
-const RecordBatchFromSelf = Schema.declare<RecordBatch>((value) => value instanceof RecordBatch, {
+export const RecordBatchFromSelf = Schema.declare<RecordBatch>((value) => value instanceof RecordBatch, {
   title: "RecordBatchFromSelf",
   description: "a record batch",
 })
@@ -576,7 +538,7 @@ const parseRecordBatch: <A, R>(
     }),
 })
 
-const RecordBatchFromUint8Array = parseRecordBatch(Schema.Uint8ArrayFromSelf)
+export const RecordBatchFromUint8Array = parseRecordBatch(Schema.Uint8ArrayFromSelf)
 
 /**
  * A record batch with metadata.
