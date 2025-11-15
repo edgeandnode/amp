@@ -682,17 +682,11 @@ impl DatasetStore {
     ) -> Result<Option<Arc<Dataset>>, GetDatasetByHashError> {
         // Check cache using manifest hash as the key
         if let Some(dataset) = self.dataset_cache.read().get(hash).cloned() {
-            tracing::trace!(
-                manifest_hash = %hash,
-                "Cache hit, returning cached dataset"
-            );
+            tracing::trace!(manifest_hash = %hash, "Cache hit, returning cached dataset");
             return Ok(Some(dataset));
         }
 
-        tracing::debug!(
-            manifest_hash = %hash,
-            "Cache miss, loading from store"
-        );
+        tracing::debug!(manifest_hash = %hash, "Cache miss, loading from store");
 
         // Get the manifest path from metadata database
         let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, hash)
