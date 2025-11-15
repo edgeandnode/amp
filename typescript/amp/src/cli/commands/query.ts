@@ -43,8 +43,8 @@ export const query = Command.make("query", {
         Effect.map((_) => Chunk.toArray(_)),
         Effect.map((array) =>
           Option.match(args.limit, {
-            onSome: (limit) => new Table(array.slice(0, limit).map((response) => response.data)),
-            onNone: () => new Table(array.map((response) => response.data)),
+            onSome: (limit) => new Table(array.slice(0, limit)),
+            onNone: () => new Table(array),
           })
         ),
       )

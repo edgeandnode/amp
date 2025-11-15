@@ -1,4 +1,12 @@
-import { ArrowField, ArrowSchema, DatasetDerived, Table, TableInput, TableSchema } from "@edgeandnode/amp/Model"
+import {
+  ArrowField,
+  ArrowSchema,
+  DatasetDerived,
+  Network,
+  Table,
+  TableInput,
+  TableSchema,
+} from "@edgeandnode/amp/Model"
 import { renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -92,7 +100,7 @@ describe("useAmpConfigStreamQuery", () => {
       dependencies: {},
       tables: {
         blocks: Table.make({
-          network: "mainnet",
+          network: Network.make("mainnet"),
           input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
           schema: TableSchema.make({
             arrow: ArrowSchema.make({
@@ -132,7 +140,7 @@ describe("useAmpConfigStreamQuery", () => {
       dependencies: {},
       tables: {
         blocks: Table.make({
-          network: "mainnet",
+          network: Network.make("mainnet"),
           input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
           schema: TableSchema.make({
             arrow: ArrowSchema.make({
@@ -149,7 +157,7 @@ describe("useAmpConfigStreamQuery", () => {
       dependencies: {},
       tables: {
         blocks: Table.make({
-          network: "mainnet",
+          network: Network.make("mainnet"),
           input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
           schema: TableSchema.make({
             arrow: ArrowSchema.make({
@@ -315,7 +323,7 @@ describe("useAmpConfigStreamQuery", () => {
       dependencies: {},
       tables: {
         blocks: Table.make({
-          network: "mainnet",
+          network: Network.make("mainnet"),
           input: TableInput.make({ sql: "SELECT * FROM source.blocks" }),
           schema: TableSchema.make({
             arrow: ArrowSchema.make({
