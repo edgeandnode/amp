@@ -684,7 +684,7 @@ export const layer = (url: string) =>
         onNone: () => undefined,
         onSome: (token) => (client) =>
           client.pipe(
-            HttpClient.mapRequestInput(HttpClientRequest.setHeader("Authorization", `Bearer ${token}`)),
+            HttpClient.mapRequestInput(HttpClientRequest.setHeader("Authorization", `Bearer ${token.accessToken}`)),
           ),
       }),
     })

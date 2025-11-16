@@ -103,7 +103,6 @@ export const createProtocolStream = (
       }
     }
 
-    console.log(response.metadata)
     // Emit Data or Watermark based on the `ranges completed` flag
     const msg = response.metadata.rangesComplete
       ? new ProtocolMessageWatermark({ ranges: [...ranges] })
