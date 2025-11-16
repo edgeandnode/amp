@@ -1,4 +1,5 @@
-import { createGrpcTransport } from "@connectrpc/connect-node"
+import type { Interceptor } from "@connectrpc/connect"
+import { createGrpcTransport, type GrpcTransportOptions } from "@connectrpc/connect-node"
 import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
@@ -82,18 +83,18 @@ export const query = Command.make("query", {
     }),
   ),
   Command.provide(({ args }) => {
-    const transportOptions: Parameters<typeof createGrpcTransport>[0] = {
-      baseUrl: `${args.flightUrl}`,
-    }
-
+    const interceptors: Array<Interceptor> = []
     if (Option.isSome(args.bearerToken)) {
       const token = args.bearerToken.value
-      transportOptions.interceptors = [
-        (next) => (req) => {
-          req.header.set("Authorization", `Bearer ${token}`)
-          return next(req)
-        },
-      ]
+      interceptors.push((next) => (req) => {
+        req.header.set("Authorization", `Bearer ${token}`)
+        return next(req)
+      })
+    }
+
+    const transportOptions: GrpcTransportOptions = {
+      baseUrl: `${args.flightUrl}`,
+      interceptors,
     }
 
     return ArrowFlight.layer(createGrpcTransport(transportOptions))

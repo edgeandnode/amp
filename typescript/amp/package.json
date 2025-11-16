@@ -10,7 +10,7 @@
     "directory": "typescript/amp"
   },
   "bin": {
-    "amp": "./src/cli/bun.ts"
+    "amp": "./src/cli/dev.ts"
   },
   "exports": {
     ".": "./src/index.ts",

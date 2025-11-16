@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Model from "../Model.js"
+import * as Model from "../Model.ts"
 import * as Flight from "../proto/Flight_pb.ts"
 import * as FlightSql from "../proto/FlightSql_pb.ts"
 

@@ -1,4 +1,4 @@
-export * as Constants from "./Constants.js"
-export * as FoundryQueryableEventResolver from "./FoundryQueryableEventResolver.js"
-export * as Model from "./Model.js"
-export * as Utils from "./Utils.js"
+export * as Constants from "./Constants.ts"
+export * as FoundryQueryableEventResolver from "./FoundryQueryableEventResolver.ts"
+export * as Model from "./Model.ts"
+export * as Utils from "./Utils.ts"
