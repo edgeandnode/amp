@@ -29,10 +29,15 @@ export class Context {
     try {
       source = fs.readFileSync(fullPath, "utf8")
     } catch (err: any) {
-      throw new Error(`Failed to read function source at ${fullPath}: ${err.message}`)
+      throw new Error(
+        `Failed to read function source at ${fullPath}: ${err.message}`,
+      )
     }
 
-    const func = new Model.FunctionSource({ source, filename: path.basename(fullPath) })
+    const func = new Model.FunctionSource({
+      source,
+      filename: path.basename(fullPath),
+    })
     return func
   }
 }
@@ -42,117 +47,198 @@ export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
   readonly message?: string
 }> {}
 
-export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoader", {
-  dependencies: [ManifestBuilder.ManifestBuilder.Default],
-  effect: Effect.gen(function*() {
-    const path = yield* Path.Path
-    const fs = yield* FileSystem.FileSystem
-    const builder = yield* ManifestBuilder.ManifestBuilder
+export class ConfigLoader extends Effect.Service<ConfigLoader>()(
+  "Amp/ConfigLoader",
+  {
+    dependencies: [ManifestBuilder.ManifestBuilder.Default],
+    effect: Effect.gen(function*() {
+      const path = yield* Path.Path
+      const fs = yield* FileSystem.FileSystem
+      const builder = yield* ManifestBuilder.ManifestBuilder
 
-    const jiti = yield* Effect.tryPromise({
-      try: () =>
-        import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false, tryNative: false })),
-      catch: (cause) => new ConfigLoaderError({ cause }),
-    }).pipe(Effect.cached)
-
-    const loadTypeScript = Effect.fnUntraced(function*(file: string) {
-      return yield* Effect.tryMapPromise(jiti, {
-        try: (jiti) => jiti.import<(context: Context) => Model.DatasetConfig>(file, { default: true }),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.map((callback) => callback(new Context(file))),
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
-      )
-    })
-
-    const loadJavaScript = Effect.fnUntraced(function*(file: string) {
-      return yield* Effect.tryPromise({
-        try: () => import(file).then((module) => module.default as (context: Context) => Model.DatasetConfig),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.map((callback) => callback(new Context(file))),
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
-      )
-    })
-
-    const loadJson = Effect.fnUntraced(function*(file: string) {
-      return yield* Effect.tryMap(fs.readFileString(file), {
-        try: (content) => JSON.parse(content),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
-      )
-    })
-
-    const load = Effect.fnUntraced(function*(file: string) {
-      const resolved = path.resolve(file)
-      return yield* Match.value(path.extname(resolved)).pipe(
-        Match.when((_) => /\.(ts|mts|cts)$/.test(_), () => loadTypeScript(resolved)),
-        Match.when((_) => /\.(js|mjs|cjs)$/.test(_), () => loadJavaScript(resolved)),
-        Match.when((_) => /\.(json)$/.test(_), () => loadJson(resolved)),
-        Match.orElse((_) => new ConfigLoaderError({ message: `Unsupported file extension ${_}` })),
-      )
-    })
-
-    const build = Effect.fnUntraced(function*(file: string) {
-      const config = yield* load(file)
-      return yield* builder.build(config).pipe(
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` })),
-      )
-    })
-
-    const find = Effect.fnUntraced(function*(cwd: string = ".") {
-      const candidates = [
-        path.resolve(cwd, `amp.config.ts`),
-        path.resolve(cwd, `amp.config.mts`),
-        path.resolve(cwd, `amp.config.cts`),
-        path.resolve(cwd, `amp.config.js`),
-        path.resolve(cwd, `amp.config.mjs`),
-        path.resolve(cwd, `amp.config.cjs`),
-        path.resolve(cwd, `amp.config.json`),
-      ]
-      return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
-    })
-
-    const watch = <E, R>(
-      file: string,
-      options?: { onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R> },
-    ): Stream.Stream<ManifestBuilder.ManifestBuildResult, ConfigLoaderError | E, R> => {
-      const resolved = path.resolve(file)
-      const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
-
-      const updates = fs.watch(resolved).pipe(
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.mapError((cause) => new ConfigLoaderError({ cause, message: "Failed to watch config file" })),
-        Stream.filter(Predicate.isTagged("Update")),
-        Stream.mapEffect(() => open),
-      )
-
-      const build = (config: Model.DatasetConfig) =>
-        builder.build(config).pipe(
-          Effect.mapError(
-            (cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` }),
+      const jiti = yield* Effect.tryPromise({
+        try: () =>
+          import("jiti").then(({ createJiti }) =>
+            createJiti(import.meta.url, {
+              moduleCache: false,
+              tryNative: false,
+            })
           ),
+        catch: (cause) => new ConfigLoaderError({ cause }),
+      }).pipe(Effect.cached)
+
+      const loadTypeScript = Effect.fnUntraced(function*(file: string) {
+        return yield* Effect.tryMapPromise(jiti, {
+          try: (jiti) =>
+            jiti.import<(context: Context) => Model.DatasetConfig>(file, {
+              default: true,
+            }),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.map((callback) => callback(new Context(file))),
+          Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
+          Effect.mapError(
+            (cause) =>
+              new ConfigLoaderError({
+                cause,
+                message: `Failed to load config file ${file}`,
+              }),
+          ),
+        )
+      })
+
+      const loadJavaScript = Effect.fnUntraced(function*(file: string) {
+        return yield* Effect.tryPromise({
+          try: () =>
+            import(file).then(
+              (module) => module.default as (context: Context) => Model.DatasetConfig,
+            ),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.map((callback) => callback(new Context(file))),
+          Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
+          Effect.mapError(
+            (cause) =>
+              new ConfigLoaderError({
+                cause,
+                message: `Failed to load config file ${file}`,
+              }),
+          ),
+        )
+      })
+
+      const loadJson = Effect.fnUntraced(function*(file: string) {
+        return yield* Effect.tryMap(fs.readFileString(file), {
+          try: (content) => JSON.parse(content),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
+          Effect.mapError(
+            (cause) =>
+              new ConfigLoaderError({
+                cause,
+                message: `Failed to load config file ${file}`,
+              }),
+          ),
+        )
+      })
+
+      const load = Effect.fnUntraced(function*(file: string) {
+        const resolved = path.resolve(file)
+        return yield* Match.value(path.extname(resolved)).pipe(
+          Match.when(
+            (_) => /\.(ts|mts|cts)$/.test(_),
+            () => loadTypeScript(resolved),
+          ),
+          Match.when(
+            (_) => /\.(js|mjs|cjs)$/.test(_),
+            () => loadJavaScript(resolved),
+          ),
+          Match.when(
+            (_) => /\.(json)$/.test(_),
+            () => loadJson(resolved),
+          ),
+          Match.orElse(
+            (_) =>
+              new ConfigLoaderError({
+                message: `Unsupported file extension ${_}`,
+              }),
+          ),
+        )
+      })
+
+      const build = Effect.fnUntraced(function*(file: string) {
+        const config = yield* load(file)
+        return yield* builder.build(config).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ConfigLoaderError({
+                cause,
+                message: `Failed to build config file ${file}`,
+              }),
+          ),
+        )
+      })
+
+      const find = Effect.fnUntraced(function*(cwd: string = ".") {
+        const candidates = [
+          path.resolve(cwd, `amp.config.ts`),
+          path.resolve(cwd, `amp.config.mts`),
+          path.resolve(cwd, `amp.config.cts`),
+          path.resolve(cwd, `amp.config.js`),
+          path.resolve(cwd, `amp.config.mjs`),
+          path.resolve(cwd, `amp.config.cjs`),
+          path.resolve(cwd, `amp.config.json`),
+        ]
+        return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
+      })
+
+      const watch = <E, R>(
+        file: string,
+        options?: {
+          onError?: (
+            cause: Cause.Cause<ConfigLoaderError>,
+          ) => Effect.Effect<void, E, R>
+        },
+      ): Stream.Stream<
+        ManifestBuilder.ManifestBuildResult,
+        ConfigLoaderError | E,
+        R
+      > => {
+        const resolved = path.resolve(file)
+        const open = load(resolved).pipe(
           Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
           Effect.either,
         )
 
-      return Stream.fromEffect(open).pipe(
-        Stream.concat(updates),
-        Stream.filterMap(Either.getRight),
-        Stream.changesWith(Schema.equivalence(Model.DatasetConfig)),
-        Stream.mapEffect((config) => build(config)),
-        Stream.filterMap(Either.getRight),
-        Stream.changesWith((a, b) =>
-          Schema.equivalence(Model.DatasetMetadata)(a.metadata, b.metadata) &&
-          Schema.equivalence(Model.DatasetDerived)(a.manifest, b.manifest)
-        ),
-      ) as Stream.Stream<ManifestBuilder.ManifestBuildResult, ConfigLoaderError | E, R>
-    }
+        const updates = fs.watch(resolved).pipe(
+          Stream.buffer({ capacity: 1, strategy: "sliding" }),
+          Stream.mapError(
+            (cause) =>
+              new ConfigLoaderError({
+                cause,
+                message: "Failed to watch config file",
+              }),
+          ),
+          Stream.filter(Predicate.isTagged("Update")),
+          Stream.mapEffect(() => open),
+        )
 
-    return { load, find, watch, build }
-  }),
-}) {}
+        const build = (config: Model.DatasetConfig) =>
+          builder.build(config).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConfigLoaderError({
+                  cause,
+                  message: `Failed to build config file ${file}`,
+                }),
+            ),
+            Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
+            Effect.either,
+          )
+
+        return Stream.fromEffect(open).pipe(
+          Stream.concat(updates),
+          Stream.filterMap(Either.getRight),
+          Stream.changesWith(Schema.equivalence(Model.DatasetConfig)),
+          Stream.mapEffect((config) => build(config)),
+          Stream.filterMap(Either.getRight),
+          Stream.changesWith(
+            (a, b) =>
+              Schema.equivalence(Model.DatasetMetadata)(
+                a.metadata,
+                b.metadata,
+              ) &&
+              Schema.equivalence(Model.DatasetDerived)(a.manifest, b.manifest),
+          ),
+        ) as Stream.Stream<
+          ManifestBuilder.ManifestBuildResult,
+          ConfigLoaderError | E,
+          R
+        >
+      }
+
+      return { load, find, watch, build }
+    }),
+  },
+) {}
