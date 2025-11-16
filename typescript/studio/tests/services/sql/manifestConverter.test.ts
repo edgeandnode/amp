@@ -5,6 +5,7 @@
 import type { DatasetManifest } from "@edgeandnode/amp/Model"
 import { describe, expect, it } from "vitest"
 
+import { Model } from "@edgeandnode/amp"
 import { convertManifestToMetadata, mergeMetadataSources } from "../../../src/services/sql/manifestConverter"
 
 describe("manifestConverter", () => {
@@ -15,7 +16,7 @@ describe("manifestConverter", () => {
         dependencies: {},
         tables: {
           blocks: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM anvil.blocks" },
             schema: {
               arrow: {
@@ -35,7 +36,7 @@ describe("manifestConverter", () => {
       expect(result).toHaveLength(1)
       expect(result[0]).toEqual({
         source: "unknown.blocks",
-        network: "mainnet",
+        network: Model.Network.make("mainnet"),
         columns: [
           { name: "block_number", datatype: "NUMERIC(20, 0)", nullable: false },
           { name: "hash", datatype: "TEXT", nullable: false },
@@ -49,7 +50,7 @@ describe("manifestConverter", () => {
         dependencies: {},
         tables: {
           blocks: {
-            network: "ethereum",
+            network: Model.Network.make("ethereum"),
             input: { sql: "SELECT * FROM anvil.blocks" },
             schema: {
               arrow: {
@@ -58,7 +59,7 @@ describe("manifestConverter", () => {
             },
           },
           transactions: {
-            network: "ethereum",
+            network: Model.Network.make("ethereum"),
             input: { sql: "SELECT * FROM anvil.transactions" },
             schema: {
               arrow: {
@@ -86,7 +87,7 @@ describe("manifestConverter", () => {
         dependencies: {},
         tables: {
           data: {
-            network: "testnet",
+            network: Model.Network.make("testnet"),
             input: { sql: "SELECT * FROM source" },
             schema: {
               arrow: {
@@ -115,7 +116,7 @@ describe("manifestConverter", () => {
         dependencies: {},
         tables: {
           events: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM logs" },
             schema: {
               arrow: {
@@ -169,7 +170,7 @@ describe("manifestConverter", () => {
       const manifestMetadata = [
         {
           source: "example.blocks",
-          network: "mainnet",
+          network: Model.Network.make("mainnet"),
           columns: [
             { name: "block_number", datatype: "NUMERIC(20, 0)", nullable: false },
             { name: "transaction_hash", datatype: "TEXT", nullable: false },
@@ -203,7 +204,7 @@ describe("manifestConverter", () => {
       const manifestMetadata = [
         {
           source: "example.blocks",
-          network: "mainnet",
+          network: Model.Network.make("mainnet"),
           columns: [{ name: "block_number", datatype: "NUMERIC(20, 0)", nullable: false }],
         },
       ]
@@ -271,7 +272,7 @@ describe("manifestConverter", () => {
         dependencies: {},
         tables: {
           swaps: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM eth_rpc.logs WHERE topic0 = 'swap'" },
             schema: {
               arrow: {

@@ -10,6 +10,7 @@ import { convertManifestToMetadata, mergeMetadataSources } from "../../../src/se
 import { SqlValidation } from "../../../src/services/sql/SqlValidation"
 import { UnifiedSQLProvider } from "../../../src/services/sql/UnifiedSQLProvider"
 
+import { Model } from "@edgeandnode/amp"
 import { mockMetadata, mockUDFs } from "./fixtures"
 
 describe("UnifiedSQLProvider with DatasetManifest", () => {
@@ -46,7 +47,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           blocks: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM anvil.blocks" },
             schema: {
               arrow: {
@@ -86,7 +87,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           table1: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM source1" },
             schema: {
               arrow: {
@@ -95,7 +96,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
             },
           },
           table2: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM source2" },
             schema: {
               arrow: {
@@ -104,7 +105,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
             },
           },
           table3: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM source3" },
             schema: {
               arrow: {
@@ -140,7 +141,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           events: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM logs" },
             schema: {
               arrow: {
@@ -181,7 +182,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           processed: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM anvil.blocks" },
             schema: {
               arrow: {
@@ -245,7 +246,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           users: {
-            network: "testnet",
+            network: Model.Network.make("testnet"),
             input: { sql: "SELECT * FROM raw_users" },
             schema: {
               arrow: {
@@ -283,7 +284,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           users: {
-            network: "testnet",
+            network: Model.Network.make("testnet"),
             input: { sql: "SELECT * FROM raw_users" },
             schema: {
               arrow: {
@@ -339,7 +340,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           data: {
-            network: "testnet",
+            network: Model.Network.make("testnet"),
             input: { sql: "SELECT * FROM source" },
             schema: {
               arrow: {
@@ -375,7 +376,7 @@ describe("UnifiedSQLProvider with DatasetManifest", () => {
         dependencies: {},
         tables: {
           blocks: {
-            network: "mainnet",
+            network: Model.Network.make("mainnet"),
             input: { sql: "SELECT * FROM anvil.blocks" },
             schema: {
               arrow: {

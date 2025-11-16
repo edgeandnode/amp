@@ -3,8 +3,8 @@ import { NodeFileSystem } from "@effect/platform-node"
 import { Array, Cause, Chunk, Console, Effect, Either, Option, pipe, Schema, Stream } from "effect"
 import { load } from "js-toml"
 
-import * as Model from "./Model.js"
-import * as Utils from "./Utils.js"
+import * as Model from "./Model.ts"
+import * as Utils from "./Utils.ts"
 
 const FoundryTomlConfig = Schema.Struct({
   profile: Schema.Struct({

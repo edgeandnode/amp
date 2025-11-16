@@ -50,7 +50,7 @@ export class AnvilError extends Schema.TaggedError<AnvilError>("AnvilError")("An
   message: Schema.String,
 }) {}
 
-export class Anvil extends Context.Tag("@edgeandnode/amp/test/utils/Anvil")<Anvil, {
+export class Anvil extends Context.Tag("Amp/Anvil")<Anvil, {
   /**
    * Runs a script on the anvil instance.
    *

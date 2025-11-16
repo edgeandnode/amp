@@ -3,9 +3,8 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import type * as ParseResult from "effect/ParseResult"
 import * as ConfigLoader from "./ConfigLoader.ts"
-import * as Model from "./Model.ts"
+import type * as Model from "./Model.ts"
 
 export class ManifestContextError extends Data.TaggedError("ManifestContextError")<{
   readonly message: string
@@ -16,23 +15,9 @@ export class ManifestContextError extends Data.TaggedError("ManifestContextError
 export interface DatasetContext {
   metadata: Model.DatasetMetadata
   manifest: Model.DatasetManifest
-  dependencies: ReadonlyArray<Model.DatasetReference>
 }
 
 export const ManifestContext = Context.GenericTag<DatasetContext>("Amp/ManifestContext")
-
-/**
- * Parse all dependencies from a manifest's dependencies record.
- */
-export const parseDependencies = (
-  dependencies: Record<string, string>,
-): Effect.Effect<ReadonlyArray<Model.DatasetReference>, ParseResult.ParseError> => {
-  return Effect.forEach(
-    Object.entries(dependencies),
-    ([_key, refStr]) => Model.parseDatasetReference(refStr),
-    { concurrency: "unbounded" },
-  )
-}
 
 const fromConfigFile = (file: string) =>
   Effect.gen(function*() {
@@ -44,7 +29,6 @@ const fromConfigFile = (file: string) =>
     return {
       metadata: buildResult.metadata,
       manifest: buildResult.manifest,
-      dependencies: buildResult.dependencies,
     }
   })
 

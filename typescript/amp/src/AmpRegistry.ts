@@ -284,50 +284,49 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       dataset: AmpRegistryDatasetDto,
       metadata: ManifestContext.DatasetContext["metadata"],
       indexingChains: ReadonlyArray<string>,
-    ): Effect.Effect<boolean, never, never> =>
-      Effect.gen(function*() {
-        // Helper to treat null/undefined/empty as equivalent
-        const isEmpty = (value: unknown): boolean =>
-          value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)
+    ) => {
+      // Helper to treat null/undefined/empty as equivalent
+      const isEmpty = (value: unknown): boolean =>
+        value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)
 
-        // Helper to compare optional values
-        const optionalChanged = (datasetVal: unknown, metadataVal: unknown): boolean => {
-          if (isEmpty(datasetVal) && isEmpty(metadataVal)) return false
-          if (isEmpty(datasetVal) || isEmpty(metadataVal)) return true
-          return datasetVal !== metadataVal
-        }
+      // Helper to compare optional values
+      const optionalChanged = (datasetVal: unknown, metadataVal: unknown): boolean => {
+        if (isEmpty(datasetVal) && isEmpty(metadataVal)) return false
+        if (isEmpty(datasetVal) || isEmpty(metadataVal)) return true
+        return datasetVal !== metadataVal
+      }
 
-        // Helper to compare arrays
-        const arrayChanged = (
-          datasetArr: ReadonlyArray<unknown> | null | undefined,
-          metadataArr: ReadonlyArray<unknown> | undefined,
-        ): boolean => {
-          if (isEmpty(datasetArr) && isEmpty(metadataArr)) return false
-          if (isEmpty(datasetArr) || isEmpty(metadataArr)) return true
-          const arr1 = datasetArr ?? []
-          const arr2 = metadataArr ?? []
-          if (arr1.length !== arr2.length) return true
-          return arr1.some((val, idx) => val !== arr2[idx])
-        }
+      // Helper to compare arrays
+      const arrayChanged = (
+        datasetArr: ReadonlyArray<unknown> | null | undefined,
+        metadataArr: ReadonlyArray<unknown> | undefined,
+      ): boolean => {
+        if (isEmpty(datasetArr) && isEmpty(metadataArr)) return false
+        if (isEmpty(datasetArr) || isEmpty(metadataArr)) return true
+        const arr1 = datasetArr ?? []
+        const arr2 = metadataArr ?? []
+        if (arr1.length !== arr2.length) return true
+        return arr1.some((val, idx) => val !== arr2[idx])
+      }
 
-        // Compare each mutable field
-        if (optionalChanged(dataset.description, metadata.description)) return true
-        if (arrayChanged(dataset.keywords, metadata.keywords)) return true
-        if (optionalChanged(dataset.readme, metadata.readme)) return true
-        if (
-          optionalChanged(
-            dataset.repository_url?.toString(),
-            metadata.repository?.toString(),
-          )
-        ) {
-          return true
-        }
-        if (optionalChanged(dataset.license, metadata.license)) return true
-        if (arrayChanged(dataset.source, metadata.sources)) return true
-        if (arrayChanged(dataset.indexing_chains, indexingChains)) return true
+      // Compare each mutable field
+      if (optionalChanged(dataset.description, metadata.description)) return true
+      if (arrayChanged(dataset.keywords, metadata.keywords)) return true
+      if (optionalChanged(dataset.readme, metadata.readme)) return true
+      if (
+        optionalChanged(
+          dataset.repository_url?.toString(),
+          metadata.repository?.toString(),
+        )
+      ) {
+        return true
+      }
+      if (optionalChanged(dataset.license, metadata.license)) return true
+      if (arrayChanged(dataset.source, metadata.sources)) return true
+      if (arrayChanged(dataset.indexing_chains, indexingChains)) return true
 
-        return false
-      })
+      return false
+    }
 
     /**
      * High-level orchestration method to publish a dataset or version
@@ -348,8 +347,11 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       }>,
     ) {
       const { auth, changelog, context, versionTag } = args
-      const { dependencies, manifest, metadata } = context
+      const { manifest, metadata } = context
       const { description, keywords, license, name, namespace, readme, repository, sources, visibility } = metadata
+      const ancestors = manifest.kind === "manifest"
+        ? Object.values(manifest.dependencies).map((ref) => ref.encode())
+        : []
 
       // derived from the tables in the dataset manifest (unique chains only)
       const indexingChains = [...new Set(Object.values(manifest.tables).map((table) => table.network))]
@@ -399,14 +401,13 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                 version_tag: versionTag,
                 manifest,
                 kind: manifest.kind,
-                ancestors: Array.map(dependencies, (dep) =>
-                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
+                ancestors,
                 changelog,
               }),
             )
 
             // Update metadata if any fields have changed
-            const metadataChanged = yield* hasMetadataChanged(dataset, metadata, indexingChains)
+            const metadataChanged = hasMetadataChanged(dataset, metadata, indexingChains)
             if (metadataChanged) {
               yield* updateDatasetMetadata(
                 auth,
@@ -447,14 +448,11 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                 version_tag: versionTag,
                 manifest,
                 kind: manifest.kind,
-                ancestors: Array.map(dependencies, (dep) =>
-                  `${dep.namespace}/${dep.name}@${dep.revision}` as Model.DatasetReferenceStr),
+                ancestors,
                 changelog,
               }),
             }),
-          ).pipe(Effect.map(() =>
-            Model.DatasetReference.make({ namespace, name, revision: versionTag })
-          )),
+          ).pipe(Effect.map(() => Model.DatasetReference.make({ namespace, name, revision: versionTag }))),
       })
     })
 
@@ -475,7 +473,7 @@ export const layer = AmpRegistryService.Default
 export class AmpRegistryDatasetVersionAncestryDto extends Schema.Class<AmpRegistryDatasetVersionAncestryDto>(
   "Amp/Registry/Models/AmpRegistryDatasetVersionAncestryDto",
 )({
-  dataset_reference: Model.DatasetReferenceStr,
+  dataset_reference: Model.DatasetReferenceString,
 }) {}
 
 export class AmpRegistryDatasetVersionDto
@@ -483,7 +481,7 @@ export class AmpRegistryDatasetVersionDto
     status: Schema.Literal("draft", "published", "deprecated", "archived"),
     created_at: Schema.String,
     version_tag: Model.DatasetRevision,
-    dataset_reference: Model.DatasetReferenceStr,
+    dataset_reference: Model.DatasetReferenceString,
     changelog: Schema.String.pipe(Schema.optionalWith({ nullable: true })),
     ancestors: Schema.Array(AmpRegistryDatasetVersionAncestryDto).pipe(Schema.optionalWith({ nullable: true })),
     descendants: Schema.Array(AmpRegistryDatasetVersionAncestryDto).pipe(Schema.optionalWith({ nullable: true })),
@@ -505,7 +503,7 @@ export class AmpRegistryDatasetDto
     source: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
     visibility: Schema.Literal("private", "public"),
     owner: Schema.Union(Schema.NonEmptyTrimmedString, Model.Address),
-    dataset_reference: Model.DatasetReferenceStr.pipe(Schema.optionalWith({ nullable: true })),
+    dataset_reference: Model.DatasetReferenceString.pipe(Schema.optionalWith({ nullable: true })),
     latest_version: AmpRegistryDatasetVersionDto.pipe(Schema.optionalWith({ nullable: true })),
     versions: Schema.Array(AmpRegistryDatasetVersionDto).pipe(Schema.optionalWith({ nullable: true })),
   })
@@ -558,7 +556,7 @@ export class AmpRegistryInsertDatasetVersionDto
     version_tag: Model.DatasetRevision,
     manifest: Model.DatasetManifest,
     kind: Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose"),
-    ancestors: Schema.Array(Model.DatasetReferenceStr),
+    ancestors: Schema.Array(Model.DatasetReferenceString),
   })
 {}
 

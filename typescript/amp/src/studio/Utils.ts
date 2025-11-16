@@ -2,7 +2,7 @@ import { HashSet } from "effect"
 import { minimatch } from "minimatch"
 import { extname } from "node:path"
 
-import { foundryOutputExludeList } from "./Constants.js"
+import { foundryOutputExludeList } from "./Constants.ts"
 
 /**
  * Checks if a relative path should be included (not excluded) based on the exclude patterns.

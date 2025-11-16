@@ -76,15 +76,23 @@ export class JsonLines extends Context.Tag("Amp/JsonLines")<JsonLines, {
   }
 }>() {}
 
+export interface JsonLinesOptions {
+  bearerToken?: string | undefined
+}
+
 /**
  * Creates a json lines api service.
  *
  * @param url - The url for the json lines api.
  * @returns The json lines api service.
  */
-export const make = Effect.fn(function*(url: string) {
+export const make = Effect.fn(function*(url: string, options?: JsonLinesOptions) {
   const client = yield* HttpClient.HttpClient.pipe(
-    Effect.map(HttpClient.mapRequest(HttpClientRequest.setHeader("Accept-Encoding", "deflate"))),
+    Effect.map(HttpClient.mapRequest(HttpClientRequest.setHeaders({
+      "Accept-Encoding": "deflate",
+      "Accept": "application/jsonl",
+      ...(options?.bearerToken !== undefined ? { "Authorization": `Bearer ${options.bearerToken}` } : undefined),
+    }))),
     Effect.map(HttpClient.transformResponse(
       Effect.flatMap((response) => {
         if (response.status >= 200 && response.status < 300) {
@@ -159,4 +167,5 @@ export const make = Effect.fn(function*(url: string) {
  * @param url - The url for the json lines api.
  * @returns The json lines api service layer.
  */
-export const layer = (url: string) => make(url).pipe(Layer.effect(JsonLines), Layer.provide(FetchHttpClient.layer))
+export const layer = (url: string, options?: JsonLinesOptions) =>
+  make(url, options).pipe(Layer.effect(JsonLines), Layer.provide(FetchHttpClient.layer))

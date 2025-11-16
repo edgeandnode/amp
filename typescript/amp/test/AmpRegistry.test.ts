@@ -25,7 +25,7 @@ const mockAuthStorage = Auth.AuthStorageSchema.make({
 const mockDatasetVersionDto = AmpRegistry.AmpRegistryDatasetVersionDto.make({
   status: "published",
   created_at: "2024-01-01T00:00:00Z",
-  version_tag: "1.0.0",
+  version_tag: Model.DatasetVersion.make("1.0.0"),
   dataset_reference: "edgeandnode/mainnet@1.0.0",
   changelog: "Initial release",
   ancestors: [],
@@ -33,13 +33,13 @@ const mockDatasetVersionDto = AmpRegistry.AmpRegistryDatasetVersionDto.make({
 })
 
 const mockDatasetDto = AmpRegistry.AmpRegistryDatasetDto.make({
-  namespace: "edgeandnode",
-  name: "mainnet",
+  namespace: Model.DatasetNamespace.make("edgeandnode"),
+  name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
   description: "Mainnet dataset",
   indexing_chains: [], // Empty to match mockManifest's empty tables
-  keywords: ["ethereum", "mainnet"],
+  keywords: ["ethereum", Model.DatasetName.make("mainnet")],
   license: "MIT",
   readme: "# Mainnet Dataset",
   repository_url: new URL("https://github.com/edgeandnode/mainnet"),
@@ -54,7 +54,7 @@ const mockDatasetDto = AmpRegistry.AmpRegistryDatasetDto.make({
 const mockNewVersionDto = AmpRegistry.AmpRegistryDatasetVersionDto.make({
   status: "published",
   created_at: "2024-01-02T00:00:00Z",
-  version_tag: "1.1.0",
+  version_tag: Model.DatasetVersion.make("1.1.0"),
   dataset_reference: "edgeandnode/mainnet@1.1.0",
   changelog: "Added new features",
   ancestors: [AmpRegistry.AmpRegistryDatasetVersionAncestryDto.make({
@@ -65,24 +65,29 @@ const mockNewVersionDto = AmpRegistry.AmpRegistryDatasetVersionDto.make({
 
 const mockManifest = Model.DatasetDerived.make({
   kind: "manifest",
-  dependencies: {},
+  dependencies: {
+    mainnet: Model.DatasetReference.make({
+      namespace: Model.DatasetNamespace.make("edgeandnode"),
+      name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
+      revision: Model.DatasetVersion.make("1.0.0"),
+    }),
+  },
   tables: {},
   functions: {},
 })
 
 const mockManifestContext: ManifestContext.DatasetContext = {
   metadata: Model.DatasetMetadata.make({
-    namespace: "edgeandnode",
-    name: "mainnet",
+    namespace: Model.DatasetNamespace.make("edgeandnode"),
+    name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
     description: "Mainnet dataset",
-    keywords: ["ethereum", "mainnet"],
+    keywords: ["ethereum", Model.DatasetName.make("mainnet")],
     license: "MIT",
     readme: "# Mainnet Dataset",
     repository: new URL("https://github.com/edgeandnode/mainnet"),
     visibility: "public",
   }),
   manifest: mockManifest,
-  dependencies: [],
 }
 
 const mockErrorResponse = AmpRegistry.AmpRegistryErrorResponseDto.make({
@@ -122,12 +127,15 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* service.getDataset("edgeandnode", "mainnet")
+        const result = yield* service.getDataset(
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("mainnet"),
+        )
 
         expect(Option.isSome(result)).toBe(true)
         if (Option.isSome(result)) {
-          expect(result.value.namespace).toBe("edgeandnode")
-          expect(result.value.name).toBe("mainnet")
+          expect(result.value.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+          expect(result.value.name).toBe(Model.DatasetName.make("mainnet"))
           expect(result.value.owner).toBe("0x04913E13A937cf63Fad3786FEE42b3d44dA558aA")
         }
       }))
@@ -149,7 +157,10 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* service.getDataset("edgeandnode", "nonexistent")
+        const result = yield* service.getDataset(
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("nonexistent"),
+        )
 
         expect(Option.isNone(result)).toBe(true)
       }))
@@ -172,7 +183,12 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getDataset(
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make(Model.DatasetName.make("mainnet")),
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
       }))
@@ -195,7 +211,12 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getDataset(
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make(Model.DatasetName.make("mainnet")),
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
       }))
@@ -216,7 +237,9 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getDataset(Model.DatasetNamespace.make("edgeandnode"), Model.DatasetName.make("mainnet")),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -250,7 +273,9 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getDataset(Model.DatasetNamespace.make("edgeandnode"), Model.DatasetName.make("mainnet")),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -265,7 +290,7 @@ describe("AmpRegistryService", () => {
       Effect.gen(function*() {
         // Return 200 but with invalid JSON structure (missing required fields)
         const invalidDataset = {
-          namespace: "edgeandnode",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
           // Missing required fields like name, created_at, etc.
         }
 
@@ -285,7 +310,9 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getDataset("edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getDataset(Model.DatasetNamespace.make("edgeandnode"), Model.DatasetName.make("mainnet")),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -320,12 +347,16 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet")
+        const result = yield* service.getOwnedDataset(
+          mockAuthStorage,
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("mainnet"),
+        )
 
         expect(Option.isSome(result)).toBe(true)
         if (Option.isSome(result)) {
-          expect(result.value.namespace).toBe("edgeandnode")
-          expect(result.value.name).toBe("mainnet")
+          expect(result.value.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+          expect(result.value.name).toBe(Model.DatasetName.make("mainnet"))
         }
       }))
 
@@ -346,7 +377,11 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* service.getOwnedDataset(mockAuthStorage, "edgeandnode", "nonexistent")
+        const result = yield* service.getOwnedDataset(
+          mockAuthStorage,
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("nonexistent"),
+        )
 
         expect(Option.isNone(result)).toBe(true)
       }))
@@ -378,7 +413,13 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getOwnedDataset(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -405,7 +446,13 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getOwnedDataset(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -420,7 +467,7 @@ describe("AmpRegistryService", () => {
       Effect.gen(function*() {
         // Return 200 but with invalid JSON structure (missing required fields)
         const invalidDataset = {
-          namespace: "edgeandnode",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
           // Missing required fields
         }
 
@@ -440,7 +487,13 @@ describe("AmpRegistryService", () => {
         const TestLayer = Layer.provide(AmpRegistry.AmpRegistryService.DefaultWithoutDependencies, MockHttpClientLayer)
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
-        const result = yield* Effect.exit(service.getOwnedDataset(mockAuthStorage, "edgeandnode", "mainnet"))
+        const result = yield* Effect.exit(
+          service.getOwnedDataset(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -477,11 +530,11 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           description: "Mainnet dataset",
-          keywords: ["ethereum", "mainnet"],
-          indexing_chains: ["mainnet"],
+          keywords: ["ethereum", Model.DatasetName.make("mainnet")],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           source: ["firehose"],
           readme: "# Mainnet Dataset",
           visibility: "public",
@@ -489,7 +542,7 @@ describe("AmpRegistryService", () => {
           license: "MIT",
           version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
             status: "published",
-            version_tag: "1.0.0",
+            version_tag: Model.DatasetVersion.make("1.0.0"),
             manifest: mockManifest,
             kind: "firehose",
             ancestors: [],
@@ -499,8 +552,8 @@ describe("AmpRegistryService", () => {
 
         const result = yield* service.publishDataset(mockAuthStorage, insertDto)
 
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.visibility).toBe("public")
       }))
 
@@ -533,16 +586,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           description: "Mainnet dataset",
           keywords: [],
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           source: [],
           visibility: "public",
           version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
             status: "published",
-            version_tag: "1.0.0",
+            version_tag: Model.DatasetVersion.make("1.0.0"),
             manifest: mockManifest,
             kind: "firehose",
             ancestors: [],
@@ -572,16 +625,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           description: "Mainnet dataset",
           keywords: [],
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           source: [],
           visibility: "public",
           version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
             status: "published",
-            version_tag: "1.0.0",
+            version_tag: Model.DatasetVersion.make("1.0.0"),
             manifest: mockManifest,
             kind: "firehose",
             ancestors: [],
@@ -603,8 +656,8 @@ describe("AmpRegistryService", () => {
       Effect.gen(function*() {
         // Return 201 but with malformed dataset DTO (missing required fields)
         const malformedDataset = {
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           // Missing required fields like created_at, updated_at, owner, etc.
         }
 
@@ -626,16 +679,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const insertDto = AmpRegistry.AmpRegistryInsertDatasetDto.make({
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           description: "Mainnet dataset",
           keywords: [],
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           source: [],
           visibility: "public",
           version: AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
             status: "published",
-            version_tag: "1.0.0",
+            version_tag: Model.DatasetVersion.make("1.0.0"),
             manifest: mockManifest,
             kind: "firehose",
             ancestors: [],
@@ -680,14 +733,19 @@ describe("AmpRegistryService", () => {
 
         const versionDto = AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
           status: "published",
-          version_tag: "1.1.0",
+          version_tag: Model.DatasetVersion.make("1.1.0"),
           manifest: mockManifest,
           kind: "firehose",
           ancestors: ["edgeandnode/mainnet@1.0.0"],
           changelog: "Added new features",
         })
 
-        const result = yield* service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto)
+        const result = yield* service.publishVersion(
+          mockAuthStorage,
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("mainnet"),
+          versionDto,
+        )
 
         expect(result.version_tag).toBe("1.1.0")
         expect(result.status).toBe("published")
@@ -724,13 +782,20 @@ describe("AmpRegistryService", () => {
 
         const versionDto = AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
           status: "published",
-          version_tag: "1.1.0",
+          version_tag: Model.DatasetVersion.make("1.1.0"),
           manifest: mockManifest,
           kind: "firehose",
           ancestors: [],
         })
 
-        const result = yield* Effect.exit(service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto))
+        const result = yield* Effect.exit(
+          service.publishVersion(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+            versionDto,
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
       }))
@@ -742,7 +807,7 @@ describe("AmpRegistryService", () => {
       Effect.gen(function*() {
         // Return 201 but with malformed version DTO (missing required fields)
         const malformedVersion = {
-          version_tag: "1.1.0",
+          version_tag: Model.DatasetVersion.make("1.1.0"),
           status: "published",
           // Missing required fields like created_at, dataset_reference, ancestors, descendants
         }
@@ -766,13 +831,20 @@ describe("AmpRegistryService", () => {
 
         const versionDto = AmpRegistry.AmpRegistryInsertDatasetVersionDto.make({
           status: "published",
-          version_tag: "1.1.0",
+          version_tag: Model.DatasetVersion.make("1.1.0"),
           manifest: mockManifest,
           kind: "firehose",
           ancestors: [],
         })
 
-        const result = yield* Effect.exit(service.publishVersion(mockAuthStorage, "edgeandnode", "mainnet", versionDto))
+        const result = yield* Effect.exit(
+          service.publishVersion(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+            versionDto,
+          ),
+        )
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -790,7 +862,7 @@ describe("AmpRegistryService", () => {
         const updatedDataset = AmpRegistry.AmpRegistryDatasetDto.make({
           ...mockDatasetDto,
           description: "Updated description",
-          keywords: ["ethereum", "mainnet", "updated"],
+          keywords: ["ethereum", Model.DatasetName.make("mainnet"), "updated"],
         })
 
         const mockHttpClient = createMockHttpClient((req) => {
@@ -816,17 +888,22 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           description: "Updated description",
-          keywords: ["ethereum", "mainnet", "updated"],
+          keywords: ["ethereum", Model.DatasetName.make("mainnet"), "updated"],
         })
 
-        const result = yield* service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto)
+        const result = yield* service.updateDatasetMetadata(
+          mockAuthStorage,
+          Model.DatasetNamespace.make("edgeandnode"),
+          Model.DatasetName.make("mainnet"),
+          updateDto,
+        )
 
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.description).toBe("Updated description")
-        expect(result.keywords).toEqual(["ethereum", "mainnet", "updated"])
+        expect(result.keywords).toEqual(["ethereum", Model.DatasetName.make("mainnet"), "updated"])
       }))
 
     it.effect("should fail with RegistryApiError on forbidden (403)", ({ expect }) =>
@@ -858,12 +935,17 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
           description: "Updated description",
         })
 
         const result = yield* Effect.exit(
-          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+          service.updateDatasetMetadata(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+            updateDto,
+          ),
         )
 
         expect(result._tag).toBe("Failure")
@@ -904,11 +986,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
         })
 
         const result = yield* Effect.exit(
-          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "nonexistent", updateDto),
+          service.updateDatasetMetadata(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("nonexistent"),
+            updateDto,
+          ),
         )
 
         expect(result._tag).toBe("Failure")
@@ -938,11 +1025,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
         })
 
         const result = yield* Effect.exit(
-          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+          service.updateDatasetMetadata(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+            updateDto,
+          ),
         )
 
         expect(result._tag).toBe("Failure")
@@ -958,8 +1050,8 @@ describe("AmpRegistryService", () => {
       Effect.gen(function*() {
         // Return 200 but with malformed dataset DTO (missing required fields)
         const malformedDataset = {
-          namespace: "edgeandnode",
-          name: "mainnet",
+          namespace: Model.DatasetNamespace.make("edgeandnode"),
+          name: Model.DatasetName.make(Model.DatasetName.make("mainnet")),
           // Missing required fields like created_at, updated_at, owner, etc.
         }
 
@@ -981,11 +1073,16 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
         const updateDto = AmpRegistry.AmpRegistryUpdateDatasetMetadataDto.make({
-          indexing_chains: ["mainnet"],
+          indexing_chains: [Model.DatasetName.make("mainnet")],
         })
 
         const result = yield* Effect.exit(
-          service.updateDatasetMetadata(mockAuthStorage, "edgeandnode", "mainnet", updateDto),
+          service.updateDatasetMetadata(
+            mockAuthStorage,
+            Model.DatasetNamespace.make("edgeandnode"),
+            Model.DatasetName.make("mainnet"),
+            updateDto,
+          ),
         )
 
         expect(result._tag).toBe("Failure")
@@ -1047,15 +1144,15 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.0.0",
+          versionTag: Model.DatasetVersion.make("1.0.0"),
           changelog: "Initial release",
         })
 
         expect(getDatasetCalled).toBe(true)
         expect(publishDatasetCalled).toBe(true)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
-        expect(result.revision).toBe("1.0.0")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
+        expect(result.revision).toBe(Model.DatasetVersion.make("1.0.0"))
       }))
 
     it.effect("should publish new version when dataset exists and user owns it", ({ expect }) =>
@@ -1107,14 +1204,14 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.1.0",
+          versionTag: Model.DatasetVersion.make("1.1.0"),
           changelog: "Added new features",
         })
 
         expect(getDatasetCalled).toBe(true)
         expect(publishVersionCalled).toBe(true)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.revision).toBe("1.1.0")
       }))
 
@@ -1157,7 +1254,7 @@ describe("AmpRegistryService", () => {
           service.publishFlow({
             auth: mockAuthStorage,
             context: mockManifestContext,
-            versionTag: "1.1.0",
+            versionTag: Model.DatasetVersion.make("1.1.0"),
           }),
         )
 
@@ -1167,8 +1264,8 @@ describe("AmpRegistryService", () => {
           if (result.cause._tag === "Fail") {
             expect(result.cause.error).toBeInstanceOf(AmpRegistry.DatasetOwnershipError)
             if (result.cause.error instanceof AmpRegistry.DatasetOwnershipError) {
-              expect(result.cause.error.namespace).toBe("edgeandnode")
-              expect(result.cause.error.name).toBe("mainnet")
+              expect(result.cause.error.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+              expect(result.cause.error.name).toBe(Model.DatasetName.make("mainnet"))
               expect(result.cause.error.actualOwner).toBe("0xDifferentOwnerAddress")
               expect(result.cause.error.userAddresses).toEqual(mockAuthStorage.accounts)
             }
@@ -1211,7 +1308,7 @@ describe("AmpRegistryService", () => {
           service.publishFlow({
             auth: mockAuthStorage,
             context: mockManifestContext,
-            versionTag: "1.0.0",
+            versionTag: Model.DatasetVersion.make("1.0.0"),
           }),
         )
 
@@ -1221,9 +1318,9 @@ describe("AmpRegistryService", () => {
           if (result.cause._tag === "Fail") {
             expect(result.cause.error).toBeInstanceOf(AmpRegistry.VersionAlreadyExistsError)
             if (result.cause.error instanceof AmpRegistry.VersionAlreadyExistsError) {
-              expect(result.cause.error.namespace).toBe("edgeandnode")
-              expect(result.cause.error.name).toBe("mainnet")
-              expect(result.cause.error.versionTag).toBe("1.0.0")
+              expect(result.cause.error.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+              expect(result.cause.error.name).toBe(Model.DatasetName.make("mainnet"))
+              expect(result.cause.error.versionTag).toBe(Model.DatasetVersion.make("1.0.0"))
             }
           }
         }
@@ -1280,21 +1377,21 @@ describe("AmpRegistryService", () => {
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: "mainnet",
+                network: Model.Network.make("mainnet"),
               }),
               transactions: Model.Table.make({
                 input: Model.TableInput.make({ sql: "SELECT * FROM transactions" }),
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: "mainnet",
+                network: Model.Network.make("mainnet"),
               }),
               logs: Model.Table.make({
                 input: Model.TableInput.make({ sql: "SELECT * FROM logs" }),
                 schema: Model.TableSchema.make({
                   arrow: Model.ArrowSchema.make({ fields: [] }),
                 }),
-                network: "sepolia",
+                network: Model.Network.make("sepolia"),
               }),
             },
             functions: {},
@@ -1304,14 +1401,14 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: contextWithMultipleTables,
-          versionTag: "1.0.0",
+          versionTag: Model.DatasetVersion.make("1.0.0"),
         })
 
         // Verify the flow completed successfully
         // The indexingChains are derived from manifest.tables internally
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
-        expect(result.revision).toBe("1.0.0")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
+        expect(result.revision).toBe(Model.DatasetVersion.make("1.0.0"))
       }))
 
     it.effect("should convert dependencies to DatasetReferenceStr in ancestors", ({ expect }) =>
@@ -1355,27 +1452,16 @@ describe("AmpRegistryService", () => {
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
 
-        const contextWithDependencies: ManifestContext.DatasetContext = {
-          ...mockManifestContext,
-          dependencies: [
-            Model.DatasetReference.make({
-              namespace: "edgeandnode",
-              name: "mainnet",
-              revision: "1.0.0",
-            }),
-          ],
-        }
-
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
-          context: contextWithDependencies,
-          versionTag: "1.1.0",
+          context: mockManifestContext,
+          versionTag: Model.DatasetVersion.make("1.1.0"),
         })
 
         // Verify the flow completed successfully
         // Dependencies are converted to ancestors internally
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.revision).toBe("1.1.0")
       }))
 
@@ -1422,25 +1508,24 @@ describe("AmpRegistryService", () => {
         // Context without explicit status/visibility
         const contextWithoutDefaults: ManifestContext.DatasetContext = {
           metadata: Model.DatasetMetadata.make({
-            namespace: "edgeandnode",
-            name: "test",
+            namespace: Model.DatasetNamespace.make("edgeandnode"),
+            name: Model.DatasetName.make("test"),
             // status and visibility will use defaults
           }),
           manifest: mockManifest,
-          dependencies: [],
         }
 
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: contextWithoutDefaults,
-          versionTag: "1.0.0",
+          versionTag: Model.DatasetVersion.make("1.0.0"),
         })
 
         // Verify the flow completed successfully
         // Defaults for visibility ("public") and status ("published") are applied internally
-        expect(result.namespace).toBe("edgeandnode")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
         expect(result.name).toBe("test")
-        expect(result.revision).toBe("1.0.0")
+        expect(result.revision).toBe(Model.DatasetVersion.make("1.0.0"))
       }))
 
     it.effect("should update metadata when publishing version if metadata changed", ({ expect }) =>
@@ -1521,15 +1606,15 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.1.0",
+          versionTag: Model.DatasetVersion.make("1.1.0"),
           changelog: "Updated features",
         })
 
         expect(getDatasetCalled).toBe(true)
         expect(publishVersionCalled).toBe(true)
         expect(updateMetadataCalled).toBe(true)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.revision).toBe("1.1.0")
       }))
 
@@ -1594,15 +1679,15 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.1.0",
+          versionTag: Model.DatasetVersion.make("1.1.0"),
           changelog: "Updated features",
         })
 
         expect(getDatasetCalled).toBe(true)
         expect(publishVersionCalled).toBe(true)
         expect(updateMetadataCalled).toBe(false)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.revision).toBe("1.1.0")
       }))
 
@@ -1671,8 +1756,8 @@ describe("AmpRegistryService", () => {
 
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
-          context: mockManifestContext, // Has keywords: ["ethereum", "mainnet"]
-          versionTag: "1.1.0",
+          context: mockManifestContext, // Has keywords: ["ethereum", Model.DatasetName.make("mainnet")]
+          versionTag: Model.DatasetVersion.make("1.1.0"),
         })
 
         expect(updateMetadataCalled).toBe(true)
@@ -1757,7 +1842,7 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.1.0",
+          versionTag: Model.DatasetVersion.make("1.1.0"),
           changelog: "New version for private dataset",
         })
 
@@ -1765,8 +1850,8 @@ describe("AmpRegistryService", () => {
         expect(getOwnedDatasetCalled).toBe(true)
         expect(publishVersionCalled).toBe(true)
         expect(publishDatasetCalled).toBe(false)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
         expect(result.revision).toBe("1.1.0")
       }))
 
@@ -1830,16 +1915,16 @@ describe("AmpRegistryService", () => {
         const result = yield* service.publishFlow({
           auth: mockAuthStorage,
           context: mockManifestContext,
-          versionTag: "1.0.0",
+          versionTag: Model.DatasetVersion.make("1.0.0"),
           changelog: "Initial release",
         })
 
         expect(getDatasetCalled).toBe(true)
         expect(getOwnedDatasetCalled).toBe(true)
         expect(publishDatasetCalled).toBe(true)
-        expect(result.namespace).toBe("edgeandnode")
-        expect(result.name).toBe("mainnet")
-        expect(result.revision).toBe("1.0.0")
+        expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
+        expect(result.name).toBe(Model.DatasetName.make("mainnet"))
+        expect(result.revision).toBe(Model.DatasetVersion.make("1.0.0"))
       }))
   })
 })

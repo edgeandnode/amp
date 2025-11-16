@@ -6,6 +6,7 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Admin from "../../api/Admin.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
+import * as Model from "../../Model.ts"
 import { adminUrl } from "../common.ts"
 
 export const dev = Command.make("dev", { args: { adminUrl } }).pipe(
@@ -37,7 +38,7 @@ export const dev = Command.make("dev", { args: { adminUrl } }).pipe(
           // Register and deploy dataset under `dev` revision
           yield* Console.info(`Config changed, deploying ${metadata.namespace}/${metadata.name}@dev`)
           yield* admin.registerDataset(metadata.namespace, metadata.name, manifest)
-          yield* admin.deployDataset(metadata.namespace, metadata.name, "dev")
+          yield* admin.deployDataset(metadata.namespace, metadata.name, Model.DatasetTag.make("dev"))
         }).pipe(
           Effect.tapError((cause) => Console.error(`Failed to deploy ${metadata.namespace}/${metadata.name}`, cause)),
           Effect.ignore,

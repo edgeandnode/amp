@@ -1,10 +1,41 @@
-import type { Field as ArrowField, Schema as ArrowSchema } from "apache-arrow"
-import { DataType, TimeUnit } from "apache-arrow"
+import type { Field as ArrowField, RecordBatch, Schema as ArrowSchema, TypeMap } from "apache-arrow"
+import { DataType, Table, TimeUnit } from "apache-arrow"
 import * as Schema from "effect/Schema"
 import type * as Types from "effect/Types"
 
+export const makeTable: {
+  <T extends TypeMap = any>(data: RecordBatch<T>): Table<T>
+  <T extends TypeMap = any>(data: Iterable<RecordBatch<T>>): Table<T>
+} = (data) => new Table(data as any)
+
+export const parseRecordBatch: {
+  <A, I, R>(schema: Schema.Schema<A, I, R>, data: RecordBatch): Array<A>
+  <A, I, R>(schema: Schema.Schema<A, I, R>, data: Iterable<RecordBatch>): Array<A>
+} = (schema, data) => {
+  const table = makeTable(data as any)
+  return Schema.validateSync(getArraySchema(schema))(table.toArray())
+}
+
+const arraySchemaCache = new WeakMap<Schema.Schema.Any, Schema.Schema.Any>()
+const getArraySchema = (schema: Schema.Schema.Any): Schema.Schema.Any => {
+  if (arraySchemaCache.has(schema)) {
+    return arraySchemaCache.get(schema)!
+  }
+
+  const generated = Schema.Array(schema).pipe(Schema.mutable)
+  arraySchemaCache.set(schema, generated)
+  return generated
+}
+
+const schemaCache = new WeakMap<ArrowSchema, Schema.Schema.AnyNoContext>()
 export const generateSchema = (schema: ArrowSchema): Schema.Schema.AnyNoContext => {
-  return Schema.Struct(generateFields(schema.fields)) as any
+  if (schemaCache.has(schema)) {
+    return schemaCache.get(schema)!
+  }
+
+  const generated = Schema.Struct(generateFields(schema.fields)) as any
+  schemaCache.set(schema, generated)
+  return generated
 }
 
 const generateFields = (fields: Array<ArrowField>) => {
