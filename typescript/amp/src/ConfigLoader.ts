@@ -21,7 +21,9 @@ export class Context {
     this.definitionPath = definitionPath
   }
 
-  /// Reads a file relative to the directory of the dataset definition
+  /** 
+   * Reads a file relative to the directory of the dataset definition.
+   */
   functionSource(relativePath: string): Model.FunctionSource {
     const baseDir = path.dirname(this.definitionPath)
     const fullPath = path.join(baseDir, relativePath)
