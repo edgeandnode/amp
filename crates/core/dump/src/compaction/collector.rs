@@ -140,7 +140,7 @@ impl Collector {
                     let metrics = self.metrics.as_ref();
 
                     async move {
-                        tracing::debug!("Deleting expired file: {}", location);
+                        tracing::trace!("Deleting expired file: {}", location);
                         match object_store.delete(&location).await {
                             Ok(_) => {
                                 tracing::debug!("Deleted expired file: {}", location);

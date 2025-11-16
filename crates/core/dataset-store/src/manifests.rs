@@ -88,7 +88,7 @@ where
             .map(ManifestContent)
             .map_err(GetError::Utf8Error)?;
 
-        tracing::debug!("Manifest retrieved from object store");
+        tracing::trace!("Manifest retrieved from object store");
 
         Ok(Some(content))
     }
