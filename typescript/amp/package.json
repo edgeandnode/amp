@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.34",
+  "version": "0.0.35",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -32,7 +32,8 @@
     "build:studio": "cd ../studio && pnpm run build",
     "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
     "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
-    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio"
+    "prepublish": "rm -rf dist && pnpm run build && pnpm run prepare-studio",
+    "amp": "amp"
   },
   "publishConfig": {
     "bin": {

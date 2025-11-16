@@ -102,7 +102,7 @@ export const publish = Command.make("publish", {
 
       yield* Console.log("Dataset successfully published!")
       yield* Console.log(
-        `Visit https://playground.amp.edgeandnode.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
+        `Visit https://playground.amp.thegraph.com/playground/${publishResult.namespace}/${publishResult.name}/${publishResult.revision} to view and query your Dataset`,
       )
       return yield* ExitCode.Zero
     })
