@@ -4,6 +4,7 @@ import type * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Either from "effect/Either"
+import { identity } from "effect/Function"
 import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -73,7 +74,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
             jiti.import<(context: Context) => Model.DatasetConfig>(file, {
               default: true,
             }),
-          catch: (cause) => cause,
+          catch: identity,
         }).pipe(
           Effect.map((callback) => callback(new Context(file))),
           Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
@@ -93,7 +94,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
             import(file).then(
               (module) => module.default as (context: Context) => Model.DatasetConfig,
             ),
-          catch: (cause) => cause,
+          catch: identity,
         }).pipe(
           Effect.map((callback) => callback(new Context(file))),
           Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
@@ -110,7 +111,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
       const loadJson = Effect.fnUntraced(function*(file: string) {
         return yield* Effect.tryMap(fs.readFileString(file), {
           try: (content) => JSON.parse(content),
-          catch: (cause) => cause,
+          catch: identity,
         }).pipe(
           Effect.flatMap(Schema.decodeUnknown(Model.DatasetConfig)),
           Effect.mapError(
@@ -162,17 +163,19 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
         )
       })
 
+      const CANDIDATE_CONFIG_FILES = [
+        "amp.config.ts",
+        "amp.config.mts",
+        "amp.config.cts",
+        "amp.config.js",
+        "amp.config.mjs",
+        "amp.config.cjs",
+        "amp.config.json",
+      ]
+
       const find = Effect.fnUntraced(function*(cwd: string = ".") {
-        const candidates = [
-          path.resolve(cwd, `amp.config.ts`),
-          path.resolve(cwd, `amp.config.mts`),
-          path.resolve(cwd, `amp.config.cts`),
-          path.resolve(cwd, `amp.config.js`),
-          path.resolve(cwd, `amp.config.mjs`),
-          path.resolve(cwd, `amp.config.cjs`),
-          path.resolve(cwd, `amp.config.json`),
-        ]
-        return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
+        const candidates = CANDIDATE_CONFIG_FILES.map((fileName) => fs.exists(path.resolve(cwd, fileName)))
+        return yield* Effect.firstSuccessOf(candidates).pipe(Effect.option)
       })
 
       const watch = <E, R>(
