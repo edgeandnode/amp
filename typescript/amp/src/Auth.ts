@@ -17,7 +17,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import * as Model from "./Model.ts"
 
-export const AUTH_PLATFORM_URL = new URL("https://auth.amp.edgeandnode.com/")
+export const AUTH_PLATFORM_URL = new URL("https://auth.amp.thegraph.com/")
 const JWKS = jose.createRemoteJWKSet(new URL("/.well-known/jwks.json", AUTH_PLATFORM_URL))
 
 const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
