@@ -123,28 +123,30 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
         )
       })
 
+      const fileMatcher = Match.type<string>().pipe(
+        Match.when(
+          (_) => /\.(ts|mts|cts)$/.test(path.extname(_)),
+          (_) => loadTypeScript(_),
+        ),
+        Match.when(
+          (_) => /\.(js|mjs|cjs)$/.test(path.extname(_)),
+          (_) => loadJavaScript(_),
+        ),
+        Match.when(
+          (_) => /\.(json)$/.test(path.extname(_)),
+          (_) => loadJson(_),
+        ),
+        Match.orElse(
+          (_) =>
+            new ConfigLoaderError({
+              message: `Unsupported file extension ${path.extname(_)}`,
+            }),
+        ),
+      )
+
       const load = Effect.fnUntraced(function*(file: string) {
         const resolved = path.resolve(file)
-        return yield* Match.value(path.extname(resolved)).pipe(
-          Match.when(
-            (_) => /\.(ts|mts|cts)$/.test(_),
-            () => loadTypeScript(resolved),
-          ),
-          Match.when(
-            (_) => /\.(js|mjs|cjs)$/.test(_),
-            () => loadJavaScript(resolved),
-          ),
-          Match.when(
-            (_) => /\.(json)$/.test(_),
-            () => loadJson(resolved),
-          ),
-          Match.orElse(
-            (_) =>
-              new ConfigLoaderError({
-                message: `Unsupported file extension ${_}`,
-              }),
-          ),
-        )
+        return yield* fileMatcher(resolved)
       })
 
       const build = Effect.fnUntraced(function*(file: string) {
