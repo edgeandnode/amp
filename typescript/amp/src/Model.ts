@@ -131,16 +131,16 @@ export class DatasetReference extends Schema.Class<DatasetReference>("DatasetRef
   }
 }
 
-export const DatasetReferenceFromString: Schema.Schema<DatasetReference, string> = DatasetReferenceString.pipe(
+export const DatasetReferenceFromString: Schema.Schema<DatasetReference, string> = Schema.String.pipe(
   Schema.transformOrFail(DatasetReference, {
     encode: (value) => ParseResult.succeed(`${value.namespace}/${value.name}@${value.revision}`),
     decode: (value) => {
       const at = value.lastIndexOf("@")
       const slash = value.indexOf("/")
 
-      const namespace = value.substring(0, slash)
-      const name = value.substring(slash + 1, at)
-      const revision = value.substring(at + 1)
+      const namespace = slash === -1 ? "_" : value.substring(0, slash)
+      const name = value.substring(slash + 1, at === -1 ? undefined : at)
+      const revision = at === -1 ? "dev" : value.substring(at + 1)
 
       return ParseResult.decode(DatasetReference)({ namespace, name, revision })
     },

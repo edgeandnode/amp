@@ -92,7 +92,7 @@ Testing.layer((it) => {
       const request = new Admin.GetOutputSchemaPayload({
         tables: { query: "SELECT * FROM anvil.transactions" },
         dependencies: {
-          anvil: Model.DatasetReference.decode("anvil/0.0.1"),
+          anvil: Model.DatasetReference.decode("anvil@0.0.1"),
         },
       })
       const result = yield* api.getOutputSchema(request)
@@ -125,6 +125,8 @@ Testing.layer((it) => {
 
       const response = yield* admin.getDatasetVersion(namespace, name, revision)
       deepStrictEqual(response.name, "example")
+      deepStrictEqual(response.namespace, "_")
+      deepStrictEqual(response.revision, "0.0.1")
     }),
   )
 
@@ -146,9 +148,19 @@ Testing.layer((it) => {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasets()
       const example = result.datasets.find((dataset) => dataset.name === "example")
-      assertInstanceOf(example, Admin.GetDatasetsResponse)
+      deepStrictEqual(example, {
+        name: Model.DatasetName.make("example"),
+        namespace: Model.DatasetNamespace.make("_"),
+        versions: [Model.DatasetVersion.make("0.0.1")],
+        latestVersion: Model.DatasetVersion.make("0.0.1"),
+      })
       const anvil = result.datasets.find((dataset) => dataset.name === "anvil")
-      assertInstanceOf(anvil, Admin.GetDatasetsResponse)
+      deepStrictEqual(anvil, {
+        name: Model.DatasetName.make("anvil"),
+        namespace: Model.DatasetNamespace.make("_"),
+        versions: [Model.DatasetVersion.make("0.0.1")],
+        latestVersion: Model.DatasetVersion.make("0.0.1"),
+      })
     }),
   )
 
@@ -167,7 +179,7 @@ Testing.layer((it) => {
       // Query the example dataset.
       const response = yield* jsonl.query(schema)`
         SELECT tx_hash, block_hash, block_num, address, count
-        FROM example.counts
+        FROM "_/example@0.0.1".counts
         ORDER BY count DESC
         LIMIT 1
       `
