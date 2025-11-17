@@ -399,25 +399,17 @@ impl PhysicalTable {
         tx.commit().await.map_err(RestoreError::TransactionCommit)?;
 
         let object_store = data_store.object_store();
-        let mut file_stream = object_store.list(Some(path));
-
-        while let Some(object_meta) = file_stream
-            .try_next()
+        let files = object_store
+            .list(Some(path))
+            .try_collect::<Vec<_>>()
             .await
-            .map_err(RestoreError::ListFiles)?
-        {
-            let file_name_for_error = object_meta
-                .location
-                .filename()
-                .unwrap_or("unknown")
-                .to_string();
+            .map_err(RestoreError::ListFiles)?;
+
+        for object_meta in files {
             let (file_name, amp_meta, footer) =
                 amp_metadata_from_parquet_file(&object_meta, object_store.clone())
                     .await
-                    .map_err(|err| RestoreError::ReadParquetMetadata {
-                        file_name: file_name_for_error,
-                        source: err,
-                    })?;
+                    .map_err(RestoreError::ReadParquetMetadata)?;
 
             let parquet_meta_json =
                 serde_json::to_value(amp_meta).map_err(RestoreError::SerializeMetadata)?;
@@ -872,12 +864,8 @@ pub enum RestoreError {
     ///
     /// TODO: Replace BoxError with concrete error type when amp_metadata_from_parquet_file
     /// is migrated to use proper error handling patterns.
-    #[error("Failed to read Amp metadata from parquet file '{file_name}'")]
-    ReadParquetMetadata {
-        file_name: String,
-        #[source]
-        source: BoxError,
-    },
+    #[error("Failed to read Amp metadata from parquet file")]
+    ReadParquetMetadata(#[source] BoxError),
 
     /// Failed to serialize parquet metadata to JSON
     #[error("Failed to serialize parquet metadata to JSON")]
