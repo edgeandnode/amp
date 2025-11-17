@@ -3,9 +3,9 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::{
-    BoxError,
-    catalog::{JobLabels, physical::PhysicalTable},
+use common::catalog::{
+    JobLabels,
+    physical::{PhysicalTable, RestoreLatestRevisionError},
 };
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
@@ -113,9 +113,17 @@ pub async fn handler(
             &job_labels,
         )
         .await
-        .map_err(|err| Error::RestoreTable {
-            table: table.name().clone(),
-            source: err,
+        .map_err(|err| {
+            tracing::error!(
+                error = %err,
+                error_source = logging::error_source(&err),
+                table = %table.name(),
+                "failed to restore table from storage"
+            );
+            Error::RestoreTable {
+                table: table.name().clone(),
+                source: err,
+            }
         })?
         .ok_or_else(|| Error::TableNotFound {
             table: table.name().clone(),
@@ -197,8 +205,12 @@ pub enum Error {
     /// - Error scanning object storage for table files
     /// - Error registering location in metadata database
     /// - Error re-indexing Parquet file metadata
-    #[error("Failed to restore table '{table}': {source}")]
-    RestoreTable { table: TableName, source: BoxError },
+    #[error("Failed to restore table '{table}'")]
+    RestoreTable {
+        table: TableName,
+        #[source]
+        source: RestoreLatestRevisionError,
+    },
 
     /// Table data not found in object storage
     ///
