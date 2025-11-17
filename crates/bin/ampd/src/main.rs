@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use ampd::{dev_cmd, migrate_cmd, restore_cmd, server_cmd, worker_cmd};
+use ampd::{dev_cmd, migrate_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
-use datasets_common::reference::Reference;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -49,12 +48,6 @@ enum Command {
     Controller,
     /// Run migrations on the metadata database
     Migrate,
-    /// Restore dataset snapshots from storage
-    Restore {
-        /// The name or names of the datasets to restore (comma-separated).
-        #[arg(long, required = true, value_delimiter = ',')]
-        dataset: Vec<Reference>,
-    },
 }
 
 #[tokio::main]
@@ -195,20 +188,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let result = migrate_cmd::run(config).await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
-        }
-        Command::Restore { dataset: datasets } => {
-            let config = load_config(config_path.as_ref(), false).await?;
-            let metadata_db = config.metadata_db().await?;
-
-            let (tracing_provider, metrics_provider, _metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
-
-            let result = restore_cmd::run(config.into(), metadata_db, datasets).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
