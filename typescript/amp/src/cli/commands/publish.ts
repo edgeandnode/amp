@@ -12,7 +12,7 @@ import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 import { configFile, ExitCode } from "../common.ts"
 
-const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.edgeandnode.com/controller")
+const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.thegraph.com/controller")
 
 export const publish = Command.make("publish", {
   args: {
