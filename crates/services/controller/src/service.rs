@@ -49,6 +49,7 @@ pub async fn new(
         metadata_db,
         dataset_store,
         scheduler: Arc::new(scheduler),
+        config,
     };
 
     // Create controller router with health check endpoint

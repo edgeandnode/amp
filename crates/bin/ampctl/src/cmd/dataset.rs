@@ -5,6 +5,7 @@ pub mod inspect;
 pub mod list;
 pub mod manifest;
 pub mod register;
+pub mod restore;
 pub mod versions;
 
 /// Dataset management subcommands.
@@ -44,6 +45,15 @@ pub enum Commands {
     /// Get the manifest JSON for a dataset
     #[command(after_help = include_str!("dataset/manifest__after_help.md"))]
     Manifest(manifest::Args),
+
+    /// Restore dataset physical tables from object storage
+    ///
+    /// Re-indexes physical table metadata from object storage into the metadata
+    /// database. This is useful for recovering from database loss, setting up a
+    /// new system with pre-existing data, or re-syncing metadata after storage
+    /// restoration.
+    #[command(after_help = include_str!("dataset/restore__after_help.md"))]
+    Restore(restore::Args),
 }
 
 /// Execute the dataset command with the given subcommand.
@@ -55,6 +65,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Versions(args) => versions::run(args).await?,
         Commands::Manifest(args) => manifest::run(args).await?,
+        Commands::Restore(args) => restore::run(args).await?,
     }
     Ok(())
 }

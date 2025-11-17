@@ -30,10 +30,11 @@ async fn evm_rpc_single_dump() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -100,10 +101,11 @@ async fn eth_beacon_single_dump() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -170,10 +172,11 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -240,10 +243,11 @@ async fn evm_rpc_base_single_dump() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -310,10 +314,11 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -380,10 +385,11 @@ async fn eth_firehose_single_dump() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await
@@ -450,10 +456,11 @@ async fn base_firehose_single_dump() {
 
     // Create reference snapshot from pre-loaded snapshot data
     let reference = {
+        let ampctl = test_env.new_ampctl();
         let tables = test_helpers::restore_dataset_snapshot(
-            test_env.daemon_server().config(),
-            test_env.metadata_db(),
+            &ampctl,
             test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
             &dataset_ref,
         )
         .await

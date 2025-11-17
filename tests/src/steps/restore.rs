@@ -22,14 +22,15 @@ impl Step {
     /// Restores the specified dataset snapshot.
     ///
     /// Uses the test helper functions to restore a dataset snapshot from
-    /// storage back into the metadata database and dataset store.
+    /// storage back into the metadata database via the Admin API.
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
         tracing::debug!("Restoring dataset snapshot '{}'", self.snapshot_name);
 
+        let ampctl = ctx.new_ampctl();
         test_helpers::restore_dataset_snapshot(
-            ctx.daemon_server().config(),
-            ctx.metadata_db(),
+            &ampctl,
             ctx.daemon_server().dataset_store(),
+            ctx.metadata_db(),
             &self.snapshot_name,
         )
         .await?;

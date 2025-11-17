@@ -60,7 +60,7 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use monitoring::logging;
 use tests::testlib::{
-    fixtures::{DaemonConfigBuilder, TempMetadataDb},
+    fixtures::{Ampctl, DaemonConfigBuilder, DaemonController, TempMetadataDb},
     helpers as test_helpers,
 };
 
@@ -153,7 +153,6 @@ async fn main() {
                     .await
                     .expect("Failed to load config"),
             );
-            let metadata_db = temp_db.metadata_db().clone();
             let dataset_store = {
                 let provider_configs_store =
                     ProviderConfigsStore::new(config.providers_store.prefixed_store());
@@ -166,11 +165,18 @@ async fn main() {
                 )
             };
 
+            // Start controller for Admin API access during dependency restoration
+            let controller = DaemonController::new(config.clone(), None)
+                .await
+                .expect("Failed to start controller for dependency restoration");
+            let ampctl = Ampctl::new(controller.admin_api_url());
+
             // Run blessing procedure
             bless(
                 config,
-                metadata_db,
+                &ampctl,
                 dataset_store,
+                temp_db.metadata_db().clone(),
                 dataset_name.clone(),
                 end_block,
             )
@@ -213,8 +219,9 @@ async fn main() {
 /// All errors include context about the specific dataset and operation that failed.
 async fn bless(
     config: Arc<Config>,
-    metadata_db: MetadataDb,
+    ampctl: &Ampctl,
     dataset_store: Arc<DatasetStore>,
+    metadata_db: MetadataDb,
     dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {
@@ -244,7 +251,7 @@ async fn bless(
 
     tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
-        test_helpers::restore_dataset_snapshot(&config, &metadata_db, &dataset_store, &dep)
+        test_helpers::restore_dataset_snapshot(ampctl, &dataset_store, &metadata_db, &dep)
             .await
             .map_err(|err| {
                 format!(

@@ -144,4 +144,32 @@ impl Ampctl {
             .map(|v| v.manifest_hash.clone())
             .ok_or("No versions found for dataset".into())
     }
+
+    /// Restore a dataset's physical tables from object storage.
+    ///
+    /// Takes a dataset reference (namespace/name@version) and POSTs to the
+    /// `/datasets/{namespace}/{name}/versions/{version}/restore` endpoint to
+    /// re-index physical table metadata from storage into the metadata database.
+    ///
+    /// Returns information about the restored tables including their names,
+    /// location IDs, and storage URLs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The network request fails
+    /// - The API returns an error response (400/404/500)
+    /// - The dataset or revision is not found
+    /// - Table data is not found in object storage
+    pub async fn restore_dataset(
+        &self,
+        dataset_ref: &Reference,
+    ) -> Result<Vec<ampctl::client::datasets::RestoredTableInfo>, BoxError> {
+        self.client
+            .datasets()
+            .restore(dataset_ref)
+            .await
+            .map(|response| response.tables)
+            .map_err(Into::into)
+    }
 }
