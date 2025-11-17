@@ -40,7 +40,7 @@ export const publish = Command.make("publish", {
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
       const client = yield* Admin.Admin
 
-      const maybeAuthStorage = yield* auth.get()
+      const maybeAuthStorage = yield* auth.getCache()
       if (Option.isNone(maybeAuthStorage)) {
         yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
         return yield* ExitCode.NonZero

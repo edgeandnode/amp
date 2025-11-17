@@ -20,7 +20,7 @@ export const logout = Command.prompt("logout", Prompt.all([confirm]), ([confirm]
       return yield* Effect.logInfo("Exiting...")
     }
 
-    return yield* auth.delete.pipe(
+    return yield* auth.clearCache.pipe(
       Effect.tapErrorCause((cause) =>
         Effect.logDebug("Failure removing the auth token from the KV Store", Cause.pretty(cause))
       ),
