@@ -176,7 +176,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()(
       ]
 
       const find = Effect.fnUntraced(function*(cwd: string = ".") {
-        const candidates = CANDIDATE_CONFIG_FILES.map((fileName) => fs.exists(path.resolve(cwd, fileName)))
+        const candidates = CANDIDATE_CONFIG_FILES.map((fileName) => {
+          const filePath = path.resolve(cwd, fileName)
+          return Effect.as(fs.exists(filePath), filePath)
+        })
         return yield* Effect.firstSuccessOf(candidates).pipe(Effect.option)
       })
 
