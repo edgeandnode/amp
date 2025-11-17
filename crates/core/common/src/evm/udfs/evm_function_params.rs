@@ -219,12 +219,29 @@ impl EvmDecodeParams {
         let mut builder = StructBuilder::from_fields(fields, 0);
         for data in data {
             match data {
+                None => {
+                    for (field, ty) in call.input_types.iter().enumerate() {
+                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                    }
+                    builder.append(false);
+                }
+                Some(data) if data.len() < 4 => {
+                    tracing::trace!(
+                        function_name=%call.alloy_function.name,
+                        data_len=data.len(),
+                        "failed to decode function params: data too short"
+                    );
+                    for (field, ty) in call.input_types.iter().enumerate() {
+                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                    }
+                    builder.append(false);
+                }
                 Some(data) => {
                     let selector = &data[..4];
                     if selector != call.alloy_function.selector() {
                         tracing::trace!(
                             function_name=%call.alloy_function.name,
-                            "failed to decode function params due to selector mismatch"
+                            "failed to decode function params: selector mismatch"
                         );
                         for (field, ty) in call.input_types.iter().enumerate() {
                             FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
@@ -254,12 +271,6 @@ impl EvmDecodeParams {
                             builder.append(false);
                         }
                     }
-                }
-                None => {
-                    for (field, ty) in call.input_types.iter().enumerate() {
-                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
-                    }
-                    builder.append(false);
                 }
             }
         }
