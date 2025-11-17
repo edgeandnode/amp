@@ -1,6 +1,5 @@
 use amp_client::{AmpClient, PostgresStateStore};
 use anyhow::{Context, Result};
-use headers::{Authorization, HeaderMapExt};
 use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
@@ -47,12 +46,7 @@ pub async fn run(config: SyncConfig) -> Result<()> {
 
     // Apply authentication if provided
     if let Some(token) = &config.auth_token {
-        let mut headers = http::HeaderMap::new();
-        // Use typed header extension to set Authorization: Bearer <token>
-        let auth = Authorization::bearer(token.as_str())
-            .context("Failed to create Authorization header from token")?;
-        headers.typed_insert(auth);
-        client.set_headers(&headers);
+        client.set_token(token.as_str());
         info!("Applied authentication token");
     }
 
