@@ -3938,6 +3938,7 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "object_store",
+ "parking_lot",
  "rand 0.9.2",
  "serde",
  "serde_json",

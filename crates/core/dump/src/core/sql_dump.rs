@@ -130,6 +130,7 @@ pub async fn dump_table(
     manifest: DerivedManifest,
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
+    compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
     microbatch_max_interval: u64,
     end: EndBlock,
@@ -265,6 +266,7 @@ pub async fn dump_table(
             end,
             resume_watermark,
             table.clone(),
+            compactor,
             &opts,
             microbatch_max_interval,
             &ctx.notification_multiplexer,
@@ -308,6 +310,7 @@ async fn dump_sql_query(
     end: Option<BlockNum>,
     resume_watermark: Option<ResumeWatermark>,
     physical_table: Arc<PhysicalTable>,
+    compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
@@ -346,13 +349,6 @@ async fn dump_sql_query(
 
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
-
-    let mut compactor = AmpCompactor::start_and_run(
-        &physical_table,
-        env.parquet_footer_cache.clone(),
-        opts,
-        metrics.clone(),
-    );
 
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.

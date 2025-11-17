@@ -19,7 +19,7 @@ use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
 use monitoring::telemetry::metrics::Meter;
 use object_store::ObjectMeta;
 
-use crate::metrics;
+use crate::{compaction::AmpCompactor, metrics};
 
 pub mod block_ranges;
 mod raw_dataset;
@@ -29,14 +29,14 @@ mod tasks;
 /// Dumps a set of tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
     ctx: Ctx,
-    tables: &[Arc<PhysicalTable>],
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
-    for t in tables {
+    for (t, _) in tables {
         kinds.insert(DatasetKind::from_str(&t.dataset().kind)?);
     }
 
@@ -61,7 +61,7 @@ pub async fn dump_tables(
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
 pub async fn dump_raw_tables(
     ctx: Ctx,
-    tables: &[Arc<PhysicalTable>],
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -74,8 +74,8 @@ pub async fn dump_raw_tables(
 
     // Check that all tables belong to the same dataset.
     let dataset = {
-        let ds = tables[0].table().dataset();
-        for table in tables {
+        let ds = tables[0].0.table().dataset();
+        for (table, _) in tables {
             if table.dataset().manifest_hash != ds.manifest_hash {
                 return Err(
                     format!("Table {} is not in {}", table.table_ref(), ds.manifest_hash).into(),
@@ -85,11 +85,11 @@ pub async fn dump_raw_tables(
         ds
     };
 
-    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
-    let catalog = Catalog::new(tables.to_vec(), logical);
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|(t, _)| t.table()));
+    let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
 
     // Ensure consistency before starting the dump procedure.
-    for table in tables {
+    for (table, _) in tables {
         consistency_check(table).await?;
     }
 
@@ -122,7 +122,7 @@ pub async fn dump_raw_tables(
 
 pub async fn dump_user_tables(
     ctx: Ctx,
-    tables: &[Arc<PhysicalTable>],
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     microbatch_max_interval: u64,
     max_writers: u16,
     end: EndBlock,
@@ -136,7 +136,7 @@ pub async fn dump_user_tables(
     let env = ctx.config.make_query_env()?;
 
     // Pre-check all tables for consistency and validate dataset kinds before spawning tasks
-    for table in tables {
+    for (table, _) in tables {
         consistency_check(table).await?;
 
         let dataset = table.table().dataset();
@@ -154,10 +154,11 @@ pub async fn dump_user_tables(
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
-    for table in tables {
+    for (table, comppactor) in tables {
         let ctx = ctx.clone();
         let env = env.clone();
-        let table = table.clone();
+        let table = Arc::clone(table);
+        let compactor = Arc::clone(comppactor);
         let opts = opts.clone();
         let metrics = metrics.clone();
 
@@ -173,6 +174,7 @@ pub async fn dump_user_tables(
                 manifest,
                 &env,
                 table.clone(),
+                compactor,
                 &opts,
                 microbatch_max_interval,
                 end,

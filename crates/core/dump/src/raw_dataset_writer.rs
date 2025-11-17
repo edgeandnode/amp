@@ -1,11 +1,10 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, ParquetFooterCache, RawTableRows,
+    BlockNum, BoxError, RawTableRows,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::BlockRange},
-    parquet::file::metadata::ParquetMetaData,
 };
 use datasets_common::table_name::TableName;
 use metadata_db::MetadataDb;
@@ -34,6 +33,7 @@ impl RawDatasetWriter {
         metadata_db: MetadataDb,
         opts: Arc<WriterProperties>,
         missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
+        compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
@@ -41,11 +41,14 @@ impl RawDatasetWriter {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
-            let cache = ParquetFooterCache::builder(opts.cache_size_mb)
-                .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
-                .build();
-            let writer =
-                RawTableWriter::new(table.clone(), cache, opts.clone(), ranges, metrics.clone())?;
+            let compactor = Arc::clone(compactors_by_table.get(table_name).unwrap());
+            let writer = RawTableWriter::new(
+                table.clone(),
+                compactor,
+                opts.clone(),
+                ranges,
+                metrics.clone(),
+            )?;
             writers.insert(table_name.clone(), writer);
         }
         Ok(RawDatasetWriter {
@@ -117,13 +120,13 @@ struct RawTableWriter {
 
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 
-    compactor: AmpCompactor,
+    compactor: Arc<AmpCompactor>,
 }
 
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        cache: ParquetFooterCache,
+        compactor: Arc<AmpCompactor>,
         opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -140,8 +143,6 @@ impl RawTableWriter {
             None => None,
         };
 
-        let amp_compactor = AmpCompactor::start_and_run(&table, cache, &opts, metrics.clone());
-
         Ok(Self {
             table,
             opts,
@@ -149,7 +150,7 @@ impl RawTableWriter {
             current_file,
             current_range: None,
             metrics,
-            compactor: amp_compactor,
+            compactor,
         })
     }
 

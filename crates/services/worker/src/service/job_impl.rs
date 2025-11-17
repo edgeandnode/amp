@@ -3,13 +3,14 @@
 use std::sync::Arc;
 
 use common::{
-    BoxError,
+    BoxError, ParquetFooterCache,
     catalog::{JobLabels, physical::PhysicalTable},
+    parquet::file::metadata::ParquetMetaData,
 };
 use datasets_common::{
     hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
 };
-use dump::{Ctx, metrics::MetricsRegistry};
+use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::job::{JobDescriptor, JobId};
@@ -59,7 +60,9 @@ pub(super) async fn new(
         .as_ref()
         .map(|m| Arc::new(MetricsRegistry::new(m, job_labels.clone())));
 
-    let mut tables = vec![];
+    let opts = dump::parquet_opts(&ctx.config.parquet);
+
+    let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     for location in output_locations {
         let hash: Hash = location.manifest_hash.into();
 
@@ -80,21 +83,26 @@ pub(super) async fn new(
                 dataset_hash: hash,
             });
         };
+        let physical_table = PhysicalTable::new(
+            table.clone(),
+            location.url,
+            location.id,
+            ctx.metadata_db.clone(),
+            job_labels.clone(),
+        )
+        .map_err(|err| JobInitError::CreatePhysicalTable {
+            table_name: table.name().clone(),
+            source: err,
+        })?
+        .into();
+        let capacity = opts.cache_size_mb;
+        let cache = ParquetFooterCache::builder(capacity)
+            .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+            .build();
+        let compactor =
+            AmpCompactor::start_and_run(&physical_table, cache, &opts, metrics.clone()).into();
 
-        tables.push(
-            PhysicalTable::new(
-                table.clone(),
-                location.url,
-                location.id,
-                ctx.metadata_db.clone(),
-                job_labels.clone(),
-            )
-            .map_err(|err| JobInitError::CreatePhysicalTable {
-                table_name: table.name().clone(),
-                source: err,
-            })?
-            .into(),
-        );
+        tables.push((physical_table, compactor));
     }
 
     let microbatch_max_interval = ctx.config.microbatch_max_interval;

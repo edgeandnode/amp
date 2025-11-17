@@ -7,7 +7,7 @@
 use std::{collections::BTreeMap, fs, sync::Arc};
 
 use common::{
-    BoxError, LogicalCatalog, Store,
+    BoxError, LogicalCatalog, ParquetFooterCache, Store,
     arrow::array::RecordBatch,
     catalog::{
         JobLabels,
@@ -15,6 +15,7 @@ use common::{
     },
     config::Config,
     metadata::segments::BlockRange,
+    parquet::file::metadata::ParquetMetaData,
     sql,
     store::ObjectStoreUrl,
 };
@@ -24,7 +25,7 @@ use dataset_store::{
 };
 use datasets_common::{reference::Reference, table_name::TableName};
 use datasets_derived::sql_str::SqlStr;
-use dump::{EndBlock, consistency_check};
+use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 
@@ -55,6 +56,10 @@ pub async fn dump_internal(
     fresh: bool,
     meter: Option<Meter>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    let opts = dump::parquet_opts(&config.parquet);
+    let cache = ParquetFooterCache::builder(opts.cache_size_mb)
+        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .build();
     let data_store = match new_location {
         Some(location) => {
             let data_path = fs::canonicalize(&location)
@@ -130,8 +135,10 @@ pub async fn dump_internal(
                             .await?
                     }
                 }
-            };
-            tables.push(physical_table.into());
+            }
+            .into();
+            let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
+            tables.push((physical_table, compactor));
         }
         physical_datasets.push((tables, metrics));
     }
@@ -149,7 +156,7 @@ pub async fn dump_internal(
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets
         .iter()
-        .flat_map(|(tables, _)| tables)
+        .flat_map(|(tables, _)| tables.iter().map(|(t, _)| t))
         .cloned()
         .collect();
 
