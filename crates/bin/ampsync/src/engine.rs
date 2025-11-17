@@ -844,10 +844,10 @@ mod tests {
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
-                Arc::new(Int64Array::from(vec![42i64; num_rows])),  // _tx_id
+                Arc::new(Int64Array::from(vec![42i64; num_rows])), // _tx_id
                 Arc::new(Int32Array::from(vec![0i32, 1i32, 2i32])), // _row_index
                 Arc::new(UInt64Array::from(vec![1000u64; num_rows])), // _block_num
-                Arc::new(Int64Array::from(vec![100, 200, 300])),    // value
+                Arc::new(Int64Array::from(vec![100, 200, 300])),   // value
             ],
         )
         .unwrap();
@@ -913,10 +913,10 @@ mod tests {
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
-                Arc::new(Int64Array::from(vec![42i64])),     // _tx_id
-                Arc::new(Int32Array::from(vec![0i32])),      // _row_index
-                Arc::new(UInt64Array::from(vec![1000u64])),  // _block_num
-                Arc::new(Int64Array::from(vec![100])),       // value
+                Arc::new(Int64Array::from(vec![42i64])),    // _tx_id
+                Arc::new(Int32Array::from(vec![0i32])),     // _row_index
+                Arc::new(UInt64Array::from(vec![1000u64])), // _block_num
+                Arc::new(Int64Array::from(vec![100])),      // value
             ],
         )
         .unwrap();
@@ -1085,10 +1085,10 @@ mod tests {
                 Field::new("value", DataType::Int64, false),
             ])),
             vec![
-                Arc::new(Int64Array::from(vec![1i64; num_rows])),     // _tx_id
-                Arc::new(Int32Array::from(row_indices)),              // _row_index
+                Arc::new(Int64Array::from(vec![1i64; num_rows])), // _tx_id
+                Arc::new(Int32Array::from(row_indices)),          // _row_index
                 Arc::new(UInt64Array::from(vec![1000u64; num_rows])), // _block_num
-                Arc::new(Int64Array::from(values)),                   // value
+                Arc::new(Int64Array::from(values)),               // value
             ],
         )
         .unwrap();
