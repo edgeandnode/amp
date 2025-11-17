@@ -111,7 +111,7 @@ export const publish = Command.make("publish", {
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
       Layer.provideMerge(Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
         return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token)?.accessToken)
       }))),
       Layer.provideMerge(Auth.layer),
