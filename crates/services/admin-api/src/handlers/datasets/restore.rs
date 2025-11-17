@@ -11,7 +11,9 @@ use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
 };
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use monitoring::logging;
+use tokio::task::JoinHandle;
 
 use crate::{
     ctx::Ctx,
@@ -100,48 +102,70 @@ pub async fn handler(
         manifest_hash: dataset.manifest_hash().clone(),
     };
 
-    let mut restored_tables = Vec::new();
+    let mut all_tasks: FuturesUnordered<JoinHandle<Result<RestoredTableInfo, Error>>> =
+        FuturesUnordered::new();
 
-    // Restore each table in the dataset
+    // Restore each table in the dataset concurrently
     for table in dataset.resolved_tables(reference.clone().into()) {
         tracing::debug!(dataset_reference=%reference, table_name=%table.name(), "restoring table");
 
-        let physical_table = PhysicalTable::restore_latest_revision(
-            &table,
-            ctx.config.data_store.clone(),
-            ctx.metadata_db.clone(),
-            &job_labels,
-        )
-        .await
-        .map_err(|err| {
+        let data_store = ctx.config.data_store.clone();
+        let metadata_db = ctx.metadata_db.clone();
+        let job_labels = job_labels.clone();
+        let reference_clone = reference.clone();
+
+        let task = tokio::spawn(async move {
+            let physical_table = PhysicalTable::restore_latest_revision(
+                &table,
+                data_store,
+                metadata_db,
+                &job_labels,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    table = %table.name(),
+                    "failed to restore table from storage"
+                );
+                Error::RestoreTable {
+                    table: table.name().clone(),
+                    source: err,
+                }
+            })?
+            .ok_or_else(|| Error::TableNotFound {
+                table: table.name().clone(),
+            })?;
+
+            tracing::info!(
+                datset_reference=%reference_clone,
+                table_name = %table.name(),
+                location_id = %physical_table.location_id(),
+                url = %physical_table.url(),
+                "table restored successfully"
+            );
+
+            Ok(RestoredTableInfo {
+                table_name: table.name().to_string(),
+                location_id: *physical_table.location_id(),
+                url: physical_table.url().to_string(),
+            })
+        });
+
+        all_tasks.push(task);
+    }
+
+    let mut restored_tables = Vec::new();
+    while let Some(result) = all_tasks.next().await {
+        restored_tables.push(result.map_err(|err| {
             tracing::error!(
                 error = %err,
                 error_source = logging::error_source(&err),
-                table = %table.name(),
-                "failed to restore table from storage"
+                "task join error during table restoration"
             );
-            Error::RestoreTable {
-                table: table.name().clone(),
-                source: err,
-            }
-        })?
-        .ok_or_else(|| Error::TableNotFound {
-            table: table.name().clone(),
-        })?;
-
-        tracing::info!(
-            datset_reference=%reference,
-            table_name = %table.name(),
-            location_id = %physical_table.location_id(),
-            url = %physical_table.url(),
-            "table restored successfully"
-        );
-
-        restored_tables.push(RestoredTableInfo {
-            table_name: table.name().to_string(),
-            location_id: *physical_table.location_id(),
-            url: physical_table.url().to_string(),
-        });
+            Error::TaskJoin { source: err }
+        })??);
     }
 
     tracing::info!(
@@ -219,6 +243,17 @@ pub enum Error {
     /// - Table has never been dumped or data was deleted
     #[error("Table '{table}' not found in object storage")]
     TableNotFound { table: TableName },
+
+    /// Failed to join restoration task
+    ///
+    /// This occurs when:
+    /// - A spawned task panicked during table restoration
+    /// - Task was cancelled unexpectedly
+    #[error("Failed to join restoration task")]
+    TaskJoin {
+        #[source]
+        source: tokio::task::JoinError,
+    },
 }
 
 impl IntoErrorResponse for Error {
@@ -228,6 +263,7 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::RestoreTable { .. } => "RESTORE_TABLE_ERROR",
             Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
+            Error::TaskJoin { .. } => "TASK_JOIN_ERROR",
         }
     }
 
@@ -237,6 +273,7 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::RestoreTable { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TableNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::TaskJoin { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

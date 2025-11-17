@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = "3.14.0"
 thiserror.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 utoipa = { version = "5.4.0", features = ["axum_extras"], optional = true }
