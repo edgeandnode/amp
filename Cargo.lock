@@ -889,6 +889,7 @@ dependencies = [
  "dataset-store",
  "datasets-common",
  "dump",
+ "futures",
  "metadata-db",
  "monitoring",
  "server",

@@ -399,36 +399,51 @@ impl PhysicalTable {
         tx.commit().await.map_err(RestoreError::TransactionCommit)?;
 
         let object_store = data_store.object_store();
-        let mut file_stream = object_store.list(Some(path));
-
-        while let Some(object_meta) = file_stream
-            .try_next()
+        let mut files = object_store
+            .list(Some(path))
+            .try_collect::<Vec<_>>()
             .await
-            .map_err(RestoreError::ListFiles)?
-        {
-            let file_name_for_error = object_meta
-                .location
-                .filename()
-                .unwrap_or("unknown")
-                .to_string();
-            let (file_name, amp_meta, footer) =
-                amp_metadata_from_parquet_file(&object_meta, object_store.clone())
-                    .await
-                    .map_err(|err| RestoreError::ReadParquetMetadata {
-                        file_name: file_name_for_error,
-                        source: err,
-                    })?;
+            .map_err(RestoreError::ListFiles)?;
+        files.sort_unstable_by(|a, b| a.location.cmp(&b.location));
 
-            let parquet_meta_json =
-                serde_json::to_value(amp_meta).map_err(RestoreError::SerializeMetadata)?;
+        // Process files in parallel using buffered stream
+        const CONCURRENT_METADATA_FETCHES: usize = 16;
 
-            let ObjectMeta {
-                size: object_size,
-                e_tag: object_e_tag,
-                version: object_version,
-                ..
-            } = object_meta;
+        let mut file_stream = stream::iter(files.into_iter())
+            .map(|object_meta| {
+                let object_store = object_store.clone();
+                async move {
+                    let (file_name, amp_meta, footer) =
+                        amp_metadata_from_parquet_file(&object_meta, object_store)
+                            .await
+                            .map_err(RestoreError::ReadParquetMetadata)?;
 
+                    let parquet_meta_json =
+                        serde_json::to_value(amp_meta).map_err(RestoreError::SerializeMetadata)?;
+
+                    let ObjectMeta {
+                        size: object_size,
+                        e_tag: object_e_tag,
+                        version: object_version,
+                        ..
+                    } = object_meta;
+
+                    Ok((
+                        file_name,
+                        object_size,
+                        object_e_tag,
+                        object_version,
+                        parquet_meta_json,
+                        footer,
+                    ))
+                }
+            })
+            .buffered(CONCURRENT_METADATA_FETCHES);
+
+        // Register all files in the metadata database as they complete
+        while let Some(result) = file_stream.next().await {
+            let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
+                result?;
             metadata_db
                 .register_file(
                     location_id,
@@ -872,12 +887,8 @@ pub enum RestoreError {
     ///
     /// TODO: Replace BoxError with concrete error type when amp_metadata_from_parquet_file
     /// is migrated to use proper error handling patterns.
-    #[error("Failed to read Amp metadata from parquet file '{file_name}'")]
-    ReadParquetMetadata {
-        file_name: String,
-        #[source]
-        source: BoxError,
-    },
+    #[error("Failed to read Amp metadata from parquet file")]
+    ReadParquetMetadata(#[source] BoxError),
 
     /// Failed to serialize parquet metadata to JSON
     #[error("Failed to serialize parquet metadata to JSON")]

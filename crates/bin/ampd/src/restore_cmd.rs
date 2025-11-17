@@ -9,7 +9,9 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::reference::Reference;
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use metadata_db::MetadataDb;
+use tokio::task::JoinHandle;
 
 /// Restores dataset snapshots from storage.
 ///
@@ -22,7 +24,7 @@ pub async fn run(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     datasets: Vec<Reference>,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+) -> Result<(), BoxError> {
     let dataset_store = {
         let provider_configs_store =
             ProviderConfigsStore::new(config.providers_store.prefixed_store());
@@ -35,7 +37,7 @@ pub async fn run(
         )
     };
 
-    let mut all_tables = Vec::new();
+    let mut all_tasks: FuturesUnordered<JoinHandle<Result<(), BoxError>>> = FuturesUnordered::new();
 
     for reference in datasets {
         tracing::info!("Restoring dataset snapshot: {}", reference);
@@ -51,29 +53,41 @@ pub async fn run(
         for table in dataset.resolved_tables(reference.clone().into()) {
             tracing::debug!("Restoring table: '{}'", reference);
 
-            let physical_table = PhysicalTable::restore_latest_revision(
-                &table,
-                config.data_store.clone(),
-                metadata_db.clone(),
-                &job_labels,
-            )
-            .await?
-            .ok_or_else(|| {
-                format!(
-                    "Failed to restore snapshot table '\"{}\".{}'. \
-                    This is likely due to the dataset or table being deleted or never dumped.",
-                    reference,
-                    table.name()
+            let config = config.clone();
+            let metadata_db = metadata_db.clone();
+            let job_labels = job_labels.clone();
+            let reference_clone = reference.clone();
+
+            let task = tokio::spawn(async move {
+                PhysicalTable::restore_latest_revision(
+                    &table,
+                    config.data_store.clone(),
+                    metadata_db.clone(),
+                    &job_labels,
                 )
-            })?;
+                .await?
+                .ok_or_else(|| {
+                    BoxError::from(format!(
+                        "Failed to restore snapshot table '\"{}\".{}'. \
+                    This is likely due to the dataset or table being deleted or never dumped.",
+                        reference_clone,
+                        table.name()
+                    ))
+                })
+                .map(|_| ())
+            });
 
             tracing::info!("Restored table: '{}'", reference);
 
-            all_tables.push(physical_table.into());
+            all_tasks.push(task);
+        }
+
+        while let Some(result) = all_tasks.next().await {
+            result??;
         }
 
         tracing::info!("Successfully restored dataset: {}", reference);
     }
 
-    Ok(all_tables)
+    Ok(())
 }
