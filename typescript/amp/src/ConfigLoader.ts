@@ -23,8 +23,11 @@ export class Context {
   /// Reads a file relative to the directory of the dataset definition
   functionSource(relativePath: string): Model.FunctionSource {
     const baseDir = path.dirname(this.definitionPath)
+    if (relativePath.includes('..')) {
+      throw new Error(`Invalid path: directory traversal not allowed`)
+    }
     const fullPath = path.join(baseDir, relativePath)
-
+    
     let source: string
     try {
       source = fs.readFileSync(fullPath, "utf8")
@@ -105,6 +108,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
     })
 
     const find = Effect.fnUntraced(function*(cwd: string = ".") {
+      // Validate cwd to prevent path traversal
+      if (cwd.includes("..") || cwd.startsWith("/")) {
+        throw new Error("Invalid directory path");
+      }
       const candidates = [
         path.resolve(cwd, `amp.config.ts`),
         path.resolve(cwd, `amp.config.mts`),
@@ -121,6 +128,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Amp/ConfigLoad
       file: string,
       options?: { onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R> },
     ): Stream.Stream<ManifestBuilder.ManifestBuildResult, ConfigLoaderError | E, R> => {
+      if (file.includes('..')) throw new Error('Invalid file path')
       const resolved = path.resolve(file)
       const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
 
