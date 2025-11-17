@@ -9,6 +9,11 @@
         "arrow": {
           "fields": [
             {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
               "name": "block_num",
               "type": "UInt64",
               "nullable": false
@@ -168,6 +173,11 @@
         "arrow": {
           "fields": [
             {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
               "name": "block_hash",
               "type": {
                 "FixedSizeBinary": 32
@@ -255,6 +265,11 @@
       "schema": {
         "arrow": {
           "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
             {
               "name": "block_hash",
               "type": {

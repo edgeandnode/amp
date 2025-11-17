@@ -61,7 +61,6 @@ fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
         .schema()
         .fields()
         .iter()
-        .filter(|field| field.name() != common::SPECIAL_BLOCK_NUM)
         .map(|field| Field {
             name: field.name().clone(),
             type_: field.data_type().clone().into(),
