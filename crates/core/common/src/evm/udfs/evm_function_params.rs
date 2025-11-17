@@ -146,26 +146,23 @@ impl ScalarUDFImpl for EvmDecodeParams {
 
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
         let result = match &args[0] {
-            ColumnarValue::Array(array) => self.decode(
-                array
+            ColumnarValue::Array(array) => {
+                let array = array
                     .as_any()
                     .downcast_ref::<BinaryArray>()
-                    .ok_or_else(|| plan!("expected binary array"))?
-                    .iter(),
-                &call,
-            ),
-            ColumnarValue::Scalar(scalar_value) => match scalar_value {
-                ScalarValue::Binary(Some(data)) => {
-                    self.decode(std::iter::once(Some(data.as_slice())), &call)
-                }
-                _ => {
-                    return plan_err!(
-                        "{}: expected Binary scalar, but got {}",
-                        self.name(),
-                        scalar_value.data_type()
-                    );
-                }
-            },
+                    .ok_or_else(|| plan!("expected binary array"))?;
+                self.decode(array.iter(), &call)
+            }
+            ColumnarValue::Scalar(ScalarValue::Binary(Some(data))) => {
+                self.decode(std::iter::once(Some(data.as_slice())), &call)
+            }
+            ColumnarValue::Scalar(scalar) => {
+                return plan_err!(
+                    "{}: expected Binary scalar, but got {}",
+                    self.name(),
+                    scalar.data_type()
+                );
+            }
         };
         let ary = result.map_err(|e| e.context(self.name()))?;
         Ok(ColumnarValue::Array(ary))
@@ -219,12 +216,29 @@ impl EvmDecodeParams {
         let mut builder = StructBuilder::from_fields(fields, 0);
         for data in data {
             match data {
+                None => {
+                    for (field, ty) in call.input_types.iter().enumerate() {
+                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                    }
+                    builder.append(false);
+                }
+                Some(data) if data.len() < 4 => {
+                    tracing::trace!(
+                        function_name=%call.alloy_function.name,
+                        data_len=data.len(),
+                        "failed to decode function params: data too short"
+                    );
+                    for (field, ty) in call.input_types.iter().enumerate() {
+                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                    }
+                    builder.append(false);
+                }
                 Some(data) => {
                     let selector = &data[..4];
                     if selector != call.alloy_function.selector() {
                         tracing::trace!(
                             function_name=%call.alloy_function.name,
-                            "failed to decode function params due to selector mismatch"
+                            "failed to decode function params: selector mismatch"
                         );
                         for (field, ty) in call.input_types.iter().enumerate() {
                             FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
@@ -254,12 +268,6 @@ impl EvmDecodeParams {
                             builder.append(false);
                         }
                     }
-                }
-                None => {
-                    for (field, ty) in call.input_types.iter().enumerate() {
-                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
-                    }
-                    builder.append(false);
                 }
             }
         }
