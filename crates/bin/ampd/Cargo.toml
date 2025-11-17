@@ -30,6 +30,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 worker = { path = "../../services/worker" }
+futures.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.8", features = ["build"] }
