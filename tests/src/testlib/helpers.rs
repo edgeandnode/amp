@@ -262,43 +262,65 @@ pub async fn check_table_consistency(table: &Arc<PhysicalTable>) -> Result<(), B
 /// Restore dataset snapshot from previously saved snapshot files.
 ///
 /// This function loads a dataset definition and restores the physical tables
-/// from their snapshot state. Dataset snapshots are reference data
+/// from their snapshot state via the Admin API. Dataset snapshots are reference data
 /// that have been validated and saved as the expected baseline for tests.
+///
+/// The function:
+/// 1. Calls the Admin API to restore physical table metadata from storage
+/// 2. Loads the restored tables as `Arc<PhysicalTable>` objects for test verification
+///
 /// This is typically used to set up known-good data for comparison testing.
 pub async fn restore_dataset_snapshot(
-    config: &Arc<Config>,
-    metadata_db: &MetadataDb,
+    ampctl: &super::fixtures::Ampctl,
     dataset_store: &Arc<DatasetStore>,
+    metadata_db: &MetadataDb,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    // 1. Restore via Admin API (indexes files into metadata DB)
+    let restored_info = ampctl.restore_dataset(dataset_ref).await?;
+
+    tracing::debug!(
+        %dataset_ref,
+        tables = restored_info.len(),
+        "Restored tables via Admin API, loading PhysicalTable objects"
+    );
+
+    // 2. Load the dataset to get ResolvedTables
     let dataset = dataset_store.get_dataset(dataset_ref).await?;
 
-    let job_labels = JobLabels {
-        dataset_namespace: dataset_ref.namespace().clone(),
-        dataset_name: dataset_ref.name().clone(),
-        manifest_hash: dataset.manifest_hash().clone(),
-    };
+    // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
     for table in Arc::new(dataset).resolved_tables(dataset_ref.clone().into()) {
-        let physical_table = PhysicalTable::restore_latest_revision(
-            &table,
-            config.data_store.clone(),
-            metadata_db.clone(),
-            &job_labels,
-        )
-        .await?
-        .unwrap_or_else(|| {
-            panic!(
-                "Failed to restore snapshot table '{}.{}'. This is likely due to \
-            the dataset or table being deleted. \n\
-            Create the dataset snapshot again by running \
-            `cargo run -p tests -- bless {} <start_block> <end_block>`",
-                dataset_ref.name(),
-                table.name(),
-                dataset_ref,
-            )
-        });
+        // Verify this table was restored
+        let table_name = table.name().to_string();
+        let restored = restored_info
+            .iter()
+            .find(|info| info.table_name == table_name)
+            .ok_or_else(|| {
+                format!(
+                    "Table '{}' not found in restored tables for dataset '{}'",
+                    table_name, dataset_ref
+                )
+            })?;
+
+        tracing::debug!(
+            %dataset_ref,
+            %table_name,
+            location_id = restored.location_id,
+            "Loading PhysicalTable from metadata DB"
+        );
+
+        // Load the PhysicalTable using get_active (it was just marked active by restore)
+        let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
+            .await?
+            .ok_or_else(|| {
+                format!(
+                    "Failed to load active PhysicalTable for '{}' after restoration. \
+                    This indicates the restore operation did not properly activate the table.",
+                    table_name
+                )
+            })?;
 
         tables.push(physical_table.into());
     }

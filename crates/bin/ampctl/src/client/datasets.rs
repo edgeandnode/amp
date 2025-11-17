@@ -87,6 +87,13 @@ fn dataset_deploy(namespace: &Namespace, name: &Name, version: &Revision) -> Str
     format!("datasets/{namespace}/{name}/versions/{version}/deploy")
 }
 
+/// Build URL path for restoring a dataset version.
+///
+/// POST `/datasets/{namespace}/{name}/versions/{version}/restore`
+fn dataset_restore(namespace: &Namespace, name: &Name, version: &Revision) -> String {
+    format!("datasets/{namespace}/{name}/versions/{version}/restore")
+}
+
 /// Client for dataset-related API operations.
 ///
 /// Created via [`Client::datasets`](crate::client::Client::datasets).
@@ -315,6 +322,103 @@ impl<'a> DatasetsClient<'a> {
                     .await
                     .unwrap_or_else(|_| String::from("Failed to read response body"));
                 Err(DeployError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
+    /// Restore a dataset version from object storage.
+    ///
+    /// POSTs to `/datasets/{namespace}/{name}/versions/{version}/restore` endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RestoreError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref))]
+    pub async fn restore(&self, dataset_ref: &Reference) -> Result<RestoreResponse, RestoreError> {
+        let namespace = dataset_ref.namespace();
+        let name = dataset_ref.name();
+        let version = dataset_ref.revision();
+
+        let url = self
+            .client
+            .base_url()
+            .join(&dataset_restore(namespace, name, version))
+            .expect("valid URL");
+
+        tracing::debug!("Sending dataset restore request");
+
+        let response = self
+            .client
+            .http()
+            .post(url.as_str())
+            .send()
+            .await
+            .map_err(|err| RestoreError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 | 202 => {
+                let restore_response = response.json::<RestoreResponse>().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse success response");
+                    RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to parse response: {}", err),
+                    }
+                })?;
+
+                tracing::debug!(
+                    tables_restored = restore_response.tables.len(),
+                    "Dataset restored successfully"
+                );
+                Ok(restore_response)
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH" => Err(RestoreError::InvalidPath(error_response.into())),
+                    "GET_DATASET_ERROR" => {
+                        Err(RestoreError::GetDatasetError(error_response.into()))
+                    }
+                    "RESTORE_TABLE_ERROR" => {
+                        Err(RestoreError::RestoreTableError(error_response.into()))
+                    }
+                    "TABLE_NOT_FOUND" => Err(RestoreError::TableNotFound(error_response.into())),
+                    _ => Err(RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(RestoreError::UnexpectedResponse {
                     status: status.as_u16(),
                     message: text,
                 })
@@ -1129,6 +1233,70 @@ pub enum DeployError {
     /// - The specified worker hasn't sent heartbeats recently (inactive)
     #[error("worker not available")]
     WorkerNotAvailable(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response from restore operation.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RestoreResponse {
+    /// List of restored physical tables
+    pub tables: Vec<RestoredTableInfo>,
+}
+
+/// Information about a restored physical table.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RestoredTableInfo {
+    /// Name of the table within the dataset
+    pub table_name: String,
+    /// Unique location ID assigned in the metadata database
+    pub location_id: i64,
+    /// Full URL to the storage location
+    pub url: String,
+}
+
+/// Errors that can occur when restoring a dataset.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    /// Invalid path parameters (400, INVALID_PATH)
+    ///
+    /// This occurs when:
+    /// - The namespace, name, or revision in the URL path is invalid
+    /// - Path parameter parsing fails
+    #[error("invalid path")]
+    InvalidPath(#[source] ApiError),
+
+    /// Dataset store operation error when loading dataset (500, GET_DATASET_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to load dataset configuration from manifest
+    /// - Manifest parsing errors
+    /// - Invalid dataset structure
+    #[error("get dataset error")]
+    GetDatasetError(#[source] ApiError),
+
+    /// Failed to restore table from storage (500, RESTORE_TABLE_ERROR)
+    ///
+    /// This occurs when:
+    /// - Error scanning object storage for table files
+    /// - Error registering location in metadata database
+    /// - Error re-indexing Parquet file metadata
+    #[error("restore table error")]
+    RestoreTableError(#[source] ApiError),
+
+    /// Table data not found in object storage (404, TABLE_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - No physical table files exist in storage for this table
+    /// - Table has never been dumped or data was deleted
+    #[error("table not found")]
+    TableNotFound(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
