@@ -1,0 +1,199 @@
+- name: restore_eth_firehose
+  restore: _/eth_firehose_evm_decode_empty@0.0.0
+
+# Issue #1226
+- name: evm_decode_params_empty_data
+  query: |
+    WITH decoded AS (
+      SELECT
+        c.block_num,
+        c.timestamp,
+        c.tx_hash,
+        c.index AS call_index,
+        c.parent_index,
+        c.depth,
+        c.call_type,
+        c.caller,
+        c.address AS contract_address,
+        c.value,
+        c.gas_limit,
+        c.gas_consumed,
+        evm_decode_params(c.input, 'function unwrap(uint256 _wstETHAmount)') AS params,
+        c.return_data AS result
+      FROM eth_firehose_evm_decode_empty.calls c
+      WHERE c.address = arrow_cast(x'7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', 'FixedSizeBinary(20)')
+    )
+    SELECT
+      block_num,
+      timestamp,
+      tx_hash,
+      call_index,
+      parent_index,
+      depth,
+      call_type,
+      contract_address,
+      caller,
+      value,
+      gas_limit,
+      gas_consumed,
+      params['_wstETHAmount'] AS wsteth_amount,
+      result
+    FROM decoded
+  results: |
+    [
+      {
+        "block_num": 15041839,
+        "call_index": 36,
+        "call_type": 1,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 104662,
+        "gas_limit": 2358532,
+        "parent_index": 2,
+        "result": "",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d",
+        "value": 42354278044243
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 42,
+        "call_type": 4,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 534,
+        "gas_limit": 2241956,
+        "parent_index": 2,
+        "result": "000000000000000000000000000000000000000000000000000023c7fa4f9e5d",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 43,
+        "call_type": 4,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 534,
+        "gas_limit": 2240360,
+        "parent_index": 2,
+        "result": "000000000000000000000000000000000000000000000000000023c7fa4f9e5d",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 44,
+        "call_type": 4,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 534,
+        "gas_limit": 2239107,
+        "parent_index": 2,
+        "result": "000000000000000000000000000000000000000000000000000023c7fa4f9e5d",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 45,
+        "call_type": 1,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 4684,
+        "gas_limit": 2236794,
+        "parent_index": 2,
+        "result": "0000000000000000000000000000000000000000000000000000000000000001",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 46,
+        "call_type": 4,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 638,
+        "gas_limit": 2231158,
+        "parent_index": 2,
+        "result": "0000000000000000000000000000000000000000000000000000000000000000",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 47,
+        "call_type": 1,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 2,
+        "gas_consumed": 22484,
+        "gas_limit": 2229278,
+        "parent_index": 2,
+        "result": "0000000000000000000000000000000000000000000000000000000000000001",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 50,
+        "call_type": 1,
+        "caller": "447ddd4960d9fdbf6af9a790560d0af76795cb08",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 4,
+        "gas_consumed": 10880,
+        "gas_limit": 2070215,
+        "parent_index": 49,
+        "result": "0000000000000000000000000000000000000000000000000000000000000001",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 101,
+        "call_type": 4,
+        "caller": "35034be97831dd7b48ca9794c31ba628e3a01640",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 6,
+        "gas_consumed": 534,
+        "gas_limit": 1397525,
+        "parent_index": 92,
+        "result": "0000000000000000000000000000000000000000000000000000000000000000",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 113,
+        "call_type": 4,
+        "caller": "8ed25770e6480578972f8cc9577c127d6f3b74fe",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 8,
+        "gas_consumed": 2336,
+        "gas_limit": 1314845,
+        "parent_index": 112,
+        "result": "0000000000000000000000000000000000000000000000000000000000000012",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      },
+      {
+        "block_num": 15041839,
+        "call_index": 116,
+        "call_type": 4,
+        "caller": "8ed25770e6480578972f8cc9577c127d6f3b74fe",
+        "contract_address": "7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "depth": 8,
+        "gas_consumed": 7787,
+        "gas_limit": 1294120,
+        "parent_index": 112,
+        "result": "0000000000000000000000000000000000000000000000000ef0c05a86a6039e",
+        "timestamp": "2022-06-28T22:02:15Z",
+        "tx_hash": "c0dc8fd082fe8555e66785fbaca0dfe5b2637f5d54c2f56110fad53cefcf928d"
+      }
+    ]
