@@ -146,26 +146,23 @@ impl ScalarUDFImpl for EvmDecodeParams {
 
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
         let result = match &args[0] {
-            ColumnarValue::Array(array) => self.decode(
-                array
+            ColumnarValue::Array(array) => {
+                let array = array
                     .as_any()
                     .downcast_ref::<BinaryArray>()
-                    .ok_or_else(|| plan!("expected binary array"))?
-                    .iter(),
-                &call,
-            ),
-            ColumnarValue::Scalar(scalar_value) => match scalar_value {
-                ScalarValue::Binary(Some(data)) => {
-                    self.decode(std::iter::once(Some(data.as_slice())), &call)
-                }
-                _ => {
-                    return plan_err!(
-                        "{}: expected Binary scalar, but got {}",
-                        self.name(),
-                        scalar_value.data_type()
-                    );
-                }
-            },
+                    .ok_or_else(|| plan!("expected binary array"))?;
+                self.decode(array.iter(), &call)
+            }
+            ColumnarValue::Scalar(ScalarValue::Binary(Some(data))) => {
+                self.decode(std::iter::once(Some(data.as_slice())), &call)
+            }
+            ColumnarValue::Scalar(scalar) => {
+                return plan_err!(
+                    "{}: expected Binary scalar, but got {}",
+                    self.name(),
+                    scalar.data_type()
+                );
+            }
         };
         let ary = result.map_err(|e| e.context(self.name()))?;
         Ok(ColumnarValue::Array(ary))
