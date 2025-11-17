@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Admin from "../../api/Admin.ts"
+import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 import { adminUrl, configFile } from "../common.ts"
@@ -50,6 +51,11 @@ export const deploy = Command.make("deploy", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(Admin.layer(`${args.adminUrl}`)))
+    ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(
+      Layer.unwrapEffect(Effect.gen(function*() {
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token)?.accessToken)
+      })).pipe(Layer.provide(Auth.layer)),
+    ))
   ),
 )

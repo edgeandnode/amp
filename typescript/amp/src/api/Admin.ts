@@ -11,9 +11,7 @@ import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as AuthService from "../Auth.ts"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
@@ -674,24 +672,17 @@ export const make = Effect.fn(function*(url: string, options?: {
  * Creates a layer for the admin api service.
  *
  * @param url - The url of the admin api service.
+ * @param token - The bearer token.
  * @returns A layer for the admin api service.
  */
-export const layer = (url: string) =>
+export const layer = (url: string, token?: string) =>
   Effect.gen(function*() {
-    const token = yield* AuthService.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
     const api = yield* make(url, {
-      transformClient: Option.match(token, {
-        onNone: () => undefined,
-        onSome: (token) => (client) =>
-          client.pipe(
-            HttpClient.mapRequestInput(HttpClientRequest.setHeader("Authorization", `Bearer ${token.accessToken}`)),
-          ),
-      }),
+      transformClient: token === undefined ? undefined : (client) =>
+        client.pipe(
+          HttpClient.mapRequestInput(HttpClientRequest.setHeader("Authorization", `Bearer ${token}`)),
+        ),
     })
 
     return api
-  }).pipe(
-    Layer.effect(Admin),
-    Layer.provide(FetchHttpClient.layer),
-    Layer.provide(AuthService.AuthService.Default),
-  )
+  }).pipe(Layer.effect(Admin), Layer.provide(FetchHttpClient.layer))

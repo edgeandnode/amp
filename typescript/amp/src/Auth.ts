@@ -1,4 +1,4 @@
-import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
+import * as Auth from "@effect/platform/FetchHttpClient"
 import * as HttpBody from "@effect/platform/HttpBody"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
@@ -94,7 +94,7 @@ const AUTH_TOKEN_STORAGE_KEY = "amp_cli_auth"
 export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService", {
   dependencies: [
     KeyValueStore.layerFileSystem(path.join(os.homedir(), ".amp-cli-config")),
-    FetchHttpClient.layer,
+    Auth.layer,
   ],
   effect: Effect.gen(function*() {
     const httpClient = yield* HttpClient.HttpClient
