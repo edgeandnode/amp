@@ -801,16 +801,8 @@ async fn get_logical_catalog_with_deps_and_funcs(
     // Part 2: Process function references (load datasets for qualified UDFs, create UDFs for bare functions)
     for func_ref in func_refs {
         match &func_ref {
-            FunctionReference::Bare { function } => {
-                // Skip bare functions - they are built-in DataFusion functions
-                // Only functions defined in the `functions` map should be registered as UDFs,
-                // but bare function references in SQL are always built-in functions
-                tracing::debug!(
-                    function=%function.as_ref(),
-                    "Skipping bare function reference - assumed to be built-in DataFusion function"
-                );
-                continue;
-            }
+            // Skip bare functions - they are assumed to be built-in functions (Amp or DataFusion)
+            FunctionReference::Bare { function: _ } => continue,
             FunctionReference::Qualified { schema, function } => {
                 // Match on schema type: DepAlias (external dependency) or SelfRef (same-dataset function)
                 match schema.as_ref() {
@@ -1075,15 +1067,8 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
         // Part 2: Process function references for this table (load datasets for qualified UDFs only)
         for func_ref in func_refs {
             match &func_ref {
-                FunctionReference::Bare { function } => {
-                    // Skip bare functions - they are built-in DataFusion functions
-                    // Only functions defined in the `functions` map should be registered as UDFs,
-                    // but bare function references in SQL are always built-in functions
-                    tracing::debug!(
-                        table=%table_name,
-                        function=%function.as_ref(),
-                        "Skipping bare function reference - assumed to be built-in DataFusion function"
-                    );
+                // Skip bare functions - they are assumed to be built-in functions (Amp or DataFusion)
+                FunctionReference::Bare { function: _ } => {
                     continue;
                 }
                 FunctionReference::Qualified { schema, function } => {
