@@ -265,17 +265,22 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
         job_labels: &JobLabels,
-    ) -> Result<Option<Self>, BoxError> {
+    ) -> Result<Option<Self>, RestoreLatestRevisionError> {
         let manifest_hash = table.dataset().manifest_hash();
         let table_id = TableId::new(manifest_hash, table.name());
 
         let prefix = location_prefix(job_labels, table.name());
-        let url = data_store.url().join(&prefix)?;
+        let url = data_store
+            .url()
+            .join(&prefix)
+            .map_err(RestoreLatestRevisionError::UrlConstruction)?;
         let path = Path::from_url_path(url.path()).unwrap();
 
         debug!("Restoring latest revision in prefix {}", path);
 
-        let revisions = list_revisions(&data_store, &prefix, &path).await?;
+        let revisions = list_revisions(&data_store, &prefix, &path)
+            .await
+            .map_err(RestoreLatestRevisionError::ListRevisions)?;
         Self::restore_latest(
             revisions,
             table,
@@ -285,6 +290,7 @@ impl PhysicalTable {
             job_labels,
         )
         .await
+        .map_err(RestoreLatestRevisionError::RestoreLatest)
     }
 
     /// Attempt to get the active revision of a table.
@@ -335,7 +341,7 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
         job_labels: &JobLabels,
-    ) -> Result<Option<Self>, BoxError> {
+    ) -> Result<Option<Self>, RestoreLatestError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
             Self::restore(
                 table,
@@ -349,6 +355,7 @@ impl PhysicalTable {
             )
             .await
             .map(Some)
+            .map_err(RestoreLatestError)
         } else {
             Ok(None)
         }
@@ -365,7 +372,7 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
         job_labels: &JobLabels,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, RestoreError> {
         let location_id = metadata_db::physical_table::register(
             &metadata_db,
             table_id.clone(),
@@ -376,22 +383,44 @@ impl PhysicalTable {
             url,
             false,
         )
-        .await?;
+        .await
+        .map_err(RestoreError::RegisterPhysicalTable)?;
 
-        let mut tx = metadata_db.begin_txn().await?;
-        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone()).await?;
+        let mut tx = metadata_db
+            .begin_txn()
+            .await
+            .map_err(RestoreError::TransactionBegin)?;
+        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone())
+            .await
+            .map_err(RestoreError::MarkInactive)?;
         metadata_db::physical_table::mark_active_by_id(&mut tx, table_id.clone(), location_id)
-            .await?;
-        tx.commit().await?;
+            .await
+            .map_err(RestoreError::MarkActive)?;
+        tx.commit().await.map_err(RestoreError::TransactionCommit)?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(path));
 
-        while let Some(object_meta) = file_stream.try_next().await? {
+        while let Some(object_meta) = file_stream
+            .try_next()
+            .await
+            .map_err(RestoreError::ListFiles)?
+        {
+            let file_name_for_error = object_meta
+                .location
+                .filename()
+                .unwrap_or("unknown")
+                .to_string();
             let (file_name, amp_meta, footer) =
-                amp_metadata_from_parquet_file(&object_meta, object_store.clone()).await?;
+                amp_metadata_from_parquet_file(&object_meta, object_store.clone())
+                    .await
+                    .map_err(|err| RestoreError::ReadParquetMetadata {
+                        file_name: file_name_for_error,
+                        source: err,
+                    })?;
 
-            let parquet_meta_json = serde_json::to_value(amp_meta)?;
+            let parquet_meta_json =
+                serde_json::to_value(amp_meta).map_err(RestoreError::SerializeMetadata)?;
 
             let ObjectMeta {
                 size: object_size,
@@ -410,7 +439,8 @@ impl PhysicalTable {
                     parquet_meta_json,
                     &footer,
                 )
-                .await?;
+                .await
+                .map_err(RestoreError::RegisterFile)?;
         }
 
         let physical_table = Self {
@@ -755,11 +785,12 @@ pub async fn list_revisions(
     store: &Store,
     prefix: &str,
     path: &Path,
-) -> Result<BTreeMap<String, (Path, Url, String)>, BoxError> {
+) -> Result<BTreeMap<String, (Path, Url, String)>, ListRevisionsError> {
     let object_store = store.object_store();
     Ok(object_store
         .list_with_delimiter(Some(path))
-        .await?
+        .await
+        .map_err(ListRevisionsError)?
         .common_prefixes
         .into_iter()
         .filter_map(|path| {
@@ -787,4 +818,99 @@ fn round_robin<'a>(
         groups[idx % size].push(file);
     }
     groups
+}
+
+/// Error when listing revisions from object store
+///
+/// This error type is used by `list_revisions()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list revisions from object store")]
+pub struct ListRevisionsError(#[source] pub object_store::Error);
+
+/// Error when restoring the latest revision from a set of revisions
+///
+/// This error type is used by `PhysicalTable::restore_latest()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to restore physical table from latest revision")]
+pub struct RestoreLatestError(#[source] pub RestoreError);
+
+/// Errors that occur when restoring a physical table from object store
+///
+/// This error type is used by `PhysicalTable::restore()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    /// Failed to register physical table in metadata database
+    ///
+    /// This occurs when the metadata database rejects the registration of the
+    /// restored physical table location.
+    #[error("Failed to register physical table in metadata database")]
+    RegisterPhysicalTable(#[source] metadata_db::Error),
+
+    /// Failed to begin transaction for marking table active
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to mark existing physical tables as inactive
+    #[error("Failed to mark existing physical tables as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+
+    /// Failed to mark restored physical table as active
+    #[error("Failed to mark restored physical table as active")]
+    MarkActive(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction after updating table status
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+
+    /// Failed to list files in the restored revision
+    #[error("Failed to list files in restored revision")]
+    ListFiles(#[source] object_store::Error),
+
+    /// Failed to read Amp metadata from parquet file
+    ///
+    /// This occurs when the parquet file cannot be read or its metadata cannot be parsed.
+    ///
+    /// TODO: Replace BoxError with concrete error type when amp_metadata_from_parquet_file
+    /// is migrated to use proper error handling patterns.
+    #[error("Failed to read Amp metadata from parquet file '{file_name}'")]
+    ReadParquetMetadata {
+        file_name: String,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to serialize parquet metadata to JSON
+    #[error("Failed to serialize parquet metadata to JSON")]
+    SerializeMetadata(#[source] serde_json::Error),
+
+    /// Failed to register file in metadata database
+    #[error("Failed to register file in metadata database")]
+    RegisterFile(#[source] metadata_db::Error),
+}
+
+/// Errors that occur when restoring the latest revision of a physical table
+///
+/// This error type is used by `PhysicalTable::restore_latest_revision()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreLatestRevisionError {
+    /// Failed to construct URL for the table prefix
+    ///
+    /// This occurs when the data store URL cannot be joined with the table prefix,
+    /// typically due to malformed URL components.
+    #[error("Failed to construct URL for table prefix")]
+    UrlConstruction(#[source] url::ParseError),
+
+    /// Failed to list revisions from object store
+    ///
+    /// This occurs when the object store cannot be queried for existing revisions,
+    /// typically due to network issues, permission errors, or storage unavailability.
+    #[error("Failed to list revisions from object store")]
+    ListRevisions(#[source] ListRevisionsError),
+
+    /// Failed to restore the latest revision
+    ///
+    /// This occurs when restoring the physical table from the latest revision fails,
+    /// which can include registration, transaction, or file processing errors.
+    #[error("Failed to restore latest revision")]
+    RestoreLatest(#[source] RestoreLatestError),
 }
