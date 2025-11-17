@@ -161,14 +161,14 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       readonly exp: Model.GenrateTokenDuration | undefined
       readonly audience: ReadonlyArray<string> | null | undefined
     }) {
-      const request = HttpClientRequest.post("/auth/generate", { 
-        // Unsafely creating the JSON body is acceptable here as the requisite 
+      const request = HttpClientRequest.post("/auth/generate", {
+        // Unsafely creating the JSON body is acceptable here as the requisite
         // parameters will have already been validated by other schemas
         body: HttpBody.unsafeJson(GenerateAccessTokenRequest.make({
-          duration: args.exp ?? undefined, 
+          duration: args.exp ?? undefined,
           audience: args.audience ?? undefined,
         })),
-        acceptJson: true, 
+        acceptJson: true,
       }).pipe(HttpClientRequest.bearerToken(args.storedAuth.accessToken))
 
       return yield* httpClient.execute(request).pipe(
@@ -315,15 +315,15 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       return cache
     }, Effect.option)
 
-    const setCache = Effect.fn("AuthService.setToken")( function*(cache: AuthStorageSchema) {
-        yield* kvs.set(AUTH_TOKEN_CACHE_KEY, cache)
-      })
+    const setCache = Effect.fn("AuthService.setToken")(function*(cache: AuthStorageSchema) {
+      yield* kvs.set(AUTH_TOKEN_CACHE_KEY, cache)
+    })
 
     const clearCache = kvs.remove(AUTH_TOKEN_CACHE_KEY).pipe(
       Effect.catchIf(
         (error) => error._tag === "SystemError" && error.reason === "NotFound",
-        () => Effect.void
-      )
+        () => Effect.void,
+      ),
     )
 
     return {
