@@ -24,3 +24,4 @@ rand.workspace = true
 tokio-util.workspace = true
 alloy.workspace = true
 monitoring = { path = "../monitoring" }
+parking_lot = "0.12.5"

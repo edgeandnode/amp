@@ -100,7 +100,7 @@ use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
 use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
-use crate::{WriterProperties, metrics, raw_dataset_writer::RawDatasetWriter};
+use crate::{WriterProperties, compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -113,14 +113,14 @@ pub async fn dump(
     ctx: Ctx,
     max_writers: u16,
     catalog: Catalog,
-    tables: &[Arc<PhysicalTable>],
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     parquet_opts: Arc<WriterProperties>,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     finalized_blocks_only: bool,
 ) -> Result<(), BoxError> {
     let dump_start_time = Instant::now();
-    let dataset = tables[0].dataset();
+    let dataset = tables[0].0.dataset();
 
     let mut client = ctx
         .dataset_store
@@ -166,14 +166,18 @@ pub async fn dump(
 
         let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
             Default::default();
+        
+        let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> = Default::default();
 
-        for table in tables {
+        for (table, compactor) in tables {
             let end = match end {
                 None => latest_block,
                 Some(end) => BlockNum::min(end, latest_block),
             };
             let missing_ranges = table.missing_ranges(start..=end).await?;
-            missing_ranges_by_table.insert(table.table().name().clone(), missing_ranges);
+            let table_name = table.table_name();
+            missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
+            compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
         }
 
         // Use the union of missing table block ranges.
@@ -208,6 +212,7 @@ pub async fn dump(
             &catalog,
             parquet_opts.clone(),
             missing_ranges_by_table,
+            compactors_by_table,
             metrics.as_ref(),
             tables,
         )
@@ -217,7 +222,7 @@ pub async fn dump(
     // Record dump duration on successful completion
     if let Some(ref metrics) = metrics {
         let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-        for table in tables {
+        for (table, _compactor) in tables {
             let table_name = table.table_name().to_string();
             let job_id = table_name.clone();
             metrics.record_dump_duration(duration_millis, table_name, job_id);
@@ -238,8 +243,9 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     catalog: &Catalog,
     parquet_opts: Arc<WriterProperties>,
     missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
+    compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     metrics: Option<&Arc<metrics::MetricsRegistry>>,
-    tables: &[Arc<PhysicalTable>],
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
 ) -> Result<(), BoxError> {
     tracing::info!(
         "dumping ranges {}",
@@ -276,6 +282,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             ranges,
             parquet_opts: parquet_opts.clone(),
             missing_ranges_by_table: missing_ranges_by_table.clone(),
+            compactors_by_table: compactors_by_table.clone(),
             id: i as u32,
             metrics: metrics.cloned(),
             progress_reporter: progress_reporter.clone(),
@@ -295,7 +302,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
 
         // Record error metrics
         if let Some(metrics) = metrics {
-            for table in tables {
+            for (table, _) in tables {
                 let table_name = table.table_name().to_string();
                 metrics.record_dump_error(table_name);
             }
@@ -405,6 +412,8 @@ struct DumpPartition<S: BlockStreamer> {
     parquet_opts: Arc<WriterProperties>,
     /// The missing block ranges by table
     missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
+    /// The compactors for each table
+    compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     /// The partition ID
     id: u32,
     /// Metrics registry
@@ -472,6 +481,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
             missing_ranges_by_table,
+            self.compactors_by_table.clone(),
             self.metrics.clone(),
         )?;
 

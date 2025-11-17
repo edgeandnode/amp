@@ -16,6 +16,7 @@ use common::{ParquetFooterCache, Timestamp, catalog::physical::PhysicalTable};
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;
+use parking_lot::RwLock;
 use tokio::task::{JoinError, JoinHandle};
 
 use crate::{WriterProperties, metrics::MetricsRegistry};
@@ -244,7 +245,7 @@ impl AmpCollectorInnerTask {
 }
 
 pub struct AmpCompactor {
-    task: AmpCompactorTask,
+    task: RwLock<AmpCompactorTask>,
 }
 
 pub struct AmpCompactorTask {
@@ -280,6 +281,16 @@ impl AmpCompactorTask {
     pub fn is_finished(&self) -> bool {
         self.inner.is_finished()
     }
+
+    pub async fn join_current_then_spawn_new(&mut self) -> TaskResult<()> {
+        let handle = &mut self.inner;
+
+        let inner = handle.await??;
+
+        self.inner = tokio::spawn(inner.try_run());
+
+        Ok(())
+    }
 }
 
 impl AmpCompactor {
@@ -289,7 +300,7 @@ impl AmpCompactor {
         opts: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let task = AmpCompactorTask::start_and_run(table, cache, opts, metrics);
+        let task = AmpCompactorTask::start_and_run(table, cache, opts, metrics).into();
         Self { task }
     }
 
@@ -299,30 +310,26 @@ impl AmpCompactor {
         opts: &Arc<WriterProperties>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let inner = AmpCompactorTask::start(table, cache, opts, metrics);
-        Self { task: inner }
+        let task = AmpCompactorTask::start(table, cache, opts, metrics).into();
+        Self { task }
     }
 
     pub fn is_finished(&self) -> bool {
-        self.task.is_finished()
+        self.task.try_read().map(|t| t.is_finished()).unwrap_or_default()
     }
 
-    pub fn try_run(&mut self) -> TaskResult<()> {
-        if self.task.is_finished() {
-            self.join_current_then_spawn_new()
-                .now_or_never()
-                .expect("We checked that it was finished")?;
+    pub fn try_run(&self) -> TaskResult<()> {
+        if let Some(mut task) = self.task.try_write()
+        && task.is_finished() {
+            task.join_current_then_spawn_new().now_or_never().unwrap()?;
         }
         Ok(())
     }
 
     pub async fn join_current_then_spawn_new(&mut self) -> TaskResult<()> {
-        let handle = &mut self.task.inner;
-
-        let inner = handle.await??;
-
-        self.task.inner = tokio::spawn(inner.try_run());
-
+        if let Some(mut task) = self.task.try_write() {
+            task.join_current_then_spawn_new().await?;
+        }
         Ok(())
     }
 }
