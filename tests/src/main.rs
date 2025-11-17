@@ -111,7 +111,7 @@ async fn main() {
 
     match args.command {
         Command::Bless {
-            dataset: dataset_name,
+            dataset: dataset_ref,
             end_block,
         } => {
             let _ = dotenvy::dotenv_override();
@@ -169,7 +169,36 @@ async fn main() {
             let controller = DaemonController::new(config.clone(), None)
                 .await
                 .expect("Failed to start controller for dependency restoration");
+
+            // Register manifest with the Admin API (after controller is running).
             let ampctl = Ampctl::new(controller.admin_api_url());
+
+            let dataset_name = dataset_ref.name().to_string();
+
+            tracing::info!(
+                manifest = %dataset_name,
+                "Registering manifest"
+            );
+
+            let manifest_path = format!(
+                "{}/{}.json",
+                daemon_config.dataset_manifests_path(),
+                dataset_name,
+            );
+
+            let manifest_content = tokio::fs::read_to_string(manifest_path)
+                .await
+                .expect("Failed to read manifest file");
+
+            ampctl
+                .register_manifest(&dataset_ref, &manifest_content)
+                .await
+                .expect("Failed to register manifest");
+
+            tracing::info!(
+                manifest = %dataset_name,
+                "Successfully registered manifest"
+            );
 
             // Run blessing procedure
             bless(
@@ -177,13 +206,13 @@ async fn main() {
                 &ampctl,
                 dataset_store,
                 temp_db.metadata_db().clone(),
-                dataset_name.clone(),
+                dataset_ref.clone(),
                 end_block,
             )
             .await
             .expect("Failed to bless dataset");
 
-            eprintln!("✅ Successfully blessed dataset '{dataset_name}' up to block {end_block}");
+            eprintln!("✅ Successfully blessed dataset '{dataset_ref}' up to block {end_block}");
         }
     }
 }
