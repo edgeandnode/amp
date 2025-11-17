@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use common::{
-    BoxError, ParquetFooterCache, catalog::{JobLabels, physical::PhysicalTable}, parquet::file::metadata::ParquetMetaData
+    BoxError, ParquetFooterCache,
+    catalog::{JobLabels, physical::PhysicalTable},
+    parquet::file::metadata::ParquetMetaData,
 };
 use datasets_common::{
     hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
@@ -82,26 +84,25 @@ pub(super) async fn new(
             });
         };
         let physical_table = PhysicalTable::new(
-                table.clone(),
-                location.url,
-                location.id,
-                ctx.metadata_db.clone(),
-                job_labels.clone(),
-            )
-            .map_err(|err| JobInitError::CreatePhysicalTable {
-                table_name: table.name().clone(),
-                source: err,
-            })?
-            .into();
+            table.clone(),
+            location.url,
+            location.id,
+            ctx.metadata_db.clone(),
+            job_labels.clone(),
+        )
+        .map_err(|err| JobInitError::CreatePhysicalTable {
+            table_name: table.name().clone(),
+            source: err,
+        })?
+        .into();
         let capacity = opts.cache_size_mb;
         let cache = ParquetFooterCache::builder(capacity)
-                .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
-                .build();
-        let compactor = AmpCompactor::start_and_run(&physical_table, cache, &opts, metrics.clone()).into();
+            .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+            .build();
+        let compactor =
+            AmpCompactor::start_and_run(&physical_table, cache, &opts, metrics.clone()).into();
 
-        tables.push(
-            (physical_table, compactor)
-        );
+        tables.push((physical_table, compactor));
     }
 
     let microbatch_max_interval = ctx.config.microbatch_max_interval;

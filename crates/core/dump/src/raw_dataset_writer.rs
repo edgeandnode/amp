@@ -42,8 +42,13 @@ impl RawDatasetWriter {
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
             let compactor = Arc::clone(compactors_by_table.get(table_name).unwrap());
-            let writer =
-                RawTableWriter::new(table.clone(), compactor, opts.clone(), ranges, metrics.clone())?;
+            let writer = RawTableWriter::new(
+                table.clone(),
+                compactor,
+                opts.clone(),
+                ranges,
+                metrics.clone(),
+            )?;
             writers.insert(table_name.clone(), writer);
         }
         Ok(RawDatasetWriter {
@@ -137,7 +142,6 @@ impl RawTableWriter {
             )?),
             None => None,
         };
-
 
         Ok(Self {
             table,

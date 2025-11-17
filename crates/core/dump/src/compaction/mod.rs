@@ -315,12 +315,16 @@ impl AmpCompactor {
     }
 
     pub fn is_finished(&self) -> bool {
-        self.task.try_read().map(|t| t.is_finished()).unwrap_or_default()
+        self.task
+            .try_read()
+            .map(|t| t.is_finished())
+            .unwrap_or_default()
     }
 
     pub fn try_run(&self) -> TaskResult<()> {
         if let Some(mut task) = self.task.try_write()
-        && task.is_finished() {
+            && task.is_finished()
+        {
             task.join_current_then_spawn_new().now_or_never().unwrap()?;
         }
         Ok(())

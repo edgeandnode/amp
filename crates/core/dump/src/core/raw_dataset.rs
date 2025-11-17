@@ -100,7 +100,9 @@ use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
 use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
-use crate::{WriterProperties, compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter};
+use crate::{
+    WriterProperties, compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter,
+};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -166,7 +168,7 @@ pub async fn dump(
 
         let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
             Default::default();
-        
+
         let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> = Default::default();
 
         for (table, compactor) in tables {

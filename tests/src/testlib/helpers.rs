@@ -7,10 +7,17 @@
 use std::{collections::BTreeMap, fs, sync::Arc};
 
 use common::{
-    BoxError, LogicalCatalog, ParquetFooterCache, Store, arrow::array::RecordBatch, catalog::{
+    BoxError, LogicalCatalog, ParquetFooterCache, Store,
+    arrow::array::RecordBatch,
+    catalog::{
         JobLabels,
         physical::{Catalog, PhysicalTable},
-    }, config::Config, metadata::segments::BlockRange, parquet::file::metadata::ParquetMetaData, sql, store::ObjectStoreUrl
+    },
+    config::Config,
+    metadata::segments::BlockRange,
+    parquet::file::metadata::ParquetMetaData,
+    sql,
+    store::ObjectStoreUrl,
 };
 use dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
@@ -51,8 +58,8 @@ pub async fn dump_internal(
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let opts = dump::parquet_opts(&config.parquet);
     let cache = ParquetFooterCache::builder(opts.cache_size_mb)
-                .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
-                .build();
+        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .build();
     let data_store = match new_location {
         Some(location) => {
             let data_path = fs::canonicalize(&location)
@@ -128,7 +135,8 @@ pub async fn dump_internal(
                             .await?
                     }
                 }
-            }.into();
+            }
+            .into();
             let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
             tables.push((physical_table, compactor));
         }
