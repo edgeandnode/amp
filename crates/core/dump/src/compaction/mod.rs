@@ -331,6 +331,10 @@ impl AmpCompactor {
     }
 
     pub async fn join_current_then_spawn_new(&mut self) -> TaskResult<()> {
+        // Clippy: This is a test utility, so holding the lock while awaiting 
+        // is acceptable here because we know there won't be contention and we
+        // always ensure the task is finished before acquiring the lock.
+        #[allow(clippy::await_holding_lock)]
         if let Some(mut task) = self.task.try_write() {
             task.join_current_then_spawn_new().await?;
         }

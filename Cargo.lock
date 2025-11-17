@@ -850,10 +850,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amp-restore"
-version = "0.1.0"
-
-[[package]]
 name = "ampctl"
 version = "0.1.0"
 dependencies = [
