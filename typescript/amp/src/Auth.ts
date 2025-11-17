@@ -164,10 +164,10 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       const request = HttpClientRequest.post("/auth/generate", { 
         // Unsafely creating the JSON body is acceptable here as the requisite 
         // parameters will have already been validated by other schemas
-        body: HttpBody.unsafeJson({
-          duration: args.exp || undefined,
-          audience: args.audience || undefined,
-        }),
+        body: HttpBody.unsafeJson(GenerateAccessTokenRequest.make({
+          duration: args.exp ?? undefined, 
+          audience: args.audience ?? undefined,
+        })),
         acceptJson: true, 
       }).pipe(HttpClientRequest.bearerToken(args.storedAuth.accessToken))
 
