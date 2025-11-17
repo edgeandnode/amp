@@ -273,8 +273,6 @@ impl AmpClient {
     /// This is useful for custom metadata headers. Headers persist across all requests made by this client.
     ///
     /// **Note**: For authentication, use [`set_token()`](Self::set_token) instead.
-    /// While Authorization headers passed here are automatically converted to tokens,
-    /// it's clearer and more direct to use `set_token()`.
     ///
     /// # Example
     /// ```rust,ignore
@@ -290,20 +288,10 @@ impl AmpClient {
     /// ```
     pub fn set_headers(&mut self, headers: &http::HeaderMap) {
         for (name, value) in headers.iter() {
-            let value_str = value.to_str().unwrap_or("").to_string();
-
-            // Extract bearer token from Authorization header and use set_token() instead
-            if name.as_str().eq_ignore_ascii_case("authorization") {
-                if let Some(token) = value_str
-                    .strip_prefix("Bearer ")
-                    .or_else(|| value_str.strip_prefix("bearer "))
-                {
-                    self.client.set_token(token.to_string());
-                }
-                continue;
-            }
-
-            self.client.set_header(name.as_str().to_string(), value_str);
+            self.client.set_header(
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            );
         }
     }
 
