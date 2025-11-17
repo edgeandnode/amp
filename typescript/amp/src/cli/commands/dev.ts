@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Admin from "../../api/Admin.ts"
+import * as Auth from "../../Auth.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
 import * as Model from "../../Model.ts"
 import { adminUrl } from "../common.ts"
@@ -46,8 +47,11 @@ export const dev = Command.make("dev", { args: { adminUrl } }).pipe(
     }),
   ),
   Command.provide(({ args }) =>
-    ConfigLoader.ConfigLoader.Default.pipe(
-      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
-    )
+    ConfigLoader.ConfigLoader.Default.pipe(Layer.provideMerge(
+      Layer.unwrapEffect(Effect.gen(function*() {
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token)?.accessToken)
+      })).pipe(Layer.provide(Auth.layer)),
+    ))
   ),
 )

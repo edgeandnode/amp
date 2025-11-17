@@ -107,11 +107,14 @@ export const publish = Command.make("publish", {
   ),
   Command.provide(({ args }) =>
     Layer.mergeAll(
-      Auth.layer,
       AmpRegistry.layer,
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
-      Layer.provideMerge(Admin.layer(`${CLUSTER_ADMIN_URL}`)),
+      Layer.provideMerge(Layer.unwrapEffect(Effect.gen(function*() {
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token)?.accessToken)
+      }))),
+      Layer.provideMerge(Auth.layer),
     )
   ),
 )
