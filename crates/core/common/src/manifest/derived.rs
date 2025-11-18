@@ -28,45 +28,36 @@ use crate::{
     utils::dfs,
 };
 
-/// Extract all SQL queries from table views.
-pub fn queries(
-    manifest: &Manifest,
-) -> Result<BTreeMap<TableName, parser::Statement>, crate::sql::ParseSqlError> {
-    let mut queries = BTreeMap::new();
-    for (table_name, table) in &manifest.tables {
-        let TableInput::View(query) = &table.input;
-        let query = crate::sql::parse(&query.sql)?;
-        queries.insert(table_name.clone(), query);
-    }
-    Ok(queries)
-}
-
 /// Convert a derived dataset manifest into a logical dataset representation.
 ///
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
 /// name, version, manifest_hash) must be provided externally as they are not part of the manifest.
-pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, BoxError> {
+pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, DatasetError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
             let TableInput::View(query) = &table.input;
-            let query = crate::sql::parse(&query.sql)?;
+            let query = crate::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
             queries.insert(table_name.clone(), query);
         }
         queries
     };
 
     // Convert manifest tables into logical tables
-    let unsorted_tables: Result<Vec<_>, _> = manifest
+    let unsorted_tables: Vec<LogicalTable> = manifest
         .tables
         .into_iter()
         .map(|(name, table)| {
             LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
         })
-        .collect();
-    let unsorted_tables = unsorted_tables?;
-    let tables = sort_tables_by_dependencies(unsorted_tables, &queries)?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DatasetError::CreateLogicalTable)?;
+    let tables = sort_tables_by_dependencies(unsorted_tables, &queries)
+        .map_err(DatasetError::SortTableDependencies)?;
 
     // Convert manifest functions into logical functions
     let functions = manifest
@@ -95,6 +86,56 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, BoxEr
     })
 }
 
+/// Errors that occur when converting a derived dataset manifest to a logical dataset
+///
+/// This error type is used by the `dataset()` function.
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetError {
+    /// Failed to parse SQL query in table definition
+    ///
+    /// This occurs when:
+    /// - The provided SQL query has invalid syntax
+    /// - Multiple statements provided (only single statement allowed)
+    /// - Query parsing fails for other reasons
+    ///
+    /// Common causes:
+    /// - Malformed SQL syntax
+    /// - Unsupported SQL features
+    /// - Multiple semicolon-separated statements (not allowed)
+    #[error("Failed to parse SQL query for table '{table_name}'")]
+    ParseSql {
+        table_name: TableName,
+        #[source]
+        source: crate::sql::ParseSqlError,
+    },
+
+    /// Failed to create logical table from manifest table definition
+    ///
+    /// This occurs when table validation fails during conversion from
+    /// manifest table to logical table representation.
+    ///
+    /// Common causes:
+    /// - Invalid table schema
+    /// - Network validation failures
+    /// - Table metadata validation errors
+    #[error("Failed to create logical table")]
+    CreateLogicalTable(
+        #[source] BoxError, // TODO: Replace with concrete type when LogicalTable::new error is typed
+    ),
+
+    /// Failed to sort tables by their SQL dependencies
+    ///
+    /// This occurs when:
+    /// - Circular dependencies detected between tables
+    /// - Table dependency resolution fails
+    /// - Invalid table references in dependency graph
+    ///
+    /// This is typically caused by circular table references in SQL queries
+    /// or invalid table names in the dependency graph.
+    #[error("Failed to sort tables by dependencies")]
+    SortTableDependencies(#[source] SortTablesByDependenciesError),
+}
+
 /// Sort tables by their SQL dependencies using topological ordering.
 ///
 /// Analyzes table queries to determine dependencies and returns tables in dependency order.
@@ -102,7 +143,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, BoxEr
 pub fn sort_tables_by_dependencies(
     tables: Vec<LogicalTable>,
     queries: &BTreeMap<TableName, parser::Statement>,
-) -> Result<Vec<LogicalTable>, BoxError> {
+) -> Result<Vec<LogicalTable>, SortTablesByDependenciesError> {
     // Map of table name -> Table
     let table_map = tables
         .into_iter()
@@ -118,7 +159,12 @@ pub fn sort_tables_by_dependencies(
     }
 
     for (table_name, query) in queries {
-        let table_refs = resolve_table_references::<String>(query)?;
+        let table_refs = resolve_table_references::<String>(query).map_err(|err| {
+            SortTablesByDependenciesError::ResolveTableReferences {
+                table_name: table_name.clone(),
+                source: err,
+            }
+        })?;
 
         // Filter to only include dependencies within the same dataset
         let mut table_deps: Vec<TableName> = vec![];
@@ -142,7 +188,8 @@ pub fn sort_tables_by_dependencies(
         }
     }
 
-    let sorted_names = table_dependency_sort(deps)?;
+    let sorted_names =
+        table_dependency_sort(deps).map_err(SortTablesByDependenciesError::TopologicalSort)?;
 
     let mut sorted_tables = Vec::new();
     for name in sorted_names {
@@ -154,13 +201,47 @@ pub fn sort_tables_by_dependencies(
     Ok(sorted_tables)
 }
 
+/// Errors that occur when sorting tables by their SQL dependencies
+///
+/// This error type is used by the `sort_tables_by_dependencies()` function.
+#[derive(Debug, thiserror::Error)]
+pub enum SortTablesByDependenciesError {
+    /// Failed to resolve table references from SQL query
+    ///
+    /// This occurs when:
+    /// - The SQL query contains invalid table references
+    /// - Table names don't conform to SQL identifier rules
+    /// - Catalog-qualified tables are used (not supported)
+    ///
+    /// Common causes:
+    /// - Invalid table name format (e.g., special characters, too long)
+    /// - Three-part table names (catalog.schema.table)
+    /// - Malformed SQL syntax in table references
+    #[error("Failed to resolve table references in table '{table_name}': {source}")]
+    ResolveTableReferences {
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError,
+    },
+
+    /// Failed to perform topological sort on table dependencies
+    ///
+    /// This occurs when:
+    /// - Circular dependencies exist between tables
+    /// - The dependency graph cannot be ordered topologically
+    ///
+    /// The most common cause is circular table dependencies in SQL queries.
+    #[error("Failed to perform topological sort on table dependencies")]
+    TopologicalSort(#[source] TableDependencySortError),
+}
+
 /// Topological sort for table dependencies.
 ///
 /// Uses depth-first search to order tables such that each table comes after
 /// all tables it depends on. Detects circular dependencies.
 fn table_dependency_sort(
     deps: BTreeMap<TableName, Vec<TableName>>,
-) -> Result<Vec<TableName>, BoxError> {
+) -> Result<Vec<TableName>, TableDependencySortError> {
     let nodes: BTreeSet<&TableName> = deps.keys().collect();
     let mut ordered: Vec<TableName> = Vec::new();
     let mut visited: BTreeSet<&TableName> = BTreeSet::new();
@@ -168,11 +249,37 @@ fn table_dependency_sort(
 
     for node in nodes {
         if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visiting)?;
+            dfs(node, &deps, &mut ordered, &mut visited, &mut visiting).map_err(|err| {
+                TableDependencySortError {
+                    table_name: err.node,
+                }
+            })?;
         }
     }
 
     Ok(ordered)
+}
+
+/// Error when circular dependency is detected during topological sorting
+///
+/// This occurs when tables have circular references in their SQL queries,
+/// creating a dependency cycle that cannot be resolved. For example:
+/// - Table A depends on Table B
+/// - Table B depends on Table C
+/// - Table C depends on Table A (creates cycle)
+///
+/// The topological sort algorithm detects this during depth-first search
+/// traversal when it encounters a node that is currently being visited.
+///
+/// To resolve this error:
+/// - Review table SQL queries to identify the circular reference chain
+/// - Refactor queries to break the dependency cycle
+/// - Consider splitting tables or using different query patterns
+#[derive(Debug, thiserror::Error)]
+#[error("Circular dependency detected in table definitions at table '{table_name}'")]
+pub struct TableDependencySortError {
+    /// The table where the circular dependency was detected
+    pub table_name: TableName,
 }
 
 /// Type alias for the table references map used in multi-table validation
