@@ -109,7 +109,7 @@ impl Compactor {
         let table_name = self.table.table_name();
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = if let Some(plan) =
+        let mut compaction_futures = if let Some(plan) =
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
             let groups = plan.collect::<Vec<_>>().await;
@@ -127,7 +127,7 @@ impl Compactor {
             return Ok(self);
         };
 
-        while let Some(res) = join_set.next().await {
+        while let Some(res) = compaction_futures.next().await {
             match res {
                 Ok(block_num) => {
                     tracing::info!(
