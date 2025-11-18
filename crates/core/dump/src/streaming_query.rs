@@ -12,10 +12,10 @@ use common::{
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     query_context::QueryEnv,
+    sql_str::SqlStr,
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
-use datasets_derived::sql_str::SqlStr;
 use futures::{
     FutureExt,
     stream::{self, BoxStream, StreamExt},

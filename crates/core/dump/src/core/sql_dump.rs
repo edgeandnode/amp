@@ -97,18 +97,18 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, Function as LogicalFunction, PlanningContext,
-    QueryContext,
+    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::{
         dataset_access::DatasetAccess,
         physical::{Catalog, PhysicalTable},
-        sql::catalog_for_sql_with_deps,
     },
     metadata::{Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
-use datasets_common::hash_reference::HashReference;
-use datasets_derived::{Manifest as DerivedManifest, deps::alias::DepAlias, manifest::TableInput};
+use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
+use datasets_derived::{
+    Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps, manifest::TableInput,
+};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
@@ -195,31 +195,13 @@ pub async fn dump_table(
     let env = env.clone();
     let opts = opts.clone();
 
-    // Convert manifest functions to common::catalog::logical::Function format
-    let functions = manifest
-        .functions
-        .iter()
-        .map(|(name, func)| {
-            let logical_func = LogicalFunction {
-                name: name.as_str().to_string(),
-                input_types: func.input_types.iter().map(|dt| dt.0.clone()).collect(),
-                output_type: func.output_type.0.clone(),
-                source: common::catalog::logical::FunctionSource {
-                    source: func.source.source.clone(),
-                    filename: func.source.filename.clone(),
-                },
-            };
-            (name.clone(), logical_func)
-        })
-        .collect();
-
     let catalog = catalog_for_sql_with_deps(
         dataset_store.as_ref(),
         &metadata_db,
         &query,
         env.clone(),
         dependencies,
-        functions,
+        manifest.functions.clone(),
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());

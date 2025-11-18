@@ -13,28 +13,33 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use datafusion::sql::parser;
-use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
-use datasets_derived::{
-    DerivedDatasetKind, Manifest,
-    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
-    manifest::{TableInput, View},
-};
-use js_runtime::isolate_pool::IsolatePool;
-
-use crate::{
+use common::{
     BoxError, Dataset, Table as LogicalTable,
     catalog::{
         dataset_access::DatasetAccess,
-        errors::PlanningCtxForSqlTablesWithDepsError,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
-        sql::planning_ctx_for_sql_tables_with_deps_and_funcs,
     },
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
         TableReference, resolve_function_references, resolve_table_references,
     },
     utils::dfs,
+};
+use datafusion::sql::parser;
+use datasets_common::{
+    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
+    hash::Hash,
+    hash_reference::HashReference,
+    table_name::TableName,
+};
+use js_runtime::isolate_pool::IsolatePool;
+
+use crate::{
+    DerivedDatasetKind, Manifest,
+    catalog::{
+        PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
+    },
+    manifest::{TableInput, View},
 };
 
 /// Convert a derived dataset manifest into a logical dataset representation.
@@ -47,7 +52,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, Datas
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
             let TableInput::View(query) = &table.input;
-            let query = crate::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
+            let query = common::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
@@ -115,7 +120,7 @@ pub enum DatasetError {
     ParseSql {
         table_name: TableName,
         #[source]
-        source: crate::sql::ParseSqlError,
+        source: common::sql::ParseSqlError,
     },
 
     /// Failed to create logical table from manifest table definition
@@ -356,7 +361,7 @@ pub async fn validate(
 
         // Parse SQL (validates single statement)
         let stmt =
-            crate::sql::parse(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
+            common::sql::parse(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
@@ -389,25 +394,7 @@ pub async fn validate(
         references.insert(table_name.clone(), (table_refs, func_refs));
     }
 
-    // Step 3: Convert manifest functions to LogicalFunction for validation
-    let logical_functions: BTreeMap<_, _> = manifest
-        .functions
-        .iter()
-        .map(|(name, f)| {
-            let logical_func = LogicalFunction {
-                name: name.as_str().to_string(),
-                input_types: f.input_types.iter().map(|dt| dt.0.clone()).collect(),
-                output_type: f.output_type.0.clone(),
-                source: LogicalFunctionSource {
-                    source: f.source.source.clone(),
-                    filename: f.source.filename.clone(),
-                },
-            };
-            (name.clone(), logical_func)
-        })
-        .collect();
-
-    // Step 4: Create planning context to validate all table and function references
+    // Step 3: Create planning context to validate all table and function references
     // This validates:
     // - All table references resolve to existing tables in dependencies
     // - All function references resolve to existing functions in dependencies
@@ -418,7 +405,7 @@ pub async fn validate(
         store,
         references,
         dependencies,
-        logical_functions,
+        manifest.functions.clone(),
         IsolatePool::dummy(), // For manifest validation only (no JS execution)
     )
     .await
@@ -474,7 +461,7 @@ pub enum ManifestValidationError {
     InvalidTableSql {
         table_name: TableName,
         #[source]
-        source: crate::sql::ParseSqlError,
+        source: common::sql::ParseSqlError,
     },
 
     /// Failed to resolve table references from SQL query

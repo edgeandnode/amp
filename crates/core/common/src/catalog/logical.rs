@@ -8,8 +8,11 @@ use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
-use datasets_common::{partial_reference::PartialReference, table_name::TableName};
-use datasets_derived::deps::{alias::DepAlias, reference::DepReference};
+use datasets_common::{
+    deps::{alias::DepAlias, reference::DepReference},
+    partial_reference::PartialReference,
+    table_name::TableName,
+};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 

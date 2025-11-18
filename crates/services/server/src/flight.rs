@@ -34,6 +34,7 @@ use common::{
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
+    sql_str::SqlStr,
     utils::error_with_causes,
 };
 use datafusion::{
@@ -43,7 +44,6 @@ use dataset_store::{
     DatasetStore, GetDatasetError, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
 };
-use datasets_derived::sql_str::SqlStr;
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,

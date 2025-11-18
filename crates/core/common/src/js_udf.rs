@@ -14,7 +14,7 @@ use datafusion::{
 use js_runtime::{convert::ToV8, isolate_pool::IsolatePool};
 
 #[derive(Debug)]
-pub(crate) struct JsUdf {
+pub struct JsUdf {
     udf_name: String,
     isolate_pool: IsolatePool,
     code: Arc<str>,          // JS source code
