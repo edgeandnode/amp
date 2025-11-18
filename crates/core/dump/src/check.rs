@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{BoxError, catalog::physical::PhysicalTable, query_context::Error as QueryError};
 use futures::TryStreamExt as _;
-use metadata_db::LocationId;
+use metadata_db::{FileId, LocationId};
 use object_store::ObjectMeta;
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will
@@ -26,9 +26,13 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyC
     let files = table
         .files()
         .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+        .map_err(|err| ConsistencyCheckError::ListFilesError(location_id, err))?;
 
-    let registered_files: BTreeSet<String> = files.into_iter().map(|m| m.file_name).collect();
+    let (registered_files, file_name_to_file_ids): (BTreeSet<String>, BTreeMap<String, FileId>) =
+        files
+            .into_iter()
+            .map(|m| (m.file_name.clone(), (m.file_name, m.file_id)))
+            .collect();
 
     let store = table.object_store();
     let path = table.path();
@@ -37,7 +41,7 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyC
         .list(Some(table.path()))
         .try_collect::<Vec<ObjectMeta>>()
         .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err.into()))?
+        .map_err(|err| ConsistencyCheckError::ObjectStoreError(err.into()))?
         .into_iter()
         .filter_map(|object| Some((object.location.filename()?.to_string(), object)))
         .collect();
@@ -54,11 +58,22 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyC
     // Check for files in the metadata DB that do not exist in the store.
     for filename in registered_files {
         if !stored_files.contains_key(&filename) {
+            let is_canonical = table
+                .canonical_chain()
+                .await
+                .map_err(|err| ConsistencyCheckError::CanonicalChainError(location_id, err.into()))?
+                .into_iter()
+                .flatten()
+                .any(|t| t.id == file_name_to_file_ids[&filename]);
             let err = format!(
                 "file `{path}/{filename}` is registered in metadata DB but is not in the data store"
             )
             .into();
-            return Err(ConsistencyCheckError::CorruptedTable(location_id, err));
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                err,
+                is_canonical,
+            ));
         }
     }
 
@@ -75,6 +90,12 @@ pub enum ConsistencyCheckError {
     #[error("object store error: {0}")]
     ObjectStoreError(#[from] object_store::Error),
 
-    #[error("table {0} is corrupted: {1}")]
-    CorruptedTable(LocationId, BoxError),
+    #[error("table {0} is corrupted: {1}, is_canonical={2}")]
+    CorruptedTable(LocationId, BoxError, bool),
+
+    #[error("could not get canonical chain for table {0}: {1}")]
+    CanonicalChainError(LocationId, BoxError),
+
+    #[error("could not list files for table {0}: {1}")]
+    ListFilesError(LocationId, BoxError),
 }
