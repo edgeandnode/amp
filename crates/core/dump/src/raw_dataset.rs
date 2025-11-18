@@ -82,6 +82,7 @@
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
+    str::FromStr,
     sync::{
         Arc, RwLock,
         atomic::{AtomicUsize, Ordering},
@@ -90,19 +91,83 @@ use std::{
 };
 
 use common::{
-    BlockNum, BlockStreamer, BoxError,
+    BlockNum, BlockStreamer, BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
+use dataset_store::DatasetKind;
 use datasets_common::table_name::TableName;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::{Instrument, instrument};
 
-use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
-    WriterProperties, compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter,
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties, check::consistency_check,
+    compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter,
+    tasks::FailFastJoinSet,
 };
+
+/// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
+pub async fn dump(
+    ctx: Ctx,
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    max_writers: u16,
+    end: EndBlock,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+) -> Result<(), BoxError> {
+    if tables.is_empty() {
+        return Ok(());
+    }
+
+    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+
+    // Check that all tables belong to the same dataset.
+    let dataset = {
+        let ds = tables[0].0.table().dataset();
+        for (table, _) in tables {
+            if table.dataset().manifest_hash != ds.manifest_hash {
+                return Err(
+                    format!("Table {} is not in {}", table.table_ref(), ds.manifest_hash).into(),
+                );
+            }
+        }
+        ds
+    };
+
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|(t, _)| t.table()));
+    let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
+
+    // Ensure consistency before starting the dump procedure.
+    for (table, _) in tables {
+        consistency_check(table).await?;
+    }
+
+    let kind = DatasetKind::from_str(&dataset.kind)?;
+    match kind {
+        DatasetKind::EvmRpc | DatasetKind::EthBeacon | DatasetKind::Firehose => {
+            dump_impl(
+                ctx,
+                max_writers,
+                catalog,
+                tables,
+                parquet_opts,
+                end,
+                metrics,
+                dataset.finalized_blocks_only,
+            )
+            .await?;
+        }
+        DatasetKind::Derived => {
+            return Err(
+                format!("Attempted to dump dataset of kind `{kind}` as raw dataset").into(),
+            );
+        }
+    }
+
+    tracing::info!("dump completed successfully");
+
+    Ok(())
+}
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -111,7 +176,7 @@ use crate::{
 /// On failure, all running partitions are terminated to prevent partial dumps.
 #[instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]
-pub async fn dump(
+async fn dump_impl(
     ctx: Ctx,
     max_writers: u16,
     catalog: Catalog,
