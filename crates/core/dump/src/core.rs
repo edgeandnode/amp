@@ -22,8 +22,8 @@ use object_store::ObjectMeta;
 use crate::{compaction::AmpCompactor, metrics};
 
 pub mod block_ranges;
+mod derived_dataset;
 mod raw_dataset;
-mod sql_dump;
 mod tasks;
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
@@ -44,9 +44,9 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, max_writers, end, metrics).await
+        dump_raw_dataset_tables(ctx, tables, max_writers, end, metrics).await
     } else {
-        dump_user_tables(
+        dump_derived_dataset_tables(
             ctx,
             tables,
             microbatch_max_interval,
@@ -59,7 +59,7 @@ pub async fn dump_tables(
 }
 
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
-pub async fn dump_raw_tables(
+pub async fn dump_raw_dataset_tables(
     ctx: Ctx,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
@@ -120,7 +120,8 @@ pub async fn dump_raw_tables(
     Ok(())
 }
 
-pub async fn dump_user_tables(
+/// Dumps a set of derived dataset tables. All tables must belong to the same dataset.
+pub async fn dump_derived_dataset_tables(
     ctx: Ctx,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     microbatch_max_interval: u64,
@@ -169,7 +170,7 @@ pub async fn dump_user_tables(
                 .get_derived_manifest(dataset.manifest_hash())
                 .await?;
 
-            sql_dump::dump_table(
+            derived_dataset::dump_table(
                 ctx,
                 manifest,
                 &env,

@@ -35,8 +35,8 @@ use super::fixtures::SnapshotContext;
 ///
 /// This function orchestrates the full extraction pipeline, including dataset
 /// dependency resolution, physical table setup, and calling the extraction
-/// functions. It was previously part of the `ampd dump` CLI command but is
-/// now only used internally by tests.
+/// functions. This provides test access to the internal dump functionality
+/// used by the worker-based extraction system.
 ///
 /// **Note**: This is an internal function with full control over all parameters.
 /// Most test code should use the simpler `dump_dataset` or `dump_dataset_continuous`
