@@ -288,6 +288,7 @@ impl MetadataDb {
     /// Retrieves footer bytes for a specific file.
     ///
     /// Returns the binary footer data stored for the specified file ID.
+    #[instrument(skip(self), err)]
     pub async fn get_file_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
         files::get_footer_bytes_by_id(&*self.pool, file_id)
             .await
