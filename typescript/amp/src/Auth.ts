@@ -145,7 +145,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     const kvs = store.forSchema(AuthStorageSchema)
 
     // Setup the `${AUTH_PLATFORM_URL}/v1/auth` base URL for the HTTP client
-    const v1AuthUrl = new URL("v1/auth", AUTH_PLATFORM_URL)
+    const v1AuthUrl = new URL("api/v1/auth", AUTH_PLATFORM_URL)
     const httpClient = (yield* HttpClient.HttpClient).pipe(
       HttpClient.mapRequest(HttpClientRequest.prependUrl(v1AuthUrl.toString())),
     )
@@ -161,7 +161,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       readonly exp: Model.GenrateTokenDuration | undefined
       readonly audience: ReadonlyArray<string> | null | undefined
     }) {
-      const request = HttpClientRequest.post("/auth/generate", {
+      const request = HttpClientRequest.post("/generate", {
         // Unsafely creating the JSON body is acceptable here as the requisite
         // parameters will have already been validated by other schemas
         body: HttpBody.unsafeJson(GenerateAccessTokenRequest.make({
@@ -213,7 +213,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     const refreshAccessToken = Effect.fn("AuthService.refreshAccessToken")(function*(
       cache: AuthStorageSchema,
     ) {
-      const request = HttpClientRequest.post("/auth/refresh", {
+      const request = HttpClientRequest.post("/refresh", {
         // Unsafely creating the JSON body is acceptable here as the `user_id`
         // and `refresh_token` have already been validated by the `AuthStorageSchema`
         body: HttpBody.unsafeJson(RefreshTokenRequest.fromCache(cache)),
