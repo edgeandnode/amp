@@ -8,7 +8,6 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
-datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true

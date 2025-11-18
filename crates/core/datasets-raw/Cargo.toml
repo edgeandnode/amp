@@ -5,7 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [features]
-gen-schema = ["dep:datafusion", "dep:tokio"]
+gen-schema = ["dep:datafusion"]
 
 [dependencies]
 # Always available - provides Table type
@@ -13,4 +13,3 @@ common = { path = "../common" }
 
 # Only for schema generation
 datafusion = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }

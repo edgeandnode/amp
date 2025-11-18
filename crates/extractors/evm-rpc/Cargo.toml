@@ -22,6 +22,3 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
-
-[dev-dependencies]
-fs-err.workspace = true
