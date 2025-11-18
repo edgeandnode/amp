@@ -5,8 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use common::{BoxError, arrow, stream_helpers::is_streaming};
-use datasets_derived::sql_str::SqlStr;
+use common::{BoxError, arrow, sql_str::SqlStr, stream_helpers::is_streaming};
 use futures::{StreamExt as _, TryStreamExt as _};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 

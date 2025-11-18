@@ -7,27 +7,29 @@ use axum::{
 };
 use common::{
     BoxError,
-    catalog::{
-        errors::PlanningCtxForSqlTablesWithDepsError, logical::Function as LogicalFunction,
-        sql::planning_ctx_for_sql_tables_with_deps_and_funcs,
-    },
     plan_visitors::prepend_special_block_num_field,
     query_context::Error as QueryContextError,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
         TableReference, resolve_function_references, resolve_table_references,
     },
+    sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
-use datasets_derived::{
+use datasets_common::{
     deps::{
         alias::{DepAlias, DepAliasOrSelfRef},
         reference::{DepReference, HashOrVersion},
     },
     func_name::FuncName,
+    hash_reference::HashReference,
+    table_name::TableName,
+};
+use datasets_derived::{
+    catalog::{
+        PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
+    },
     manifest::{Function, TableSchema},
-    sql_str::SqlStr,
 };
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
@@ -264,29 +266,12 @@ pub async fn handler(
         (statements, references)
     };
 
-    // Convert Function to LogicalFunction for planning context
-    let logical_functions: BTreeMap<_, _> = functions
-        .into_iter()
-        .map(|(name, func)| {
-            let logical_func = LogicalFunction {
-                name: name.as_str().to_string(),
-                input_types: func.input_types.into_iter().map(|dt| dt.0).collect(),
-                output_type: func.output_type.0,
-                source: common::catalog::logical::FunctionSource {
-                    source: func.source.source,
-                    filename: func.source.filename,
-                },
-            };
-            (name, logical_func)
-        })
-        .collect();
-
     // Create planning context using resolved dependencies
     let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
         ctx.dataset_store.as_ref(),
         references,
         dependencies,
-        logical_functions,
+        functions,
         IsolatePool::dummy(), // For schema validation only (no JS execution)
     )
     .await
@@ -470,7 +455,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -485,7 +470,7 @@ enum Error {
         /// The underlying extraction error
         #[source]
         source:
-            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
+            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Dependency not found in dataset store
@@ -529,7 +514,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
     },
 
     /// Unqualified table reference
@@ -545,7 +530,7 @@ enum Error {
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
     InvalidTableName(
-        #[source] ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
+        #[source] ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
     ),
 
     /// Dataset reference not found
@@ -599,7 +584,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_derived::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
     },
 
     /// Invalid dependency alias in function reference
@@ -615,7 +600,7 @@ enum Error {
         /// The underlying resolution error
         #[source]
         source:
-            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
+            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Catalog-qualified function reference not supported
@@ -631,7 +616,7 @@ enum Error {
         /// The underlying resolution error
         #[source]
         source:
-            ResolveFunctionReferencesError<datasets_derived::deps::alias::DepAliasOrSelfRefError>,
+            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Dependency alias not found

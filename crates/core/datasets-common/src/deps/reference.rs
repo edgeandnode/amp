@@ -3,7 +3,7 @@
 //! This module provides types for referencing dataset dependencies with explicit
 //! versions or content hashes, excluding symbolic references like "latest" or "dev".
 
-use datasets_common::{
+use crate::{
     fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace, version::Version,
 };
 
@@ -51,32 +51,30 @@ impl DepReference {
     }
 
     /// Convert to a regular Reference (consuming).
-    pub fn into_reference(self) -> datasets_common::reference::Reference {
+    pub fn into_reference(self) -> crate::reference::Reference {
         let (fqn, hash_or_version) = self.into_fqn_and_hash_or_version();
         let (namespace, name) = fqn.into_parts();
         let revision = match hash_or_version {
-            HashOrVersion::Hash(hash) => datasets_common::revision::Revision::Hash(hash),
-            HashOrVersion::Version(version) => {
-                datasets_common::revision::Revision::Version(version)
-            }
+            HashOrVersion::Hash(hash) => crate::revision::Revision::Hash(hash),
+            HashOrVersion::Version(version) => crate::revision::Revision::Version(version),
         };
-        datasets_common::reference::Reference::new(namespace, name, revision)
+        crate::reference::Reference::new(namespace, name, revision)
     }
 
     /// Convert to a regular Reference (non-consuming).
-    pub fn to_reference(&self) -> datasets_common::reference::Reference {
+    pub fn to_reference(&self) -> crate::reference::Reference {
         self.clone().into_reference()
     }
 }
 
 // Implement PartialEq between DepReference and Reference for comparisons
-impl PartialEq<datasets_common::reference::Reference> for DepReference {
-    fn eq(&self, other: &datasets_common::reference::Reference) -> bool {
+impl PartialEq<crate::reference::Reference> for DepReference {
+    fn eq(&self, other: &crate::reference::Reference) -> bool {
         self.to_reference() == *other
     }
 }
 
-impl PartialEq<DepReference> for datasets_common::reference::Reference {
+impl PartialEq<DepReference> for crate::reference::Reference {
     fn eq(&self, other: &DepReference) -> bool {
         *self == other.to_reference()
     }
@@ -202,7 +200,7 @@ pub enum DepReferenceParseError {
     /// - Missing '/' separator between namespace and name
     /// - Empty namespace or name component
     #[error("Invalid fully qualified name '{0}': {1}")]
-    InvalidFqn(String, datasets_common::fqn::FullyQualifiedNameError),
+    InvalidFqn(String, crate::fqn::FullyQualifiedNameError),
 
     /// Invalid revision component (hash or version)
     ///

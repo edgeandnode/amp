@@ -203,7 +203,7 @@ pub enum Error {
 
     /// Manifest validation error for derived datasets
     #[error("manifest validation error: {0}")]
-    ManifestValidationError(#[source] common::datasets_derived::ManifestValidationError),
+    ManifestValidationError(#[source] datasets_derived::ManifestValidationError),
 
     /// Unsupported dataset kind
     ///

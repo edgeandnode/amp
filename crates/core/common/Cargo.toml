@@ -4,8 +4,6 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-
 [dependencies]
 alloy.workspace = true
 async-trait.workspace = true
@@ -28,6 +26,7 @@ js-runtime = { path = "../js-runtime" }
 metadata-db = { path = "../metadata-db", features = ["temp-db"] }
 object_store.workspace = true
 regex.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -36,7 +35,6 @@ tower.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
-datasets-derived = { path = "../datasets-derived" }
 
 [dev-dependencies]
 chrono.workspace = true

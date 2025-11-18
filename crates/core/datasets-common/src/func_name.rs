@@ -2,9 +2,19 @@
 //!
 //! This module provides the `FuncName` type for validated UDF function names that enforce
 //! naming conventions compatible with DataFusion UDFs.
+//!
+//! TODO: Consider moving this module to `datasets-derived` crate to break circular dependency.
+//! Currently used by `common::sql::FunctionReference` which may also need refactoring.
 
 /// Maximum length for function identifiers (practical limit for reasonable function names).
 const MAX_IDENTIFIER_LENGTH: usize = 255;
+
+/// Special function name for the `eth_call` UDF that requires special handling.
+///
+/// The `eth_call` function is a special async UDF that makes RPC calls to Ethereum nodes
+/// during query execution. It requires special initialization and handling compared to
+/// regular scalar UDFs.
+pub const ETH_CALL_FUNCTION_NAME: &str = "eth_call";
 
 /// A validated UDF function name that enforces naming conventions.
 ///

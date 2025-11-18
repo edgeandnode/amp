@@ -6,16 +6,17 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use common::sql_str::SqlStr;
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{manifest::DataType, table_name::TableName};
-
-use crate::{
-    dataset_kind::DerivedDatasetKind,
+use datasets_common::{
     deps::{alias::DepAlias, reference::DepReference},
     func_name::FuncName,
-    sql_str::SqlStr,
+    manifest::DataType,
+    table_name::TableName,
 };
+
+use crate::dataset_kind::DerivedDatasetKind;
 
 /// Complete manifest definition for a derived dataset.
 ///

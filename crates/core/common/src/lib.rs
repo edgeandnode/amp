@@ -1,7 +1,6 @@
 pub mod arrow_helpers;
 pub mod catalog;
 pub mod config;
-pub mod datasets_derived;
 pub mod evm;
 pub mod incrementalizer;
 pub mod js_udf;
@@ -10,6 +9,7 @@ pub mod plan_visitors;
 pub mod planning_context;
 pub mod query_context;
 pub mod sql;
+pub mod sql_str;
 pub mod store;
 pub mod stream_helpers;
 pub mod utils;

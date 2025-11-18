@@ -17,6 +17,7 @@ use common::{
     metadata::segments::BlockRange,
     parquet::file::metadata::ParquetMetaData,
     sql,
+    sql_str::SqlStr,
     store::ObjectStoreUrl,
 };
 use dataset_store::{
@@ -24,7 +25,6 @@ use dataset_store::{
     providers::ProviderConfigsStore,
 };
 use datasets_common::{reference::Reference, table_name::TableName};
-use datasets_derived::sql_str::SqlStr;
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;

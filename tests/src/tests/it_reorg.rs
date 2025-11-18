@@ -2,9 +2,10 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
-use common::{BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange, sql};
+use common::{
+    BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange, sql, sql_str::SqlStr,
+};
 use datasets_common::reference::Reference;
-use datasets_derived::sql_str::SqlStr;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;

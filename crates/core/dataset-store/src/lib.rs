@@ -738,7 +738,7 @@ impl DatasetStore {
                 let manifest = manifest_content
                     .try_into_manifest::<DerivedManifest>()
                     .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
-                common::datasets_derived::dataset(hash.clone(), manifest)
+                datasets_derived::dataset(hash.clone(), manifest)
                     .map_err(GetDatasetByHashError::CreateDerivedDataset)?
             }
         };

@@ -31,9 +31,8 @@ pub fn is_streaming(stmt: &Statement) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use datasets_derived::sql_str::SqlStr;
-
     use super::*;
+    use crate::sql_str::SqlStr;
 
     #[test]
     fn test_is_streaming() {
