@@ -30,17 +30,16 @@ pub struct JobSet {
 }
 
 impl JobSet {
+    pub(super) fn job_running(&self, job_id: &JobId) -> bool {
+        self.job_id_to_handle.contains_key(job_id)
+    }
+
     /// Spawn a new job and register it in the set
-    pub fn spawn(
+    pub(super) fn spawn(
         &mut self,
         job_id: JobId,
         job_fut: impl Future<Output = Result<(), BoxError>> + Send + 'static,
     ) {
-        if self.job_id_to_handle.contains_key(&job_id) {
-            tracing::debug!(%job_id, "Job already spawned, skipping.");
-            return;
-        }
-
         let handle = self.jobs.spawn(job_fut);
 
         // Register the IDs and the handle

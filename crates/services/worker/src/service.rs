@@ -14,6 +14,7 @@ use metadata_db::{
 use monitoring::{logging, telemetry::metrics::Meter};
 use tokio::time::MissedTickBehavior;
 use tokio_util::task::AbortOnDropHandle;
+use tracing::instrument;
 
 mod error;
 mod job_impl;
@@ -390,8 +391,14 @@ impl Worker {
     ///
     /// This method is called when a job is started by the user or the scheduler.
     /// It marks the job as RUNNING and spawns the job in the job set.
+    #[instrument(skip(self, job), fields(node_id=%self.node_id, %job.id))]
     async fn spawn_job(&mut self, job: Job) -> Result<(), SpawnJobError> {
-        tracing::debug!(node_id=%self.node_id, %job.id, "job start requested");
+        tracing::debug!("job start requested");
+
+        if self.job_set.job_running(&job.id) {
+            tracing::debug!("Job already spawned, skipping.");
+            return Ok(());
+        }
 
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {
