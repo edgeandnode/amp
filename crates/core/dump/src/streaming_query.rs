@@ -313,6 +313,7 @@ impl StreamingQuery {
         }
     }
 
+    #[instrument(skip_all, err)]
     async fn next_microbatch_range(
         &mut self,
         ctx: &QueryContext,
@@ -371,6 +372,7 @@ impl StreamingQuery {
         }))
     }
 
+    #[instrument(skip_all, err)]
     async fn next_microbatch_start(
         &self,
         ctx: &QueryContext,
@@ -394,6 +396,7 @@ impl StreamingQuery {
         }
     }
 
+    #[instrument(skip_all, err)]
     async fn next_microbatch_end(
         &mut self,
         ctx: &QueryContext,
@@ -428,6 +431,7 @@ impl StreamingQuery {
         }
     }
 
+    #[instrument(skip_all, err)]
     async fn latest_src_watermark(
         &self,
         ctx: &QueryContext,
@@ -457,6 +461,7 @@ impl StreamingQuery {
     /// When a streaming query detects that the previous block range is no longer on the canonical
     /// chain (indicating a reorg), this method walks backwards from the end of the previous block
     /// range to find the latest adjacent block that exists on the canonical chain.
+    #[instrument(skip_all, err)]
     async fn reorg_base(
         &self,
         ctx: &QueryContext,
@@ -507,6 +512,7 @@ impl StreamingQuery {
         self.blocks_table_fetch(ctx, min_fork_block_num, None).await
     }
 
+    #[instrument(skip_all, err)]
     async fn blocks_table_contains(
         &self,
         ctx: &QueryContext,
@@ -517,6 +523,7 @@ impl StreamingQuery {
             .map(|row| row.is_some())
     }
 
+    #[instrument(skip(self, ctx), err)]
     async fn blocks_table_fetch(
         &self,
         ctx: &QueryContext,
