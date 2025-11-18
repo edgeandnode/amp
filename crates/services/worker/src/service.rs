@@ -304,7 +304,7 @@ impl Worker {
                     })?;
             }
             Err(JobSetJoinError::Failed(err)) => {
-                tracing::error!(node_id=%self.node_id, %job_id, "job failed: {:?}", err);
+                tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&*err), "job failed");
 
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
