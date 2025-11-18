@@ -160,57 +160,62 @@ fn columnar_to_scalar(
     }
 }
 
-#[tokio::test]
-async fn js_udf_smoke_test() {
+#[cfg(test)]
+mod tests {
     use datafusion::{
         arrow::datatypes::{DataType, Field},
         logical_expr::ReturnFieldArgs,
     };
 
-    pub const TEST_JS: &str = indoc::indoc! { r#"
-        function int_in_int_out(i32) {
-            if (i32 != 42) {
-                throw new Error(
-                    `assert_eq failed:\n  actual:   ${format(actual)}\n  expected: ${format(expected)}`,
-                );
+    use super::*;
+
+    #[tokio::test]
+    async fn js_udf_smoke_test() {
+        const TEST_JS: &str = indoc::indoc! { r#"
+            function int_in_int_out(i32) {
+                if (i32 != 42) {
+                    throw new Error(
+                        `assert_eq failed:\n  actual:   ${format(actual)}\n  expected: ${format(expected)}`,
+                    );
+                }
+                return 43;
             }
-            return 43;
-        }
-"#};
+        "#};
 
-    let isolate_pool = IsolatePool::new();
-    let udf = JsUdf::new(
-        isolate_pool,
-        String::new(),
-        TEST_JS.into(),
-        "test.js".into(),
-        "int_in_int_out".into(),
-        vec![DataType::Int32],
-        DataType::Int32,
-    );
-    let arg_scalar = ScalarValue::Int32(Some(42));
-    let args = vec![ColumnarValue::Scalar(arg_scalar.clone())];
-    let arg_fields = vec![Arc::new(Field::new("js_in", DataType::Int32, false))];
-    let ret_args = ReturnFieldArgs {
-        arg_fields: &arg_fields,
-        scalar_arguments: &[Some(&arg_scalar)],
-    };
-    let return_field = udf.return_field_from_args(ret_args).unwrap();
+        let isolate_pool = IsolatePool::new();
+        let udf = JsUdf::new(
+            isolate_pool,
+            String::new(),
+            TEST_JS.into(),
+            "test.js".into(),
+            "int_in_int_out".into(),
+            vec![DataType::Int32],
+            DataType::Int32,
+        );
+        let arg_scalar = ScalarValue::Int32(Some(42));
+        let args = vec![ColumnarValue::Scalar(arg_scalar.clone())];
+        let arg_fields = vec![Arc::new(Field::new("js_in", DataType::Int32, false))];
+        let ret_args = ReturnFieldArgs {
+            arg_fields: &arg_fields,
+            scalar_arguments: &[Some(&arg_scalar)],
+        };
+        let return_field = udf.return_field_from_args(ret_args).unwrap();
 
-    let args = ScalarFunctionArgs {
-        args,
-        arg_fields,
-        return_field,
-        number_rows: 1,
-        config_options: Default::default(),
-    };
-    let out = udf.invoke_async_with_args(args).await.unwrap();
-    let array = match out {
-        ColumnarValue::Array(arr) => arr,
-        ColumnarValue::Scalar(_) => panic!("expected array"),
-    };
-    assert_eq!(
-        ScalarValue::try_from_array(&array, 0).unwrap(),
-        ScalarValue::Int32(Some(43))
-    );
+        let args = ScalarFunctionArgs {
+            args,
+            arg_fields,
+            return_field,
+            number_rows: 1,
+            config_options: Default::default(),
+        };
+        let out = udf.invoke_async_with_args(args).await.unwrap();
+        let array = match out {
+            ColumnarValue::Array(arr) => arr,
+            ColumnarValue::Scalar(_) => panic!("expected array"),
+        };
+        assert_eq!(
+            ScalarValue::try_from_array(&array, 0).unwrap(),
+            ScalarValue::Int32(Some(43))
+        );
+    }
 }
