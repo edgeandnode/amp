@@ -1,21 +1,77 @@
 //! # Dump
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
-use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use common::{
+    BoxError, catalog::physical::PhysicalTable, config::Config,
+    parquet::file::properties::WriterProperties as ParquetWriterProperties,
+    store::Store as DataStore,
+};
+use dataset_store::{DatasetKind, DatasetStore};
+use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
+use monitoring::telemetry::metrics::Meter;
 
+mod block_ranges;
+mod check;
 pub mod compaction;
-mod core;
+mod derived_dataset;
 pub mod metrics;
 mod parquet_writer;
+mod raw_dataset;
 mod raw_dataset_writer;
 pub mod streaming_query;
+mod tasks;
 
-pub use core::*;
-
+pub use block_ranges::{EndBlock, ResolvedEndBlock};
+pub use check::*;
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
-use crate::compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit};
+use crate::compaction::{AmpCompactor, CollectorProperties, CompactorProperties, SegmentSizeLimit};
+
+/// Dataset dump context
+#[derive(Clone)]
+pub struct Ctx {
+    pub config: Arc<Config>,
+    pub metadata_db: MetadataDb,
+    pub dataset_store: Arc<DatasetStore>,
+    pub data_store: Arc<DataStore>,
+    /// Shared notification multiplexer for streaming queries
+    pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    /// Optional meter for job metrics
+    pub meter: Option<Meter>,
+}
+
+/// Dumps a set of tables. All tables must belong to the same dataset.
+pub async fn dump_tables(
+    ctx: Ctx,
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    max_writers: u16,
+    microbatch_max_interval: u64,
+    end: EndBlock,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+) -> Result<(), BoxError> {
+    let mut kinds = BTreeSet::new();
+    for (t, _) in tables {
+        kinds.insert(DatasetKind::from_str(&t.dataset().kind)?);
+    }
+
+    if kinds.iter().any(|k| k.is_raw()) {
+        if !kinds.iter().all(|k| k.is_raw()) {
+            return Err("Cannot mix raw and non-raw datasets in a same dump".into());
+        }
+        raw_dataset::dump(ctx, tables, max_writers, end, metrics).await
+    } else {
+        derived_dataset::dump(
+            ctx,
+            tables,
+            microbatch_max_interval,
+            max_writers,
+            end,
+            metrics,
+        )
+        .await
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct WriterProperties {

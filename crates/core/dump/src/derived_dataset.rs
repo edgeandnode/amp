@@ -107,20 +107,99 @@ use common::{
 };
 use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
 use datasets_derived::{
-    Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps, manifest::TableInput,
+    DerivedDatasetKind, Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps,
+    manifest::TableInput,
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
 
-use super::{Ctx, EndBlock, ResolvedEndBlock, tasks::FailFastJoinSet};
 use crate::{
-    WriterProperties,
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    check::consistency_check,
     compaction::AmpCompactor,
     metrics,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
+    tasks,
 };
+
+/// Dumps a set of derived dataset tables. All tables must belong to the same dataset.
+pub async fn dump(
+    ctx: Ctx,
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    microbatch_max_interval: u64,
+    max_writers: u16,
+    end: EndBlock,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+) -> Result<(), BoxError> {
+    if max_writers > 1 {
+        tracing::warn!("max_writers > 1 has no effect for derived datasets");
+    }
+
+    let opts = crate::parquet_opts(&ctx.config.parquet);
+    let env = ctx.config.make_query_env()?;
+
+    // Pre-check all tables for consistency and validate dataset kinds before spawning tasks
+    for (table, _) in tables {
+        consistency_check(table).await?;
+
+        let dataset = table.table().dataset();
+
+        if dataset.kind != DerivedDatasetKind {
+            return Err(format!(
+                "Unsupported dataset kind {} for table {}",
+                dataset.kind,
+                table.table_ref()
+            )
+            .into());
+        }
+    }
+
+    // Process all tables in parallel using FailFastJoinSet
+    let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
+
+    for (table, comppactor) in tables {
+        let ctx = ctx.clone();
+        let env = env.clone();
+        let table = Arc::clone(table);
+        let compactor = Arc::clone(comppactor);
+        let opts = opts.clone();
+        let metrics = metrics.clone();
+
+        join_set.spawn(async move {
+            let dataset = table.table().dataset();
+            let manifest = ctx
+                .dataset_store
+                .get_derived_manifest(dataset.manifest_hash())
+                .await?;
+
+            dump_table(
+                ctx,
+                manifest,
+                &env,
+                table.clone(),
+                compactor,
+                &opts,
+                microbatch_max_interval,
+                end,
+                metrics,
+            )
+            .await?;
+
+            tracing::info!("dump of `{}` completed successfully", table.table_name());
+            Ok(())
+        });
+    }
+
+    // Wait for all tables to complete with fail-fast behavior
+    join_set
+        .try_wait_all()
+        .await
+        .map_err(|err| err.into_box_error())?;
+
+    Ok(())
+}
 
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(table = %table.table_name()), err)]
@@ -189,7 +268,7 @@ pub async fn dump_table(
         dependencies.insert(alias.clone(), (fqn, hash).into());
     }
 
-    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
+    let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
     let dataset_store = ctx.dataset_store.clone();
     let metadata_db = ctx.metadata_db.clone();
     let env = env.clone();
