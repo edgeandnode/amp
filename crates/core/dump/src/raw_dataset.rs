@@ -82,7 +82,6 @@
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
-    str::FromStr,
     sync::{
         Arc, RwLock,
         atomic::{AtomicUsize, Ordering},
@@ -95,7 +94,6 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
-use dataset_store::DatasetKind;
 use datasets_common::table_name::TableName;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -113,8 +111,7 @@ pub async fn dump(
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     end: EndBlock,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> Result<(), BoxError> {
+) -> Result<(), Error> {
     if tables.is_empty() {
         return Ok(());
     }
@@ -126,9 +123,11 @@ pub async fn dump(
         let ds = tables[0].0.table().dataset();
         for (table, _) in tables {
             if table.dataset().manifest_hash != ds.manifest_hash {
-                return Err(
-                    format!("Table {} is not in {}", table.table_ref(), ds.manifest_hash).into(),
-                );
+                return Err(Error::MixedDatasets {
+                    table_ref: table.table_ref().to_string(),
+                    expected_hash: ds.manifest_hash.to_string(),
+                    actual_hash: table.dataset().manifest_hash.to_string(),
+                });
             }
         }
         ds
@@ -139,34 +138,93 @@ pub async fn dump(
 
     // Ensure consistency before starting the dump procedure.
     for (table, _) in tables {
-        consistency_check(table).await?;
+        consistency_check(table)
+            .await
+            .map_err(|err| Error::ConsistencyCheck {
+                table_name: table.table_name().to_string(),
+                source: err,
+            })?;
     }
 
-    let kind = DatasetKind::from_str(&dataset.kind)?;
-    match kind {
-        DatasetKind::EvmRpc | DatasetKind::EthBeacon | DatasetKind::Firehose => {
-            dump_impl(
-                ctx,
-                max_writers,
-                catalog,
-                tables,
-                parquet_opts,
-                end,
-                metrics,
-                dataset.finalized_blocks_only,
-            )
-            .await?;
-        }
-        DatasetKind::Derived => {
-            return Err(
-                format!("Attempted to dump dataset of kind `{kind}` as raw dataset").into(),
-            );
-        }
-    }
+    let metrics = ctx.metrics.clone();
+    dump_impl(
+        ctx,
+        max_writers,
+        catalog,
+        tables,
+        parquet_opts,
+        end,
+        metrics,
+        dataset.finalized_blocks_only,
+    )
+    .await
+    .map_err(Error::DumpImpl)?;
 
     tracing::info!("dump completed successfully");
 
     Ok(())
+}
+
+/// Errors that occur during raw dataset dump operations
+///
+/// This error type is used by the `dump()` function to report issues encountered
+/// when dumping raw datasets to Parquet files.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Tables from different datasets cannot be dumped together
+    ///
+    /// This occurs when attempting to dump multiple tables that belong to different
+    /// datasets (identified by different manifest hashes). All tables in a single
+    /// dump operation must belong to the same dataset.
+    ///
+    /// Common causes:
+    /// - Incorrectly grouping tables from multiple datasets in API calls
+    /// - Dataset manifest hash mismatch due to version conflicts
+    /// - Configuration error specifying wrong table combinations
+    ///
+    /// To fix: Ensure all tables being dumped share the same manifest hash.
+    #[error(
+        "Table '{table_ref}' belongs to dataset '{actual_hash}' but expected '{expected_hash}'"
+    )]
+    MixedDatasets {
+        table_ref: String,
+        expected_hash: String,
+        actual_hash: String,
+    },
+
+    /// Failed consistency check for table
+    ///
+    /// This occurs when the consistency check detects issues between metadata database
+    /// and object store for a table. Common causes:
+    /// - Missing registered files (data corruption)
+    /// - Object store connectivity issues
+    /// - Metadata database query failures
+    ///
+    /// The table must pass consistency checks before dump can proceed.
+    #[error("Consistency check failed for table '{table_name}'")]
+    ConsistencyCheck {
+        table_name: String,
+        #[source]
+        source: crate::check::ConsistencyError,
+    },
+
+    /// Failed to execute dump implementation
+    ///
+    /// This occurs when the main dump implementation fails. This wraps errors from
+    /// the `dump_impl()` function which handles:
+    /// - Blockchain client connection and data streaming
+    /// - Block range resolution and partitioning
+    /// - Parallel partition execution
+    /// - Parquet file writing and metadata updates
+    ///
+    /// Common causes:
+    /// - Blockchain client connectivity issues
+    /// - Block streaming failures
+    /// - Parquet file writing errors
+    /// - Metadata database update failures
+    /// - Partition task failures
+    #[error("Dump implementation failed")]
+    DumpImpl(#[source] BoxError),
 }
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges

@@ -1,6 +1,6 @@
 //! Internal job implementation for the worker service.
 
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use common::{
     BoxError, ParquetFooterCache,
@@ -13,31 +13,59 @@ use datasets_common::{
 use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
-use crate::job::{JobDescriptor, JobId};
+use crate::{
+    job::{JobDescriptor, JobId},
+    service::WorkerJobCtx,
+};
 
 /// Create and run a worker job that dumps tables from a dataset.
 ///
 /// This function performs initialization (fetching metadata and building physical tables)
 /// and returns a future that executes the dump operation.
 pub(super) async fn new(
-    ctx: Ctx,
+    job_ctx: WorkerJobCtx,
     job_id: JobId,
     job_desc: JobDescriptor,
 ) -> Result<impl Future<Output = Result<(), BoxError>>, JobInitError> {
-    let (end_block, max_writers, dataset_namespace, dataset_name, manifest_hash) = match job_desc {
-        JobDescriptor::Dump {
-            end_block,
-            max_writers,
-            dataset_namespace,
-            dataset_name,
-            manifest_hash,
-        } => (
-            end_block,
-            max_writers,
-            dataset_namespace,
-            dataset_name,
-            manifest_hash,
-        ),
+    let (end_block, max_writers, dataset_namespace, dataset_name, manifest_hash, dataset_kind) =
+        match job_desc {
+            JobDescriptor::Dump {
+                end_block,
+                max_writers,
+                dataset_namespace,
+                dataset_name,
+                manifest_hash,
+                dataset_kind,
+            } => (
+                end_block,
+                max_writers,
+                dataset_namespace,
+                dataset_name,
+                manifest_hash,
+                dataset_kind,
+            ),
+        };
+
+    // Create job-specific metrics from job descriptor
+    let job_labels = JobLabels {
+        dataset_namespace: dataset_namespace.clone(),
+        dataset_name: dataset_name.clone(),
+        manifest_hash: manifest_hash.clone(),
+    };
+
+    let metrics = job_ctx
+        .meter
+        .as_ref()
+        .map(|m| Arc::new(MetricsRegistry::new(m, job_labels.clone())));
+
+    // Create Ctx instance for job execution
+    let ctx = Ctx {
+        config: job_ctx.config.clone(),
+        metadata_db: job_ctx.metadata_db.clone(),
+        dataset_store: job_ctx.dataset_store.clone(),
+        data_store: job_ctx.data_store.clone(),
+        notification_multiplexer: job_ctx.notification_multiplexer.clone(),
+        metrics,
     };
 
     let output_locations = metadata_db::physical_table::get_by_job_id(&ctx.metadata_db, job_id)
@@ -50,15 +78,7 @@ pub(super) async fn new(
         Revision::Hash(manifest_hash.clone()),
     );
 
-    let job_labels = JobLabels {
-        dataset_namespace: dataset_namespace.clone(),
-        dataset_name: dataset_name.clone(),
-        manifest_hash: manifest_hash.clone(),
-    };
-    let metrics = ctx
-        .meter
-        .as_ref()
-        .map(|m| Arc::new(MetricsRegistry::new(m, job_labels.clone())));
+    let metrics = ctx.metrics.clone();
 
     let opts = dump::parquet_opts(&ctx.config.parquet);
 
@@ -108,14 +128,15 @@ pub(super) async fn new(
     let fut = async move {
         dump::dump_tables(
             ctx,
+            dataset_kind,
             &tables,
             max_writers,
             microbatch_max_interval,
             end_block,
-            metrics,
         )
         .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref.short_display()))
         .await
+        .map_err(|err| err.into())
     };
     Ok(fut)
 }

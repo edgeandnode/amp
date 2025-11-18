@@ -1,15 +1,14 @@
 //! # Dump
 
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use common::{
-    BoxError, catalog::physical::PhysicalTable, config::Config,
+    catalog::physical::PhysicalTable, config::Config,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
-use monitoring::telemetry::metrics::Meter;
 
 mod block_ranges;
 mod check;
@@ -23,10 +22,74 @@ pub mod streaming_query;
 mod tasks;
 
 pub use block_ranges::{EndBlock, ResolvedEndBlock};
-pub use check::*;
+pub use check::consistency_check;
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
-use crate::compaction::{AmpCompactor, CollectorProperties, CompactorProperties, SegmentSizeLimit};
+use crate::{
+    compaction::{AmpCompactor, CollectorProperties, CompactorProperties, SegmentSizeLimit},
+    metrics::MetricsRegistry,
+};
+
+/// Dumps a set of tables. All tables must belong to the same dataset.
+pub async fn dump_tables(
+    ctx: Ctx,
+    kind: DatasetKind,
+    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    max_writers: u16,
+    microbatch_max_interval: u64,
+    end: EndBlock,
+) -> Result<(), Error> {
+    if kind.is_raw() {
+        // Raw datasets (EvmRpc, EthBeacon, Firehose)
+        raw_dataset::dump(ctx, tables, max_writers, end)
+            .await
+            .map_err(Error::RawDatasetDump)?;
+    } else {
+        // Derived datasets
+        derived_dataset::dump(ctx, tables, microbatch_max_interval, end)
+            .await
+            .map_err(Error::DerivedDatasetDump)?;
+    }
+
+    Ok(())
+}
+
+/// Errors that occur during dump_tables operations
+///
+/// This error type is used by the `dump_tables()` function to report issues encountered
+/// when dumping tables to Parquet files.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to dump raw dataset
+    ///
+    /// This occurs when the raw dataset dump operation fails. This wraps errors
+    /// from the `raw_dataset::dump()` function which handles blockchain data
+    /// extraction and Parquet file writing for raw datasets.
+    ///
+    /// Common causes:
+    /// - Blockchain client connectivity issues
+    /// - Consistency check failures
+    /// - Invalid dataset kind
+    /// - Partition task failures
+    /// - Parquet file writing errors
+    #[error("Failed to dump raw dataset")]
+    RawDatasetDump(#[source] raw_dataset::Error),
+
+    /// Failed to dump derived dataset
+    ///
+    /// This occurs when the derived dataset dump operation fails. This wraps errors
+    /// from the `derived_dataset::dump()` function which handles SQL query execution
+    /// and Parquet file writing for derived datasets.
+    ///
+    /// Common causes:
+    /// - Query environment creation failures
+    /// - Consistency check failures
+    /// - Manifest retrieval errors
+    /// - Table dump failures
+    /// - Parallel task execution failures
+    #[error("Failed to dump derived dataset")]
+    DerivedDatasetDump(#[source] derived_dataset::Error),
+}
 
 /// Dataset dump context
 #[derive(Clone)]
@@ -37,40 +100,8 @@ pub struct Ctx {
     pub data_store: Arc<DataStore>,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
-    /// Optional meter for job metrics
-    pub meter: Option<Meter>,
-}
-
-/// Dumps a set of tables. All tables must belong to the same dataset.
-pub async fn dump_tables(
-    ctx: Ctx,
-    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
-    max_writers: u16,
-    microbatch_max_interval: u64,
-    end: EndBlock,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> Result<(), BoxError> {
-    let mut kinds = BTreeSet::new();
-    for (t, _) in tables {
-        kinds.insert(DatasetKind::from_str(&t.dataset().kind)?);
-    }
-
-    if kinds.iter().any(|k| k.is_raw()) {
-        if !kinds.iter().all(|k| k.is_raw()) {
-            return Err("Cannot mix raw and non-raw datasets in a same dump".into());
-        }
-        raw_dataset::dump(ctx, tables, max_writers, end, metrics).await
-    } else {
-        derived_dataset::dump(
-            ctx,
-            tables,
-            microbatch_max_interval,
-            max_writers,
-            end,
-            metrics,
-        )
-        .await
-    }
+    /// Optional job-specific metrics registry
+    pub metrics: Option<Arc<MetricsRegistry>>,
 }
 
 #[derive(Debug, Clone)]

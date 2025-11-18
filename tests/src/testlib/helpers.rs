@@ -103,14 +103,9 @@ pub async fn dump_internal(
             manifest_hash: dataset.manifest_hash().clone(),
         };
 
-        // Create metrics registry if meter is available
-        let metrics = meter
-            .as_ref()
-            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
-
-        let mut tables = Vec::with_capacity(dataset.tables.len());
-
-        if matches!(dataset.kind.as_str(), "sql" | "manifest") {
+        // Parse dataset kind
+        let kind: dataset_store::DatasetKind = dataset.kind.parse()?;
+        if !kind.is_raw() {
             let table_names: Vec<String> = dataset
                 .tables
                 .iter()
@@ -122,6 +117,13 @@ pub async fn dump_internal(
                 table_names
             );
         }
+
+        // Create metrics registry if meter is available
+        let metrics = meter
+            .as_ref()
+            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
+
+        let mut tables = Vec::with_capacity(dataset.tables.len());
 
         for table in dataset.resolved_tables(dataset_ref.clone().into()) {
             let db = metadata_db.clone();
@@ -140,36 +142,36 @@ pub async fn dump_internal(
             let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
             tables.push((physical_table, compactor));
         }
-        physical_datasets.push((tables, metrics));
+        physical_datasets.push((kind, tables, metrics));
     }
 
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
-    let ctx = dump::Ctx {
-        config: config.clone(),
-        metadata_db: metadata_db.clone(),
-        dataset_store: dataset_store.clone(),
-        data_store: data_store.clone(),
-        notification_multiplexer,
-        meter,
-    };
-
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets
         .iter()
-        .flat_map(|(tables, _)| tables.iter().map(|(t, _)| t))
+        .flat_map(|(_, tables, _)| tables.iter().map(|(t, _)| t))
         .cloned()
         .collect();
 
     match run_every {
         None => {
-            for (tables, metrics) in &physical_datasets {
+            for (kind, tables, metrics) in &physical_datasets {
+                let ctx = dump::Ctx {
+                    config: config.clone(),
+                    metadata_db: metadata_db.clone(),
+                    dataset_store: dataset_store.clone(),
+                    data_store: data_store.clone(),
+                    notification_multiplexer: notification_multiplexer.clone(),
+                    metrics: metrics.clone(),
+                };
+
                 dump::dump_tables(
-                    ctx.clone(),
+                    ctx,
+                    *kind,
                     tables,
                     max_writers,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
-                    metrics.clone(),
                 )
                 .await?
             }
@@ -177,14 +179,23 @@ pub async fn dump_internal(
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            for (tables, metrics) in &physical_datasets {
+            for (kind, tables, metrics) in &physical_datasets {
+                let ctx = dump::Ctx {
+                    config: config.clone(),
+                    metadata_db: metadata_db.clone(),
+                    dataset_store: dataset_store.clone(),
+                    data_store: data_store.clone(),
+                    notification_multiplexer: notification_multiplexer.clone(),
+                    metrics: metrics.clone(),
+                };
+
                 dump::dump_tables(
-                    ctx.clone(),
+                    ctx,
+                    *kind,
                     tables,
                     max_writers,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
-                    metrics.clone(),
                 )
                 .await?;
             }

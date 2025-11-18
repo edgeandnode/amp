@@ -1,15 +1,14 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
-use common::config::Config;
+use common::{config::Config, store::Store as DataStore};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
-use dump::Ctx;
 use futures::{TryStreamExt as _, future::BoxFuture};
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb, WorkerNotifListener as NotifListener,
-    notification_multiplexer,
+    Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,
+    WorkerNotifListener as NotifListener, notification_multiplexer,
 };
 use monitoring::{logging, telemetry::metrics::Meter};
 use tokio::time::MissedTickBehavior;
@@ -97,16 +96,6 @@ pub async fn new(
     // Create notification multiplexer
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
-    // Construct job context with meter
-    let job_ctx = Ctx {
-        config,
-        metadata_db: metadata_db.clone(),
-        dataset_store,
-        data_store,
-        notification_multiplexer,
-        meter,
-    };
-
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
     // from the last known state.
     //
@@ -119,7 +108,18 @@ pub async fn new(
         .map_err(InitError::BootstrapFetchScheduledJobs)?;
 
     // Create the worker instance with pre-constructed dependencies
-    let mut worker = Worker::new(node_id, queue, job_ctx);
+    let mut worker = Worker::new(
+        node_id,
+        queue,
+        WorkerJobCtx {
+            config,
+            metadata_db: metadata_db.clone(),
+            dataset_store,
+            data_store,
+            notification_multiplexer,
+            meter,
+        },
+    );
 
     // Spawn all scheduled jobs
     for job in scheduled_jobs {
@@ -219,17 +219,28 @@ pub async fn new(
     Ok(fut)
 }
 
+/// Worker job context parameters
+#[derive(Clone)]
+pub(crate) struct WorkerJobCtx {
+    pub config: Arc<Config>,
+    pub metadata_db: MetadataDb,
+    pub dataset_store: Arc<DatasetStore>,
+    pub data_store: Arc<DataStore>,
+    pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    pub meter: Option<Meter>,
+}
+
 pub struct Worker {
     node_id: NodeId,
     queue: JobQueue,
-    job_ctx: Ctx,
+    job_ctx: WorkerJobCtx,
     job_set: JobSet,
 }
 
 impl Worker {
     /// Create a new worker instance
     #[must_use]
-    pub(crate) fn new(node_id: NodeId, queue: JobQueue, job_ctx: Ctx) -> Self {
+    pub(crate) fn new(node_id: NodeId, queue: JobQueue, job_ctx: WorkerJobCtx) -> Self {
         Self {
             node_id,
             queue,
@@ -304,7 +315,7 @@ impl Worker {
                     })?;
             }
             Err(JobSetJoinError::Failed(err)) => {
-                tracing::error!(node_id=%self.node_id, %job_id, "job failed: {:?}", err);
+                tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&*err), "job failed");
 
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
@@ -410,7 +421,7 @@ impl Worker {
 
         // Construct the job instance and spawn it in the job set
         let job_id = job.id;
-        let job_desc =
+        let job_desc: crate::job::JobDescriptor =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
         let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc)
