@@ -15,8 +15,8 @@ import * as Model from "@edgeandnode/amp/Model"
 // Test Fixtures
 
 const mockAuthStorage = Auth.AuthStorageSchema.make({
-  accessToken: "test-access-token",
-  refreshToken: "test-refresh-token",
+  accessToken: Model.AccessToken.make("test-access-token"),
+  refreshToken: Model.RefreshToken.make("test-refresh-token"),
   userId: "cmfoby1bt005el70b0fjd3glv",
   accounts: ["cmfoby1bt005el70b0fjd3glv", "0x04913E13A937cf63Fad3786FEE42b3d44dA558aA"],
   expiry: Date.now() + 3600000,

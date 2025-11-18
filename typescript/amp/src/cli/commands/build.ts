@@ -46,7 +46,7 @@ export const build = Command.make("build", {
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(
       Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
         return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token)?.accessToken)
       })).pipe(Layer.provide(Auth.layer)),
     ))

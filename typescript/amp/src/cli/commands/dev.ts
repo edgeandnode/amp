@@ -49,7 +49,7 @@ export const dev = Command.make("dev", { args: { adminUrl } }).pipe(
   Command.provide(({ args }) =>
     ConfigLoader.ConfigLoader.Default.pipe(Layer.provideMerge(
       Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
         return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token)?.accessToken)
       })).pipe(Layer.provide(Auth.layer)),
     ))

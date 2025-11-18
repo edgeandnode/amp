@@ -20,6 +20,7 @@ import * as crypto from "node:crypto"
 import open from "open"
 import { isAddress } from "viem"
 import * as Auth from "../../../Auth.ts"
+import * as Model from "../../../Model.ts"
 
 /**
  * Base64 URL-safe encoding (RFC 4648)
@@ -131,7 +132,7 @@ const DeviceTokenPollingResponse = Schema.Union(
 const checkAlreadyAuthenticated = Effect.gen(function*() {
   const auth = yield* Auth.AuthService
 
-  const authResult = yield* auth.get()
+  const authResult = yield* auth.getCache()
   return Option.isSome(authResult)
 }).pipe(
   // if any error occurs, return false and make the user authenticate
@@ -341,9 +342,9 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
   // Step 4: Store the tokens
   const now = yield* DateTime.now
   const expiry = Fn.pipe(now, DateTime.add({ seconds: tokenResponse.expires_in }), DateTime.toEpochMillis)
-  yield* auth.set(Auth.AuthStorageSchema.make({
-    accessToken: tokenResponse.access_token,
-    refreshToken: tokenResponse.refresh_token,
+  yield* auth.setCache(Auth.AuthStorageSchema.make({
+    accessToken: Model.AccessToken.make(tokenResponse.access_token),
+    refreshToken: Model.RefreshToken.make(tokenResponse.refresh_token),
     userId: tokenResponse.user_id,
     accounts: tokenResponse.user_accounts,
     expiry,

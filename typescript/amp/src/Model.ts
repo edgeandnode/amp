@@ -5,6 +5,14 @@ import { isAddress } from "viem"
 
 export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
+export const AccessToken = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("AccessToken"),
+)
+
+export const RefreshToken = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("RefreshToken"),
+)
+
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
     title: "Network",

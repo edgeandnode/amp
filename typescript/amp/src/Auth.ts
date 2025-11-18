@@ -1,58 +1,47 @@
-import * as Auth from "@effect/platform/FetchHttpClient"
+import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
 import * as HttpBody from "@effect/platform/HttpBody"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
-import type * as HttpClientResponse from "@effect/platform/HttpClientResponse"
+import * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import * as KeyValueStore from "@effect/platform/KeyValueStore"
+import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Fn from "effect/Function"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as jose from "jose"
-import * as os from "node:os"
-import * as path from "node:path"
+import { LocalCache } from "./LocalCache.ts"
 import * as Model from "./Model.ts"
 
 export const AUTH_PLATFORM_URL = new URL("https://auth.amp.thegraph.com/")
-const JWKS = jose.createRemoteJWKSet(new URL("/.well-known/jwks.json", AUTH_PLATFORM_URL))
 
-const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
+// =============================================================================
+// Access Tokens
+// =============================================================================
+
+export const AccessTokenDuration = Schema.Union(
+  Schema.Number,
+  Schema.DateFromSelf,
+  Schema.String.pipe(
+    Schema.pattern(
+      /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
+    ),
+  ),
 )
 
-export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>("Amp/models/auth/RefreshTokenResponse")({
-  token: Schema.NonEmptyTrimmedString.annotations({
-    identifier: "RefreshTokenResponse.token",
-    description: "The refreshed access token",
-  }),
-  refresh_token: Schema.NullOr(Schema.String).annotations({
-    identifier: "RefreshTokenResponse.refresh_token",
-  }),
-  session_update_action: Schema.String.annotations({
-    identifier: "RefreshTokenResponse.session_update_action",
-  }),
-  expires_in: Schema.Int.pipe(Schema.positive()).annotations({
-    identifier: "RefreshTokenResponse.expires_in",
-    description: "Seconds from receipt of when the token expires (def is 1hr)",
-  }),
-  user: Schema.Struct({
-    id: AuthUserId,
-    accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).annotations({
-      identifier: "RefreshTokenResponse.user.accounts",
-      description: "List of accounts (connected wallets, etc) belonging to the user",
-      examples: [["cmfd6bf6u006vjx0b7xb2eybx", "0x5c8fA0bDf68C915a88cD68291fC7CF011C126C29"]],
-    }),
-  }).annotations({
-    identifier: "RefreshTokenResponse.user",
-    description: "The user the access token belongs to",
-  }),
+export class GenerateAccessTokenRequest extends Schema.Class<GenerateAccessTokenRequest>(
+  "Amp/models/auth/GenerateAccessTokenRequest",
+)({
+  duration: AccessTokenDuration.pipe(Schema.optionalWith({ nullable: true })),
+  audience: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
 }) {}
-export class GenerateTokenResponse extends Schema.Class<GenerateTokenResponse>(
-  "Amp/models/auth/GenerateTokenResponse",
+
+export class GenerateAccessTokenResponse extends Schema.Class<GenerateAccessTokenResponse>(
+  "Amp/models/auth/GenerateAccessTokenResponse",
 )({
   token: Schema.NonEmptyTrimmedString,
   token_type: Schema.Literal("Bearer"),
@@ -60,45 +49,151 @@ export class GenerateTokenResponse extends Schema.Class<GenerateTokenResponse>(
   sub: Schema.NonEmptyTrimmedString,
   iss: Schema.String,
 }) {}
-export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/models/auth/AuthStorageSchema")({
-  accessToken: Schema.NonEmptyTrimmedString,
-  refreshToken: Schema.NonEmptyTrimmedString,
-  userId: AuthUserId,
-  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).pipe(Schema.optional),
-  expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
-}) {}
-export class AuthTokenExpiredError extends Data.TaggedError("Amp/errors/auth/AuthTokenExpiredError") {}
-export class AuthRateLimitError extends Data.TaggedError("Amp/errors/auth/AuthRateLimitError")<{
-  readonly retryAfter: number
-  readonly message: string
-}> {}
-export class AuthRefreshError extends Data.TaggedError("Amp/errors/auth/AuthRefreshError")<{
-  readonly status: number
-  readonly message: string
-}> {}
-export class AuthUserMismatchError extends Data.TaggedError("Amp/errors/auth/AuthUserMismatchError")<{
-  readonly expected: string
-  readonly received: string
-}> {}
+
 export class GenerateAccessTokenError extends Data.TaggedError("Amp/errors/auth/GenerateAccessTokenError")<{
   readonly error: string
   readonly error_description: string
   readonly status: number
 }> {}
-export class VerifySignedAccessTokenError extends Data.TaggedError("Amp/errors/auth/VerifySignedAccessTokenError")<{
-  readonly error: string | unknown
+
+// =============================================================================
+// Refresh Tokens
+// =============================================================================
+
+const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
+)
+
+export class RefreshTokenRequest extends Schema.Class<RefreshTokenRequest>(
+  "Amp/models/auth/RefreshTokenRequest",
+)({
+  refresh_token: Model.RefreshToken,
+  user_id: AuthUserId,
+}) {
+  static fromCache(cache: AuthStorageSchema) {
+    return RefreshTokenRequest.make({
+      user_id: cache.userId,
+      refresh_token: cache.refreshToken,
+    })
+  }
+}
+
+export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>(
+  "Amp/models/auth/RefreshTokenResponse",
+)({
+  token: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "RefreshTokenResponse.token",
+    description: "The refreshed access token",
+  }),
+  refresh_token: Schema.NullOr(Schema.String),
+  session_update_action: Schema.String,
+  expires_in: Schema.Int.pipe(Schema.positive()).annotations({
+    description: "Seconds from receipt of when the token expires (def is 1hr)",
+  }),
+  user: Schema.Struct({
+    id: AuthUserId,
+    accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).annotations({
+      description: "List of accounts (connected wallets, etc) belonging to the user",
+      examples: [["cmfd6bf6u006vjx0b7xb2eybx", "0x5c8fA0bDf68C915a88cD68291fC7CF011C126C29"]],
+    }),
+  }).annotations({
+    description: "The user the access token belongs to",
+  }),
+}) {}
+
+// =============================================================================
+// Token Cache
+// =============================================================================
+
+export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/models/auth/AuthStorageSchema")({
+  accessToken: Model.AccessToken,
+  refreshToken: Model.RefreshToken,
+  userId: AuthUserId,
+  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).pipe(Schema.optional),
+  expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
+}) {}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+export class AuthTokenExpiredError extends Data.TaggedError("Amp/errors/auth/AuthTokenExpiredError") {}
+
+export class AuthRateLimitError extends Data.TaggedError("Amp/errors/auth/AuthRateLimitError")<{
+  readonly retryAfter: number
+  readonly message: string
 }> {}
 
-const AUTH_TOKEN_STORAGE_KEY = "amp_cli_auth"
+export class AuthRefreshError extends Data.TaggedError("Amp/errors/auth/AuthRefreshError")<{
+  readonly status: number
+  readonly message: string
+}> {}
+
+export class AuthUserMismatchError extends Data.TaggedError("Amp/errors/auth/AuthUserMismatchError")<{
+  readonly expected: string
+  readonly received: string
+}> {}
+
+export class VerifySignedAccessTokenError extends Data.TaggedError("Amp/errors/auth/VerifySignedAccessTokenError")<{
+  readonly cause: unknown
+}> {}
 
 export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService", {
-  dependencies: [
-    KeyValueStore.layerFileSystem(path.join(os.homedir(), ".amp-cli-config")),
-    Auth.layer,
-  ],
+  dependencies: [LocalCache, FetchHttpClient.layer],
   effect: Effect.gen(function*() {
-    const httpClient = yield* HttpClient.HttpClient
-    const kv = (yield* KeyValueStore.KeyValueStore).forSchema(AuthStorageSchema)
+    const store = yield* KeyValueStore.KeyValueStore
+    const kvs = store.forSchema(AuthStorageSchema)
+
+    // Setup the `${AUTH_PLATFORM_URL}/v1/auth` base URL for the HTTP client
+    const v1AuthUrl = new URL("v1/auth", AUTH_PLATFORM_URL)
+    const httpClient = (yield* HttpClient.HttpClient).pipe(
+      HttpClient.mapRequest(HttpClientRequest.prependUrl(v1AuthUrl.toString())),
+    )
+
+    const AUTH_TOKEN_CACHE_KEY = "amp_cli_auth"
+
+    // ------------------------------------------------------------------------
+    // Token Operations
+    // ------------------------------------------------------------------------
+
+    const generateAccessToken = Effect.fn("AuthService.generateAccessToken")(function*(args: {
+      readonly storedAuth: AuthStorageSchema
+      readonly exp: Model.GenrateTokenDuration | undefined
+      readonly audience: ReadonlyArray<string> | null | undefined
+    }) {
+      const request = HttpClientRequest.post("/auth/generate", {
+        // Unsafely creating the JSON body is acceptable here as the requisite
+        // parameters will have already been validated by other schemas
+        body: HttpBody.unsafeJson(GenerateAccessTokenRequest.make({
+          duration: args.exp ?? undefined,
+          audience: args.audience ?? undefined,
+        })),
+        acceptJson: true,
+      }).pipe(HttpClientRequest.bearerToken(args.storedAuth.accessToken))
+
+      return yield* httpClient.execute(request).pipe(
+        Effect.flatMap(HttpClientResponse.matchStatus({
+          "2xx": (response) => HttpClientResponse.schemaBodyJson(GenerateAccessTokenResponse)(response),
+          orElse: Effect.fnUntraced(function*(response) {
+            // Parse error response from API, with fallback for non-JSON responses
+            const errorResponse = yield* response.json.pipe(Effect.catchAll(() => Effect.succeed({})))
+            const error = typeof errorResponse === "object" && errorResponse !== null && "error" in errorResponse
+              ? String(errorResponse.error)
+              : "server_error"
+            const error_description =
+              typeof errorResponse === "object" && errorResponse !== null && "error_description" in errorResponse
+                ? String(errorResponse.error_description)
+                : "Failed to generate access token"
+
+            return yield* new GenerateAccessTokenError({
+              error,
+              error_description,
+              status: response.status,
+            })
+          }),
+        })),
+      )
+    })
 
     // Helper to extract error description from response body
     const extractErrorDescription = (response: HttpClientResponse.HttpClientResponse) =>
@@ -115,214 +210,131 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
         Effect.map(Option.getOrElse(() => "Failed to refresh token")),
       )
 
-    const refreshAccessToken = Effect.fn("RefreshAccessToken")(function*(
-      storedAuth: AuthStorageSchema,
+    const refreshAccessToken = Effect.fn("AuthService.refreshAccessToken")(function*(
+      cache: AuthStorageSchema,
     ) {
-      const accessToken = storedAuth.accessToken
-      const refreshToken = storedAuth.refreshToken
-      const userId = storedAuth.userId
+      const request = HttpClientRequest.post("/auth/refresh", {
+        // Unsafely creating the JSON body is acceptable here as the `user_id`
+        // and `refresh_token` have already been validated by the `AuthStorageSchema`
+        body: HttpBody.unsafeJson(RefreshTokenRequest.fromCache(cache)),
+        acceptJson: true,
+      }).pipe(HttpClientRequest.bearerToken(cache.accessToken))
 
-      const body = yield* HttpBody.json({
-        refresh_token: refreshToken,
-        user_id: userId,
-      })
-      const req = HttpClientRequest.post(`${AUTH_PLATFORM_URL}api/v1/auth/refresh`).pipe(
-        HttpClientRequest.acceptJson,
-        HttpClientRequest.bearerToken(accessToken),
-        HttpClientRequest.setHeaders({
-          "Content-Type": "application/json",
-        }),
-        HttpClientRequest.setBody(body),
-      )
-
-      const resp = yield* httpClient.execute(req).pipe(
+      const response = yield* httpClient.execute(request).pipe(
         Effect.timeout(Duration.seconds(15)),
-        // Validate successful status or handle errors
-        Effect.flatMap((response) =>
-          Effect.if(response.status === 200, {
-            onTrue: () => Effect.succeed(response),
-            onFalse: () =>
-              Effect.gen(function*() {
-                const errorDescription = yield* extractErrorDescription(response)
-
-                // Handle rate limiting (429)
-                if (response.status === 429) {
-                  const retryAfterHeader = response.headers["retry-after"]
-                  const retryAfter = retryAfterHeader ? globalThis.parseInt(retryAfterHeader, 10) : 60
-
-                  return yield* Effect.fail(
-                    new AuthRateLimitError({
-                      retryAfter,
-                      message: errorDescription,
-                    }),
-                  )
-                }
-
-                // Handle authentication failures (401/403)
-                if (response.status === 401 || response.status === 403) {
-                  return yield* Effect.fail(new AuthTokenExpiredError())
-                }
-
-                // Handle server errors and other failures
-                return yield* Effect.fail(
-                  new AuthRefreshError({
-                    status: response.status,
-                    message: errorDescription,
-                  }),
-                )
+        Effect.flatMap(HttpClientResponse.matchStatus({
+          "2xx": (response) => HttpClientResponse.schemaBodyJson(RefreshTokenResponse)(response),
+          // Unauthorized
+          401: () => Effect.fail(new AuthTokenExpiredError()),
+          // Insufficient Permissions
+          403: () => Effect.fail(new AuthTokenExpiredError()),
+          // Too Many Requests
+          429: Effect.fnUntraced(function*(response) {
+            const message = yield* extractErrorDescription(response)
+            const retryAfter = Option.fromNullable(response.headers["retry-after"]).pipe(
+              Option.flatMap((retryAfter) => {
+                const parsed = Number.parseInt(retryAfter, 10)
+                return Number.isNaN(parsed) ? Option.none() : Option.some(parsed)
               }),
-          })
-        ),
+              Option.getOrElse(() => 60),
+            )
+            return yield* new AuthRateLimitError({ message, retryAfter })
+          }),
+          orElse: Effect.fnUntraced(function*(response) {
+            const message = yield* extractErrorDescription(response)
+            return yield* new AuthRefreshError({ message, status: response.status })
+          }),
+        })),
       )
 
-      const tokenResponse = yield* resp.json.pipe(Effect.flatMap(Schema.decodeUnknown(RefreshTokenResponse)))
-
-      // Validate that the response user ID matches the stored user ID
-      if (tokenResponse.user.id !== storedAuth.userId) {
-        return yield* Effect.fail(
-          new AuthUserMismatchError({
-            expected: storedAuth.userId,
-            received: tokenResponse.user.id,
-          }),
-        )
+      // Validate that the received user ID matches the cached user ID
+      if (response.user.id !== cache.userId) {
+        return yield* new AuthUserMismatchError({
+          expected: cache.userId,
+          received: response.user.id,
+        })
       }
 
       const now = yield* DateTime.now
-      const expiry = Fn.pipe(now, DateTime.add({ seconds: tokenResponse.expires_in }), DateTime.toEpochMillis)
+
+      const expiry = DateTime.toEpochMillis(DateTime.add(now, { seconds: response.expires_in }))
+      const accessToken = Model.AccessToken.make(response.token)
+      const refreshToken = Model.RefreshToken.make(response.refresh_token ?? cache.refreshToken)
       const refreshedAuth = AuthStorageSchema.make({
-        accessToken: tokenResponse.token,
-        refreshToken: tokenResponse.refresh_token ?? refreshToken,
-        userId: tokenResponse.user.id,
-        accounts: tokenResponse.user.accounts,
+        userId: response.user.id,
+        accounts: response.user.accounts,
+        accessToken,
+        refreshToken,
         expiry,
       })
-      yield* kv.set(AUTH_TOKEN_STORAGE_KEY, refreshedAuth)
+
+      // Reset the cached tokens
+      yield* kvs.set(AUTH_TOKEN_CACHE_KEY, refreshedAuth)
 
       return refreshedAuth
     })
 
-    const generateAccessToken = Effect.fn("GenerateAccessToken")(function*(
-      args: Readonly<{
-        storedAuth: AuthStorageSchema
-        exp: Model.GenrateTokenDuration | undefined
-        audience: ReadonlyArray<string> | null | undefined
-      }>,
-    ) {
-      const accessToken = args.storedAuth.accessToken
-      const body = yield* HttpBody.jsonSchema(
-        Schema.Struct({
-          duration: Schema.Union(
-            Schema.Number,
-            Schema.DateFromSelf,
-            Schema.String.pipe(
-              Schema.pattern(
-                /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
-              ),
-            ),
-          ).pipe(Schema.optionalWith({ nullable: true })),
-          audience: Schema.Array(Schema.String).pipe(Schema.optionalWith({ nullable: true })),
-        }),
-      )({
-        duration: args.exp || undefined,
-        audience: args.audience || undefined,
+    const JWKS = jose.createRemoteJWKSet(new URL("/.well-known/jwks.json", AUTH_PLATFORM_URL))
+    const verifyJwt = (token: string, issuer: string) =>
+      Effect.tryPromise({
+        try: () => jose.jwtVerify(token, JWKS, { issuer }),
+        catch: (cause) => new VerifySignedAccessTokenError({ cause }),
       })
-      const req = HttpClientRequest.post(new URL("/api/v1/auth/generate", AUTH_PLATFORM_URL), {
-        acceptJson: true,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }).pipe(
-        HttpClientRequest.acceptJson,
-        HttpClientRequest.bearerToken(accessToken),
-        HttpClientRequest.setBody(body),
-      )
-
-      const resp = yield* httpClient.execute(req)
-      if (resp.status !== 200) {
-        // Parse error response from API, with fallback for non-JSON responses
-        const errorResponse = yield* resp.json.pipe(Effect.catchAll(() => Effect.succeed({})))
-        const error = typeof errorResponse === "object" && errorResponse !== null && "error" in errorResponse
-          ? String(errorResponse.error)
-          : "server_error"
-        const error_description =
-          typeof errorResponse === "object" && errorResponse !== null && "error_description" in errorResponse
-            ? String(errorResponse.error_description)
-            : "Failed to generate access token"
-
-        return yield* Effect.fail(
-          new GenerateAccessTokenError({
-            error,
-            error_description,
-            status: resp.status,
-          }),
-        )
-      }
-
-      return yield* resp.json.pipe(Effect.flatMap(Schema.decodeUnknown(GenerateTokenResponse)))
-    })
 
     const verifySignedAccessToken = (token: Redacted.Redacted<string>, issuer: string) =>
-      Effect.tryPromise({
-        async try() {
-          const { payload } = await jose.jwtVerify(Redacted.value(token), JWKS, {
-            issuer,
-          })
-
-          return payload.sub || "sub unknown"
-        },
-        catch(error) {
-          return new VerifySignedAccessTokenError({ error })
-        },
-      })
-
-    const maybeGetToken = kv.get(AUTH_TOKEN_STORAGE_KEY)
-
-    const get = Effect.fn("FetchAuthToken")(function*() {
-      return yield* maybeGetToken.pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.succeed(Option.none<AuthStorageSchema>()),
-            onSome: (token) =>
-              Effect.gen(function*() {
-                // Check if we need to refresh the token
-                const needsRefresh =
-                  // Missing expiry field - refresh to populate it
-                  token.expiry == null ||
-                  // Missing accounts field - refresh to populate it
-                  token.accounts == null ||
-                  // Token is expired
-                  token.expiry < Date.now() ||
-                  // Token is expiring within 5 minutes
-                  token.expiry - Date.now() <= 5 * 60 * 1000
-
-                if (needsRefresh) {
-                  return yield* refreshAccessToken(token).pipe(Effect.map(Option.some))
-                }
-
-                // Token is still valid, return it as-is
-                return Option.some(token)
-              }),
-          }),
-        ),
-        // Return None on any error during refresh
-        Effect.orElse(() => Effect.succeed(Option.none<AuthStorageSchema>())),
+      verifyJwt(Redacted.value(token), issuer).pipe(
+        Effect.map(({ payload }) => payload.sub ?? "sub unknown"),
       )
+
+    // ------------------------------------------------------------------------
+    // Cache Operations
+    // ------------------------------------------------------------------------
+
+    const getCache = Effect.fn("AuthService.getToken")(function*() {
+      const cache = yield* Effect.flatten(kvs.get(AUTH_TOKEN_CACHE_KEY))
+
+      const now = yield* Clock.currentTimeMillis
+
+      // Check if we need to refresh the token
+      const needsRefresh =
+        // Missing expiry field - refresh to populate it
+        Predicate.isNullable(cache.expiry) ||
+        // Missing accounts field - refresh to populate it
+        Predicate.isNullable(cache.accounts) ||
+        // Token is expired
+        cache.expiry < now ||
+        // Token is expiring within 5 minutes
+        cache.expiry - now <= 5 * 60 * 1000
+
+      // If a refresh is required, perform the refresh request
+      if (needsRefresh) {
+        return yield* refreshAccessToken(cache)
+      }
+
+      // Token is still valid, return as is
+      return cache
+    }, Effect.option)
+
+    const setCache = Effect.fn("AuthService.setToken")(function*(cache: AuthStorageSchema) {
+      yield* kvs.set(AUTH_TOKEN_CACHE_KEY, cache)
     })
 
-    return {
-      refreshAccessToken,
-      get,
-      set: (data: AuthStorageSchema) => kv.set(AUTH_TOKEN_STORAGE_KEY, data),
-      generateAccessToken,
-      verifySignedAccessToken,
-      delete: kv.remove(AUTH_TOKEN_STORAGE_KEY).pipe(
-        Effect.catchIf(
-          (error): error is Extract<typeof error, { _tag: "SystemError"; reason: "NotFound" }> =>
-            error._tag === "SystemError" && error.reason === "NotFound",
-          () => Effect.void,
-        ),
+    const clearCache = kvs.remove(AUTH_TOKEN_CACHE_KEY).pipe(
+      Effect.catchIf(
+        (error) => error._tag === "SystemError" && error.reason === "NotFound",
+        () => Effect.void,
       ),
+    )
+
+    return {
+      generateAccessToken,
+      refreshAccessToken,
+      verifySignedAccessToken,
+      getCache,
+      setCache,
+      clearCache,
     } as const
   }),
 }) {}
+
 export const layer = AuthService.Default

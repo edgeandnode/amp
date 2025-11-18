@@ -31,7 +31,7 @@ export const token = Command.make("token", {
     Effect.gen(function*() {
       const auth = yield* Auth.AuthService
 
-      const maybeAuthStorage = yield* auth.get()
+      const maybeAuthStorage = yield* auth.getCache()
       if (Option.isNone(maybeAuthStorage)) {
         yield* Console.error("Must be authenticated to generate an access token")
         yield* Console.error(`Run "amp auth login" to authenticate`)

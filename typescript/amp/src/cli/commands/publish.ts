@@ -40,7 +40,7 @@ export const publish = Command.make("publish", {
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
       const client = yield* Admin.Admin
 
-      const maybeAuthStorage = yield* auth.get()
+      const maybeAuthStorage = yield* auth.getCache()
       if (Option.isNone(maybeAuthStorage)) {
         yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
         return yield* ExitCode.NonZero
@@ -111,7 +111,7 @@ export const publish = Command.make("publish", {
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
       Layer.provideMerge(Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.get()))
+        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
         return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token)?.accessToken)
       }))),
       Layer.provideMerge(Auth.layer),
