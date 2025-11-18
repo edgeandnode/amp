@@ -14,8 +14,9 @@ use common::{
     config::ParquetConfig,
     metadata::{SegmentSize, segments::BlockRange},
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
+use monitoring::logging;
 
 use crate::{
     WriterProperties,
@@ -105,31 +106,49 @@ impl Compactor {
             .await
             .map_err(CompactorError::chain_error)?;
         let opts = Arc::clone(&self.opts);
+        let table_name = self.table.table_name();
 
         // await: We need to await the PhysicalTable::segments method
-        let mut join_set = if let Some(plan) =
+        let mut comapction_futures_stream = if let Some(plan) =
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
-            plan.try_compact_all()
+            let groups = plan.collect::<Vec<_>>().await;
+            tracing::debug!(
+                table = %table_name,
+                group_count = groups.len(),
+                "Compaction Groups: {:?}",
+                groups
+            );
+
+            stream::iter(groups)
+                .map(|group| group.compact())
+                .buffered(self.opts.compactor.write_concurrency)
         } else {
             return Ok(self);
         };
 
-        // await: We need to await all the compaction tasks to finish before returning
-        while let Some(result) = join_set.next().await {
-            match result {
-                Ok(range_start) => {
+        while let Some(res) = comapction_futures_stream.next().await {
+            match res {
+                Ok(block_num) => {
+                    tracing::info!(
+                        table = %table_name,
+                        block_num,
+                        "compaction group completed successfully"
+                    );
                     if let Some(metrics) = &self.metrics {
-                        let table_name = self.table.table_name().to_string();
-                        metrics.inc_successful_compactions(table_name, range_start);
+                        metrics.inc_successful_compactions(table_name.to_string(), block_num);
                     }
                 }
                 Err(err) => {
+                    tracing::error!(
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        table = %table_name,
+                        "compaction failed"
+                    );
                     if let Some(metrics) = &self.metrics {
-                        let table_name = self.table.table_name().to_string();
-                        metrics.inc_failed_compactions(table_name);
+                        metrics.inc_failed_compactions(table_name.to_string());
                     }
-                    tracing::warn!("{err}");
                 }
             }
         }
@@ -144,6 +163,17 @@ pub struct CompactionGroup {
     pub size: SegmentSize,
     pub streams: Vec<CompactionFile>,
     pub table: Arc<PhysicalTable>,
+}
+
+impl Debug for CompactionGroup {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ file_count: {}, range: {:?} }}",
+            self.streams.len(),
+            self.range()
+        )
+    }
 }
 
 impl CompactionGroup {

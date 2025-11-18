@@ -7,7 +7,6 @@ use std::{
 };
 
 use common::{
-    BlockNum,
     catalog::{
         physical::{PhysicalTable, TableSnapshot},
         reader::AmpReaderFactory,
@@ -171,13 +170,6 @@ impl<'a> CompactionPlan<'a> {
             done: false,
             group_count: 0,
         }))
-    }
-
-    pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<BlockNum>> {
-        let write_concurrency = self.opts.compactor.write_concurrency;
-        self.map(CompactionGroup::compact)
-            .buffered(write_concurrency)
-            .boxed()
     }
 }
 
