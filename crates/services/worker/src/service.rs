@@ -393,12 +393,12 @@ impl Worker {
     /// It marks the job as RUNNING and spawns the job in the job set.
     #[instrument(skip(self, job), fields(node_id=%self.node_id, %job.id))]
     async fn spawn_job(&mut self, job: Job) -> Result<(), SpawnJobError> {
-        tracing::debug!("job start requested");
-
         if self.job_set.job_running(&job.id) {
-            tracing::debug!("Job already spawned, skipping.");
+            tracing::trace!("Job already spawned, skipping.");
             return Ok(());
         }
+
+        tracing::debug!("job start requested");
 
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {
