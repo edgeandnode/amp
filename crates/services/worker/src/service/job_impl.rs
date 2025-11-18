@@ -99,8 +99,7 @@ pub(super) async fn new(
         let cache = ParquetFooterCache::builder(capacity)
             .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
             .build();
-        let compactor =
-            AmpCompactor::start_and_run(&physical_table, cache, &opts, metrics.clone()).into();
+        let compactor = AmpCompactor::start(&physical_table, cache, &opts, metrics.clone()).into();
 
         tables.push((physical_table, compactor));
     }
