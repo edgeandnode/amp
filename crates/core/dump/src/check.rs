@@ -46,8 +46,8 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyC
         if !registered_files.contains(filename) {
             // This file was written by a dump job but it is not present in the metadata DB,
             // so it is an orphaned file. Delete it.
-            tracing::warn!("Deleting orphaned file: {}", object_meta.location);
-            store.delete(&object_meta.location).await?;
+            tracing::warn!("Discovered orphaned file: {}", object_meta.location);
+            // store.delete(&object_meta.location).await?;
         }
     }
 
