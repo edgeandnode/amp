@@ -10,6 +10,7 @@ use datafusion::parquet::{
 };
 use metadata_db::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes, LocationId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
+use tracing::instrument;
 
 use crate::{
     BoxError,
@@ -71,6 +72,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
     }
 }
 
+#[instrument(skip(object_meta, object_store), err)]
 pub async fn extract_footer_bytes_from_file(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
@@ -82,6 +84,7 @@ pub async fn extract_footer_bytes_from_file(
     Ok(footer_bytes)
 }
 
+#[instrument(skip(object_meta, object_store), err)]
 pub async fn amp_metadata_from_parquet_file(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
