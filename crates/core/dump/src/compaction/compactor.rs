@@ -109,6 +109,12 @@ impl Compactor {
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
             let mut groups = plan.collect::<Vec<_>>().await;
+            tracing::debug!(
+                table = %table_name,
+                group_count = groups.len(),
+                "Compaction Groups: {:?}", 
+                groups
+            );
             let mut join_set = tokio::task::JoinSet::new();
             for group in groups.drain(..) {
                 join_set.spawn(group.compact());
@@ -168,6 +174,17 @@ pub struct CompactionGroup {
     pub size: SegmentSize,
     pub streams: Vec<CompactionFile>,
     pub table: Arc<PhysicalTable>,
+}
+
+impl Debug for CompactionGroup {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ file_count: {}, range: {:?} }}",
+            self.streams.len(),
+            self.range()
+        )
+    }
 }
 
 impl CompactionGroup {
