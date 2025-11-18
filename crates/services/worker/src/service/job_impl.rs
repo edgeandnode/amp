@@ -117,7 +117,6 @@ pub(super) async fn new(
         )
         .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref.short_display()))
         .await
-        .map_err(|err| err.into())
     };
     Ok(fut)
 }
