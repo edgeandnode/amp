@@ -2,7 +2,6 @@
 
 use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
-use common::arrow::array::RecordBatch;
 use heed::{
     Database, Env, EnvOpenOptions,
     types::{Bytes, Str},
@@ -10,6 +9,7 @@ use heed::{
 
 use super::{BatchStore, StateSnapshot, StateStore, deserialize_batch, serialize_batch};
 use crate::{
+    datafusion::arrow::array::RecordBatch,
     error::{Error, LmdbError, StateStoreError},
     transactional::{Commit, TransactionId},
 };

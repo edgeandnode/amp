@@ -1,6 +1,6 @@
 //! Error types for the Amp client
 
-use common::BlockNum;
+use crate::BlockNum;
 
 // ============================================================================
 // Top-Level Error
@@ -68,7 +68,7 @@ pub enum Error {
     /// - Schema mismatches
     /// - Invalid Arrow IPC format
     #[error("Arrow error: {0}")]
-    Arrow(#[source] common::arrow::error::ArrowError),
+    Arrow(#[source] datafusion::arrow::error::ArrowError),
 
     /// JSON deserialization error
     ///
@@ -274,7 +274,7 @@ pub enum SerializationError {
     /// - Invalid schema
     /// - Memory allocation failures
     #[error("failed to create batch writer: {0}")]
-    WriterCreation(#[source] common::arrow::error::ArrowError),
+    WriterCreation(#[source] datafusion::arrow::error::ArrowError),
 
     /// Failed to write batch to Arrow IPC format
     ///
@@ -282,7 +282,7 @@ pub enum SerializationError {
     /// - Memory allocation failures
     /// - Schema incompatibilities
     #[error("failed to write batch: {0}")]
-    BatchWrite(#[source] common::arrow::error::ArrowError),
+    BatchWrite(#[source] datafusion::arrow::error::ArrowError),
 
     /// Failed to finalize Arrow IPC writer
     ///
@@ -290,7 +290,7 @@ pub enum SerializationError {
     /// - I/O errors
     /// - Incomplete writes
     #[error("failed to finish batch writer: {0}")]
-    WriterFinish(#[source] common::arrow::error::ArrowError),
+    WriterFinish(#[source] datafusion::arrow::error::ArrowError),
 
     /// Failed to create Arrow IPC reader for batch deserialization
     ///
@@ -298,7 +298,7 @@ pub enum SerializationError {
     /// - Corrupted IPC data
     /// - Invalid Arrow format
     #[error("failed to create batch reader: {0}")]
-    ReaderCreation(#[source] common::arrow::error::ArrowError),
+    ReaderCreation(#[source] datafusion::arrow::error::ArrowError),
 
     /// Empty batch stream encountered
     ///
@@ -313,7 +313,7 @@ pub enum SerializationError {
     /// - Corrupted data
     /// - Schema mismatches
     #[error("failed to read batch: {0}")]
-    BatchRead(#[source] common::arrow::error::ArrowError),
+    BatchRead(#[source] datafusion::arrow::error::ArrowError),
 }
 
 // ============================================================================

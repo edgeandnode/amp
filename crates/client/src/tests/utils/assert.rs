@@ -2,7 +2,7 @@
 
 use std::ops::RangeInclusive;
 
-use common::arrow::array::AsArray;
+use datafusion::arrow::array::AsArray;
 
 use crate::transactional::{Cause, TransactionEvent};
 

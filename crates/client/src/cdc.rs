@@ -46,11 +46,12 @@ use std::{
 };
 
 use async_stream::try_stream;
-use common::{BlockNum, arrow::array::RecordBatch};
+use datafusion::arrow::array::RecordBatch;
 use futures::{Stream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
+    BlockNum,
     client::AmpClient,
     error::Error,
     store::{BatchStore, StateStore},

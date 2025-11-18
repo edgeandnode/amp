@@ -833,7 +833,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bytes",
- "common",
+ "datafusion",
  "futures",
  "heed",
  "http",

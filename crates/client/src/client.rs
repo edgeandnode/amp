@@ -9,11 +9,7 @@ use std::{
 
 use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::array::RecordBatch,
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
+use datafusion::arrow::array::RecordBatch;
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::{
@@ -22,6 +18,7 @@ use tonic::{
 };
 
 use crate::{
+    BlockNum, BlockRange, ResumeWatermark,
     cdc::CdcStreamBuilder,
     decode,
     error::{Error, ProtocolError},

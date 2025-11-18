@@ -12,15 +12,12 @@ use std::{
 };
 
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::array::RecordBatch,
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
+use datafusion::arrow::array::RecordBatch;
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
+    BlockNum, BlockRange, ResumeWatermark,
     client::{AmpClient, InvalidationRange, ProtocolMessage, ProtocolStream, ResponseBatch},
     error::{Error, ReorgError},
     store::StateStore,
