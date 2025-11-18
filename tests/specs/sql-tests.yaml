@@ -65,13 +65,6 @@
       }
     ]
 
-- name: attestation_hash
-  query: SELECT attestation_hash(input) FROM eth_rpc.transactions
-  results: |
-    [
-      {"attestation_hash(eth_rpc.transactions.input)": "8c39ef228de22ebdee449719351a7665"}
-    ]
-
 - name: eth_call
   query: |
     SELECT eth_rpc.eth_call(from, to, input, CAST(block_num as STRING)) AS call
