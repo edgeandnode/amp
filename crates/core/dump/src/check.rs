@@ -23,11 +23,6 @@ use object_store::ObjectMeta;
 ///    - **Action on failure**: Returns [`ConsistencyError::MissingRegisteredFile`]
 ///    - Indicates data corruption requiring manual intervention
 ///
-/// 3. **Overlapping Ranges Detection** *(Planned)*
-///    - Verifies metadata entries do not contain overlapping block ranges
-///    - **Action on failure**: Returns error indicating corrupted metadata
-///    - Currently not implemented
-///
 /// ## Side Effects
 ///
 /// ⚠️ **Warning**: This function has side effects - it deletes orphaned files from object store.
