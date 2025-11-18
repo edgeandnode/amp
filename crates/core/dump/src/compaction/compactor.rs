@@ -1,5 +1,4 @@
 use std::{
-    error::Error as StdError,
     fmt::{Debug, Display, Formatter},
     ops::RangeInclusive,
     sync::{
@@ -17,6 +16,7 @@ use common::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
+use monitoring::logging;
 
 use crate::{
     WriterProperties,
@@ -109,7 +109,7 @@ impl Compactor {
         let table_name = self.table.table_name();
 
         // await: We need to await the PhysicalTable::segments method
-        let mut compaction_futures = if let Some(plan) =
+        let mut comapction_futures_stream = if let Some(plan) =
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
             let groups = plan.collect::<Vec<_>>().await;
@@ -127,7 +127,7 @@ impl Compactor {
             return Ok(self);
         };
 
-        while let Some(res) = compaction_futures.next().await {
+        while let Some(res) = comapction_futures_stream.next().await {
             match res {
                 Ok(block_num) => {
                     tracing::info!(
@@ -142,9 +142,9 @@ impl Compactor {
                 Err(err) => {
                     tracing::error!(
                         error = %err,
-                        error_source = err.source(),
+                        error_source = logging::error_source(&err),
                         table = %table_name,
-                        "compaction error during compaction"
+                        "compaction failed"
                     );
                     if let Some(metrics) = &self.metrics {
                         metrics.inc_failed_compactions(table_name.to_string());
