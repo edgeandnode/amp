@@ -1,8 +1,12 @@
 use std::{
-    error::Error as StdError, fmt::{Debug, Display, Formatter}, ops::RangeInclusive, sync::{
+    error::Error as StdError,
+    fmt::{Debug, Display, Formatter},
+    ops::RangeInclusive,
+    sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-    }, time::Duration
+    },
+    time::Duration,
 };
 
 use common::{
@@ -11,7 +15,7 @@ use common::{
     config::ParquetConfig,
     metadata::{SegmentSize, segments::BlockRange},
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 
 use crate::{
@@ -108,25 +112,24 @@ impl Compactor {
         let mut join_set = if let Some(plan) =
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
-            let mut groups = plan.collect::<Vec<_>>().await;
+            let groups = plan.collect::<Vec<_>>().await;
             tracing::debug!(
                 table = %table_name,
                 group_count = groups.len(),
-                "Compaction Groups: {:?}", 
+                "Compaction Groups: {:?}",
                 groups
             );
-            let mut join_set = tokio::task::JoinSet::new();
-            for group in groups.drain(..) {
-                join_set.spawn(group.compact());
-            }
-            join_set
+
+            stream::iter(groups)
+                .map(|group| group.compact())
+                .buffered(self.opts.compactor.write_concurrency)
         } else {
             return Ok(self);
         };
 
-        while let Some(res) = join_set.join_next().await {
+        while let Some(res) = join_set.next().await {
             match res {
-                Ok(Ok(block_num)) => {
+                Ok(block_num) => {
                     tracing::info!(
                         table = %table_name,
                         block_num,
@@ -136,7 +139,7 @@ impl Compactor {
                         metrics.inc_successful_compactions(table_name.to_string(), block_num);
                     }
                 }
-                Ok(Err(err)) => {
+                Err(err) => {
                     tracing::error!(
                         error = %err,
                         error_source = err.source(),
@@ -147,22 +150,8 @@ impl Compactor {
                         metrics.inc_failed_compactions(table_name.to_string());
                     }
                 }
-                Err(err) => {
-                    tracing::error!(
-                        error = %err,
-                        error_source = err.source(),
-                        table = %table_name,
-                        "task join error during compaction"
-                    );
-
-                    if let Some(metrics) = &self.metrics {
-                        metrics.inc_failed_compactions(table_name.to_string());
-                    }
-                }
             }
         }
-
-        join_set.join_all().await;
 
         Ok(self)
     }
