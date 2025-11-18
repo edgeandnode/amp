@@ -1,8 +1,8 @@
-//! # SQL dump implementation
+//! # Derived dataset dump implementation
 //!
-//! This module implements the core logic for dumping SQL-based datasets to Parquet files.
-//! Unlike raw dataset dumps that extract blockchain data directly, SQL dataset dumps execute
-//! user-defined SQL queries against existing datasets to create derived or transformed datasets.
+//! This module implements the core logic for dumping derived datasets to Parquet files.
+//! Unlike raw dataset dumps that extract blockchain data directly, derived dataset dumps execute
+//! SQL queries against existing datasets to create transformed datasets.
 //!
 //! ## Overview
 //!
@@ -24,7 +24,7 @@
 //!
 //! ## Dump Process
 //!
-//! The SQL dataset dump process follows these main steps:
+//! The derived dataset dump process follows these main steps:
 //!
 //! 1. **Query Analysis**: Analyzes each SQL query to determine if it's incremental and
 //!    identifies the maximum end block from its dependencies. This helps establish the
@@ -78,7 +78,7 @@
 //!
 //! ## Error Handling and Reliability
 //!
-//! The SQL dataset dump process includes several reliability features:
+//! The derived dataset dump process includes several reliability features:
 //!
 //! - **Dependency Validation**: Checks that all required source datasets have data
 //!   available before attempting to execute queries, preventing unnecessary work.

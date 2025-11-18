@@ -44,9 +44,9 @@
 //!
 //! ## 4. Derived Dataset Execution Path
 //!
-//! - **Purpose**: Execute SQL to create derived datasets during dumps
+//! - **Purpose**: Execute SQL to create derived datasets during extraction
 //! - **Function**: [`catalog_for_sql_with_deps`] (calls [`get_logical_catalog_with_deps_and_funcs`] internally)
-//! - **Entry**: `ampd dump` for SQL datasets (`crates/core/dump/src/core/sql_dump.rs`)
+//! - **Entry**: Worker-based extraction for SQL datasets (`crates/core/dump/src/core/sql_dump.rs`)
 //! - **Characteristics**: Full catalog with physical parquet locations, pre-resolved dependencies, writes parquet files
 //! - **Resolution Strategy**: Uses locked dataset hashes from manifest dependencies (deterministic, reproducible)
 //!
@@ -103,7 +103,7 @@ use crate::{
 ///    - Provides physical catalog for streaming query results to clients
 ///
 /// 2. **Derived Dataset Execution Path** (`crates/core/dump/src/sql_dump.rs`):
-///    - Called during `ampd dump` to execute SQL-defined derived datasets
+///    - Called during worker-based extraction to execute SQL-defined derived datasets
 ///    - Writes query results as parquet files to object storage
 ///
 /// ## Implementation
@@ -143,7 +143,7 @@ pub async fn catalog_for_sql(
 /// This function is used exclusively in the **Derived Dataset Execution Path**:
 ///
 /// - **`crates/core/dump/src/core/sql_dump.rs`**:
-///   - Called during `ampd dump` to execute SQL-defined derived datasets
+///   - Called during worker-based extraction to execute SQL-defined derived datasets
 ///   - Uses dependencies from the derived dataset manifest
 ///   - Writes query results as parquet files to object storage
 ///

@@ -489,7 +489,7 @@ impl StreamingQuery {
                 .await?;
         }
 
-        // If we're dumping a SQL dataset, we must rewind to the start of the canonical segment
+        // If we're dumping a derived dataset, we must rewind to the start of the canonical segment
         // boudary. Otherwise, the new segments may not form a canonical chain.
         if let Some(destination) = self.destination.as_ref()
             && let Some(destination_chain) = destination.canonical_chain().await?
