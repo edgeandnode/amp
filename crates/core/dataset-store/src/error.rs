@@ -225,7 +225,7 @@ pub enum GetDatasetByHashError {
     /// - Dependency resolution issues (referenced datasets not found)
     /// - Logical errors in the dataset definition
     #[error("Failed to create derived dataset")]
-    CreateDerivedDataset(#[source] common::manifest::derived::DatasetError),
+    CreateDerivedDataset(#[source] common::datasets_derived::DatasetError),
 }
 
 /// Errors specific to getting dataset operations

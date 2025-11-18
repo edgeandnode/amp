@@ -944,13 +944,13 @@ type TableReferencesMap = BTreeMap<
 ///
 /// 2. **Manifest Registration** (`crates/services/admin-api/src/handlers/manifests/register.rs`):
 ///    - Called via `POST /manifests` endpoint during content-addressable manifest registration
-///    - Validates derived dataset manifests via `common::manifest::derived::validate()`
+///    - Validates derived dataset manifests via `common::datasets_derived::validate()`
 ///    - Ensures all SQL queries, dependencies, and table references are valid
 ///    - Stores validated manifests in content-addressable storage without dataset linking
 ///
 /// 3. **Dataset Registration** (`crates/services/admin-api/src/handlers/datasets/register.rs`):
 ///    - Called via `POST /datasets` endpoint during dataset registration
-///    - Validates derived dataset manifests via `common::manifest::derived::validate()`
+///    - Validates derived dataset manifests via `common::datasets_derived::validate()`
 ///    - Ensures all SQL queries, dependencies, and table references are valid
 ///    - Prevents invalid manifests from being registered and linked to dataset versions
 ///

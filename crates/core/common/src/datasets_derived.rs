@@ -1,0 +1,586 @@
+//! Derived dataset utilities
+//!
+//! This module provides utilities for working with derived datasets, including:
+//! - Converting manifest representations to logical datasets
+//! - Validating derived dataset manifests
+//! - Sorting tables by their SQL dependencies
+//!
+//! ## Key Functions
+//!
+//! - [`dataset()`] - Convert a derived dataset manifest into a logical dataset
+//! - [`validate()`] - Validate a derived dataset manifest with comprehensive checks
+//! - [`sort_tables_by_dependencies()`] - Sort tables by their SQL dependencies
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use datafusion::sql::parser;
+use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
+use datasets_derived::{
+    DerivedDatasetKind, Manifest,
+    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
+    manifest::{TableInput, View},
+};
+use js_runtime::isolate_pool::IsolatePool;
+
+use crate::{
+    BoxError, Dataset, Table as LogicalTable,
+    catalog::{
+        dataset_access::DatasetAccess,
+        errors::PlanningCtxForSqlTablesWithDepsError,
+        logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
+        sql::planning_ctx_for_sql_tables_with_deps_and_funcs,
+    },
+    sql::{
+        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
+        TableReference, resolve_function_references, resolve_table_references,
+    },
+    utils::dfs,
+};
+
+/// Convert a derived dataset manifest into a logical dataset representation.
+///
+/// This function transforms a derived dataset manifest with its tables, functions, and metadata
+/// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
+/// name, version, manifest_hash) must be provided externally as they are not part of the manifest.
+pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, DatasetError> {
+    let queries = {
+        let mut queries = BTreeMap::new();
+        for (table_name, table) in &manifest.tables {
+            let TableInput::View(query) = &table.input;
+            let query = crate::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+            queries.insert(table_name.clone(), query);
+        }
+        queries
+    };
+
+    // Convert manifest tables into logical tables
+    let unsorted_tables: Vec<LogicalTable> = manifest
+        .tables
+        .into_iter()
+        .map(|(name, table)| {
+            LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DatasetError::CreateLogicalTable)?;
+    let tables = sort_tables_by_dependencies(unsorted_tables, &queries)
+        .map_err(DatasetError::SortTableDependencies)?;
+
+    // Convert manifest functions into logical functions
+    let functions = manifest
+        .functions
+        .into_iter()
+        .map(|(name, f)| LogicalFunction {
+            name: name.into_inner(),
+            input_types: f.input_types.into_iter().map(|dt| dt.0).collect(),
+            output_type: f.output_type.0,
+            source: LogicalFunctionSource {
+                source: f.source.source,
+                filename: f.source.filename,
+            },
+        })
+        .collect();
+
+    Ok(Dataset {
+        manifest_hash,
+        dependencies: manifest.dependencies,
+        kind: DerivedDatasetKind.to_string(),
+        network: None,
+        start_block: None,
+        finalized_blocks_only: false,
+        tables,
+        functions,
+    })
+}
+
+/// Errors that occur when converting a derived dataset manifest to a logical dataset
+///
+/// This error type is used by the `dataset()` function.
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetError {
+    /// Failed to parse SQL query in table definition
+    ///
+    /// This occurs when:
+    /// - The provided SQL query has invalid syntax
+    /// - Multiple statements provided (only single statement allowed)
+    /// - Query parsing fails for other reasons
+    ///
+    /// Common causes:
+    /// - Malformed SQL syntax
+    /// - Unsupported SQL features
+    /// - Multiple semicolon-separated statements (not allowed)
+    #[error("Failed to parse SQL query for table '{table_name}'")]
+    ParseSql {
+        table_name: TableName,
+        #[source]
+        source: crate::sql::ParseSqlError,
+    },
+
+    /// Failed to create logical table from manifest table definition
+    ///
+    /// This occurs when table validation fails during conversion from
+    /// manifest table to logical table representation.
+    ///
+    /// Common causes:
+    /// - Invalid table schema
+    /// - Network validation failures
+    /// - Table metadata validation errors
+    #[error("Failed to create logical table")]
+    CreateLogicalTable(
+        #[source] BoxError, // TODO: Replace with concrete type when LogicalTable::new error is typed
+    ),
+
+    /// Failed to sort tables by their SQL dependencies
+    ///
+    /// This occurs when:
+    /// - Circular dependencies detected between tables
+    /// - Table dependency resolution fails
+    /// - Invalid table references in dependency graph
+    ///
+    /// This is typically caused by circular table references in SQL queries
+    /// or invalid table names in the dependency graph.
+    #[error("Failed to sort tables by dependencies")]
+    SortTableDependencies(#[source] SortTablesByDependenciesError),
+}
+
+/// Sort tables by their SQL dependencies using topological ordering.
+///
+/// Analyzes table queries to determine dependencies and returns tables in dependency order.
+/// Tables with no dependencies come first, followed by tables that depend on them.
+pub fn sort_tables_by_dependencies(
+    tables: Vec<LogicalTable>,
+    queries: &BTreeMap<TableName, parser::Statement>,
+) -> Result<Vec<LogicalTable>, SortTablesByDependenciesError> {
+    // Map of table name -> Table
+    let table_map = tables
+        .into_iter()
+        .map(|t| (t.name().clone(), t))
+        .collect::<BTreeMap<TableName, LogicalTable>>();
+
+    // Dependency map: table -> [tables it depends on]
+    let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
+
+    // Initialize empty deps with all tables
+    for table_name in table_map.keys() {
+        deps.insert(table_name.clone(), Vec::new());
+    }
+
+    for (table_name, query) in queries {
+        let table_refs = resolve_table_references::<String>(query).map_err(|err| {
+            SortTablesByDependenciesError::ResolveTableReferences {
+                table_name: table_name.clone(),
+                source: err,
+            }
+        })?;
+
+        // Filter to only include dependencies within the same dataset
+        let mut table_deps: Vec<TableName> = vec![];
+        for table_ref in table_refs {
+            match &table_ref {
+                TableReference::Bare { table } if table.as_ref() != table_name => {
+                    // Unqualified reference is assumed to be to a table in the same dataset
+                    if table_map.contains_key(table.as_ref()) {
+                        table_deps.push(table.as_ref().clone());
+                    }
+                }
+                _ => {
+                    // Reference to external dataset or self-reference, ignore
+                }
+            }
+        }
+
+        // Update the existing entry with dependencies
+        if let Some(existing_deps) = deps.get_mut(table_name) {
+            *existing_deps = table_deps;
+        }
+    }
+
+    let sorted_names =
+        table_dependency_sort(deps).map_err(SortTablesByDependenciesError::TopologicalSort)?;
+
+    let mut sorted_tables = Vec::new();
+    for name in sorted_names {
+        if let Some(table) = table_map.get(&name) {
+            sorted_tables.push(table.clone());
+        }
+    }
+
+    Ok(sorted_tables)
+}
+
+/// Errors that occur when sorting tables by their SQL dependencies
+///
+/// This error type is used by the `sort_tables_by_dependencies()` function.
+#[derive(Debug, thiserror::Error)]
+pub enum SortTablesByDependenciesError {
+    /// Failed to resolve table references from SQL query
+    ///
+    /// This occurs when:
+    /// - The SQL query contains invalid table references
+    /// - Table names don't conform to SQL identifier rules
+    /// - Catalog-qualified tables are used (not supported)
+    ///
+    /// Common causes:
+    /// - Invalid table name format (e.g., special characters, too long)
+    /// - Three-part table names (catalog.schema.table)
+    /// - Malformed SQL syntax in table references
+    #[error("Failed to resolve table references in table '{table_name}': {source}")]
+    ResolveTableReferences {
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError,
+    },
+
+    /// Failed to perform topological sort on table dependencies
+    ///
+    /// This occurs when:
+    /// - Circular dependencies exist between tables
+    /// - The dependency graph cannot be ordered topologically
+    ///
+    /// The most common cause is circular table dependencies in SQL queries.
+    #[error("Failed to perform topological sort on table dependencies")]
+    TopologicalSort(#[source] TableDependencySortError),
+}
+
+/// Topological sort for table dependencies.
+///
+/// Uses depth-first search to order tables such that each table comes after
+/// all tables it depends on. Detects circular dependencies.
+fn table_dependency_sort(
+    deps: BTreeMap<TableName, Vec<TableName>>,
+) -> Result<Vec<TableName>, TableDependencySortError> {
+    let nodes: BTreeSet<&TableName> = deps.keys().collect();
+    let mut ordered: Vec<TableName> = Vec::new();
+    let mut visited: BTreeSet<&TableName> = BTreeSet::new();
+    let mut visiting: BTreeSet<&TableName> = BTreeSet::new();
+
+    for node in nodes {
+        if !visited.contains(node) {
+            dfs(node, &deps, &mut ordered, &mut visited, &mut visiting).map_err(|err| {
+                TableDependencySortError {
+                    table_name: err.node,
+                }
+            })?;
+        }
+    }
+
+    Ok(ordered)
+}
+
+/// Error when circular dependency is detected during topological sorting
+///
+/// This occurs when tables have circular references in their SQL queries,
+/// creating a dependency cycle that cannot be resolved. For example:
+/// - Table A depends on Table B
+/// - Table B depends on Table C
+/// - Table C depends on Table A (creates cycle)
+///
+/// The topological sort algorithm detects this during depth-first search
+/// traversal when it encounters a node that is currently being visited.
+///
+/// To resolve this error:
+/// - Review table SQL queries to identify the circular reference chain
+/// - Refactor queries to break the dependency cycle
+/// - Consider splitting tables or using different query patterns
+#[derive(Debug, thiserror::Error)]
+#[error("Circular dependency detected in table definitions at table '{table_name}'")]
+pub struct TableDependencySortError {
+    /// The table where the circular dependency was detected
+    pub table_name: TableName,
+}
+
+/// Type alias for the table references map used in multi-table validation
+///
+/// Maps table names to their SQL references (table refs and function refs) using dependency aliases or self-references.
+type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAliasOrSelfRef>>,
+    ),
+>;
+
+/// Validates a derived dataset manifest with comprehensive checks.
+///
+/// This function performs deep validation of a manifest by:
+/// 1. Parsing SQL queries from all table definitions
+/// 2. Resolving all dependency references to their content hashes
+/// 3. Extracting table and function references from SQL
+/// 4. Building a planning context with actual dataset schemas
+/// 5. Validating that all referenced tables and functions exist
+///
+/// Validation checks include:
+/// - SQL syntax validity for all table queries
+/// - All referenced datasets exist in the store
+/// - All tables used in SQL exist in their datasets
+/// - All functions used in SQL exist in their datasets
+/// - Table schemas are compatible with SQL queries
+pub async fn validate(
+    manifest: &Manifest,
+    store: &impl DatasetAccess,
+) -> Result<(), ManifestValidationError> {
+    // Step 1: Resolve all dependencies to HashReference
+    // This must happen first to ensure all dependencies exist before parsing SQL
+    let mut dependencies: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
+
+    for (alias, dep_reference) in &manifest.dependencies {
+        // Convert DepReference to Reference for resolution
+        let reference = dep_reference.to_reference();
+
+        // Resolve reference to its manifest hash
+        // This handles all revision types (Version, Hash)
+        let hash = store
+            .resolve_dataset_reference(&reference)
+            .await
+            .map_err(|err| ManifestValidationError::DependencyResolution {
+                alias: alias.to_string(),
+                reference: reference.to_string(),
+                source: err,
+            })?
+            .ok_or_else(|| ManifestValidationError::DependencyNotFound {
+                alias: alias.to_string(),
+                reference: reference.to_string(),
+            })?;
+
+        let fqn = reference.into_fqn();
+        dependencies.insert(alias.clone(), (fqn, hash).into());
+    }
+
+    // Step 2: Parse all SQL queries and extract references
+    let mut references: TableReferencesMap = BTreeMap::new();
+
+    for (table_name, table) in &manifest.tables {
+        let TableInput::View(View { sql }) = &table.input;
+
+        // Parse SQL (validates single statement)
+        let stmt =
+            crate::sql::parse(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+
+        // Extract table references
+        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
+            ResolveTableReferencesError::InvalidTableName { .. } => {
+                ManifestValidationError::InvalidTableName(err)
+            }
+            ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                ManifestValidationError::CatalogQualifiedTableInSql {
+                    table_name: table_name.clone(),
+                    source: err,
+                }
+            }
+            _ => ManifestValidationError::TableReferenceResolution {
+                table_name: table_name.clone(),
+                source: err,
+            },
+        })?;
+
+        // Extract function references (supports both external deps and self-references)
+        let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| {
+            ManifestValidationError::FunctionReferenceResolution {
+                table_name: table_name.clone(),
+                source: err,
+            }
+        })?;
+
+        references.insert(table_name.clone(), (table_refs, func_refs));
+    }
+
+    // Step 3: Convert manifest functions to LogicalFunction for validation
+    let logical_functions: BTreeMap<_, _> = manifest
+        .functions
+        .iter()
+        .map(|(name, f)| {
+            let logical_func = LogicalFunction {
+                name: name.as_str().to_string(),
+                input_types: f.input_types.iter().map(|dt| dt.0.clone()).collect(),
+                output_type: f.output_type.0.clone(),
+                source: LogicalFunctionSource {
+                    source: f.source.source.clone(),
+                    filename: f.source.filename.clone(),
+                },
+            };
+            (name.clone(), logical_func)
+        })
+        .collect();
+
+    // Step 4: Create planning context to validate all table and function references
+    // This validates:
+    // - All table references resolve to existing tables in dependencies
+    // - All function references resolve to existing functions in dependencies
+    // - Bare function references can be created as UDFs or are assumed to be built-ins
+    // - Table references use valid dataset aliases from dependencies
+    // - Schema compatibility across dependencies
+    planning_ctx_for_sql_tables_with_deps_and_funcs(
+        store,
+        references,
+        dependencies,
+        logical_functions,
+        IsolatePool::dummy(), // For manifest validation only (no JS execution)
+    )
+    .await
+    .map_err(|err| match &err {
+        PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
+            ManifestValidationError::UnqualifiedTable(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
+            ManifestValidationError::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
+            ManifestValidationError::DatasetNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
+            ManifestValidationError::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
+            ManifestValidationError::GetDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
+            ManifestValidationError::EthCallUdfCreation(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
+            ManifestValidationError::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef { .. } => {
+            ManifestValidationError::DependencyAliasNotFound(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
+            ManifestValidationError::TableNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
+            ManifestValidationError::FunctionNotFoundInDataset(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
+            ManifestValidationError::EthCallNotAvailable(err)
+        }
+    })?;
+
+    Ok(())
+}
+
+/// Errors that occur during derived dataset manifest validation
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestValidationError {
+    /// Invalid SQL query in table definition
+    ///
+    /// This occurs when:
+    /// - The provided SQL query has invalid syntax
+    /// - Multiple statements provided (only single statement allowed)
+    /// - Query parsing fails for other reasons
+    #[error("Invalid SQL query for table '{table_name}': {source}")]
+    InvalidTableSql {
+        table_name: TableName,
+        #[source]
+        source: crate::sql::ParseSqlError,
+    },
+
+    /// Failed to resolve table references from SQL query
+    #[error("Failed to resolve table references in table '{table_name}': {source}")]
+    TableReferenceResolution {
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasError>,
+    },
+
+    /// Failed to resolve function references from SQL query
+    #[error("Failed to resolve function references in table '{table_name}': {source}")]
+    FunctionReferenceResolution {
+        table_name: TableName,
+        #[source]
+        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
+    },
+
+    /// Dependency declared in manifest but not found in store
+    #[error("Dependency '{alias}' ({reference}) not found in dataset store")]
+    DependencyNotFound { alias: String, reference: String },
+
+    /// Failed to resolve dependency reference to hash
+    #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
+    DependencyResolution {
+        alias: String,
+        reference: String,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Catalog-qualified table reference in SQL query
+    ///
+    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
+    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
+    /// This error occurs during SQL parsing when a 3-part table reference is detected.
+    #[error("Catalog-qualified table reference in table '{table_name}': {source}")]
+    CatalogQualifiedTableInSql {
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasError>,
+    },
+
+    /// Unqualified table reference
+    ///
+    /// All tables must be qualified with a dataset reference in the schema portion.
+    /// Unqualified tables (e.g., just `table_name`) are not allowed.
+    #[error("Unqualified table reference: {0}")]
+    UnqualifiedTable(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid table name
+    ///
+    /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
+    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
+    #[error("Invalid table name in SQL query: {0}")]
+    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
+
+    /// Dataset reference not found
+    ///
+    /// The referenced dataset does not exist in the store.
+    #[error("Dataset not found: {0}")]
+    DatasetNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Failed to retrieve dataset from store
+    ///
+    /// This occurs when loading a dataset definition fails due to:
+    /// - Invalid or corrupted manifest
+    /// - Unsupported dataset kind
+    /// - Storage backend errors
+    #[error("Failed to retrieve dataset from store: {0}")]
+    GetDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Failed to create ETH call UDF
+    ///
+    /// This occurs when creating the eth_call user-defined function fails.
+    #[error("Failed to create ETH call UDF: {0}")]
+    EthCallUdfCreation(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Table not found in dataset
+    ///
+    /// The referenced table does not exist in the dataset.
+    #[error("Table not found in dataset: {0}")]
+    TableNotFoundInDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Function not found in dataset
+    ///
+    /// The referenced function does not exist in the dataset.
+    #[error("Function not found in dataset: {0}")]
+    FunctionNotFoundInDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// eth_call function not available
+    ///
+    /// The eth_call function is not available for the referenced dataset.
+    #[error("eth_call function not available: {0}")]
+    EthCallNotAvailable(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Invalid dependency alias
+    ///
+    /// The dependency alias does not conform to alias rules (must start with letter,
+    /// contain only alphanumeric/underscore, and be <= 63 bytes).
+    #[error("Invalid dependency alias: {0}")]
+    InvalidDependencyAlias(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Dependency alias not found
+    ///
+    /// A table reference uses an alias that was not provided in the dependencies map.
+    #[error("Dependency alias not found: {0}")]
+    DependencyAliasNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+}

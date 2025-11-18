@@ -422,7 +422,7 @@ pub enum Error {
 
     /// Manifest validation error
     #[error("Manifest validation error: {0}")]
-    ManifestValidationError(#[source] common::manifest::derived::ManifestValidationError),
+    ManifestValidationError(#[source] common::datasets_derived::ManifestValidationError),
 
     /// Failed to register manifest in the system
     ///
