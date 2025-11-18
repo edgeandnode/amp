@@ -36,7 +36,7 @@ use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, arrow, attestation, block_range_intersection,
+    BlockNum, BoxError, arrow, block_range_intersection,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -355,7 +355,7 @@ pub fn udfs() -> Vec<ScalarUDF> {
 }
 
 pub fn udafs() -> Vec<AggregateUDF> {
-    vec![attestation::AttestationHasherUDF::new().into()]
+    vec![]
 }
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.

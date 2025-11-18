@@ -117,7 +117,6 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 - `eth_call`: Execute RPC calls during queries
 - `evm_decode_params`: Decode function parameters
 - `evm_encode_params`: Encode function parameters
-- `attestation_hash`: Generate data attestations
 
 ### Dataset Definition
 

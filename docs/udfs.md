@@ -52,15 +52,6 @@ LIMIT 10
 
 Returns a tuple of the return value of the call and the error message (if any, or empty string if no error).
 
-## `attestation_hash`
-
-```sql
-Binary attestation_hash(...)
-```
-
-This is an aggregate UDF which takes any number of parameters of any type. Returns a hash over all
-the input parameters (columns) over all the rows.
-
 ## `evm_decode_params`
 
 ```sql
