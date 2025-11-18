@@ -6,7 +6,7 @@ license-file.workspace = true
 
 [features]
 default = []
-lmdb = ["dep:heed", "dep:bincode"]
+lmdb = ["dep:heed"]
 postgres = ["sqlx", "uuid"]
 
 [dependencies]
@@ -36,7 +36,6 @@ uuid = { workspace = true, optional = true }
 
 # Optional dependencies for LMDB backend
 heed = { version = "0.20", optional = true }
-bincode = { workspace = true, optional = true }
 
 [dev-dependencies]
 pgtemp = "0.6.0"
