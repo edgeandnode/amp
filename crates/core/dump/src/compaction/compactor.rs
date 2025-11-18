@@ -1,11 +1,8 @@
 use std::{
-    fmt::{Debug, Display, Formatter},
-    ops::RangeInclusive,
-    sync::{
+    error::Error as StdError, fmt::{Debug, Display, Formatter}, ops::RangeInclusive, sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+    }, time::Duration
 };
 
 use common::{
@@ -105,34 +102,61 @@ impl Compactor {
             .await
             .map_err(CompactorError::chain_error)?;
         let opts = Arc::clone(&self.opts);
+        let table_name = self.table.table_name();
 
         // await: We need to await the PhysicalTable::segments method
         let mut join_set = if let Some(plan) =
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
-            plan.try_compact_all()
+            let mut groups = plan.collect::<Vec<_>>().await;
+            let mut join_set = tokio::task::JoinSet::new();
+            for group in groups.drain(..) {
+                join_set.spawn(group.compact());
+            }
+            join_set
         } else {
             return Ok(self);
         };
 
-        // await: We need to await all the compaction tasks to finish before returning
-        while let Some(result) = join_set.next().await {
-            match result {
-                Ok(range_start) => {
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Ok(Ok(block_num)) => {
+                    tracing::info!(
+                        table = %table_name,
+                        block_num,
+                        "compaction group completed successfully"
+                    );
                     if let Some(metrics) = &self.metrics {
-                        let table_name = self.table.table_name().to_string();
-                        metrics.inc_successful_compactions(table_name, range_start);
+                        metrics.inc_successful_compactions(table_name.to_string(), block_num);
+                    }
+                }
+                Ok(Err(err)) => {
+                    tracing::error!(
+                        error = %err,
+                        error_source = err.source(),
+                        table = %table_name,
+                        "compaction error during compaction"
+                    );
+                    if let Some(metrics) = &self.metrics {
+                        metrics.inc_failed_compactions(table_name.to_string());
                     }
                 }
                 Err(err) => {
+                    tracing::error!(
+                        error = %err,
+                        error_source = err.source(),
+                        table = %table_name,
+                        "task join error during compaction"
+                    );
+
                     if let Some(metrics) = &self.metrics {
-                        let table_name = self.table.table_name().to_string();
-                        metrics.inc_failed_compactions(table_name);
+                        metrics.inc_failed_compactions(table_name.to_string());
                     }
-                    tracing::warn!("{err}");
                 }
             }
         }
+
+        join_set.join_all().await;
 
         Ok(self)
     }
