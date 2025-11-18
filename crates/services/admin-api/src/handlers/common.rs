@@ -116,7 +116,7 @@ pub async fn parse_and_canonicalize_derived_dataset_manifest(
     let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
         .map_err(ParseDerivedManifestError::Deserialization)?;
 
-    common::manifest::derived::validate(&manifest, store)
+    common::datasets_derived::validate(&manifest, store)
         .await
         .map_err(ParseDerivedManifestError::ManifestValidation)?;
 
@@ -132,7 +132,7 @@ pub enum ParseDerivedManifestError {
 
     /// Failed manifest validation after successful deserialization
     #[error("manifest validation failed: {0}")]
-    ManifestValidation(#[from] common::manifest::derived::ManifestValidationError),
+    ManifestValidation(#[from] common::datasets_derived::ManifestValidationError),
 
     /// Failed to serialize the validated manifest back to canonical JSON
     #[error("failed to serialize manifest: {0}")]
