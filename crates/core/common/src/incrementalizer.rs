@@ -119,7 +119,12 @@ impl TreeNodeRewriter for Incrementalizer {
                 // Term 2: L[t−1]⋈ΔR
                 let history_left = left.clone().rewrite(&mut self.with_range(History))?.data;
                 let delta_right = right.clone().rewrite(&mut self.with_range(Delta))?.data;
-                let term2 = create_join(history_left, delta_right, &join)?;
+                // DF hash joins collect the left side by default, so try to put the delta on the left.
+                let term2 = if join.join_type.supports_swap() {
+                    create_join(delta_right, history_left, &join)?
+                } else {
+                    create_join(history_left, delta_right, &join)?
+                };
 
                 // Term 3: ΔL⋈ΔR
                 let delta_left2 = left.clone().rewrite(&mut self.with_range(Delta))?.data;
