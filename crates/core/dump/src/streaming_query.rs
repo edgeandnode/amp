@@ -22,7 +22,10 @@ use futures::{
 };
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{LocationId, NotificationMultiplexerHandle};
-use tokio::{sync::{mpsc, watch}, time::MissedTickBehavior};
+use tokio::{
+    sync::{mpsc, watch},
+    time::MissedTickBehavior,
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, debug, instrument};
