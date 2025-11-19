@@ -236,7 +236,7 @@ impl DaemonConfigBuilder {
     ///
     /// Controls the microbatch processing interval for data ingestion.
     ///
-    /// **Default**: `100_000` microseconds
+    /// **Default**: `100_000` blocks
     pub fn microbatch_max_interval(mut self, interval: impl Into<Option<u64>>) -> Self {
         self.microbatch_max_interval = interval.into();
         self

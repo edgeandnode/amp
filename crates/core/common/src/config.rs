@@ -391,9 +391,9 @@ pub struct ConfigFile {
     // Operational timing
     /// Polling interval for new blocks during dump in seconds (default: 1.0)
     pub poll_interval_secs: ConfigDuration<1>,
-    /// Max interval for derived dataset dump microbatches in microseconds (default: 100000)
+    /// Max interval for derived dataset dump microbatches in blocks (default: 100000)
     pub microbatch_max_interval: Option<u64>,
-    /// Max interval for streaming server microbatches in microseconds (default: 1000)
+    /// Max interval for streaming server microbatches in blocks (default: 1000)
     pub server_microbatch_max_interval: Option<u64>,
     /// Keep-alive interval for streaming server in seconds (default: 30; min: 30)
     pub keep_alive_interval: Option<u64>,

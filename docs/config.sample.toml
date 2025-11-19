@@ -27,8 +27,8 @@ manifests_dir = "<config_dir/manifests>"
 
 # Operational timing
 # poll_interval_secs = 1.0                 # Polling interval for new blocks during dump in seconds (default: 1.0)
-# microbatch_max_interval = 100000         # Max interval for derived dataset dump microbatches in microseconds (default: 100000)
-# server_microbatch_max_interval = 1000    # Max interval for streaming server microbatches in microseconds (default: 1000)
+# microbatch_max_interval = 100000         # Max interval for derived dataset dump microbatches in blocks (default: 100000)
+# server_microbatch_max_interval = 1000    # Max interval for streaming server microbatches in blocks (default: 1000)
 
 # Service addresses
 # flight_addr = "0.0.0.0:1602"      # Arrow Flight RPC server address (default: "0.0.0.0:1602")
