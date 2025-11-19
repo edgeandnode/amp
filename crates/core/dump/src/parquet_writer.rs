@@ -115,18 +115,11 @@ impl ParquetFileWriter {
     ) -> Result<ParquetFileWriterOutput, BoxError> {
         self.writer.flush().await?;
 
-        debug!(
-            "wrote {} for range {} to {}",
-            self.filename,
-            range.start(),
-            range.end(),
-        );
-
         let parquet_meta = ParquetMeta {
             table: self.table.table_name().to_string(),
-            filename: self.filename,
+            filename: self.filename.clone(),
             created_at: Timestamp::now(),
-            ranges: vec![range],
+            ranges: vec![range.clone()],
         };
 
         let kv_metadata = KeyValue::new(
@@ -146,7 +139,15 @@ impl ParquetFileWriter {
             KeyValue::new(GENERATION_METADATA_KEY.to_string(), generation.to_string());
         self.writer.append_key_value_metadata(generation_metadata);
 
-        self.writer.close().await?;
+        let meta = self.writer.close().await?;
+
+        debug!(
+            "wrote {} for range {} to {}, row count {}",
+            self.filename,
+            range.start(),
+            range.end(),
+            meta.num_rows,
+        );
 
         let location = Path::from_url_path(self.file_url.path())?;
         let object_meta = self.table.object_store().head(&location).await?;
