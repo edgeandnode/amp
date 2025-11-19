@@ -158,7 +158,7 @@ pub struct StreamingQuery {
     table_updates: TableUpdates,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
-    keep_alive_interval: u64,
+    keep_alive_interval: Option<u64>,
     destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
     network: String,
@@ -220,7 +220,6 @@ impl StreamingQuery {
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
             .transpose()?;
-        let keep_alive_interval = keep_alive_interval.unwrap_or_default().max(30);
         let streaming_query = Self {
             query_env,
             catalog,
@@ -267,7 +266,7 @@ impl StreamingQuery {
             };
 
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
-
+            
             let plan = {
                 // Incrementalize the plan
                 let plan = self.plan.clone().attach_to(&ctx)?;
@@ -282,14 +281,18 @@ impl StreamingQuery {
                 }
                 plan
             };
-
-            let schema = Arc::new(plan.schema().as_arrow().clone());
-
-            let mut stream = keep_alive_stream(
-                ctx.execute_plan(plan, false).await?,
-                schema,
-                self.keep_alive_interval,
-            );
+            
+            
+            let mut stream = if let Some(keep_alive_interval) = self.keep_alive_interval {
+                let schema = Arc::new(plan.schema().as_arrow().clone());
+                keep_alive_stream(
+                    ctx.execute_plan(plan, false).await?,
+                    schema,
+                    keep_alive_interval,
+                )
+            } else {
+                ctx.execute_plan(plan, false).await?
+            };
 
             // Send start message for this microbatch
             let _ = self
