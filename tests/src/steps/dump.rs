@@ -56,13 +56,35 @@ impl Step {
         // Handle expected failure cases
         if let Some(expected_substring) = &self.failure {
             match result {
-                Err(actual_error) => {
-                    let actual_error_str = actual_error.to_string();
-                    if !actual_error_str.contains(expected_substring.trim()) {
+                Err(err) => {
+                    let err_str = err.to_string();
+
+                    // First check the main error message
+                    if err_str.contains(expected_substring.trim()) {
+                        return Ok(());
+                    }
+
+                    // If not found, traverse the error chain
+                    let mut found = false;
+                    let mut error_chain = vec![err_str.clone()];
+                    let mut current_error = err.source();
+
+                    while let Some(err) = current_error {
+                        let err_str = err.to_string();
+                        error_chain.push(err_str.clone());
+                        if err_str.contains(expected_substring.trim()) {
+                            found = true;
+                            break;
+                        }
+                        current_error = err.source();
+                    }
+
+                    if !found {
+                        let full_error_chain = error_chain.join("\n  caused by: ");
                         return Err(format!(
-                            "Expected error to contain: \"{}\"\nActual error: \"{}\"",
+                            "Expected error to contain: \"{}\"\nActual error chain:\n  {}",
                             expected_substring.trim(),
-                            actual_error_str
+                            full_error_chain
                         )
                         .into());
                     }

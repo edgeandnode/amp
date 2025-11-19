@@ -159,6 +159,7 @@ impl Scheduler {
             dataset_namespace: job_labels.dataset_namespace.clone(),
             dataset_name: job_labels.dataset_name.clone(),
             manifest_hash: job_labels.manifest_hash.clone(),
+            dataset_kind: dataset.kind.parse().expect("Unable to parse Dataset Kind"),
         })
         .map_err(ScheduleJobError::SerializeJobDescriptor)?;
         let job_id =

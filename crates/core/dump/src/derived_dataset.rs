@@ -107,8 +107,7 @@ use common::{
 };
 use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
 use datasets_derived::{
-    DerivedDatasetKind, Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps,
-    manifest::TableInput,
+    Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps, manifest::TableInput,
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
@@ -129,50 +128,46 @@ pub async fn dump(
     ctx: Ctx,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     microbatch_max_interval: u64,
-    max_writers: u16,
     end: EndBlock,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> Result<(), BoxError> {
-    if max_writers > 1 {
-        tracing::warn!("max_writers > 1 has no effect for derived datasets");
-    }
-
+) -> Result<(), Error> {
     let opts = crate::parquet_opts(&ctx.config.parquet);
-    let env = ctx.config.make_query_env()?;
+    let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
 
-    // Pre-check all tables for consistency and validate dataset kinds before spawning tasks
+    // Pre-check all tables for consistency before spawning tasks
     for (table, _) in tables {
-        consistency_check(table).await?;
-
-        let dataset = table.table().dataset();
-
-        if dataset.kind != DerivedDatasetKind {
-            return Err(format!(
-                "Unsupported dataset kind {} for table {}",
-                dataset.kind,
-                table.table_ref()
-            )
-            .into());
-        }
+        consistency_check(table)
+            .await
+            .map_err(|err| Error::ConsistencyCheck {
+                table_name: table.table_name().to_string(),
+                source: err,
+            })?;
     }
 
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
-    for (table, comppactor) in tables {
+    for (table, compactor) in tables {
         let ctx = ctx.clone();
         let env = env.clone();
         let table = Arc::clone(table);
-        let compactor = Arc::clone(comppactor);
+        let compactor = Arc::clone(compactor);
         let opts = opts.clone();
-        let metrics = metrics.clone();
+        let metrics = ctx.metrics.clone();
 
         join_set.spawn(async move {
             let dataset = table.table().dataset();
+            let table_name = table.table_name().to_string();
             let manifest = ctx
                 .dataset_store
                 .get_derived_manifest(dataset.manifest_hash())
-                .await?;
+                .await
+                .map_err(|err| -> BoxError {
+                    Error::GetDerivedManifest {
+                        table_name: table_name.clone(),
+                        source: err,
+                    }
+                    .into()
+                })?;
 
             dump_table(
                 ctx,
@@ -185,9 +180,16 @@ pub async fn dump(
                 end,
                 metrics,
             )
-            .await?;
+            .await
+            .map_err(|err| -> BoxError {
+                Error::DumpTable {
+                    table_name: table_name.clone(),
+                    source: err,
+                }
+                .into()
+            })?;
 
-            tracing::info!("dump of `{}` completed successfully", table.table_name());
+            tracing::info!("dump of `{}` completed successfully", table_name);
             Ok(())
         });
     }
@@ -196,9 +198,89 @@ pub async fn dump(
     join_set
         .try_wait_all()
         .await
-        .map_err(|err| err.into_box_error())?;
+        .map_err(|err| Error::ParallelTasksFailed(err.into_box_error()))?;
 
     Ok(())
+}
+
+/// Errors that occur during derived dataset dump operations
+///
+/// This error type is used by the `dump()` function to report issues encountered
+/// when dumping derived datasets to Parquet files.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to create query environment from configuration
+    ///
+    /// This occurs when the query environment cannot be initialized, typically due to:
+    /// - Invalid configuration parameters
+    /// - Missing required environment settings
+    /// - Resource allocation failures
+    ///
+    /// The dump operation cannot proceed without a valid query environment.
+    #[error("Failed to create query environment")]
+    CreateQueryEnv(#[source] datafusion::error::DataFusionError),
+
+    /// Failed consistency check for table
+    ///
+    /// This occurs when the consistency check detects issues between metadata database
+    /// and object store for a table. Common causes:
+    /// - Missing registered files (data corruption)
+    /// - Object store connectivity issues
+    /// - Metadata database query failures
+    ///
+    /// The table must pass consistency checks before dump can proceed.
+    #[error("Consistency check failed for table '{table_name}'")]
+    ConsistencyCheck {
+        table_name: String,
+        #[source]
+        source: crate::check::ConsistencyError,
+    },
+
+    /// Failed to retrieve derived dataset manifest
+    ///
+    /// This occurs when the manifest for a derived dataset cannot be fetched from
+    /// the dataset store. Common causes:
+    /// - Manifest hash not found in store
+    /// - Object store connectivity issues
+    /// - Corrupted manifest data
+    ///
+    /// The manifest is required to determine table definitions and SQL queries.
+    #[error("Failed to get derived manifest for table '{table_name}'")]
+    GetDerivedManifest {
+        table_name: String,
+        #[source]
+        source: dataset_store::GetDerivedManifestError,
+    },
+
+    /// Failed to dump individual table
+    ///
+    /// This occurs when the table-level dump operation fails. This wraps errors
+    /// from the `dump_table()` function which handles SQL execution, query planning,
+    /// and Parquet file writing.
+    ///
+    /// Common causes:
+    /// - SQL query execution failures
+    /// - Dependency resolution errors
+    /// - Parquet file writing errors
+    /// - Metadata database update failures
+    #[error("Failed to dump table '{table_name}'")]
+    DumpTable {
+        table_name: String,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Parallel task execution failed
+    ///
+    /// This occurs when one or more parallel table dump tasks fail or panic.
+    /// The fail-fast join set ensures that if any task fails, all remaining
+    /// tasks are immediately terminated to prevent partial dumps.
+    ///
+    /// When this error occurs, the entire dump operation is aborted and no
+    /// partial results are committed. The operation is safe to retry from
+    /// the beginning.
+    #[error("Parallel table dump tasks failed")]
+    ParallelTasksFailed(#[source] BoxError),
 }
 
 /// Dumps a derived dataset table

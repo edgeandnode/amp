@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use dataset_store::DatasetKind;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 pub use dump::Ctx;
 use dump::EndBlock;
@@ -28,11 +29,44 @@ pub enum JobDescriptor {
         dataset_namespace: Namespace,
         dataset_name: Name,
         manifest_hash: Hash,
+        dataset_kind: DatasetKind,
     },
 }
 
 fn default_max_writers() -> u16 {
     1
+}
+
+impl JobDescriptor {
+    /// Get the dataset namespace from the job descriptor
+    pub fn dataset_namespace(&self) -> &Namespace {
+        match self {
+            JobDescriptor::Dump {
+                dataset_namespace, ..
+            } => dataset_namespace,
+        }
+    }
+
+    /// Get the dataset name from the job descriptor
+    pub fn dataset_name(&self) -> &Name {
+        match self {
+            JobDescriptor::Dump { dataset_name, .. } => dataset_name,
+        }
+    }
+
+    /// Get the manifest hash from the job descriptor
+    pub fn manifest_hash(&self) -> &Hash {
+        match self {
+            JobDescriptor::Dump { manifest_hash, .. } => manifest_hash,
+        }
+    }
+
+    /// Get the dataset kind from the job descriptor
+    pub fn dataset_kind(&self) -> DatasetKind {
+        match self {
+            JobDescriptor::Dump { dataset_kind, .. } => *dataset_kind,
+        }
+    }
 }
 
 /// Job data transfer object for the Worker service.
