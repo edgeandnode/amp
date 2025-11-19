@@ -22,7 +22,7 @@ use futures::{
 };
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{LocationId, NotificationMultiplexerHandle};
-use tokio::sync::{mpsc, watch};
+use tokio::{sync::{mpsc, watch}, time::MissedTickBehavior};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, debug, instrument};
@@ -604,6 +604,10 @@ pub fn keep_alive_stream<'a>(
 ) -> BoxStream<'a, Result<RecordBatch, DataFusionError>> {
     let period = tokio::time::Duration::from_secs(keep_alive_interval);
     let mut keep_alive_interval = tokio::time::interval(period);
+
+    let missed_tick_behavior = MissedTickBehavior::Delay;
+    keep_alive_interval.set_missed_tick_behavior(missed_tick_behavior);
+
     let mut record_batch_stream = record_batch_stream.fuse();
 
     Box::pin(async_stream::stream! {
