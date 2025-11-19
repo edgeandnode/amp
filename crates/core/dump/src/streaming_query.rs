@@ -6,7 +6,7 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
     SPECIAL_BLOCK_NUM,
-    arrow::array::RecordBatch,
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
@@ -14,7 +14,7 @@ use common::{
     query_context::QueryEnv,
     sql_str::SqlStr,
 };
-use datafusion::common::cast::as_fixed_size_binary_array;
+use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
 use dataset_store::{DatasetStore, resolve_blocks_table};
 use futures::{
     FutureExt,
@@ -158,6 +158,7 @@ pub struct StreamingQuery {
     table_updates: TableUpdates,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
+    keep_alive_interval: u64,
     destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
     network: String,
@@ -186,6 +187,7 @@ impl StreamingQuery {
         multiplexer_handle: &NotificationMultiplexerHandle,
         destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
+        keep_alive_interval: Option<u64>,
     ) -> Result<StreamingQueryHandle, BoxError> {
         let (tx, rx) = mpsc::channel(10);
 
@@ -218,6 +220,7 @@ impl StreamingQuery {
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
             .transpose()?;
+        let keep_alive_interval = keep_alive_interval.unwrap_or_default().max(30);
         let streaming_query = Self {
             query_env,
             catalog,
@@ -228,6 +231,7 @@ impl StreamingQuery {
             prev_watermark,
             table_updates,
             microbatch_max_interval,
+            keep_alive_interval,
             destination,
             preserve_block_num,
             network: network.to_string(),
@@ -279,7 +283,13 @@ impl StreamingQuery {
                 plan
             };
 
-            let mut stream = ctx.execute_plan(plan, false).await?;
+            let schema = Arc::new(plan.schema().as_arrow().clone());
+
+            let mut stream = keep_alive_stream(
+                ctx.execute_plan(plan, false).await?,
+                schema,
+                self.keep_alive_interval,
+            );
 
             // Send start message for this microbatch
             let _ = self
@@ -576,5 +586,118 @@ impl BlockRow {
             number: self.number,
             hash: self.hash,
         }
+    }
+}
+
+/// Wraps a record batch stream to periodically emit empty record batches as keep-alive signals.
+/// These empty batches have the same schema as the original stream.
+///
+/// The keep-alive batches are emitted at the specified interval (in seconds) until the original
+/// stream is exhausted.
+pub fn keep_alive_stream<'a>(
+    record_batch_stream: BoxStream<'a, Result<RecordBatch, DataFusionError>>,
+    schema: SchemaRef,
+    keep_alive_interval: u64,
+) -> BoxStream<'a, Result<RecordBatch, DataFusionError>> {
+    let period = tokio::time::Duration::from_secs(keep_alive_interval);
+    let mut keep_alive_interval = tokio::time::interval(period);
+    let mut record_batch_stream = record_batch_stream.fuse();
+
+    Box::pin(async_stream::stream! {
+        loop {
+            tokio::select! {
+                biased;
+
+                maybe_batch = record_batch_stream.next() => {
+                    match maybe_batch {
+                        Some(batch) => {
+                            yield batch;
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                }
+
+                _ = keep_alive_interval.tick() => {
+                    let empty_batch = RecordBatch::new_empty(schema.clone());
+                    yield Ok(empty_batch);
+                }
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use common::arrow::{
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use datafusion::error::DataFusionError;
+    use futures::stream;
+
+    use super::keep_alive_stream;
+
+    #[tokio::test]
+    async fn test_keep_alive_stream() {
+        use tokio_stream::StreamExt;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int32, false),
+            Field::new("b", DataType::Utf8, false),
+        ]));
+
+        let record_batches = vec![
+            RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(common::arrow::array::Int32Array::from(vec![1, 2, 3])),
+                    Arc::new(common::arrow::array::StringArray::from(vec!["x", "y", "z"])),
+                ],
+            )
+            .unwrap(),
+            RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(common::arrow::array::Int32Array::from(vec![4, 5, 6])),
+                    Arc::new(common::arrow::array::StringArray::from(vec!["u", "v", "w"])),
+                ],
+            )
+            .unwrap(),
+        ];
+        let original_batches_count = record_batches.len();
+
+        let record_batch_stream = Box::pin(
+            stream::iter(
+                record_batches
+                    .into_iter()
+                    .map(Ok)
+                    .collect::<Vec<Result<RecordBatch, DataFusionError>>>(),
+            )
+            .throttle(Duration::from_secs(2)),
+        );
+
+        let keep_alive_interval = 1; // 1 second for testing
+        let mut stream =
+            keep_alive_stream(record_batch_stream, schema.clone(), keep_alive_interval);
+
+        let mut received_batches = Vec::new();
+        let mut ticks = 0;
+
+        while let Some(Ok(batch)) = stream.next().await {
+            if batch.num_rows() == 0 {
+                ticks += 1;
+            }
+            received_batches.push(batch);
+        }
+
+        assert!(
+            received_batches.len() == original_batches_count + ticks,
+            "Expected total batches to be {}, got {}",
+            original_batches_count + ticks,
+            received_batches.len()
+        );
     }
 }

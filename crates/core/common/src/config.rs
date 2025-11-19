@@ -43,6 +43,7 @@ pub struct Config {
     pub config_path: PathBuf,
     pub parquet: ParquetConfig,
     pub poll_interval: Duration,
+    pub keep_alive_interval: Option<u64>,
     /// Build information (version, commit SHA, timestamps)
     pub build_info: BuildInfo,
 }
@@ -394,6 +395,8 @@ pub struct ConfigFile {
     pub microbatch_max_interval: Option<u64>,
     /// Max interval for streaming server microbatches in microseconds (default: 1000)
     pub server_microbatch_max_interval: Option<u64>,
+    /// Keep-alive interval for streaming server in seconds (default: 30; min: 30)
+    pub keep_alive_interval: Option<u64>,
 
     // Service addresses
     /// Arrow Flight RPC server address (default: "0.0.0.0:1602")
@@ -548,6 +551,7 @@ impl Config {
             config_path,
             poll_interval: config_file.poll_interval_secs.into(),
             build_info: build_info.into().unwrap_or_default(),
+            keep_alive_interval: config_file.keep_alive_interval,
         })
     }
 
