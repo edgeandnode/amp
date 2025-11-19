@@ -97,12 +97,16 @@ use common::{
 use datasets_common::table_name::TableName;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
+use monitoring::logging;
 use tracing::{Instrument, instrument};
 
 use crate::{
-    Ctx, EndBlock, ResolvedEndBlock, WriterProperties, check::consistency_check,
-    compaction::AmpCompactor, metrics, raw_dataset_writer::RawDatasetWriter,
-    tasks::FailFastJoinSet,
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    check::consistency_check,
+    compaction::AmpCompactor,
+    metrics,
+    raw_dataset_writer::RawDatasetWriter,
+    tasks::{FailFastJoinSet, TryWaitAllError},
 };
 
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
@@ -157,8 +161,7 @@ pub async fn dump(
         metrics,
         dataset.finalized_blocks_only,
     )
-    .await
-    .map_err(Error::DumpImpl)?;
+    .await?;
 
     tracing::info!("dump completed successfully");
 
@@ -208,23 +211,91 @@ pub enum Error {
         source: crate::check::ConsistencyError,
     },
 
-    /// Failed to execute dump implementation
+    /// Failed to get blockchain client for dataset
     ///
-    /// This occurs when the main dump implementation fails. This wraps errors from
-    /// the `dump_impl()` function which handles:
-    /// - Blockchain client connection and data streaming
-    /// - Block range resolution and partitioning
-    /// - Parallel partition execution
-    /// - Parquet file writing and metadata updates
+    /// This occurs when the dump implementation cannot obtain a blockchain client
+    /// for the dataset's provider. Common causes:
+    /// - Provider configuration not found
+    /// - Invalid provider configuration
+    /// - Manifest not registered in metadata database
+    /// - Network connectivity issues to provider
+    #[error("Failed to get blockchain client for dataset")]
+    GetClient(#[source] dataset_store::GetClientError),
+
+    /// Failed to resolve end block number
+    ///
+    /// This occurs when resolving the end block (absolute or relative) against
+    /// the blockchain's latest block fails. Common causes:
+    /// - Blockchain client connectivity issues (when fetching latest block)
+    /// - Invalid end block configuration (end < start)
+    /// - RPC provider returning invalid block numbers
+    /// - Provider temporarily unavailable
+    #[error("Failed to resolve end block")]
+    ResolveEndBlock(#[source] crate::block_ranges::ResolutionError),
+
+    /// Failed to get latest block number from blockchain client
+    ///
+    /// This occurs when querying the blockchain provider for the latest block fails.
+    /// Common causes:
+    /// - Network connectivity issues
+    /// - RPC provider rate limiting
+    /// - Provider temporarily unavailable
+    /// - Invalid provider credentials
+    #[error("Failed to get latest block number")]
+    LatestBlock(#[source] BoxError),
+
+    /// Failed to get missing block ranges for table
+    ///
+    /// This occurs when querying the metadata database for unprocessed block ranges
+    /// fails. The metadata database tracks which block ranges have been successfully
+    /// dumped to prevent redundant work.
     ///
     /// Common causes:
-    /// - Blockchain client connectivity issues
-    /// - Block streaming failures
+    /// - Metadata database connectivity issues
+    /// - Corrupted file metadata
+    /// - Database query timeout
+    #[error("Failed to get missing block ranges for table")]
+    MissingRanges(#[source] BoxError),
+
+    /// Failed to dump block ranges
+    ///
+    /// This occurs when the parallel dump of block ranges fails. This wraps errors
+    /// from partition tasks that process subsets of the block ranges.
+    ///
+    /// Common causes:
+    /// - Block streaming failures from blockchain client
     /// - Parquet file writing errors
     /// - Metadata database update failures
-    /// - Partition task failures
-    #[error("Dump implementation failed")]
-    DumpImpl(#[source] BoxError),
+    /// - Object store connectivity issues
+    /// - Partition task panics or cancellations
+    #[error("Failed to dump block ranges")]
+    DumpRanges(#[source] DumpRangesError),
+}
+
+/// Errors that occur during parallel dump of block ranges
+///
+/// This error type is used by the `dump_ranges()` function when partitioning
+/// and processing block ranges across multiple parallel workers.
+#[derive(Debug, thiserror::Error)]
+pub enum DumpRangesError {
+    /// A partition task execution failed
+    ///
+    /// This occurs when one of the parallel partition tasks fails during execution
+    /// or panics unexpectedly. When a partition task fails, all other running
+    /// partitions are terminated to prevent partial dumps.
+    ///
+    /// Common causes:
+    /// - Block streaming failures from blockchain client
+    /// - Parquet file writing errors
+    /// - Metadata database update failures
+    /// - Object store connectivity issues
+    /// - RawDatasetWriter initialization failures
+    /// - Partition task panics (assertion failures, unwrap on None/Err, stack overflow)
+    ///
+    /// Note: The `TryWaitAllError` type cannot use `#[source]` due to Rust trait system
+    /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
+    #[error("Partition task failed: {0}")]
+    PartitionTaskError(crate::tasks::TryWaitAllError<common::BoxError>),
 }
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
@@ -243,14 +314,15 @@ async fn dump_impl(
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     finalized_blocks_only: bool,
-) -> Result<(), BoxError> {
+) -> Result<(), Error> {
     let dump_start_time = Instant::now();
     let dataset = tables[0].0.dataset();
 
     let mut client = ctx
         .dataset_store
         .get_client(dataset.manifest_hash(), metrics.as_ref().map(|m| m.meter()))
-        .await?;
+        .await
+        .map_err(Error::GetClient)?;
 
     let provider_name = client.provider_name().to_string();
     tracing::info!("connected to provider: {provider_name}");
@@ -258,7 +330,8 @@ async fn dump_impl(
     let start = dataset.start_block.unwrap_or(0);
     let resolved = end
         .resolve(start, client.latest_block(finalized_blocks_only))
-        .await?;
+        .await
+        .map_err(Error::ResolveEndBlock)?;
 
     let end = match resolved {
         ResolvedEndBlock::NoDataAvailable => {
@@ -278,7 +351,11 @@ async fn dump_impl(
     // To reduce RPC polling of `latest_block`, we wait on `timer` when we know the
     // next iteration would have no work to do unless there is a new block.
     loop {
-        let Some(latest_block) = client.latest_block(finalized_blocks_only).await? else {
+        let Some(latest_block) = client
+            .latest_block(finalized_blocks_only)
+            .await
+            .map_err(Error::LatestBlock)?
+        else {
             // No data to dump, wait for more data
             timer.tick().await;
             continue;
@@ -299,7 +376,10 @@ async fn dump_impl(
                 None => latest_block,
                 Some(end) => BlockNum::min(end, latest_block),
             };
-            let missing_ranges = table.missing_ranges(start..=end).await?;
+            let missing_ranges = table
+                .missing_ranges(start..=end)
+                .await
+                .map_err(Error::MissingRanges)?;
             let table_name = table.table_name();
             missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
             compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
@@ -341,7 +421,8 @@ async fn dump_impl(
             metrics.as_ref(),
             tables,
         )
-        .await?;
+        .await
+        .map_err(Error::DumpRanges)?;
     }
 
     // Record dump duration on successful completion
@@ -371,7 +452,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     metrics: Option<&Arc<metrics::MetricsRegistry>>,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
-) -> Result<(), BoxError> {
+) -> Result<(), DumpRangesError> {
     tracing::info!(
         "dumping ranges {}",
         missing_dataset_ranges
@@ -413,7 +494,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             progress_reporter: progress_reporter.clone(),
         });
 
-    // Spawn the writers, starting them with a 1 second delay between each.
+    // Spawn the writers, starting them with a 1-second delay between each.
     // Note that tasks spawned in the join set start executing immediately in parallel
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     for writer in writers {
@@ -423,7 +504,19 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
 
     // Wait for all the writers to finish, returning an error if any writer panics or fails.
     if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(error=%err, "dataset dump failed");
+        // Log detailed error information based on error type
+        match &err {
+            TryWaitAllError::Error(err) => {
+                tracing::error!(
+                    error=%err,
+                    error_source=logging::error_source(&**err),
+                    "dataset dump failed: partition task error"
+                );
+            }
+            TryWaitAllError::Panic(err) => {
+                tracing::error!(error=%err, "dataset dump failed: partition task panicked");
+            }
+        }
 
         // Record error metrics
         if let Some(metrics) = metrics {
@@ -433,7 +526,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             }
         }
 
-        return Err(err.into_box_error());
+        return Err(DumpRangesError::PartitionTaskError(err));
     }
 
     Ok(())
