@@ -16,7 +16,7 @@ import * as HttpServer from "@effect/platform/HttpServer"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as OpenApi from "@effect/platform/OpenApi"
 import * as Path from "@effect/platform/Path"
-import { Table } from "apache-arrow"
+import * as ApacheArrow from "apache-arrow"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Console from "effect/Console"
@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 import * as Admin from "../../api/Admin.ts"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
-import { generateSchema } from "../../Arrow.ts"
+import * as Arrow from "../../Arrow.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
 import * as ManifestBuilder from "../../ManifestBuilder.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../studio/index.ts"
@@ -133,7 +133,7 @@ WHERE topic0 = evm_topic('Count(uint256 count)');`,
           Schema.parseJson(Schema.Struct({ query: Schema.NonEmptyTrimmedString })),
         ),
       )
-      .addSuccess(Schema.Any)
+      .addSuccess(Schema.Array(Schema.Any))
       .addError(HttpApiError.InternalServerError)
       .annotateContext(
         OpenApi.annotations({
@@ -329,10 +329,9 @@ FROM (
           }))
         .handle("Query", ({ payload }) =>
           flight.query(payload.query).pipe(
-            // Stream.tap((batch) => Effect.logInfo("returned batch", )),
             Stream.mapEffect(Effect.fn(function*(batch) {
-              const table = new Table(batch)
-              const schema = Schema.Array(generateSchema(batch.schema))
+              const table = new ApacheArrow.Table(batch)
+              const schema = Schema.Array(Arrow.generateSchema(batch.schema))
               const data = yield* Schema.encode(schema)(table.toArray())
               return data
             })),
