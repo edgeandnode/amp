@@ -75,7 +75,7 @@ export const publish = Command.make("publish", {
         auth: authStorage,
         context,
         versionTag: args.tag,
-        changelog: Option.getOrUndefined(args.changelog),
+        changelog: Option.getOrUndefined(args.changelog)?.trim(),
       }).pipe(
         Effect.tap((result) => Console.log(`Published ${result.namespace}/${result.name}@${result.revision}`)),
         Effect.catchTags({
