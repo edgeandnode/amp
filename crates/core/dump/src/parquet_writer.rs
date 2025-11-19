@@ -106,7 +106,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]
-    #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
+    #[instrument(skip_all, fields(table = %self.table.table_ref_compact(), location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
