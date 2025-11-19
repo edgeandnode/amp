@@ -3894,6 +3894,7 @@ name = "dump"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-stream",
  "common",
  "datafusion",
  "dataset-store",

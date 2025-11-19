@@ -218,6 +218,7 @@ impl Service {
                 &self.notification_multiplexer,
                 None,
                 self.config.server_microbatch_max_interval,
+                self.config.keep_alive_interval,
             )
             .await
             .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;

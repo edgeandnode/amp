@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+async-stream.workspace = true
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 datafusion.workspace = true

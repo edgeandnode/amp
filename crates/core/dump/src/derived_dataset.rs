@@ -465,6 +465,7 @@ async fn dump_sql_query(
         start,
         end.map(|e| e.to_string()).unwrap_or_default(),
     );
+    let keep_alive_interval = ctx.config.keep_alive_interval;
     let mut stream = {
         StreamingQuery::spawn(
             env.clone(),
@@ -477,6 +478,7 @@ async fn dump_sql_query(
             notification_multiplexer,
             Some(physical_table.clone()),
             microbatch_max_interval,
+            keep_alive_interval,
         )
         .await?
         .as_stream()
