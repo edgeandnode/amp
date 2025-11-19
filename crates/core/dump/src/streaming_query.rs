@@ -266,7 +266,7 @@ impl StreamingQuery {
             };
 
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
-            
+
             let plan = {
                 // Incrementalize the plan
                 let plan = self.plan.clone().attach_to(&ctx)?;
@@ -281,9 +281,9 @@ impl StreamingQuery {
                 }
                 plan
             };
-            
-            
+
             let mut stream = if let Some(keep_alive_interval) = self.keep_alive_interval {
+                let keep_alive_interval = keep_alive_interval.max(30);
                 let schema = Arc::new(plan.schema().as_arrow().clone());
                 keep_alive_stream(
                     ctx.execute_plan(plan, false).await?,
