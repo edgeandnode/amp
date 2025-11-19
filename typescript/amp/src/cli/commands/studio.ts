@@ -16,7 +16,7 @@ import * as HttpServer from "@effect/platform/HttpServer"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as OpenApi from "@effect/platform/OpenApi"
 import * as Path from "@effect/platform/Path"
-import { Table } from "apache-arrow"
+import * as ApacheArrow from "apache-arrow"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Console from "effect/Console"
@@ -34,6 +34,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
 import * as Arrow from "../../Arrow.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
+import * as ManifestBuilder from "../../ManifestBuilder.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../studio/index.ts"
 import { adminUrl, configFile, flightUrl } from "../common.ts"
 
@@ -176,16 +177,21 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   },
                   onSome(ampConfigPath) {
                     return loader.watch<HttpApiError.InternalServerError, never>(ampConfigPath, {
-                      onError(cause) {
-                        console.error("Failure while watching the amp config", ampConfigPath, cause)
-                        return new HttpApiError.InternalServerError()
-                      },
+                      onError: (cause) =>
+                        Effect.gen(function*() {
+                          yield* Console.error("Failure while watching the amp config", ampConfigPath, cause)
+                          return yield* new HttpApiError.InternalServerError()
+                        }),
                     }).pipe(
-                      Stream.map((manifest) => {
-                        const jsonData = JSON.stringify(manifest)
-                        const sseData = `data: ${jsonData}\n\n`
-                        return new TextEncoder().encode(sseData)
-                      }),
+                      Stream.mapEffect((manifest) =>
+                        Effect.gen(function*() {
+                          // Encode the manifest using Effect Schema to properly serialize dependencies
+                          const encoded = yield* Schema.encode(ManifestBuilder.ManifestBuildResult)(manifest)
+                          const jsonData = JSON.stringify(encoded)
+                          const sseData = `data: ${jsonData}\n\n`
+                          return new TextEncoder().encode(sseData)
+                        })
+                      ),
                       Stream.mapError(() => new HttpApiError.InternalServerError()),
                     )
                   },
@@ -230,11 +236,12 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   onSome: (configPath) =>
                     loader.build(configPath).pipe(
                       Effect.map((buildResult) => {
+                        const reference = `"${buildResult.metadata.namespace || "_"}/${buildResult.metadata.name}@dev"`
                         const tables = Object.entries(buildResult.manifest.tables)
                         return tables.length > 0
                           ? Option.some({
                             title: `SELECT ... ${tables[0][0]}`,
-                            query: `SELECT * FROM "${buildResult.metadata.name}"."${tables[0][0]}"`,
+                            query: `SELECT * FROM ${reference}."${tables[0][0]}"`,
                           })
                           : Option.none()
                       }),
@@ -317,15 +324,16 @@ FROM (
             )
           }))
         .handle("Query", ({ payload }) =>
-          flight.stream(payload.query).pipe(
+          flight.query(payload.query).pipe(
+            Stream.mapEffect(Effect.fn(function*(batch) {
+              const table = new ApacheArrow.Table(batch)
+              const schema = Schema.Array(Arrow.generateSchema(batch.schema))
+              const data = yield* Schema.encode(schema)(table.toArray())
+              return data
+            })),
             Stream.runCollect,
-            Effect.map((_) => Chunk.toArray(_)),
-            Effect.map((array) => new Table(array.map((response) => response.data))),
-            Effect.flatMap((table) => {
-              const schema = Arrow.generateSchema(table.schema)
-              return Effect.succeed([table, schema] as const)
-            }),
-            Effect.flatMap(([table, schema]) => Schema.encodeUnknown(Schema.Array(schema))([...table])),
+            Effect.map(Chunk.toReadonlyArray),
+            Effect.map((_) => _.flat()),
             Effect.tapErrorCause((cause) => Effect.logError("Failure performing query", Cause.pretty(cause))),
             Effect.mapError(() => new HttpApiError.InternalServerError()),
           ))

@@ -1,6 +1,7 @@
 "use client"
 
 import { Accordion } from "@base-ui-components/react/accordion"
+import { Model } from "@edgeandnode/amp"
 import { Button } from "@graphprotocol/gds-react"
 import { PlusIcon, TableIcon } from "@graphprotocol/gds-react/icons"
 import { String } from "effect"
@@ -8,8 +9,7 @@ import { String } from "effect"
 import { useAmpConfigStreamQuery } from "@/hooks/useAmpConfigStream"
 
 export type AmpConfigBrowserProps = {
-  // TODO: DatasetManifest no longer has 'name' field after versioning refactor. Name should be passed separately from metadata.
-  onTableSelected: (dataset: string, table: string) => void
+  onTableSelected: (dataset: Model.DatasetReferenceString, table: string) => void
 }
 export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserProps>) {
   const { data: config } = useAmpConfigStreamQuery()
@@ -18,7 +18,7 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
     return null
   }
 
-  const tables = Object.entries(config.tables)
+  const tables = Object.entries(config.manifest.tables)
 
   return (
     <div className="flex flex-col gap-4 px-2 py-6">
@@ -40,9 +40,11 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
                     variant="naked"
                     size="large"
                     onClick={() => {
-                      // TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately.
-                      const datasetName = ("name" in config ? config.name : "unknown") as string
-                      onTableSelected(datasetName, table)
+                      const namespace = Model.DatasetNamespace.make(config.metadata.namespace || "_")
+                      const name = Model.DatasetName.make(config.metadata.name)
+                      const revision = Model.DatasetTag.make("dev")
+                      const ref: Model.DatasetReferenceString = `${namespace}/${name}@${revision}`
+                      onTableSelected(ref, table)
                     }}
                   >
                     <PlusIcon alt={`Add ${table}`} size={4} aria-hidden="true" />

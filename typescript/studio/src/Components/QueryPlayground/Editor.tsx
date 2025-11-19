@@ -54,7 +54,7 @@ export function Editor({
   const ampConfigQuery = useAmpConfigStreamQuery({
     onSuccess: (newManifest) => {
       // When manifest updates from SSE, update the SQL provider with new data
-      sqlProviderRef.current?.updateManifest(newManifest)
+      sqlProviderRef.current?.updateManifest(newManifest.manifest)
     },
   })
 
@@ -129,7 +129,7 @@ export function Editor({
                 minPrefixLength: 0,
                 maxSuggestions: 50,
               },
-              ampConfigQuery.data, // Pass the manifest from amp config stream
+              ampConfigQuery.data?.manifest, // Pass the manifest from amp config stream
             )
 
             sqlProviderRef.current.setup(editor)

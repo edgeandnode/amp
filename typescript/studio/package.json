@@ -19,7 +19,11 @@
   },
   "dependencies": {
     "@base-ui-components/react": "^1.0.0-beta.4",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-web": "^2.1.1",
     "@edgeandnode/amp": "workspace:*",
+    "@effect-atom/atom": "^0.4.2",
+    "@effect-atom/atom-react": "^0.4.0",
     "@graphprotocol/gds-react": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@b9ac299",
     "@monaco-editor/react": "4.8.0-rc.2",
     "@tailwindcss/vite": "^4.1.17",
