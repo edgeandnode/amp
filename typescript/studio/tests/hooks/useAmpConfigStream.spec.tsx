@@ -2,6 +2,9 @@ import {
   ArrowField,
   ArrowSchema,
   DatasetDerived,
+  DatasetMetadata,
+  DatasetName,
+  DatasetNamespace,
   Network,
   Table,
   TableInput,
@@ -93,6 +96,15 @@ describe("useAmpConfigStreamQuery", () => {
   // Helper to get the most recent EventSource instance
   const getMockEventSource = () => MockEventSource.instances[MockEventSource.instances.length - 1]
 
+  // Helper to create mock data in the format the server sends
+  const createMockBuildResult = (manifest: DatasetDerived) => ({
+    metadata: DatasetMetadata.make({
+      namespace: DatasetNamespace.make("_"),
+      name: DatasetName.make("test"),
+    }),
+    manifest,
+  })
+
   it("should connect to EventSource and decode server-sent events successfully", async () => {
     // Mock SSE data in the format the API would send
     const mockManifest = DatasetDerived.make({
@@ -115,6 +127,8 @@ describe("useAmpConfigStreamQuery", () => {
       functions: {},
     })
 
+    const mockData = createMockBuildResult(mockManifest)
+
     const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for the hook to initialize and start connecting
@@ -123,13 +137,13 @@ describe("useAmpConfigStreamQuery", () => {
     })
 
     // Simulate receiving SSE data
-    getMockEventSource().simulateMessage(JSON.stringify(mockManifest))
+    getMockEventSource().simulateMessage(JSON.stringify(mockData))
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.data).toEqual(mockManifest)
+    expect(result.current.data).toEqual(mockData)
     expect(MockEventSource.instances.length).toBe(1)
     expect(MockEventSource.instances[0].url).toBe("http://test-api.com/config/stream")
   })
@@ -172,6 +186,9 @@ describe("useAmpConfigStreamQuery", () => {
       functions: {},
     })
 
+    const mockData1 = createMockBuildResult(mockManifest1)
+    const mockData2 = createMockBuildResult(mockManifest2)
+
     const { result } = renderHook(() => useAmpConfigStreamQuery())
 
     // Wait for loading state
@@ -180,18 +197,18 @@ describe("useAmpConfigStreamQuery", () => {
     })
 
     // Simulate first message
-    getMockEventSource().simulateMessage(JSON.stringify(mockManifest1))
+    getMockEventSource().simulateMessage(JSON.stringify(mockData1))
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
-      expect(result.current.data).toEqual(mockManifest1)
+      expect(result.current.data).toEqual(mockData1)
     })
 
     // Simulate second message (should replace the first one)
-    getMockEventSource().simulateMessage(JSON.stringify(mockManifest2))
+    getMockEventSource().simulateMessage(JSON.stringify(mockData2))
 
     await waitFor(() => {
-      expect(result.current.data).toEqual(mockManifest2)
+      expect(result.current.data).toEqual(mockData2)
     })
   })
 
@@ -335,7 +352,9 @@ describe("useAmpConfigStreamQuery", () => {
       functions: {},
     })
 
-    getMockEventSource().simulateMessage(JSON.stringify(mockManifest))
+    const mockData = createMockBuildResult(mockManifest)
+
+    getMockEventSource().simulateMessage(JSON.stringify(mockData))
 
     // Both hooks should receive the same data
     await waitFor(() => {
@@ -343,7 +362,7 @@ describe("useAmpConfigStreamQuery", () => {
       expect(result2.current.isSuccess).toBe(true)
     })
 
-    expect(result1.current.data).toEqual(mockManifest)
-    expect(result2.current.data).toEqual(mockManifest)
+    expect(result1.current.data).toEqual(mockData)
+    expect(result2.current.data).toEqual(mockData)
   })
 })

@@ -18,7 +18,7 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
     return null
   }
 
-  const tables = Object.entries(config.tables)
+  const tables = Object.entries(config.manifest.tables)
 
   return (
     <div className="flex flex-col gap-4 px-2 py-6">
@@ -41,7 +41,7 @@ export function AmpConfigBrowser({ onTableSelected }: Readonly<AmpConfigBrowserP
                     size="large"
                     onClick={() => {
                       // TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately.
-                      const datasetName = ("name" in config ? config.name : "unknown") as string
+                      const datasetName = config.metadata.name
                       onTableSelected(datasetName, table)
                     }}
                   >

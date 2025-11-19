@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.38",
+  "version": "0.0.39",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -59,8 +59,8 @@
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "2.6.3",
-    "@connectrpc/connect": "^2.1.0",
-    "@connectrpc/connect-node": "^2.1.0",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-node": "^2.1.1",
     "@effect/cluster": "^0.52.8",
     "@effect/platform": "^0.93.0",
     "@effect/platform-node": "^0.100.0",
@@ -70,8 +70,8 @@
   "devDependencies": {
     "@bufbuild/buf": "^1.59.0",
     "@bufbuild/protoc-gen-es": "^2.10.1",
-    "@connectrpc/connect": "^2.1.0",
-    "@connectrpc/connect-node": "^2.1.0",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-node": "^2.1.1",
     "@effect/cluster": "^0.52.9",
     "@effect/platform": "^0.93.1",
     "@effect/platform-node": "^0.100.0",

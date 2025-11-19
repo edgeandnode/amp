@@ -1,24 +1,24 @@
 "use client"
 
-import { DatasetManifest } from "@edgeandnode/amp/Model"
+import { ManifestBuildResult } from "@edgeandnode/amp/ManifestBuilder"
 import { Schema } from "effect"
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react"
 
 import * as Constants from "../constants.js"
 
-const DatasetManifestInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(DatasetManifest))
-const datasetManifestEquivalence = Schema.equivalence(DatasetManifest)
+const DatasetManifestInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(ManifestBuildResult))
+const datasetManifestEquivalence = Schema.equivalence(ManifestBuildResult)
 
 export interface UseAmpConfigStreamQueryOptions {
   enabled?: boolean
-  onSuccess?: (data: DatasetManifest) => void
+  onSuccess?: (data: ManifestBuildResult) => void
   onError?: (error: Error) => void
   retry?: boolean
   retryDelay?: number
 }
 
 export interface State {
-  data: DatasetManifest | null
+  data: ManifestBuildResult | null
   error?: Error | null | undefined
   status: "idle" | "fetching" | "success" | "error"
 }
@@ -37,7 +37,7 @@ export class AmpConfigStreamManager {
   private eventSource: EventSource | null = null
   private retryTimeout: NodeJS.Timeout | null = null
   private subscribers = new Set<() => void>()
-  private currentData: DatasetManifest | null = null
+  private currentData: ManifestBuildResult | null = null
   private currentError: Error | null = null
   private status: "idle" | "connecting" | "connected" | "error" = "idle"
   private retryConfig = {
@@ -134,7 +134,7 @@ export class AmpConfigStreamManager {
   /**
    * Get current data (for callbacks)
    */
-  getCurrentData(): DatasetManifest | null {
+  getCurrentData(): ManifestBuildResult | null {
     return this.currentData
   }
 
@@ -274,7 +274,7 @@ export function useAmpConfigStreamQuery({
   // Stable callback refs to avoid re-subscribing
   const onSuccessRef = useRef(onSuccess)
   const onErrorRef = useRef(onError)
-  const prevDataRef = useRef<DatasetManifest | null>(null)
+  const prevDataRef = useRef<ManifestBuildResult | null>(null)
   const prevErrorRef = useRef<Error | null>(null)
 
   useEffect(() => {

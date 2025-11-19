@@ -37,8 +37,7 @@ function HomePage() {
             {data != null ?
               (
                 <Breadcrumbs.Item>
-                  {/* TODO: DatasetManifest no longer has 'name' field. Using backwards-compatible fallback until metadata is passed separately. */}
-                  <p className="text-white text-16">{("name" in data ? data.name : "unknown") as string}</p>
+                  <p className="text-white text-16">{data.metadata.name}</p>
                 </Breadcrumbs.Item>
               ) :
               null}

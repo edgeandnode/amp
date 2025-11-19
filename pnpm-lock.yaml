@@ -127,11 +127,11 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1(@bufbuild/protobuf@2.6.3)
       '@connectrpc/connect':
-        specifier: ^2.1.0
-        version: 2.1.0(@bufbuild/protobuf@2.6.3)
+        specifier: ^2.1.1
+        version: 2.1.1(@bufbuild/protobuf@2.6.3)
       '@connectrpc/connect-node':
-        specifier: ^2.1.0
-        version: 2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))
+        specifier: ^2.1.1
+        version: 2.1.1(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.6.3))
       '@effect/cluster':
         specifier: ^0.52.9
         version: 0.52.9(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/sql@0.45.0(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/workflow@0.10.0(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)
@@ -168,9 +168,21 @@ importers:
       '@base-ui-components/react':
         specifier: ^1.0.0-beta.4
         version: 1.0.0-beta.4(@types/react@19.2.4)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@connectrpc/connect':
+        specifier: ^2.1.1
+        version: 2.1.1(@bufbuild/protobuf@2.10.1)
+      '@connectrpc/connect-web':
+        specifier: ^2.1.1
+        version: 2.1.1(@bufbuild/protobuf@2.10.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.10.1))
       '@edgeandnode/amp':
         specifier: workspace:*
         version: link:../amp
+      '@effect-atom/atom':
+        specifier: ^0.4.2
+        version: 0.4.2(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)
+      '@effect-atom/atom-react':
+        specifier: ^0.4.0
+        version: 0.4.0(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)(react@19.2.0)(scheduler@0.27.0)
       '@graphprotocol/gds-react':
         specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@b9ac299
         version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@b9ac299(@types/react@19.2.4)(bufferutil@4.0.9)(react-dom@19.2.0(react@19.2.0))(react-is@17.0.2)(react@19.2.0)(tailwindcss@4.1.17)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
@@ -529,15 +541,21 @@ packages:
   '@chevrotain/utils@11.0.3':
     resolution: {integrity: sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==}
 
-  '@connectrpc/connect-node@2.1.0':
-    resolution: {integrity: sha512-6akCXZSX5uWHLR654ne9Tnq7AnPUkLS65NvgsI5885xBkcuVy2APBd8sA4sLqaplUt84cVEr6LhjEFNx6W1KtQ==}
+  '@connectrpc/connect-node@2.1.1':
+    resolution: {integrity: sha512-s3TfsI1XF+n+1z6MBS9rTnFsxxR4Rw5wmdEnkQINli81ESGxcsfaEet8duzq8LVuuCupmhUsgpRo0Nv9pZkufg==}
     engines: {node: '>=20'}
     peerDependencies:
       '@bufbuild/protobuf': ^2.7.0
-      '@connectrpc/connect': 2.1.0
+      '@connectrpc/connect': 2.1.1
 
-  '@connectrpc/connect@2.1.0':
-    resolution: {integrity: sha512-xhiwnYlJNHzmFsRw+iSPIwXR/xweTvTw8x5HiwWp10sbVtd4OpOXbRgE7V58xs1EC17fzusF1f5uOAy24OkBuA==}
+  '@connectrpc/connect-web@2.1.1':
+    resolution: {integrity: sha512-J8317Q2MaFRCT1jzVR1o06bZhDIBmU0UAzWx6xOIXzOq8+k71/+k7MUF7AwcBUX+34WIvbm5syRgC5HXQA8fOg==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.7.0
+      '@connectrpc/connect': 2.1.1
+
+  '@connectrpc/connect@2.1.1':
+    resolution: {integrity: sha512-JzhkaTvM73m2K1URT6tv53k2RwngSmCXLZJgK580qNQOXRzZRR/BCMfZw3h+90JpnG6XksP5bYT+cz0rpUzUWQ==}
     peerDependencies:
       '@bufbuild/protobuf': ^2.7.0
 
@@ -578,6 +596,21 @@ packages:
 
   '@dprint/typescript@0.91.8':
     resolution: {integrity: sha512-tuKn4leCPItox1O4uunHcQF0QllDCvPWklnNQIh2PiWWVtRAGltJJnM4Cwj5AciplosD1Hiz7vAY3ew3crLb3A==}
+
+  '@effect-atom/atom-react@0.4.0':
+    resolution: {integrity: sha512-5HpKLgXEG8EWr4sBDl7BZjm6koO/5HSb94C9+OkRLDE4mhH2357vNl4uPNqid0ZNGwVvS6bAvKFmBzc0bZU6yg==}
+    peerDependencies:
+      effect: ^3.19
+      react: '>=18 <20'
+      scheduler: '*'
+
+  '@effect-atom/atom@0.4.2':
+    resolution: {integrity: sha512-E8XssuIus+0nnu0qf0fTHr98Qme47Ph75CAO++q5gYMdeWkpi5iEY1Ugb2NzUVZKTXRKap4te89yFtfl2f2TQA==}
+    peerDependencies:
+      '@effect/experimental': ^0.57.0
+      '@effect/platform': ^0.93.0
+      '@effect/rpc': ^0.72.1
+      effect: ^3.19.0
 
   '@effect/cli@0.72.1':
     resolution: {integrity: sha512-HGDMGD23TxFW9tCSX6g+M2u0robikMA0mP0SqeJMj7FWXTdcQ+cQsJE99bxi9iu+5YID7MIrVJMs8TUwXUV2sg==}
@@ -4118,12 +4151,21 @@ snapshots:
 
   '@chevrotain/utils@11.0.3': {}
 
-  '@connectrpc/connect-node@2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))':
+  '@connectrpc/connect-node@2.1.1(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.6.3))':
     dependencies:
       '@bufbuild/protobuf': 2.6.3
-      '@connectrpc/connect': 2.1.0(@bufbuild/protobuf@2.6.3)
+      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.6.3)
 
-  '@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3)':
+  '@connectrpc/connect-web@2.1.1(@bufbuild/protobuf@2.10.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.10.1))':
+    dependencies:
+      '@bufbuild/protobuf': 2.10.1
+      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.10.1)
+
+  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.10.1)':
+    dependencies:
+      '@bufbuild/protobuf': 2.10.1
+
+  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.6.3)':
     dependencies:
       '@bufbuild/protobuf': 2.6.3
 
@@ -4152,6 +4194,24 @@ snapshots:
   '@dprint/formatter@0.4.1': {}
 
   '@dprint/typescript@0.91.8': {}
+
+  '@effect-atom/atom-react@0.4.0(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)(react@19.2.0)(scheduler@0.27.0)':
+    dependencies:
+      '@effect-atom/atom': 0.4.2(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)
+      effect: 3.19.3
+      react: 19.2.0
+      scheduler: 0.27.0
+    transitivePeerDependencies:
+      - '@effect/experimental'
+      - '@effect/platform'
+      - '@effect/rpc'
+
+  '@effect-atom/atom@0.4.2(@effect/experimental@0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.1(effect@3.19.3))(@effect/rpc@0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)':
+    dependencies:
+      '@effect/experimental': 0.57.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3)
+      '@effect/platform': 0.93.1(effect@3.19.3)
+      '@effect/rpc': 0.70.0(@effect/platform@0.93.1(effect@3.19.3))(effect@3.19.3)
+      effect: 3.19.3
 
   '@effect/cli@0.72.1(@effect/platform@0.93.1(effect@3.19.3))(@effect/printer-ansi@0.47.0(@effect/typeclass@0.36.0(effect@3.19.3))(effect@3.19.3))(@effect/printer@0.47.0(@effect/typeclass@0.36.0(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)':
     dependencies:

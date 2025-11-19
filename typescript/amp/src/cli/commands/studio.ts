@@ -32,8 +32,9 @@ import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 import * as Admin from "../../api/Admin.ts"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
-import * as Arrow from "../../Arrow.ts"
+import { generateSchema } from "../../Arrow.ts"
 import * as ConfigLoader from "../../ConfigLoader.ts"
+import * as ManifestBuilder from "../../ManifestBuilder.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../studio/index.ts"
 import { adminUrl, configFile, flightUrl } from "../common.ts"
 
@@ -132,7 +133,7 @@ WHERE topic0 = evm_topic('Count(uint256 count)');`,
           Schema.parseJson(Schema.Struct({ query: Schema.NonEmptyTrimmedString })),
         ),
       )
-      .addSuccess(Schema.Array(Schema.Any))
+      .addSuccess(Schema.Any)
       .addError(HttpApiError.InternalServerError)
       .annotateContext(
         OpenApi.annotations({
@@ -164,6 +165,7 @@ const AmpStudioApiLive = HttpApiBuilder.group(
           Effect.gen(function*() {
             const stream: Stream.Stream<Uint8Array<ArrayBuffer>, HttpApiError.InternalServerError, never> =
               yield* loader.find().pipe(
+                Effect.tapErrorCause(() => Console.error("Failure finding amp.config from builder")),
                 Effect.map(Option.match({
                   onNone() {
                     return Stream.make([1]).pipe(
@@ -176,16 +178,24 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   },
                   onSome(ampConfigPath) {
                     return loader.watch<HttpApiError.InternalServerError, never>(ampConfigPath, {
-                      onError(cause) {
-                        console.error("Failure while watching the amp config", ampConfigPath, cause)
-                        return new HttpApiError.InternalServerError()
-                      },
+                      onError: (cause) =>
+                        Effect.gen(function*() {
+                          yield* Console.error("Failure while watching the amp config", ampConfigPath, cause)
+                          return yield* new HttpApiError.InternalServerError()
+                        }),
                     }).pipe(
-                      Stream.map((manifest) => {
-                        const jsonData = JSON.stringify(manifest)
-                        const sseData = `data: ${jsonData}\n\n`
-                        return new TextEncoder().encode(sseData)
-                      }),
+                      Stream.tapErrorCause((cause) =>
+                        Console.error("Failure watching config file", Cause.pretty(cause))
+                      ),
+                      Stream.mapEffect((manifest) =>
+                        Effect.gen(function*() {
+                          // Encode the manifest using Effect Schema to properly serialize dependencies
+                          const encoded = yield* Schema.encode(ManifestBuilder.ManifestBuildResult)(manifest)
+                          const jsonData = JSON.stringify(encoded)
+                          const sseData = `data: ${jsonData}\n\n`
+                          return new TextEncoder().encode(sseData)
+                        })
+                      ),
                       Stream.mapError(() => new HttpApiError.InternalServerError()),
                     )
                   },
@@ -230,11 +240,12 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   onSome: (configPath) =>
                     loader.build(configPath).pipe(
                       Effect.map((buildResult) => {
+                        const reference = `"${buildResult.metadata.namespace || "_"}/${buildResult.metadata.name}@dev"`
                         const tables = Object.entries(buildResult.manifest.tables)
                         return tables.length > 0
                           ? Option.some({
                             title: `SELECT ... ${tables[0][0]}`,
-                            query: `SELECT * FROM "${buildResult.metadata.name}"."${tables[0][0]}"`,
+                            query: `SELECT * FROM ${reference}."${tables[0][0]}"`,
                           })
                           : Option.none()
                       }),
@@ -317,15 +328,17 @@ FROM (
             )
           }))
         .handle("Query", ({ payload }) =>
-          flight.stream(payload.query).pipe(
+          flight.query(payload.query).pipe(
+            // Stream.tap((batch) => Effect.logInfo("returned batch", )),
+            Stream.mapEffect(Effect.fn(function*(batch) {
+              const table = new Table(batch)
+              const schema = Schema.Array(generateSchema(batch.schema))
+              const data = yield* Schema.encode(schema)(table.toArray())
+              return data
+            })),
             Stream.runCollect,
-            Effect.map((_) => Chunk.toArray(_)),
-            Effect.map((array) => new Table(array.map((response) => response.data))),
-            Effect.flatMap((table) => {
-              const schema = Arrow.generateSchema(table.schema)
-              return Effect.succeed([table, schema] as const)
-            }),
-            Effect.flatMap(([table, schema]) => Schema.encodeUnknown(Schema.Array(schema))([...table])),
+            Effect.map(Chunk.toReadonlyArray),
+            Effect.map((_) => _.flat()),
             Effect.tapErrorCause((cause) => Effect.logError("Failure performing query", Cause.pretty(cause))),
             Effect.mapError(() => new HttpApiError.InternalServerError()),
           ))

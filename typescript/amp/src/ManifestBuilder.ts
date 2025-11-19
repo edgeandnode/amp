@@ -1,12 +1,15 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as Admin from "./api/Admin.ts"
 import * as Model from "./Model.ts"
 
-export interface ManifestBuildResult {
-  metadata: Model.DatasetMetadata
-  manifest: Model.DatasetDerived
-}
+// Schema for ManifestBuildResult with proper encoding/decoding
+export const ManifestBuildResult = Schema.Struct({
+  metadata: Model.DatasetMetadata,
+  manifest: Model.DatasetDerived,
+})
+export type ManifestBuildResult = typeof ManifestBuildResult.Type
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
   readonly cause: unknown
