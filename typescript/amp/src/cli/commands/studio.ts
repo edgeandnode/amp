@@ -165,7 +165,6 @@ const AmpStudioApiLive = HttpApiBuilder.group(
           Effect.gen(function*() {
             const stream: Stream.Stream<Uint8Array<ArrayBuffer>, HttpApiError.InternalServerError, never> =
               yield* loader.find().pipe(
-                Effect.tapErrorCause(() => Console.error("Failure finding amp.config from builder")),
                 Effect.map(Option.match({
                   onNone() {
                     return Stream.make([1]).pipe(
@@ -184,9 +183,6 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                           return yield* new HttpApiError.InternalServerError()
                         }),
                     }).pipe(
-                      Stream.tapErrorCause((cause) =>
-                        Console.error("Failure watching config file", Cause.pretty(cause))
-                      ),
                       Stream.mapEffect((manifest) =>
                         Effect.gen(function*() {
                           // Encode the manifest using Effect Schema to properly serialize dependencies
