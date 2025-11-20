@@ -130,6 +130,7 @@ mod decode;
 mod error;
 pub mod store;
 mod transactional;
+mod types;
 mod validation;
 
 pub use cdc::{CdcEvent, CdcStream, DeleteBatchIterator};
@@ -137,7 +138,6 @@ pub use client::{
     AmpClient, BatchStream, InvalidationRange, Metadata, ProtocolMessage, ProtocolStream,
     RawStream, ResponseBatch, StreamBuilder,
 };
-pub use common::metadata::segments::BlockRange;
 pub use error::Error;
 #[cfg(feature = "postgres")]
 pub use store::PostgresStateStore;
@@ -145,6 +145,7 @@ pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapsho
 #[cfg(feature = "lmdb")]
 pub use store::{LmdbBatchStore, LmdbStateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
+pub use types::{BlockNum, BlockRange, ResumeWatermark, Watermark};
 
 #[cfg(test)]
 mod tests;

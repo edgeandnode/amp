@@ -1,11 +1,10 @@
 use std::ops::RangeInclusive;
 
 use alloy::primitives::BlockHash;
-use amp_client::AmpClient;
+use amp_client::{AmpClient, ResumeWatermark};
 use common::{
     BlockNum,
     arrow::array::{FixedSizeBinaryArray, UInt64Array},
-    metadata::segments::ResumeWatermark,
 };
 use futures::StreamExt;
 use monitoring::logging;

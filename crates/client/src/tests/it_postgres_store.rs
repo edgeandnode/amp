@@ -3,9 +3,9 @@
 use std::collections::VecDeque;
 
 use alloy::primitives::BlockHash;
-use common::metadata::segments::BlockRange;
 
 use crate::{
+    BlockRange,
     store::{PostgresStateStore, StateStore},
     transactional::Commit,
 };

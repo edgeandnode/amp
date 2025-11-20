@@ -6,7 +6,7 @@ use std::{
 };
 
 use arrow_flight::FlightData;
-use common::arrow::{
+use datafusion::arrow::{
     array::{ArrayRef, RecordBatch},
     buffer::Buffer,
     datatypes::SchemaRef,
