@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use common::{BoxError, Dataset, catalog::JobLabels};
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::EndBlock;
 use metadata_db::Worker;
 use worker::{
@@ -92,6 +93,14 @@ pub trait SchedulerJobs: Send + Sync {
 
     /// Delete all failed jobs
     async fn delete_failed_jobs(&self) -> Result<usize, DeleteJobsByStatusError>;
+
+    /// List all jobs for a specific dataset by namespace, name, and manifest hash
+    async fn list_jobs_by_dataset(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        hash: &Hash,
+    ) -> Result<Vec<Job>, ListJobsByDatasetError>;
 }
 
 /// Errors that can occur when scheduling a dataset dump job
@@ -291,6 +300,16 @@ pub struct DeleteJobError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct DeleteJobsByStatusError(#[source] pub metadata_db::Error);
+
+/// Error when listing jobs by dataset from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct ListJobsByDatasetError(#[source] pub metadata_db::Error);
 
 /// Trait for querying worker information
 ///

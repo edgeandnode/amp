@@ -10,6 +10,7 @@ async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
 dataset-store = { version = "0.1.0", path = "../../core/dataset-store" }
+datasets-common = { version = "0.1.0", path = "../../core/datasets-common" }
 dump = { version = "0.1.0", path = "../../core/dump" }
 metadata-db = { version = "0.1.0", path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }

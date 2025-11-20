@@ -373,6 +373,87 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/jobs": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/jobs` endpoint",
+        "description": "Retrieves and returns all jobs for a specific dataset revision.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns all jobs for the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `LIST_JOBS_ERROR`: Failed to list jobs from metadata database (database error)\n\nThis handler:\n- Validates and extracts the dataset reference from the URL path\n- Resolves the revision to a manifest hash using the dataset store\n- Queries all jobs filtered by the manifest hash\n- Returns all matching jobs",
+        "operationId": "list_dataset_jobs",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{revision}/manifest": {
       "get": {
         "tags": [

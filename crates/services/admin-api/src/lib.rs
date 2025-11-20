@@ -45,6 +45,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/datasets/{namespace}/{name}/versions/{revision}/restore",
             post(datasets::restore::handler),
         )
+        .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/jobs",
+            get(datasets::list_jobs::handler),
+        )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/jobs",
@@ -95,6 +99,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Dataset endpoints
         handlers::datasets::list_all::handler,
         handlers::datasets::list_versions::handler,
+        handlers::datasets::list_jobs::handler,
         handlers::datasets::get::handler,
         handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,
