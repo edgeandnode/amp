@@ -83,7 +83,10 @@ hex = "0.4.3"
 indoc = "2.0.6"
 itertools = "0.14.0"
 opentelemetry = { version = "0.31", features = ["trace"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "http-proto"] }
+opentelemetry-otlp = { version = "0.31", features = [
+    "grpc-tonic",
+    "http-proto",
+] }
 opentelemetry_sdk = { version = "0.31" }
 pg_escape = "0.1"
 pretty_assertions = "1.4.1"
@@ -124,6 +127,7 @@ uuid = { version = "1.11.0", features = ["v7"] }
 arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
 datafusion = { version = "50", features = ["serde"] }
 datafusion-tracing = { version = "50" }
+datafusion-datasource = { version = "50" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow

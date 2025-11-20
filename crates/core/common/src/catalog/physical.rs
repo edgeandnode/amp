@@ -3,11 +3,13 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
-    common::DFSchema,
+    common::{DFSchema, stats::Precision},
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
+        physical_plan::{
+            FileGroup, FileScanConfigBuilder, ParquetSource, parquet::metadata::DFParquetMetadata,
+        },
     },
     error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
@@ -16,11 +18,12 @@ use datafusion::{
     physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
 };
+use datafusion_datasource::compute_all_files_statistics;
 use datasets_common::table_name::TableName;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, physical_table::TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -155,6 +158,20 @@ impl TableSnapshot {
 
     pub fn reader_factory(&self) -> &Arc<AmpReaderFactory> {
         &self.reader_factory
+    }
+
+    // Convert a Segment to a PartitionedFile and crucially associates statistics to the file
+    async fn segment_to_partitioned_file(
+        &self,
+        segment: &Segment,
+    ) -> Result<PartitionedFile, BoxError> {
+        let metadata = self.reader_factory.get_cached_metadata(segment.id).await?;
+        let statistics =
+            DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &self.schema())?;
+        let file = PartitionedFile::from(segment.object.clone())
+            .with_extensions(Arc::new(segment.id))
+            .with_statistics(Arc::new(statistics));
+        Ok(file)
     }
 }
 
@@ -740,11 +757,20 @@ impl TableProvider for TableSnapshot {
         }
 
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(self.canonical_segments.iter(), target_partitions);
+        let table_schema = self.physical_table.schema();
+        let (file_groups, statistics) = {
+            let file_count = self.canonical_segments.len();
+            let file_stream = stream::iter(self.canonical_segments.iter())
+                .then(|s| self.segment_to_partitioned_file(&s));
+            let partitioned = round_robin(file_stream, file_count, target_partitions).await?;
+            compute_all_files_statistics(partitioned, table_schema.clone(), true, false)?
+        };
+        if statistics.num_rows == Precision::Absent {
+            // This log likely signifies a bug in our statistics fetching.
+            warn!("Table has no row count statistics. Queries may be inefficient.");
+        }
 
         let output_ordering = self.physical_table.output_ordering()?;
-
-        let file_schema = self.physical_table.schema();
         let object_store_url = self.physical_table.object_store_url()?;
         let predicate = self.physical_table.filters_to_predicate(state, filters)?;
 
@@ -756,11 +782,12 @@ impl TableProvider for TableSnapshot {
             .into();
 
         let data_source = Arc::new(
-            FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
+            FileScanConfigBuilder::new(object_store_url, table_schema, file_source)
                 .with_file_groups(file_groups)
                 .with_limit(limit)
                 .with_output_ordering(output_ordering)
                 .with_projection(projection.cloned())
+                .with_statistics(statistics)
                 .build(),
         );
 
@@ -821,18 +848,18 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin<'a>(
-    segments: impl ExactSizeIterator<Item = &'a Segment>,
+async fn round_robin(
+    files: impl Stream<Item = Result<PartitionedFile, BoxError>> + Send,
+    files_len: usize,
     target_partitions: usize,
-) -> Vec<FileGroup> {
-    let size = segments.len().min(target_partitions);
+) -> Result<Vec<FileGroup>, BoxError> {
+    let size = files_len.min(target_partitions);
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, segment) in segments.into_iter().enumerate() {
-        let mut file = PartitionedFile::from(segment.object.clone());
-        file.extensions = Some(Arc::new(segment.id));
-        groups[idx % size].push(file);
+    let mut stream = files.enumerate().boxed();
+    while let Some((idx, file)) = stream.next().await {
+        groups[idx % size].push(file?);
     }
-    groups
+    Ok(groups)
 }
 
 /// Error when listing revisions from object store
