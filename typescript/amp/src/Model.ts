@@ -509,6 +509,9 @@ export const GenrateTokenDuration = Schema.String.pipe(
   Schema.pattern(
     /^-?\d+\.?\d*\s*(sec|secs|second|seconds|s|minute|minutes|min|mins|m|hour|hours|hr|hrs|h|day|days|d|week|weeks|w|year|years|yr|yrs|y)(\s+ago|\s+from\s+now)?$/i,
   ),
+  Schema.annotations({
+    examples: ["7 days", "30 days", "1 hour", "1 year"],
+  }),
 )
 export type GenrateTokenDuration = typeof GenrateTokenDuration.Type
 

@@ -1,6 +1,8 @@
+import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as Console from "effect/Console"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -10,11 +12,11 @@ import { ExitCode } from "../../common.ts"
 
 export const token = Command.make("token", {
   args: {
-    duration: Options.text("duration").pipe(
-      Options.withAlias("d"),
-      Options.withDescription("Duration of the generated access token before it expires"),
-      Options.withSchema(Model.GenrateTokenDuration),
-      Options.withDefault("7 days"),
+    duration: Args.text({ name: "duration" }).pipe(
+      Args.withDescription(
+        "Duration of the generated access token before it expires. Ex: \"7 days\", \"30 days\", \"1 hour\"",
+      ),
+      Args.withSchema(Model.GenrateTokenDuration),
     ),
     audience: Options.text("audience").pipe(
       Options.withAlias("a"),
@@ -72,13 +74,17 @@ export const token = Command.make("token", {
             )),
         )
 
+      const exp = response.exp
+      const expDateTime = DateTime.unsafeMake(exp * 1000)
+      const formatted = DateTime.formatLocal({ timeStyle: "full", dateStyle: "medium" })(expDateTime)
+
       yield* Console.log("Access token generated.")
       yield* Console.log("We do not store this value. You will need to store it.")
       yield* Console.log(
         "Use this as a Authorization Bearer token in requests to query a published Amp Dataset to the Gateway",
       )
       yield* Console.log(`    token:`, response.token)
-      yield* Console.log(`    exp:`, response.exp)
+      yield* Console.log(`    exp:`, formatted)
       return yield* ExitCode.Zero
     })
   ),

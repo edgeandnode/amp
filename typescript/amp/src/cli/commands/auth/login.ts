@@ -230,9 +230,7 @@ const pollForToken = Effect.fn("PollForDeviceToken")(function*(deviceCode: Devic
 
   yield* Effect.logDebug(`Polling response status: ${response.status}`)
 
-  const json = yield* response.json.pipe(
-    Effect.timeout(Duration.seconds(40)),
-  )
+  const json = yield* response.json
   yield* Effect.logDebug(`Polling response body:`, json)
 
   const result = yield* Schema.decodeUnknown(DeviceTokenPollingResponse)(json).pipe(
@@ -272,6 +270,16 @@ const displayUserCodeAndOpenBrowser = Effect.fn("DisplayUserCodeAndOpenBrowser")
   yield* Effect.logInfo(`Enter this verification code in your browser: ${deviceAuth.user_code}`)
 
   const verificationUrl = new URL(deviceAuth.verification_uri)
+
+  // user is not already authenticated - ask if they want to open browser
+  const shouldOpenBrowser = yield* Prompt.confirm({
+    message: "Open browser to authenticate?",
+    initial: true,
+  })
+
+  if (!shouldOpenBrowser) {
+    return yield* Effect.fail(new AuthenticationCancelledError())
+  }
 
   yield* openBrowser(verificationUrl.toString()).pipe(
     Effect.tapError(() =>
@@ -368,27 +376,13 @@ const resolveAuthToken = Effect.fn("ResolveAuthToken")(function*() {
     return true
   }
 
-  // user is not already authenticated - ask if they want to open browser
-  const shouldOpenBrowser = yield* Prompt.confirm({
-    message: "Open browser to authenticate?",
-    initial: true,
-  })
-
-  if (!shouldOpenBrowser) {
-    return yield* Effect.fail(new AuthenticationCancelledError())
-  }
-
   return false
 })
 
 const openBrowser = (url: string) =>
-  Effect.async<void, OpenBrowserError>((resume) => {
-    open(url)
-      .then((subprocess) => {
-        subprocess.on("spawn", () => resume(Effect.void))
-        subprocess.on("error", (err) => resume(Effect.fail(new OpenBrowserError({ url, cause: err }))))
-      })
-      .catch((err) => resume(Effect.fail(new OpenBrowserError({ url, cause: err }))))
+  Effect.tryPromise({
+    try: () => open(url, { wait: false }),
+    catch: (err) => new OpenBrowserError({ url, cause: err }),
   })
 
 export class OpenBrowserError extends Data.TaggedError("Amp/cli/auth/errors/OpenBrowserError")<{
