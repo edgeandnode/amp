@@ -50,7 +50,7 @@ export class RegisterDatasetPayload extends Schema.Class<RegisterDatasetPayload>
 const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.InvalidPayloadFormat)
   .addError(Error.InvalidManifest)
-  .addError(Error.DependencyValidationError)
+  .addError(Error.ManifestValidationError)
   .addError(Error.UnsupportedDatasetKind)
   .addError(Error.ManifestRegistrationError)
   .addError(Error.ManifestLinkingError)
@@ -65,7 +65,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
  *
  * - InvalidPayloadFormat: Request JSON is malformed or invalid.
  * - InvalidManifest: Manifest JSON is malformed or structurally invalid.
- * - DependencyValidationError: SQL queries reference undeclared dependencies.
+ * - ManifestValidationError: Manifest validation error (e.g., non-incremental operations).
  * - UnsupportedDatasetKind: Dataset kind is not supported.
  * - ManifestRegistrationError: Failed to register manifest in system.
  * - ManifestLinkingError: Failed to link manifest to dataset.
@@ -76,7 +76,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
 export type RegisterDatasetError =
   | Error.InvalidPayloadFormat
   | Error.InvalidManifest
-  | Error.DependencyValidationError
+  | Error.ManifestValidationError
   | Error.UnsupportedDatasetKind
   | Error.ManifestRegistrationError
   | Error.ManifestLinkingError
