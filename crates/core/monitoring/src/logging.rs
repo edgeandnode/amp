@@ -77,6 +77,7 @@ const AMP_CRATES: &[&str] = &[
     "metadata_db",
     "monitoring",
     "server",
+    "solana_datasets",
     "tests",
     "worker",
 ];

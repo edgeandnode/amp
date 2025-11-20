@@ -39,6 +39,8 @@ monitoring = { path = "../../core/monitoring" }
 pg_escape.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+snmalloc-rs = { version = "0.3.8", optional = true }
+solana-datasets = { path = "../../extractors/solana" }
 sqlparser.workspace = true
 sqlx = { version = "0.8.6", features = [
     "runtime-tokio",

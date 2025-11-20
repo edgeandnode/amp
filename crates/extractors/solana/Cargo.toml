@@ -1,0 +1,42 @@
+[package]
+name = "solana-datasets"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
+
+[dependencies]
+anyhow.workspace = true
+async-stream.workspace = true
+bincode.workspace = true
+bs58 = "0.5.1"
+common = { path = "../../core/common" }
+datasets-common = { path = "../../core/datasets-common" }
+futures.workspace = true
+monitoring = { path = "../../core/monitoring" }
+reqwest.workspace = true
+schemars = { workspace = true, optional = true }
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+serde_with = "3.9.0"
+solana-clock = "3.0.0"
+solana-client = "3.0.10"
+solana-rpc-client-types = "3.0.10"
+solana-rpc-client-api = "3.0.10"
+solana-sdk = "3.0.0"
+solana-storage-proto = "3.0.10"
+solana-transaction-status-client-types = "3.0.10"
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+yellowstone-faithful-car-parser = "1.0.0"
+zstd.workspace = true
+
+# Not using the workspace version for compatibility with `solana-storage-proto`.
+prost = "0.11.9"
+
+[dev-dependencies]
+fs-err.workspace = true
