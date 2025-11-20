@@ -1,6 +1,6 @@
 pub mod message_stream_with_block_complete;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
@@ -16,10 +16,7 @@ use common::{
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
 use dataset_store::{DatasetStore, resolve_blocks_table};
-use futures::{
-    FutureExt,
-    stream::{self, BoxStream, StreamExt},
-};
+use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{LocationId, NotificationMultiplexerHandle};
 use tokio::{
@@ -132,13 +129,18 @@ impl StreamingQueryHandle {
         // If `tx` has been dropped then the query task has terminated. So we check if it has
         // terminated with errors, and if so send the error as the final item of the stream.
         let get_task_result = async move {
-            // Unwrap: The task is known to have terminated.
-            match join.now_or_never().unwrap() {
-                Ok(Ok(())) => None,
-                Ok(Err(e)) => Some(Err(e)),
-                Err(join_err) => Some(Err(
-                    format!("Streaming task failed to join: {}", join_err).into()
-                )),
+            match tokio::time::timeout(Duration::from_secs(1), join).await {
+                Ok(Ok(Ok(()))) => None,
+                Ok(Ok(Err(e))) => Some(Err(e)),
+                Ok(Err(join_err)) => {
+                    Some(Err(
+                        format!("Streaming task failed to join: {}", join_err).into()
+                    ))
+                }
+
+                // This would only happen under extreme CPU or tokio scheduler contention.
+                // Or blocking `Drop` implementations.
+                Err(_) => Some(Err("Streaming task join timed out".into())),
             }
         };
 
