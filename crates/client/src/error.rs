@@ -97,6 +97,18 @@ pub enum ProtocolError {
     /// ticket, which is required to fetch query results.
     #[error("FlightInfo missing ticket")]
     MissingFlightTicket,
+
+    /// Invalid schema in FlightInfo
+    ///
+    /// This occurs when the server's FlightInfo response contains an invalid
+    /// or malformed Arrow schema in IPC format.
+    ///
+    /// Possible causes:
+    /// - Corrupted IPC message in FlightInfo.schema
+    /// - Incompatible Arrow schema version
+    /// - Invalid flatbuffer encoding
+    #[error("invalid schema in FlightInfo")]
+    InvalidSchema(#[source] common::arrow::error::ArrowError),
 }
 
 // ============================================================================

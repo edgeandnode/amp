@@ -14,14 +14,14 @@ use std::{
 use async_stream::try_stream;
 use common::{
     BlockNum,
-    arrow::array::RecordBatch,
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
     metadata::segments::{BlockRange, ResumeWatermark},
 };
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
-    client::{AmpClient, InvalidationRange, ProtocolMessage, ProtocolStream, ResponseBatch},
+    client::{AmpClient, HasSchema, InvalidationRange, ProtocolMessage, ProtocolStream},
     error::{Error, ReorgError},
     store::StateStore,
 };
@@ -609,10 +609,7 @@ impl IntoFuture for TransactionalStreamBuilder {
                 self.store,
                 self.retention,
                 |resume: Option<ResumeWatermark>| async move {
-                    self.client
-                        .request(&self.sql, resume.as_ref(), true)
-                        .await
-                        .map(|s| s.boxed())
+                    self.client.request(&self.sql, resume.as_ref(), true).await
                 },
             )
             .await
@@ -678,6 +675,7 @@ impl IntoFuture for TransactionalStreamBuilder {
 /// ```
 pub struct TransactionalStream {
     stream: BoxStream<'static, Result<(TransactionEvent, CommitHandle), Error>>,
+    schema: SchemaRef,
 }
 
 impl TransactionalStream {
@@ -693,7 +691,7 @@ impl TransactionalStream {
     /// # Arguments
     /// - `store`: State store for persistence
     /// - `retention`: Retention window in blocks
-    /// - `connect`: Async function that produces a raw response stream, given an optional resume watermark
+    /// - `connect`: Async function that produces a raw stream, given an optional resume watermark
     pub(crate) async fn create<F, Fut>(
         store: Box<dyn StateStore>,
         retention: BlockNum,
@@ -701,7 +699,7 @@ impl TransactionalStream {
     ) -> Result<Self, Error>
     where
         F: FnOnce(Option<ResumeWatermark>) -> Fut,
-        Fut: Future<Output = Result<BoxStream<'static, Result<ResponseBatch, Error>>, Error>>,
+        Fut: Future<Output = Result<crate::client::RawStream, Error>>,
     {
         let actor = StateActor::new(store, retention).await?;
 
@@ -721,7 +719,8 @@ impl TransactionalStream {
         let resume = watermark.map(|(_, ranges)| ResumeWatermark::from_ranges(&ranges));
 
         let raw = connect(resume).await?;
-        let mut protocol = ProtocolStream::new(raw, previous);
+        let schema = raw.schema();
+        let mut protocol = ProtocolStream::new(raw.boxed(), previous, schema.clone());
 
         let stream = try_stream! {
             // Emit rewind if needed (StateManager determines invalidation range)
@@ -736,7 +735,7 @@ impl TransactionalStream {
         }
         .boxed();
 
-        Ok(Self { stream })
+        Ok(Self { stream, schema })
     }
 
     /// High-level consumer: auto-commit after callback succeeds.
@@ -773,6 +772,12 @@ impl TransactionalStream {
             commit.await?;
         }
         Ok(())
+    }
+}
+
+impl HasSchema for TransactionalStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }
 

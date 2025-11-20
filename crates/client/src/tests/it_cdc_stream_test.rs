@@ -24,7 +24,7 @@ async fn create_cdc_stream(
     let responses_clone = responses.clone();
     let transactional = TransactionalStream::create(state_store, retention, move |_| {
         let responses = responses_clone.clone();
-        async move { Ok(MockResponseStream::new(responses).boxed()) }
+        async move { Ok(MockResponseStream::new(responses).into_raw_stream()) }
     })
     .await?;
 
