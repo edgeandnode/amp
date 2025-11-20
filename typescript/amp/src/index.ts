@@ -18,7 +18,7 @@ export const defineDataset = (fn: (context: Context) => typeof Model.DatasetConf
   return (context: Context) => fn(context)
 }
 
-export const eventQuery = (abi: AbiEvent) => {
+export const eventQuery = (abi: AbiEvent, rpcSource: string = "anvil") => {
   const signature = formatAbiItem(abi).replace(/^event /, "")
   // TODO: make this configurable?
   const logsColumns = ["block_hash", "tx_hash", "address", "block_num", "timestamp"]
@@ -26,7 +26,7 @@ export const eventQuery = (abi: AbiEvent) => {
   const eventColumn = `evm_decode_log(topic1, topic2, topic3, data, '${signature}') AS event`
   const logsQuery = `
     SELECT ${[...logsColumns, eventColumn].join(", ")}
-    FROM anvil.logs
+    FROM ${rpcSource}.logs
     WHERE topic0 = evm_topic('${signature}')
   `
 
@@ -45,11 +45,13 @@ export const eventQuery = (abi: AbiEvent) => {
 export const camelToSnake = (str: string) => str.replace(/([a-zA-Z])(?=[A-Z])/g, "$1_").toLowerCase()
 
 export const eventTableName = (abi: AbiEvent) => camelToSnake(abi.name)
-export const eventTable = (abi: AbiEvent) => ({
-  sql: eventQuery(abi),
+export const eventTable = (abi: AbiEvent, rpcSource: string = "anvil") => ({
+  sql: eventQuery(abi, rpcSource),
 })
 
-export const eventTables = (abi: Abi): Record<string, TableDefinition> => {
-  const events = abi.filter((item) => item.type === "event").map((item) => [eventTableName(item), eventTable(item)])
+export const eventTables = (abi: Abi, rpcSource: string = "anvil"): Record<string, TableDefinition> => {
+  const events = abi.filter((item) => item.type === "event").map((
+    item,
+  ) => [eventTableName(item), eventTable(item, rpcSource)])
   return Object.fromEntries(events)
 }
