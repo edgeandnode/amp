@@ -141,14 +141,16 @@ datafusion-datasource = { version = "51" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
-prost = "0.13.3"
-prost-build = "0.13.3"
-tonic = { version = "0.13", features = [
+prost = "0.14.1"
+prost-build = "0.14.1"
+tonic = { version = "0.14", features = [
     "transport",
     "gzip",
     "tls-native-roots",
 ] }
-tonic-build = "0.13"
+tonic-build = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
 
 [profile.dev]
 # Locally measured to reduce total wall clock time of `cargo build` by 34%

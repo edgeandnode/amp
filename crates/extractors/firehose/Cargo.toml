@@ -22,6 +22,7 @@ serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -31,7 +32,7 @@ serde_json.workspace = true
 # These dependencies are only included when the gen_proto cfg flag is enabled
 [target.'cfg(gen_proto)'.build-dependencies]
 prost-build = { workspace = true }
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 
 [lints.rust]
 # Allow the gen_proto cfg flag used for conditional protobuf code generation

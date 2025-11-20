@@ -9,7 +9,6 @@ pub mod dataset;
 mod dataset_kind;
 pub mod evm;
 pub mod metrics;
-#[expect(clippy::doc_overindented_list_items)]
 #[expect(clippy::enum_variant_names)]
 mod proto;
 
