@@ -3,7 +3,7 @@
 use sqlx::{Executor, Postgres};
 
 use super::{Job, JobId, JobStatus, JobStatusUpdateError};
-use crate::{ManifestHash, workers::WorkerNodeId};
+use crate::{DatasetName, DatasetNamespace, ManifestHash, workers::WorkerNodeId};
 
 /// Insert a new job into the queue
 ///
@@ -180,6 +180,41 @@ where
     "#};
     let res = sqlx::query_as(query)
         .bind(manifest_hash)
+        .fetch_all(exe)
+        .await?;
+    Ok(res)
+}
+
+/// List jobs by dataset reference (namespace, name, and manifest hash)
+///
+/// Queries the job descriptor JSONB field directly, avoiding joins to physical_tables.
+pub async fn list_by_dataset_reference<'c, E>(
+    exe: E,
+    dataset_namespace: DatasetNamespace<'_>,
+    dataset_name: DatasetName<'_>,
+    manifest_hash: ManifestHash<'_>,
+) -> Result<Vec<Job>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        WHERE descriptor->>'dataset_namespace' = $1
+          AND descriptor->>'dataset_name' = $2
+          AND descriptor->>'manifest_hash' = $3
+        ORDER BY id ASC
+    "#};
+    let res = sqlx::query_as(query)
+        .bind(&dataset_namespace)
+        .bind(&dataset_name)
+        .bind(&manifest_hash)
         .fetch_all(exe)
         .await?;
     Ok(res)

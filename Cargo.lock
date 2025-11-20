@@ -2550,6 +2550,7 @@ dependencies = [
  "axum 0.8.6",
  "common",
  "dataset-store",
+ "datasets-common",
  "dump",
  "metadata-db",
  "monitoring",

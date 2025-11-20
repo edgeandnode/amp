@@ -28,8 +28,9 @@
 use std::{sync::Arc, time::Duration};
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsError,
-    ListWorkersError, ScheduleJobError, SchedulerJobs, SchedulerWorkers, StopJobError,
+    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsByDatasetError,
+    ListJobsError, ListWorkersError, ScheduleJobError, SchedulerJobs, SchedulerWorkers,
+    StopJobError,
 };
 use async_trait::async_trait;
 use common::{
@@ -37,6 +38,7 @@ use common::{
     catalog::{JobLabels, physical::PhysicalTable},
     config::Config,
 };
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
 use rand::seq::IndexedRandom as _;
@@ -310,6 +312,22 @@ impl SchedulerJobs for Scheduler {
         metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Failed.into()])
             .await
             .map_err(DeleteJobsByStatusError)
+    }
+
+    async fn list_jobs_by_dataset(
+        &self,
+        namespace: &Namespace,
+        name: &Name,
+        hash: &Hash,
+    ) -> Result<Vec<Job>, ListJobsByDatasetError> {
+        let jobs =
+            metadata_db::jobs::list_by_dataset_reference(&self.metadata_db, namespace, name, hash)
+                .await
+                .map_err(ListJobsByDatasetError)?
+                .into_iter()
+                .map(Into::into)
+                .collect();
+        Ok(jobs)
     }
 }
 

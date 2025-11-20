@@ -138,6 +138,29 @@ where
     .map_err(Error::Database)
 }
 
+/// List jobs by dataset reference (namespace, name, and manifest hash)
+///
+/// Queries the job descriptor JSONB field for matching jobs, avoiding joins to physical_tables.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_by_dataset_reference<'c, E>(
+    exe: E,
+    dataset_namespace: impl Into<crate::DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<crate::DatasetName<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_by_dataset_reference(
+        exe,
+        dataset_namespace.into(),
+        dataset_name.into(),
+        manifest_hash.into(),
+    )
+    .await
+    .map_err(Error::Database)
+}
+
 /// Given a worker node ID, return all the scheduled jobs
 ///
 /// A job is considered scheduled if it's in one of the following non-terminal states:
