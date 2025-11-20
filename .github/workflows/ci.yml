@@ -133,7 +133,7 @@ jobs:
       - name: Run ampup tests
         run: just test-ampup --verbose
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   rustfmt:
     name: Check rustfmt style
