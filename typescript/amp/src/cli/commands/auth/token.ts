@@ -14,7 +14,7 @@ export const token = Command.make("token", {
       Options.withAlias("d"),
       Options.withDescription("Duration of the generated access token before it expires"),
       Options.withSchema(Model.GenrateTokenDuration),
-      Options.withDefault("1 hour"),
+      Options.withDefault("7 days"),
     ),
     audience: Options.text("audience").pipe(
       Options.withAlias("a"),
