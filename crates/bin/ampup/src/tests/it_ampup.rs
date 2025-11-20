@@ -168,6 +168,7 @@ async fn uninstall_fails_for_non_existent_version() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Re-enable this and bump versions once the repository is public"]
 async fn install_latest_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
@@ -194,6 +195,7 @@ async fn install_latest_version() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Re-enable this and bump versions once the repository is public"]
 async fn install_specific_version() -> Result<()> {
     let temp = TempInstallDir::new()?;
 
@@ -219,6 +221,7 @@ async fn install_specific_version() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Re-enable this and bump versions once the repository is public"]
 async fn install_already_installed_version_switches_to_it() -> Result<()> {
     let temp = TempInstallDir::new()?;
     let version = "v0.0.21";
