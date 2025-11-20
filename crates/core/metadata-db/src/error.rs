@@ -136,6 +136,21 @@ pub enum Error {
     #[error("Error parsing URL: {0}")]
     UrlParse(#[source] url::ParseError),
 
+    /// Invalid file path provided
+    ///
+    /// This occurs when a file path cannot be processed or parsed correctly,
+    /// such as when extracting the file name from a path fails.
+    ///
+    /// Common causes:
+    /// - Path does not contain a valid file name component
+    /// - Path contains invalid UTF-8 characters
+    /// - Path is empty or malformed
+    /// - Path ends with a directory separator
+    ///
+    /// This typically indicates invalid input data or a bug in path construction.
+    #[error("Invalid file path: {0}")]
+    InvalidFilePath(String),
+
     /// Failed to update job status
     ///
     /// This occurs when attempting to transition a job to a new status but the

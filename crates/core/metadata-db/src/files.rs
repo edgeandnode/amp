@@ -16,7 +16,8 @@ pub type FooterBytes = Vec<u8>;
 
 /// Insert new file metadata record
 ///
-/// Creates a new file metadata entry and stores the footer in the separate cache table.
+/// Creates a new file metadata entry and stores the footer in both the file_metadata table
+/// and the separate cache table for backwards compatibility and rollback support.
 /// Uses ON CONFLICT DO NOTHING for idempotency. If the file already exists, ensures
 /// the footer is also stored.
 #[instrument(skip(executor, footer))]
@@ -24,6 +25,7 @@ pub type FooterBytes = Vec<u8>;
 pub async fn insert<'e, E>(
     executor: E,
     location_id: LocationId,
+    file_name: &'e str,
     file_path: String,
     object_size: u64,
     object_e_tag: Option<String>,
@@ -34,25 +36,25 @@ pub async fn insert<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    // Begin a transaction to ensure atomicity
-
-    // Insert file metadata and footer in a single statement using CTEs
+    // Insert file metadata with both file_name and file_path, and footer in both locations
     // This ensures atomicity and only requires one database round-trip
+    // We store footer in both file_metadata and file_footer_cache for rollback support
     let query = indoc::indoc! {r#"
         WITH file_ins AS (
-            INSERT INTO file_metadata (location_id, file_path, object_size, object_e_tag, object_version, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO file_metadata (location_id, file_name, file_path, object_size, object_e_tag, object_version, metadata, footer)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (location_id, file_path) DO NOTHING
             RETURNING id
         )
         INSERT INTO file_footer_cache (file_id, footer)
-        SELECT id, $7 FROM file_ins
+        SELECT id, $8 FROM file_ins
         ON CONFLICT (file_id) DO NOTHING
     "#};
 
     sqlx::query(query)
         .bind(location_id)
-        .bind(file_path)
+        .bind(file_name)
+        .bind(file_path.to_string())
         .bind(object_size as i64)
         .bind(object_e_tag)
         .bind(object_version)

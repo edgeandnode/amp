@@ -34,7 +34,7 @@ pub async fn commit_metadata(
     location_id: LocationId,
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
-    let file_path = location.as_ref().to_string();
+    let file_path = location;
     let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db
         .register_file(

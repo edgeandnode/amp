@@ -85,10 +85,11 @@ pub async fn extract_footer_bytes_from_file(
 pub async fn amp_metadata_from_parquet_file(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ParquetMeta, FooterBytes), BoxError> {
+) -> Result<(Path, ParquetMeta, FooterBytes), BoxError> {
     let parquet_metadata = extract_parquet_metadata_from_file(object_meta, object_store).await?;
 
     let file_metadata = parquet_metadata.file_metadata();
+    let file_path = object_meta.location.clone();
 
     let key_value_metadata =
         file_metadata
@@ -122,8 +123,6 @@ pub async fn amp_metadata_from_parquet_file(
                 &object_meta.location, e
             ))
         })?;
-
-    let file_path = object_meta.location.as_ref().to_string();
 
     let mut footer_bytes = Vec::new();
 

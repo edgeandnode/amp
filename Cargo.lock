@@ -5760,6 +5760,7 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
+ "object_store",
  "pgtemp",
  "serde",
  "serde_json",
