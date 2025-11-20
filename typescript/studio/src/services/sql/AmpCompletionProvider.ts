@@ -17,14 +17,8 @@
  * @author SQL Intellisense System
  */
 import type { StudioModel } from "@edgeandnode/amp"
-import type {
-  CancellationToken,
-  editor,
-  IMarkdownString,
-  IRange,
-  Position,
-} from "monaco-editor/esm/vs/editor/editor.api"
-import { languages } from "monaco-editor/esm/vs/editor/editor.api"
+import type { CancellationToken, editor, IMarkdownString, IRange, Position } from "monaco-editor"
+import { languages } from "monaco-editor"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types.ts"

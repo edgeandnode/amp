@@ -16,7 +16,7 @@
  * @file contextAnalyzer.ts
  * @author SQL Intellisense System
  */
-import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
+import type { Position } from "monaco-editor"
 
 import type { CompletionConfig, MonacoITextModel, QueryContext, SqlClause, SqlToken, SqlTokenType } from "./types.ts"
 import { DEFAULT_COMPLETION_CONFIG } from "./types.ts"

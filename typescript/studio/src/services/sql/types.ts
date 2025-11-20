@@ -23,7 +23,7 @@ import type {
   MarkerSeverity,
   Position,
   Range,
-} from "monaco-editor/esm/vs/editor/editor.api"
+} from "monaco-editor"
 
 import type { UserDefinedFunctionName } from "../../constants.ts"
 

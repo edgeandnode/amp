@@ -17,8 +17,8 @@
 import type { StudioModel } from "@edgeandnode/amp"
 import { DatasetManifest } from "@edgeandnode/amp/Model"
 import { Schema } from "effect"
-import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+import type { editor, IDisposable, Position } from "monaco-editor"
+import * as monaco from "monaco-editor"
 
 import { AmpCompletionProvider } from "./AmpCompletionProvider.ts"
 import { convertManifestToMetadata, mergeMetadataSources } from "./manifestConverter.ts"
