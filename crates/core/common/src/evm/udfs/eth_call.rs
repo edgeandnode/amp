@@ -116,6 +116,12 @@ impl EthCall {
                     DataType::Utf8,
                 ]),
                 volatility: Volatility::Volatile,
+                parameter_names: Some(vec![
+                    "from".to_string(),
+                    "to".to_string(),
+                    "input_data".to_string(),
+                    "block".to_string(),
+                ]),
             },
             fields: Fields::from_iter([
                 Field::new("data", DataType::Binary, true),

@@ -589,7 +589,7 @@ impl TableProvider for TableSnapshot {
                 .with_file_groups(file_groups)
                 .with_limit(limit)
                 .with_output_ordering(output_ordering)
-                .with_projection(projection.cloned())
+                .with_projection_indices(projection.cloned())
                 .with_statistics(statistics)
                 .build(),
         );

@@ -110,7 +110,7 @@ semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 serde_yaml = "0.9.34"
-sqlparser = "0.58"
+sqlparser = "0.59"
 tempfile = "3.13.0"
 thiserror = "2.0"
 tokio = { version = "1.36.0", features = [
@@ -133,11 +133,11 @@ uuid = { version = "1.11.0", features = ["v7"] }
 zstd = "0.13.3"
 
 # Datafusion and Arrow crates
-arrow = "56"
-arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
-datafusion = { version = "50", features = ["serde"] }
-datafusion-tracing = { version = "50" }
-datafusion-datasource = { version = "50" }
+arrow = "57"
+arrow-flight = { version = "57", features = ["flight-sql-experimental"] }
+datafusion = { version = "51", features = ["serde"] }
+datafusion-tracing = { version = "51" }
+datafusion-datasource = { version = "51" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow

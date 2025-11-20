@@ -395,7 +395,7 @@ fn append_sol_value_to_builder(
                 .append_value(i64::try_from(s)?),
             n if n <= DEC_128_MAX_BINARY_PREC => {
                 let val = i128::try_from(s)?;
-                validate_decimal_precision(val, DEC128_PREC)?;
+                validate_decimal_precision(val, DEC128_PREC, 0)?;
                 let builder = builder
                     .as_any_mut()
                     .downcast_mut::<Decimal128Builder>()
@@ -406,7 +406,7 @@ fn append_sol_value_to_builder(
             }
             n if n <= DEC_256_MAX_BINARY_PREC => {
                 let val = i256::from_le_bytes(s.to_le_bytes());
-                validate_decimal256_precision(val, DEC256_PREC)?;
+                validate_decimal256_precision(val, DEC256_PREC, 0)?;
                 let builder = builder
                     .as_any_mut()
                     .downcast_mut::<Decimal256Builder>()
@@ -455,7 +455,7 @@ fn append_sol_value_to_builder(
                 .append_value(u64::try_from(u)?),
             n if n <= DEC_128_MAX_BINARY_PREC => {
                 let val = i128::try_from(u)?;
-                validate_decimal_precision(val, DEC128_PREC)?;
+                validate_decimal_precision(val, DEC128_PREC, 0)?;
                 let builder = builder
                     .as_any_mut()
                     .downcast_mut::<Decimal128Builder>()
@@ -466,7 +466,7 @@ fn append_sol_value_to_builder(
             }
             n if n <= DEC_256_MAX_BINARY_PREC => {
                 let val = i256::from_le_bytes(u.to_le_bytes());
-                validate_decimal256_precision(val, DEC256_PREC)?;
+                validate_decimal256_precision(val, DEC256_PREC, 0)?;
                 let builder = builder
                     .as_any_mut()
                     .downcast_mut::<Decimal256Builder>()

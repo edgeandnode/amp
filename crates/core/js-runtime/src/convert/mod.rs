@@ -327,6 +327,8 @@ impl ToV8 for ScalarValue {
             | ScalarValue::DurationMicrosecond(_)
             | ScalarValue::DurationNanosecond(_)
             | ScalarValue::Union(_, _, _)
+            | ScalarValue::Decimal32(_, _, _)
+            | ScalarValue::Decimal64(_, _, _)
             | ScalarValue::Dictionary(_, _) => Err(BoxError::from(format!(
                 "{} not yet supported in functions",
                 self.data_type()
