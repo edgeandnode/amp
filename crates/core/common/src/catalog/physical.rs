@@ -761,7 +761,7 @@ impl TableProvider for TableSnapshot {
         let (file_groups, statistics) = {
             let file_count = self.canonical_segments.len();
             let file_stream = stream::iter(self.canonical_segments.iter())
-                .then(|s| self.segment_to_partitioned_file(&s));
+                .then(|s| self.segment_to_partitioned_file(s));
             let partitioned = round_robin(file_stream, file_count, target_partitions).await?;
             compute_all_files_statistics(partitioned, table_schema.clone(), true, false)?
         };
