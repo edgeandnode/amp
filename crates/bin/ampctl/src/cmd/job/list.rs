@@ -55,8 +55,6 @@ impl std::fmt::Display for ListResult {
                 if let Some(descriptor) = show_dataset_descriptor(&job.descriptor) {
                     writeln!(f, "    Descriptor: {descriptor}")?;
                 }
-                writeln!(f, "    Created: {}", job.created_at)?;
-                writeln!(f, "    Updated: {}", job.updated_at)?;
             }
 
             if let Some(next_cursor) = &self.data.next_cursor {
