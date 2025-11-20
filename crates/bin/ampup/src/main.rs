@@ -1,9 +1,8 @@
 use ampup::{DEFAULT_REPO, commands};
-use anyhow::Result;
-use clap::{Parser, Subcommand};
+use console::style;
 
 /// The ampd installer and version manager
-#[derive(Parser, Debug)]
+#[derive(Debug, clap::Parser)]
 #[command(name = "ampup")]
 #[command(about = "The ampd installer and version manager", long_about = None)]
 #[command(version = env!("VERGEN_GIT_DESCRIBE"))]
@@ -12,7 +11,7 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug, clap::Subcommand)]
 enum Commands {
     /// Initialize ampup (called by install script)
     #[command(hide = true)]
@@ -122,7 +121,40 @@ enum Commands {
         jobs: Option<usize>,
     },
 
-    /// Update ampup itself
+    /// Update to the latest ampd version (default behavior)
+    Update {
+        /// Installation directory (defaults to $AMP_DIR or $XDG_CONFIG_HOME/.amp or $HOME/.amp)
+        #[arg(long, env = "AMP_DIR")]
+        install_dir: Option<std::path::PathBuf>,
+
+        /// GitHub repository in format "owner/repo"
+        #[arg(long, default_value_t = DEFAULT_REPO.to_string())]
+        repo: String,
+
+        /// GitHub token for private repository access (defaults to $GITHUB_TOKEN)
+        #[arg(long, env = "GITHUB_TOKEN", hide_env = true)]
+        github_token: Option<String>,
+
+        /// Override architecture detection (x86_64, aarch64)
+        #[arg(long)]
+        arch: Option<String>,
+
+        /// Override platform detection (linux, darwin)
+        #[arg(long)]
+        platform: Option<String>,
+    },
+
+    /// Manage the ampup executable
+    #[command(name = "self")]
+    SelfCmd {
+        #[command(subcommand)]
+        command: SelfCommands,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum SelfCommands {
+    /// Update ampup itself to the latest version
     Update {
         /// GitHub repository in format "owner/repo"
         #[arg(long, default_value_t = DEFAULT_REPO.to_string())]
@@ -132,20 +164,22 @@ enum Commands {
         #[arg(long, env = "GITHUB_TOKEN", hide_env = true)]
         github_token: Option<String>,
     },
+
+    /// Print the version of ampup
+    Version,
 }
 
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
         // Print the error with some custom formatting
-        use console::style;
         eprintln!("{} {}", style("✗").red().bold(), e);
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<()> {
-    let cli = Cli::parse();
+async fn run() -> anyhow::Result<()> {
+    let cli = <Cli as clap::Parser>::parse();
 
     match cli.command {
         Some(Commands::Init {
@@ -195,11 +229,26 @@ async fn run() -> Result<()> {
         }) => {
             commands::build::run(install_dir, repo, path, branch, commit, pr, name, jobs).await?;
         }
-        Some(Commands::Update { repo, github_token }) => {
-            commands::update::run(repo, github_token).await?;
+        Some(Commands::Update {
+            install_dir,
+            repo,
+            github_token,
+            arch,
+            platform,
+        }) => {
+            // Install latest version (same as default behavior)
+            commands::install::run(install_dir, repo, github_token, None, arch, platform).await?;
         }
+        Some(Commands::SelfCmd { command }) => match command {
+            SelfCommands::Update { repo, github_token } => {
+                commands::update::run(repo, github_token).await?;
+            }
+            SelfCommands::Version => {
+                println!("ampup {}", env!("VERGEN_GIT_DESCRIBE"));
+            }
+        },
         None => {
-            // Default: install latest version
+            // Default: install latest version (same as 'ampup update')
             commands::install::run(
                 std::env::var("AMP_DIR").ok().map(std::path::PathBuf::from),
                 DEFAULT_REPO.to_string(),
