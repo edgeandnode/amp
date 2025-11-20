@@ -13,7 +13,7 @@
  */
 
 import type { StudioModel } from "@edgeandnode/amp"
-import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
+import { MarkerSeverity } from "monaco-editor"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { SqlValidation } from "../../../src/services/sql/SqlValidation.ts"

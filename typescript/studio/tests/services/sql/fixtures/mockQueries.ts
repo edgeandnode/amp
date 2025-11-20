@@ -3,7 +3,7 @@
  * Covers various SQL patterns and edge cases
  */
 
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+import * as monaco from "monaco-editor"
 
 export interface TestQuery {
   /** The SQL query text */

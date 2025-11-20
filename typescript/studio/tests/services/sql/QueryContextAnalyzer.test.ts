@@ -2,7 +2,7 @@
  * Unit tests for QueryContextAnalyzer
  * Tests SQL context analysis, clause detection, and cursor position handling
  */
-import { Position } from "monaco-editor/esm/vs/editor/editor.api"
+import { Position } from "monaco-editor"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { QueryContextAnalyzer } from "../../../src/services/sql/QueryContextAnalyzer"

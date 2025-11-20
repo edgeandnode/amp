@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.42",
+  "version": "0.0.44",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -49,38 +49,36 @@
   },
   "dependencies": {
     "@effect/cli": "^0.72.1",
-    "abitype": "^1.1.1",
+    "abitype": "^1.1.2",
     "jiti": "^2.6.1",
-    "jose": "^6.1.1",
+    "jose": "^6.1.2",
     "js-toml": "^1.0.2",
     "minimatch": "^10.1.1",
-    "open": "^10.2.0",
-    "viem": "^2.39.0"
+    "open": "^11.0.0",
+    "viem": "^2.39.3"
   },
   "peerDependencies": {
-    "@bufbuild/protobuf": "2.6.3",
+    "@bufbuild/protobuf": "^2.10.1",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-node": "^2.1.1",
-    "@effect/cluster": "^0.52.8",
-    "@effect/platform": "^0.93.0",
-    "@effect/platform-node": "^0.100.0",
+    "@effect/platform": "^0.93.3",
+    "@effect/platform-node": "^0.101.0",
     "apache-arrow": "^21.1.0",
-    "effect": "^3.19.3"
+    "effect": "^3.19.5"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.59.0",
+    "@bufbuild/buf": "^1.60.0",
     "@bufbuild/protoc-gen-es": "^2.10.1",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-node": "^2.1.1",
-    "@effect/cluster": "^0.52.9",
-    "@effect/platform": "^0.93.1",
-    "@effect/platform-node": "^0.100.0",
+    "@effect/platform": "^0.93.3",
+    "@effect/platform-node": "^0.101.0",
     "@effect/vitest": "^0.27.0",
     "@types/node": "^24.10.1",
     "apache-arrow": "^21.1.0",
-    "effect": "^3.19.3",
+    "effect": "^3.19.5",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.8"
+    "vitest": "^4.0.12"
   }
 }

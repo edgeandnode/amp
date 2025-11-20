@@ -2,7 +2,7 @@
  * Test utilities for SQL intellisense testing
  * Provides helpers for creating Monaco models and testing completion providers
  */
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+import * as monaco from "monaco-editor"
 
 /**
  * Creates a Monaco editor model for testing

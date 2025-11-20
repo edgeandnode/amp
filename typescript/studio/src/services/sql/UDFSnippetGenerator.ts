@@ -15,8 +15,8 @@
  * @file udfSnippets.ts
  * @author SQL Intellisense System
  */
-import type { IMarkdownString, Position } from "monaco-editor/esm/vs/editor/editor.api"
-import { languages } from "monaco-editor/esm/vs/editor/editor.api"
+import type { IMarkdownString, Position } from "monaco-editor"
+import { languages } from "monaco-editor"
 
 import type { UserDefinedFunctionName } from "../../constants.ts"
 import type { UserDefinedFunction } from "./types.ts"

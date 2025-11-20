@@ -3,7 +3,7 @@
  * Tests table/column/UDF completions, context filtering, and Monaco integration
  */
 
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+import * as monaco from "monaco-editor"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { AmpCompletionProvider } from "../../../src/services/sql/AmpCompletionProvider"

@@ -12,7 +12,7 @@
   "devDependencies": {
     "@edgeandnode/amp": "workspace:*",
     "@effect/eslint-plugin": "^0.3.2",
-    "@effect/language-service": "^0.55.4",
+    "@effect/language-service": "^0.56.0",
     "@eslint/js": "^9.39.1",
     "eslint": "^9.39.1",
     "eslint-import-resolver-typescript": "^4.4.4",
@@ -21,7 +21,7 @@
     "eslint-plugin-sort-destructure-keys": "^2.0.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.4",
-    "vitest": "^4.0.8"
+    "typescript-eslint": "^8.47.0",
+    "vitest": "^4.0.12"
   }
 }

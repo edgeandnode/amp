@@ -17,7 +17,7 @@
  */
 import type { StudioModel } from "@edgeandnode/amp"
 import { Array as EffectArray } from "effect"
-import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
+import { MarkerSeverity } from "monaco-editor"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type {
