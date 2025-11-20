@@ -15,16 +15,35 @@ use datafusion::{
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
 use foyer::Cache;
-use futures::future::BoxFuture;
+use futures::{TryFutureExt as _, future::BoxFuture};
 use metadata_db::{FileId, LocationId, MetadataDb};
 use object_store::ObjectStore;
+
+use crate::BoxError;
+
+type ParquetMetaDataCache = Cache<FileId, Arc<ParquetMetaData>>;
 
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {
     pub location_id: LocationId,
     pub metadata_db: MetadataDb,
     pub object_store: Arc<dyn ObjectStore>,
-    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
+    pub parquet_footer_cache: ParquetMetaDataCache,
+}
+
+impl AmpReaderFactory {
+    pub async fn get_cached_metadata(
+        &self,
+        file: FileId,
+    ) -> Result<Arc<ParquetMetaData>, BoxError> {
+        get_cached_metadata(
+            file,
+            self.parquet_footer_cache.clone(),
+            self.metadata_db.clone(),
+        )
+        .await
+        .map_err(|e| e.into())
+    }
 }
 
 impl ParquetFileReaderFactory for AmpReaderFactory {
@@ -70,7 +89,7 @@ pub struct AmpReader {
     pub metadata_db: MetadataDb,
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
-    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
+    pub parquet_footer_cache: ParquetMetaDataCache,
 }
 
 impl AsyncFileReader for AmpReader {
@@ -96,26 +115,36 @@ impl AsyncFileReader for AmpReader {
         let metadata_db = self.metadata_db.clone();
         let cache = self.parquet_footer_cache.clone();
 
-        Box::pin(async move {
-            let cache_key = self.file_id;
-
-            cache
-                .fetch(cache_key, || async move {
-                    // Cache miss, fetch from database
-                    let footer = metadata_db
-                        .get_file_footer_bytes(cache_key)
-                        .await
-                        .map_err(|e| foyer::Error::Other(e.into()))?;
-
-                    let metadata = ParquetMetaDataReader::new()
-                        .with_page_index_policy(PageIndexPolicy::Required)
-                        .parse_and_finish(&Bytes::from_owner(footer))
-                        .map_err(|e| foyer::Error::Other(e.into()))?;
-                    Ok(Arc::new(metadata))
-                })
-                .await
-                .map(|c| c.value().clone())
-                .map_err(|e: foyer::Error| ParquetError::External(e.into()))
-        })
+        Box::pin(
+            get_cached_metadata(self.file_id, cache.clone(), metadata_db.clone())
+                .map_err(|e| ParquetError::External(e.into())),
+        )
     }
+}
+
+async fn get_cached_metadata(
+    file: FileId,
+    cache: ParquetMetaDataCache,
+    metadata_db: MetadataDb,
+) -> Result<Arc<ParquetMetaData>, foyer::Error> {
+    let file_id = file;
+    let metadata_db = metadata_db.clone();
+    let cache = cache.clone();
+
+    cache
+        .fetch(file_id, || async move {
+            // Cache miss, fetch from database
+            let footer = metadata_db
+                .get_file_footer_bytes(file_id)
+                .await
+                .map_err(|e| foyer::Error::Other(e.into()))?;
+
+            let metadata = ParquetMetaDataReader::new()
+                .with_page_index_policy(PageIndexPolicy::Required)
+                .parse_and_finish(&Bytes::from_owner(footer))
+                .map_err(|e| foyer::Error::Other(e.into()))?;
+            Ok(Arc::new(metadata))
+        })
+        .await
+        .map(|c| c.value().clone())
 }

@@ -2376,6 +2376,7 @@ dependencies = [
  "bytes",
  "chrono",
  "datafusion",
+ "datafusion-datasource",
  "datafusion-tracing",
  "datasets-common",
  "figment",
