@@ -1,13 +1,8 @@
 - name: restore_eth_rpc
   restore: _/eth_rpc@0.0.0
 
-- name: register_non_incremental
+- name: register_non_incremental_fails
   dataset: non_incremental
   tag: "0.0.0"
-  end: 15000000
-
-- name: dump_non_incremental_fails
-  dataset: _/non_incremental@0.0.0
-  end: 15000000
   failure: |
     non-incremental operation: Aggregate

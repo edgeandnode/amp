@@ -401,7 +401,7 @@ pub async fn validate(
     // - Bare function references can be created as UDFs or are assumed to be built-ins
     // - Table references use valid dataset aliases from dependencies
     // - Schema compatibility across dependencies
-    planning_ctx_for_sql_tables_with_deps_and_funcs(
+    let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
         store,
         references,
         dependencies,
@@ -444,6 +444,36 @@ pub async fn validate(
             ManifestValidationError::EthCallNotAvailable(err)
         }
     })?;
+
+    // Step 4: Validate that all table SQL queries are incremental
+    // Incremental processing is required for derived datasets to efficiently update
+    // as new blocks arrive. This check ensures no non-incremental operations are used.
+    for (table_name, table) in &manifest.tables {
+        let TableInput::View(View { sql }) = &table.input;
+
+        // Parse SQL (already validated in Step 2, but need Statement for planning)
+        let stmt =
+            common::sql::parse(sql).map_err(|err| ManifestValidationError::InvalidTableSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+
+        // Plan the SQL query to a logical plan
+        let plan = planning_ctx.plan_sql(stmt).await.map_err(|err| {
+            ManifestValidationError::NonIncrementalSql {
+                table_name: table_name.clone(),
+                source: Box::new(err) as BoxError,
+            }
+        })?;
+
+        // Validate that the plan can be processed incrementally
+        // This checks for non-incremental operations like aggregations, sorts, limits, outer joins, etc.
+        plan.is_incremental()
+            .map_err(|err| ManifestValidationError::NonIncrementalSql {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+    }
 
     Ok(())
 }
@@ -570,4 +600,35 @@ pub enum ManifestValidationError {
     /// A table reference uses an alias that was not provided in the dependencies map.
     #[error("Dependency alias not found: {0}")]
     DependencyAliasNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Non-incremental SQL operation in table query
+    ///
+    /// This occurs when a table's SQL query contains operations that cannot be
+    /// processed incrementally (aggregations, sorts, limits, outer joins, window
+    /// functions, distinct, or recursive queries).
+    ///
+    /// Incremental processing is required for derived datasets to efficiently
+    /// update as new blocks arrive. Non-incremental operations would require
+    /// recomputing the entire table on each update.
+    ///
+    /// Common non-incremental operations:
+    /// - Aggregations: COUNT, SUM, MAX, MIN, AVG, GROUP BY
+    /// - Sorting: ORDER BY
+    /// - Deduplication: DISTINCT
+    /// - Limiting: LIMIT, TOP
+    /// - Outer joins: LEFT JOIN, RIGHT JOIN, FULL JOIN
+    /// - Window functions: ROW_NUMBER, RANK, LAG, LEAD
+    /// - Recursive queries: WITH RECURSIVE
+    ///
+    /// To resolve this error:
+    /// - Remove aggregations and use raw data or pre-aggregated sources
+    /// - Replace outer joins with inner joins
+    /// - Remove sorting, limiting, and window functions
+    /// - Ensure queries only use incremental operations (projection, filter, inner join, union)
+    #[error("Table '{table_name}' contains non-incremental SQL: {source}")]
+    NonIncrementalSql {
+        table_name: TableName,
+        #[source]
+        source: BoxError,
+    },
 }
