@@ -97,10 +97,8 @@ pub struct FileInfo {
     /// Location ID this file belongs to (64-bit integer)
     #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub location_id: LocationId,
-    /// Name of the file (e.g., "blocks_0000000000_0000099999.parquet")
-    pub file_name: String,
-    /// Base location URL (e.g., "s3://bucket/path/") - combine with file_name for full file URL
-    pub url: String,
+    /// Full path of the file (e.g., "s3://bucket/path/blocks_0000000000_0000099999.parquet")
+    pub file_path: String,
     /// Size of the file object in bytes
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object_size: Option<i64>,
@@ -118,15 +116,12 @@ pub struct FileInfo {
 impl From<metadata_db::FileMetadataWithDetails> for FileInfo {
     /// Converts a database `FileMetadataWithDetails` record into an API-friendly `FileInfo`
     ///
-    /// This conversion handles:
-    /// - Converting the base location URL to `String` for JSON serialization
-    /// - Preserving all other fields as-is from the database record
+    /// This conversion preserves all fields from the database record.
     fn from(value: metadata_db::FileMetadataWithDetails) -> Self {
         Self {
             id: value.id,
             location_id: value.location_id,
-            file_name: value.file_name,
-            url: value.url.to_string(),
+            file_path: value.file_path,
             object_size: value.object_size,
             object_e_tag: value.object_e_tag,
             object_version: value.object_version,

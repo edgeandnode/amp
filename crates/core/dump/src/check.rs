@@ -40,7 +40,15 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             source: QueryError::DatasetError(err),
         })?;
 
-    let registered_files: BTreeSet<String> = files.into_iter().map(|m| m.file_name).collect();
+    let registered_files: BTreeSet<String> = files
+        .into_iter()
+        .filter_map(|m| {
+            // Extract filename from full path
+            object_store::path::Path::parse(&m.file_path)
+                .ok()
+                .and_then(|p| p.filename().map(|s| s.to_string()))
+        })
+        .collect();
 
     let store = table.object_store();
     let path = table.path();

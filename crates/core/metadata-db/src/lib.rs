@@ -215,7 +215,7 @@ impl MetadataDb {
     pub async fn register_file(
         &self,
         location_id: LocationId,
-        file_name: String,
+        file_path: String,
         object_size: u64,
         object_e_tag: Option<String>,
         object_version: Option<String>,
@@ -225,7 +225,7 @@ impl MetadataDb {
         files::insert(
             &*self.pool,
             location_id,
-            file_name,
+            file_path,
             object_size,
             object_e_tag,
             object_version,
@@ -370,7 +370,7 @@ impl MetadataDb {
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
-                  , file_metadata.file_name
+                  , file_metadata.file_path
                   , CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id

@@ -413,7 +413,7 @@ impl PhysicalTable {
             .map(|object_meta| {
                 let object_store = object_store.clone();
                 async move {
-                    let (file_name, amp_meta, footer) =
+                    let (file_path, amp_meta, footer) =
                         amp_metadata_from_parquet_file(&object_meta, object_store)
                             .await
                             .map_err(RestoreError::ReadParquetMetadata)?;
@@ -429,7 +429,7 @@ impl PhysicalTable {
                     } = object_meta;
 
                     Ok((
-                        file_name,
+                        file_path,
                         object_size,
                         object_e_tag,
                         object_version,
@@ -442,12 +442,12 @@ impl PhysicalTable {
 
         // Register all files in the metadata database as they complete
         while let Some(result) = file_stream.next().await {
-            let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
+            let (file_path, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
                 result?;
             metadata_db
                 .register_file(
                     location_id,
-                    file_name,
+                    file_path,
                     object_size,
                     object_e_tag,
                     object_version,
@@ -617,14 +617,14 @@ impl PhysicalTable {
             .map(|result| {
                 let FileMetadata {
                     file_id,
-                    file_name,
+                    file_path,
                     object_meta,
                     parquet_meta: ParquetMeta { mut ranges, .. },
                     ..
                 } = result?;
                 if ranges.len() != 1 {
                     return Err(BoxError::from(format!(
-                        "expected exactly 1 range for {file_name}"
+                        "expected exactly 1 range for {file_path}"
                     )));
                 }
                 Ok(Segment {
