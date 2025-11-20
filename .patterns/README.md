@@ -29,6 +29,15 @@ This directory provides reusable solutions and best practices for Amp Core devel
 
 ## 🚨 CRITICAL PRINCIPLES
 
+These patterns prioritize:
+
+1. **Safety First** - Production code must never panic unexpectedly
+2. **Type-Driven Design** - Use the type system to prevent entire classes of errors at compile time
+3. **Clarity** - Explicit error handling makes code paths visible and maintainable
+4. **Rust Idioms** - Following Rust 2018+ conventions and ecosystem best practices
+5. **Production Quality** - Code that handles errors gracefully and provides rich debugging context
+6. **Compile-Time Guarantees** - Leverage Rust's type system to catch bugs before runtime
+
 ### Mandatory Patterns (ALWAYS USE)
 
 - **Immediate formatting**: `just fmt-file <rust_file>.rs` after editing ANY Rust file
@@ -37,8 +46,9 @@ This directory provides reusable solutions and best practices for Amp Core devel
 ### Forbidden Patterns (NEVER USE)
 
 - **Unsafe code without documentation**: Any `unsafe` block without thorough safety comments
-- **Unwrapping without context**: Using `.unwrap()` or `.expect()` without clear justification
+- **🔥 Unwrapping in production**: Using `.unwrap()` or `.expect()` in production code (ZERO TOLERANCE)
 - **Blocking in async contexts**: Using synchronous I/O in async functions
+- **Using `mod.rs` files**: Use modern named module pattern instead
 
 ## 📈 PATTERN QUALITY METRICS
 
@@ -105,6 +115,7 @@ This directory provides reusable solutions and best practices for Amp Core devel
 
 ### ⚛️ Core Development Patterns
 
+- **[idiomatic-rust.md](./idiomatic-rust.md)** - **🚨 MANDATORY for ALL Rust code** - Modern module organization (no `mod.rs`), critical error handling rules (ZERO `.unwrap()`/`.expect()` in production), and type-driven design patterns. MUST be consulted before writing any Rust code.
 - **[cargo-workspace-patterns.md](./cargo-workspace-patterns.md)** - **🚨 MANDATORY for ALL workspace operations** - Comprehensive workspace management, crate organization rules, dependency management with `cargo add`/`cargo remove`, and workspace structure guidelines. MUST be consulted before creating crates or managing dependencies.
 - **[error-reporting.md](./error-reporting.md)** - **🚨 MANDATORY for ALL error handling** - Production-grade error reporting patterns using `thiserror`, explicit error propagation with `.map_err()`, error documentation standards, and type-safe error handling. MUST be consulted before defining error types or handling errors.
 - **[logging.md](./logging.md)** - **🚨 MANDATORY for ALL logging** - Structured logging patterns using `tracing`, error logging homogeneity (`error = %err, error_source = logging::error_source(&err)`), field naming conventions, and log level guidelines. MUST be consulted before adding ANY logging statements.
