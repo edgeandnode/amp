@@ -411,27 +411,27 @@ export class VersionTaggingError extends Schema.Class<VersionTaggingError>("Vers
 }
 
 /**
- * DependencyValidationError - Manifest dependency validation error.
+ * ManifestValidationError - Manifest validation error.
  *
  * Causes:
- * - SQL queries are invalid
- * - SQL queries reference datasets not declared in dependencies
- * - Undeclared dependencies in manifest
- * - Circular dependencies
+ * - SQL queries contain non-incremental operations
+ * - Invalid table references in SQL
+ * - Schema validation failures
+ * - Type inference errors
  *
  * Applies to:
  * - POST /datasets - During manifest validation
  */
-export class DependencyValidationError extends Schema.Class<DependencyValidationError>("DependencyValidationError")(
+export class ManifestValidationError extends Schema.Class<ManifestValidationError>("ManifestValidationError")(
   {
-    code: Schema.Literal("DEPENDENCY_VALIDATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    code: Schema.Literal("MANIFEST_VALIDATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
     [HttpApiSchema.AnnotationStatus]: 400,
   },
 ) {
-  readonly _tag = "DependencyValidationError" as const
+  readonly _tag = "ManifestValidationError" as const
 }
 
 /**

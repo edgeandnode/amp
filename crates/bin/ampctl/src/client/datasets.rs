@@ -1102,7 +1102,7 @@ pub enum RegisterError {
     #[error("invalid manifest")]
     InvalidManifest(#[source] ApiError),
 
-    /// Dependency validation error (400, MANIFEST_VALIDATION_ERROR)
+    /// Manifest validation error (400, MANIFEST_VALIDATION_ERROR)
     ///
     /// This occurs when:
     /// - SQL queries are invalid

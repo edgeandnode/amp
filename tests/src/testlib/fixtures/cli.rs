@@ -4,10 +4,7 @@
 //! such as `build`, `register`, and `deploy` in test environments. It handles the command
 //! execution, environment variable setup, and error handling.
 
-use std::{
-    path::Path,
-    process::{ExitStatus, Stdio},
-};
+use std::{path::Path, process::Stdio};
 
 use common::BoxError;
 
@@ -163,21 +160,27 @@ async fn run_amp_command(
 ) -> Result<(), BoxError> {
     tracing::debug!("Executing amp command");
 
-    let status = tokio::process::Command::new("pnpm")
+    let output = tokio::process::Command::new("pnpm")
         .args(args)
         .env("AMP_ADMIN_URL", admin_url)
         .current_dir(path)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
         .await?;
 
-    if status != ExitStatus::default() {
-        return Err(BoxError::from(format!(
-            "Failed to {}: pnpm {} failed with exit code {status}",
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined_output = format!("{}{}", stdout, stderr);
+        let error_msg = format!(
+            "Failed to {}: pnpm {} failed with exit code {}\n{}",
             command_name,
-            args.join(" ")
-        )));
+            args.join(" "),
+            output.status,
+            combined_output.trim()
+        );
+        return Err(BoxError::from(error_msg));
     }
 
     Ok(())
