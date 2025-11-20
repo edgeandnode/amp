@@ -200,6 +200,27 @@ where
     Ok(table)
 }
 
+/// Get all active physical tables for a manifest hash
+pub async fn get_all_active_by_manifest_hash<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+) -> Result<Vec<PhysicalTable>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        SELECT *
+        FROM physical_tables
+        WHERE manifest_hash = $1 AND active
+        ORDER BY table_name
+    "};
+
+    sqlx::query_as(query)
+        .bind(manifest_hash)
+        .fetch_all(exe)
+        .await
+}
+
 /// Deactivate all active locations for a specific table
 pub async fn mark_inactive_by_table_id<'c, E>(
     exe: E,

@@ -45,6 +45,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/datasets/{namespace}/{name}/versions/{revision}/restore",
             post(datasets::restore::handler),
         )
+        .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/status",
+            get(datasets::status::handler),
+        )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/jobs",
@@ -102,6 +106,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::restore::handler,
         handlers::datasets::delete::handler,
         handlers::datasets::delete_version::handler,
+        handlers::datasets::status::handler,
         // Manifest endpoints
         handlers::manifests::list_all::handler,
         handlers::manifests::register::handler,
@@ -149,6 +154,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::deploy::DeployResponse,
         handlers::datasets::restore::RestoreResponse,
         handlers::datasets::restore::RestoredTableInfo,
+        handlers::datasets::status::DatasetStatusResponse,
+        handlers::datasets::status::TableStatus,
         // Job schemas
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,

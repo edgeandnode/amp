@@ -113,6 +113,23 @@ where
         .map_err(Error::Database)
 }
 
+/// Get all active physical table locations for a given manifest hash
+///
+/// Returns all tables that are marked as active for the specified manifest hash,
+/// ordered by table name.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_all_active_by_manifest_hash<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+) -> Result<Vec<PhysicalTable>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_all_active_by_manifest_hash(exe, manifest_hash.into())
+        .await
+        .map_err(Error::Database)
+}
+
 /// Mark all active locations for a table as inactive
 ///
 /// This is typically used before marking a new location as active, ensuring
