@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     num::NonZeroU32,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use common::{
@@ -33,10 +33,7 @@ use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry::metrics::Meter};
 use parking_lot::RwLock;
 use rand::seq::SliceRandom as _;
-use solana_datasets::{
-    Manifest as SolanaManifest, ProviderConfig as SolanaProviderConfig,
-    ring_buffer::SolanaSlotRingBuffer,
-};
+use solana_datasets::{Manifest as SolanaManifest, ProviderConfig as SolanaProviderConfig};
 use tracing::instrument;
 use url::Url;
 
@@ -896,16 +893,8 @@ impl DatasetStore {
                         name: provider_name.to_string(),
                         source: err,
                     })?;
-                let subscription_ring_buffer = Arc::new(Mutex::new(SolanaSlotRingBuffer::new()));
-                let subscription_task = solana_datasets::run_subscription(
-                    config.ws_url.clone(),
-                    Arc::clone(&subscription_ring_buffer),
-                );
-                solana_datasets::extractor(config, Arc::clone(&subscription_ring_buffer), meter)
-                    .map(|extractor| BlockStreamClient::Solana {
-                        extractor,
-                        subscription_task: Arc::new(subscription_task),
-                    })
+                solana_datasets::extractor(config, meter)
+                    .map(BlockStreamClient::Solana)
                     .map_err(|err| GetClientError::SolanaExtractorError {
                         name: provider_name.to_string(),
                         source: err,

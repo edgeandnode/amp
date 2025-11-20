@@ -10,6 +10,8 @@ use common::{
 };
 use solana_clock::Slot;
 
+use crate::rpc_client::UiConfirmedBlock;
+
 pub const TABLE_NAME: &str = "block_headers";
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -48,14 +50,25 @@ pub(crate) struct BlockHeader {
 }
 
 impl BlockHeader {
-    pub(crate) fn from_of_block(block: crate::extractor::DecodedBlock) -> Self {
+    pub(crate) fn from_rpc_block(slot: Slot, block: &UiConfirmedBlock) -> Self {
+        let block_hash: [u8; 32] = bs58::decode(&block.blockhash)
+            .into_vec()
+            .expect("invalid base-58 string")
+            .try_into()
+            .expect("block hash should be 32 bytes");
+        let previous_block_hash: [u8; 32] = bs58::decode(&block.previous_blockhash)
+            .into_vec()
+            .expect("invalid base-58 string")
+            .try_into()
+            .expect("block hash should be 32 bytes");
+
         Self {
-            slot: block.slot,
+            slot,
             parent_slot: block.parent_slot,
-            block_hash: block.blockhash,
-            previous_block_hash: block.prev_blockhash,
+            block_hash,
+            previous_block_hash,
             block_height: block.block_height,
-            block_time: Some(block.blocktime as i64),
+            block_time: block.block_time,
         }
     }
 
