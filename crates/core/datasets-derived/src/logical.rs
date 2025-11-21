@@ -68,8 +68,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, Datas
         .map(|(name, table)| {
             LogicalTable::new(name, table.schema.arrow.into(), table.network, vec![])
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(DatasetError::CreateLogicalTable)?;
+        .collect();
     let tables = sort_tables_by_dependencies(unsorted_tables, &queries)
         .map_err(DatasetError::SortTableDependencies)?;
 
@@ -122,20 +121,6 @@ pub enum DatasetError {
         #[source]
         source: common::sql::ParseSqlError,
     },
-
-    /// Failed to create logical table from manifest table definition
-    ///
-    /// This occurs when table validation fails during conversion from
-    /// manifest table to logical table representation.
-    ///
-    /// Common causes:
-    /// - Invalid table schema
-    /// - Network validation failures
-    /// - Table metadata validation errors
-    #[error("Failed to create logical table")]
-    CreateLogicalTable(
-        #[source] BoxError, // TODO: Replace with concrete type when LogicalTable::new error is typed
-    ),
 
     /// Failed to sort tables by their SQL dependencies
     ///

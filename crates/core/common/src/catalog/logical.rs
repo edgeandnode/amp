@@ -16,7 +16,7 @@ use datasets_common::{
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
+use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -96,15 +96,15 @@ impl Table {
         schema: SchemaRef,
         network: String,
         sorted_by: Vec<String>,
-    ) -> Result<Self, BoxError> {
+    ) -> Self {
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
         sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
-        Ok(Self {
+        Self {
             name,
             schema,
             network,
             sorted_by,
-        })
+        }
     }
 
     pub fn name(&self) -> &TableName {
