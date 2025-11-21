@@ -134,8 +134,8 @@ mod validation;
 
 pub use cdc::{CdcEvent, CdcStream, DeleteBatchIterator};
 pub use client::{
-    AmpClient, BatchStream, InvalidationRange, Metadata, ProtocolMessage, ProtocolStream,
-    RawStream, ResponseBatch, StreamBuilder,
+    AmpClient, BatchStream, HasSchema, InvalidationRange, Metadata, ProtocolMessage,
+    ProtocolStream, RawStream, ResponseBatch, StreamBuilder,
 };
 pub use common::metadata::segments::BlockRange;
 pub use error::Error;

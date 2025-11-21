@@ -2,24 +2,23 @@
 
 use std::{
     future::{Future, IntoFuture},
+    io::Cursor,
     ops::RangeInclusive,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
-use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
+use arrow_flight::sql::client::FlightSqlServiceClient;
 use async_stream::try_stream;
 use common::{
     BlockNum,
-    arrow::array::RecordBatch,
+    arrow::{array::RecordBatch, datatypes::SchemaRef, ipc::reader::StreamReader},
     metadata::segments::{BlockRange, ResumeWatermark},
 };
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
-use tonic::{
-    Streaming,
-    transport::{ClientTlsConfig, Endpoint},
-};
+use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{
     cdc::CdcStreamBuilder,
@@ -29,6 +28,16 @@ use crate::{
     transactional::TransactionalStreamBuilder,
     validation::{validate_consecutiveness, validate_networks, validate_prev_hash},
 };
+
+/// Trait for types that expose an Arrow schema.
+///
+/// All client streams implement this trait to expose the Arrow schema
+/// of the data they yield. The schema is guaranteed to be stable for the
+/// lifetime of the stream.
+pub trait HasSchema {
+    /// Get the Arrow schema for this stream.
+    fn schema(&self) -> SchemaRef;
+}
 
 /// Metadata attached to each batch from the server.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -70,14 +79,21 @@ impl FuturesStream for BatchStream {
 /// Returns `ResponseBatch` with metadata. Most users should use `client.stream()`
 /// for streaming queries with reorg detection, or `client.query()` for batch queries.
 pub struct RawStream {
-    decoder: decode::FlightDataDecoder<Streaming<FlightData>>,
+    pub(crate) inner: BoxStream<'static, Result<ResponseBatch, Error>>,
+    pub(crate) schema: SchemaRef,
+}
+
+impl HasSchema for RawStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
 }
 
 impl FuturesStream for RawStream {
     type Item = Result<ResponseBatch, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.decoder).poll_next(cx)
+        Pin::new(&mut self.inner).poll_next(cx)
     }
 }
 
@@ -134,6 +150,7 @@ pub enum ProtocolMessage {
 /// ```
 pub struct ProtocolStream {
     stream: BoxStream<'static, Result<ProtocolMessage, Error>>,
+    schema: SchemaRef,
 }
 
 impl ProtocolStream {
@@ -142,9 +159,11 @@ impl ProtocolStream {
     /// # Arguments
     /// - `responses`: Stream of response batches from the server
     /// - `previous`: Initial previous ranges (from last watermark on resume, empty on first connect)
+    /// - `schema`: Arrow schema for the stream
     pub fn new(
         mut responses: BoxStream<'static, Result<ResponseBatch, Error>>,
         previous: Vec<BlockRange>,
+        schema: SchemaRef,
     ) -> Self {
         let stream = try_stream! {
             let mut previous = previous;
@@ -210,7 +229,13 @@ impl ProtocolStream {
         }
         .boxed();
 
-        Self { stream }
+        Self { stream, schema }
+    }
+}
+
+impl HasSchema for ProtocolStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }
 
@@ -381,6 +406,16 @@ impl AmpClient {
 
         let flight_info = result.map_err(Error::Arrow)?;
 
+        // Decode schema from FlightInfo
+        let schema = {
+            // Use StreamReader to decode the IPC message properly
+            let cursor = Cursor::new(&flight_info.schema);
+            let reader = StreamReader::try_new(cursor, None)
+                .map_err(|err| Error::Protocol(ProtocolError::InvalidSchema(err)))?;
+
+            Arc::new(reader.schema().as_ref().clone())
+        };
+
         let ticket = flight_info
             .endpoint
             .into_iter()
@@ -402,7 +437,10 @@ impl AmpClient {
         let flight_data = self.client.inner_mut().do_get(request).await?.into_inner();
         let decoder = decode::FlightDataDecoder::new(flight_data);
 
-        Ok(RawStream { decoder })
+        Ok(RawStream {
+            inner: decoder.boxed(),
+            schema,
+        })
     }
 }
 
@@ -477,10 +515,12 @@ impl IntoFuture for StreamBuilder {
     fn into_future(mut self) -> Self::IntoFuture {
         Box::pin(async move {
             // Get raw response stream with streaming enabled
-            let raw = self.client.request(&self.sql, None, true).await?.boxed();
+            let raw = self.client.request(&self.sql, None, true).await?;
+            let schema = raw.schema();
+            let boxed = raw.boxed();
 
             // Create protocol stream (with reorg detection)
-            Ok(ProtocolStream::new(raw, Vec::new()))
+            Ok(ProtocolStream::new(boxed, Vec::new(), schema))
         })
     }
 }

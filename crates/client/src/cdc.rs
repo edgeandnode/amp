@@ -46,12 +46,15 @@ use std::{
 };
 
 use async_stream::try_stream;
-use common::{BlockNum, arrow::array::RecordBatch};
+use common::{
+    BlockNum,
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+};
 use futures::{Stream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
-    client::AmpClient,
+    client::{AmpClient, HasSchema},
     error::Error,
     store::{BatchStore, StateStore},
     transactional::{
@@ -170,6 +173,7 @@ pub enum CdcEvent {
 /// ```
 pub struct CdcStream {
     inner: BoxStream<'static, Result<(CdcEvent, CommitHandle), Error>>,
+    schema: SchemaRef,
 }
 
 impl CdcStream {
@@ -189,9 +193,11 @@ impl CdcStream {
     /// let stream = CdcStream::create(mock_stream, batch_store)?;
     /// ```
     pub(crate) fn create(
-        mut inner: TransactionalStream,
+        inner: TransactionalStream,
         batch_store: Box<dyn BatchStore>,
     ) -> Result<Self, Error> {
+        let schema = inner.schema();
+        let mut inner = inner;
         let store = Arc::new(Mutex::new(batch_store));
         let stream = try_stream! {
             while let Some(result) = inner.next().await {
@@ -241,7 +247,16 @@ impl CdcStream {
         }
         .boxed();
 
-        Ok(Self { inner: stream })
+        Ok(Self {
+            inner: stream,
+            schema,
+        })
+    }
+}
+
+impl HasSchema for CdcStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }
 

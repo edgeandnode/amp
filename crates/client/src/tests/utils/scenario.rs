@@ -4,10 +4,12 @@ use std::{
     collections::HashMap,
     future::{Future, IntoFuture},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
-use futures::{Stream as FuturesStream, stream::BoxStream};
+use common::arrow::datatypes::{DataType, Field, Schema};
+use futures::{Stream as FuturesStream, StreamExt};
 
 use crate::{
     client::ResponseBatch,
@@ -133,7 +135,7 @@ impl ScenarioRun {
         // Use the generic constructor with mock stream (ignores resume parameter)
         let stream = TransactionalStream::create(self.store, self.retention, move |_| {
             let responses = responses.clone();
-            async move { Ok(MockResponseStream::new(responses).boxed()) }
+            async move { Ok(MockResponseStream::new(responses).into_raw_stream()) }
         })
         .await?;
 
@@ -195,8 +197,15 @@ impl MockResponseStream {
         }
     }
 
-    pub fn boxed(self) -> BoxStream<'static, Result<ResponseBatch, Error>> {
-        Box::pin(self)
+    /// Create a mock RawStream for testing with a default schema.
+    pub fn into_raw_stream(self) -> crate::client::RawStream {
+        // Create a simple test schema matching the mock batches
+        let schema = Arc::new(Schema::new(vec![Field::new("label", DataType::Utf8, true)]));
+
+        crate::client::RawStream {
+            inner: self.boxed(),
+            schema,
+        }
     }
 }
 
