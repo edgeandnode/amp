@@ -88,17 +88,6 @@ If you used **AI tools** to generate any part of your contribution, you must:
 
 The CLA explicitly covers AI-generated contributions. See [CLA](CLA.md) Section 1 for the definition of "AI System" and your responsibilities.
 
-## Coding Standards
-
-- Follow standard formatting (enforced by `rustfmt` and `prettier`)
-- Address **ALL** linting warnings (clippy for Rust, ESLint for TypeScript)
-- Use proper error handling - avoid `unwrap()` except in tests
-- Write tests for new functionality
-- Add documentation comments for public APIs
-- Keep changes focused and atomic
-- Follow existing patterns in the codebase
-- Never commit secrets, API keys, or sensitive data
-
 ### Commit Messages
 
 Write clear, descriptive commit messages following conventional commits format:
