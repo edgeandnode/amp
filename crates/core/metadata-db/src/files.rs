@@ -5,7 +5,6 @@
 
 use futures::stream::Stream;
 use tracing::instrument;
-use url::Url;
 
 use crate::physical_table::LocationId;
 
@@ -17,13 +16,17 @@ pub type FooterBytes = Vec<u8>;
 
 /// Insert new file metadata record
 ///
-/// Creates a new file metadata entry. Uses ON CONFLICT DO NOTHING for idempotency.
+/// Creates a new file metadata entry and stores the footer in both the file_metadata table
+/// and the separate cache table for backwards compatibility and rollback support.
+/// Uses ON CONFLICT DO NOTHING for idempotency. If the file already exists, ensures
+/// the footer is also stored.
 #[instrument(skip(executor, footer))]
 #[expect(clippy::too_many_arguments)]
 pub async fn insert<'e, E>(
     executor: E,
     location_id: LocationId,
-    file_name: String,
+    file_name: &'e str,
+    file_path: String,
     object_size: u64,
     object_e_tag: Option<String>,
     object_version: Option<String>,
@@ -33,15 +36,25 @@ pub async fn insert<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
+    // Insert file metadata with both file_name and file_path, and footer in both locations
+    // This ensures atomicity and only requires one database round-trip
+    // We store footer in both file_metadata and file_footer_cache for rollback support
     let query = indoc::indoc! {r#"
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT DO NOTHING
+        WITH file_ins AS (
+            INSERT INTO file_metadata (location_id, file_name, file_path, object_size, object_e_tag, object_version, metadata, footer)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (location_id, file_path) DO NOTHING
+            RETURNING id
+        )
+        INSERT INTO file_footer_cache (file_id, footer)
+        SELECT id, $8 FROM file_ins
+        ON CONFLICT (file_id) DO NOTHING
     "#};
 
     sqlx::query(query)
         .bind(location_id)
         .bind(file_name)
+        .bind(file_path.to_string())
         .bind(object_size as i64)
         .bind(object_e_tag)
         .bind(object_version)
@@ -67,17 +80,15 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT fm.id,
-               fm.location_id,
-               fm.file_name,
-               l.url,
-               fm.object_size,
-               fm.object_e_tag,
-               fm.object_version,
-               fm.metadata
-        FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
-        WHERE fm.id = $1
+        SELECT id,
+               location_id,
+               file_path,
+               object_size,
+               object_e_tag,
+               object_version,
+               metadata
+        FROM file_metadata
+        WHERE id = $1
     "#};
 
     sqlx::query_as(query)
@@ -98,16 +109,14 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e,
 {
     let query = indoc::indoc! {r#"
-        SELECT fm.id,
-               fm.location_id,
-               fm.file_name,
-               l.url,
-               fm.object_size,
-               fm.object_e_tag,
-               fm.object_version,
-               fm.metadata
-        FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
+        SELECT id,
+               location_id,
+               file_path,
+               object_size,
+               object_e_tag,
+               object_version,
+               metadata
+        FROM file_metadata
         WHERE location_id = $1
     "#};
 
@@ -123,7 +132,7 @@ pub async fn get_footer_bytes_by_id<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let query = "SELECT footer FROM file_metadata WHERE id = $1";
+    let query = "SELECT footer FROM file_footer_cache WHERE file_id = $1";
 
     sqlx::query_scalar(query).bind(id).fetch_one(executor).await
 }
@@ -161,11 +170,8 @@ pub struct FileMetadata {
     pub id: FileId,
     /// ID of the location containing this file
     pub location_id: LocationId,
-    /// Name/path of the file in the object store
-    pub file_name: String,
-    /// Storage location URL (parsed during deserialization)
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
+    /// Full path of the file in the object store
+    pub file_path: String,
     /// Size of the file in bytes
     pub object_size: Option<i64>,
     /// Object store ETag for version tracking
@@ -185,11 +191,8 @@ pub struct FileMetadataWithDetails {
     pub id: FileId,
     /// ID of the location containing this file
     pub location_id: LocationId,
-    /// Name/path of the file in the object store
-    pub file_name: String,
-    /// Storage location URL (parsed during deserialization)
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
+    /// Full path of the file in the object store
+    pub file_path: String,
     /// Size of the file in bytes
     pub object_size: Option<i64>,
     /// Object store ETag for version tracking

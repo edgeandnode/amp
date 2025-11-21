@@ -1830,14 +1830,13 @@
         "required": [
           "id",
           "location_id",
-          "file_name",
-          "url",
+          "file_path",
           "metadata"
         ],
         "properties": {
-          "file_name": {
+          "file_path": {
             "type": "string",
-            "description": "Name of the file (e.g., \"blocks_0000000000_0000099999.parquet\")"
+            "description": "Full path of the file (e.g., \"s3://bucket/path/blocks_0000000000_0000099999.parquet\")"
           },
           "id": {
             "type": "integer",
@@ -1873,10 +1872,6 @@
               "null"
             ],
             "description": "Version identifier of the file object in the storage system"
-          },
-          "url": {
-            "type": "string",
-            "description": "Base location URL (e.g., \"s3://bucket/path/\") - combine with file_name for full file URL"
           }
         }
       },
