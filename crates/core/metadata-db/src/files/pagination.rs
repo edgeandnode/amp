@@ -18,15 +18,17 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id,
-               location_id,
-               file_path,
-               object_size,
-               object_e_tag,
-               object_version
-        FROM file_metadata
-        WHERE location_id = $1
-        ORDER BY id DESC
+        SELECT fm.id,
+               fm.location_id,
+               fm.file_name,
+               l.url,
+               fm.object_size,
+               fm.object_e_tag,
+               fm.object_version
+        FROM file_metadata fm
+        JOIN physical_tables l ON fm.location_id = l.id
+        WHERE fm.location_id = $1
+        ORDER BY fm.id DESC
         LIMIT $2
     "#};
 
@@ -53,15 +55,17 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id,
-               location_id,
-               file_path,
-               object_size,
-               object_e_tag,
-               object_version
-        FROM file_metadata
-        WHERE location_id = $1 AND id < $3
-        ORDER BY id DESC
+        SELECT fm.id,
+               fm.location_id,
+               fm.file_name,
+               l.url,
+               fm.object_size,
+               fm.object_e_tag,
+               fm.object_version
+        FROM file_metadata fm
+        JOIN physical_tables l ON fm.location_id = l.id
+        WHERE fm.location_id = $1 AND fm.id < $3
+        ORDER BY fm.id DESC
         LIMIT $2
     "#};
 

@@ -25,7 +25,6 @@ pub async fn commit_metadata(
     metadata_db: &MetadataDb,
     parquet_meta: ParquetMeta,
     ObjectMeta {
-        location,
         size: object_size,
         e_tag: object_e_tag,
         version: object_version,
@@ -34,12 +33,12 @@ pub async fn commit_metadata(
     location_id: LocationId,
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
-    let file_path = location;
+    let file_name = parquet_meta.filename.clone();
     let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db
         .register_file(
             location_id,
-            file_path,
+            file_name,
             object_size,
             object_e_tag,
             object_version,

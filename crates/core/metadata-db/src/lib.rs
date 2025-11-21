@@ -211,35 +211,21 @@ impl MetadataDb {
     ///
     /// Creates a new file metadata entry with the provided information. Uses
     /// ON CONFLICT DO NOTHING to make the operation idempotent.
-    ///
-    /// Extracts the file_name from the file_path and stores both for backwards
-    /// compatibility and rollback support.
     #[expect(clippy::too_many_arguments)]
     pub async fn register_file(
         &self,
         location_id: LocationId,
-        file_path: object_store::path::Path,
+        file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
         footer: &Vec<u8>,
     ) -> Result<(), Error> {
-        let file_path_string = file_path.to_string();
-
-        // Extract file_name from file_path
-        let file_name = file_path.filename().ok_or_else(|| {
-            Error::InvalidFilePath(format!(
-                "Invalid file path, cannot extract file name: {}",
-                file_path_string
-            ))
-        })?;
-
         files::insert(
             &*self.pool,
             location_id,
             file_name,
-            file_path_string,
             object_size,
             object_e_tag,
             object_version,
@@ -325,9 +311,7 @@ pub struct GcManifestRow {
     pub location_id: LocationId,
     /// gc_manifest.file_id
     pub file_id: FileId,
-    /// gc_manifest.file_name (just the filename)
-    pub file_name: String,
-    /// gc_manifest.file_path (full path)
+    /// gc_manifest.file_path
     pub file_path: String,
     /// gc_manifest.expiration
     pub expiration: NaiveDateTime,
@@ -383,11 +367,10 @@ impl MetadataDb {
         };
 
         let sql = "
-            INSERT INTO gc_manifest (location_id, file_id, file_name, file_path, expiration)
+            INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
                   , file_metadata.file_name
-                  , file_metadata.file_path
                   , CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id
@@ -411,7 +394,6 @@ impl MetadataDb {
         let sql = "
         SELECT location_id
              , file_id
-             , file_name
              , file_path
              , expiration
           FROM gc_manifest

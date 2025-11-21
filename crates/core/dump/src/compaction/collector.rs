@@ -75,11 +75,17 @@ impl Collector {
             .map_err(CollectorError::file_stream_error)
             .map(|manifest_row| {
                 let GcManifestRow {
-                    file_id, file_path, ..
+                    file_id,
+                    file_path: file_name,
+                    ..
                 } = manifest_row?;
 
-                // file_path is now a full denormalized path, parse it directly
-                let path = Path::parse(&file_path).map_err(CollectorError::path_error)?;
+                let url = self
+                    .table
+                    .url()
+                    .join(&file_name)
+                    .map_err(CollectorError::parse_error(file_id))?;
+                let path = Path::from_url_path(url.path()).map_err(CollectorError::path_error)?;
                 Ok::<_, CollectorError>((file_id, path))
             })
             .try_collect()
