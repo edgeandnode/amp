@@ -40,34 +40,18 @@ export class ArrowFlight extends Context.Tag("Amp/ArrowFlight")<ArrowFlight, {
    * @param resume - Optional block ranges to resume from.
    * @returns A stream of protocol messages.
    */
-  readonly stream: {
-    (
-      sql: TemplateStringsArray,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
-    (
-      sql: string,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
-  }
+  readonly stream: (
+    sql: string,
+    resume?: ReadonlyArray<Model.BlockRange>,
+  ) => Stream.Stream<Model.ResponseBatch, ArrowFlightError>
 
   /**
    * A batch query from a sql query.
    *
    * @param sql - The sql query to execute.
-   * @param resume - Optional block ranges to resume from.
    * @returns A stream of record batches.
    */
-  readonly query: {
-    (
-      sql: TemplateStringsArray,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<RecordBatch, ArrowFlightError>
-    (
-      sql: string,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<RecordBatch, ArrowFlightError>
-  }
+  readonly query: (sql: string) => Stream.Stream<RecordBatch, ArrowFlightError>
 }>() {}
 
 const createResponseStream: (
@@ -142,24 +126,16 @@ const createResponseStream: (
 export const make = (transport: Transport) => {
   const decode = Schema.decodeSync(Model.RecordBatchMetadataFromFlight)
   const client = createClient(Flight.FlightService, transport)
-  const stream: {
-    (
-      sql: TemplateStringsArray,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
-    (
-      sql: string,
-      resume?: ReadonlyArray<Model.BlockRange>,
-    ): Stream.Stream<Model.ResponseBatch, ArrowFlightError>
-  } = (sql, resume) =>
+  const stream: (
+    sql: string,
+    resume?: ReadonlyArray<Model.BlockRange>,
+  ) => Stream.Stream<Model.ResponseBatch, ArrowFlightError> = (sql, resume) =>
     createResponseStream(client, sql, true, resume).pipe(
       Stream.unwrap,
       Stream.map(([data, metadata]) => new Model.ResponseBatch({ data, metadata: decode(metadata) })),
     )
 
-  const query = (
-    sql: TemplateStringsArray | string,
-  ): Stream.Stream<RecordBatch, ArrowFlightError> => {
+  const query = (sql: string): Stream.Stream<RecordBatch, ArrowFlightError> => {
     const responses = createResponseStream(client, sql).pipe(
       Stream.unwrap,
       Stream.map(([data]) => data),

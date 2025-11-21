@@ -1,13 +1,15 @@
 import * as Admin from "@edgeandnode/amp/api/Admin"
+import * as ArrowFlight from "@edgeandnode/amp/api/ArrowFlight"
 import * as Errors from "@edgeandnode/amp/api/Error"
-import * as JsonLines from "@edgeandnode/amp/api/JsonLines"
 import * as Model from "@edgeandnode/amp/Model"
 import { assertEquals, assertFailure, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
+import { Table } from "apache-arrow"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
+import * as Chunk from "effect/Chunk"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as Struct from "effect/Struct"
 import * as Anvil from "./utils/Anvil.ts"
 import * as Fixtures from "./utils/Fixtures.ts"
@@ -167,24 +169,17 @@ Testing.layer((it) => {
   it.effect(
     "query the example dataset",
     Effect.fn(function*() {
-      const jsonl = yield* JsonLines.JsonLines
-      const schema = Schema.Struct({
-        blockHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("block_hash")),
-        blockNumber: Schema.Number.pipe(Schema.propertySignature, Schema.fromKey("block_num")),
-        txHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("tx_hash")),
-        address: Schema.String,
-        count: Schema.NumberFromString,
-      })
-
+      const flight = yield* ArrowFlight.ArrowFlight
       // Query the example dataset.
-      const response = yield* jsonl.query(schema)`
+      const stream = flight.query(`
         SELECT tx_hash, block_hash, block_num, address, count
         FROM "_/example@0.0.1".counts
         ORDER BY count DESC
         LIMIT 1
-      `
+      `)
 
-      assertSome(Array.last(response).pipe(Option.map(Struct.get("count"))), 3)
+      const data = new Table(yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray)))
+      assertSome(Array.last([...data]).pipe(Option.map(Struct.get("count"))), "3")
     }),
   )
 

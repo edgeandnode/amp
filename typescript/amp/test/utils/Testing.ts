@@ -1,7 +1,6 @@
 import { createGrpcTransport } from "@connectrpc/connect-node"
 import * as Admin from "@edgeandnode/amp/api/Admin"
 import * as ArrowFlight from "@edgeandnode/amp/api/ArrowFlight"
-import * as JsonLines from "@edgeandnode/amp/api/JsonLines"
 import type * as Model from "@edgeandnode/amp/Model"
 import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as Vitest from "@effect/vitest"
@@ -11,6 +10,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
+import * as String from "effect/String"
 import * as Anvil from "./Anvil.ts"
 import * as Fixtures from "./Fixtures.ts"
 
@@ -61,7 +61,6 @@ export const waitForJobCompletion = Effect.fn("waitForJobCompletion")(function*(
  *
  * Environment variables:
  * - AMP_ADMIN_URL: Admin API URL (default: http://localhost:1610)
- * - AMP_JSONL_URL: JSON Lines API URL (default: http://localhost:1603)
  * - AMP_FLIGHT_URL: Arrow Flight API URL (default: http://localhost:1602)
  * - ANVIL_RPC_URL: Anvil RPC URL (default: http://localhost:8545)
  *
@@ -73,20 +72,20 @@ export const layer = Vitest.layer(
       adminUrl,
       anvilRpcUrl,
       flightUrl,
-      jsonlUrl,
     } = yield* Config.all({
       adminUrl: Config.string("AMP_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
-      jsonlUrl: Config.string("AMP_JSONL_URL").pipe(Config.withDefault("http://localhost:1603")),
-      flightUrl: Config.string("AMP_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
+      flightUrl: Config.string("AMP_FLIGHT_URL").pipe(
+        Config.map(String.replace("grpc://", "http://")),
+        Config.withDefault("http://localhost:1602"),
+      ),
       anvilRpcUrl: Config.string("ANVIL_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
     })
 
     const flight = ArrowFlight.layer(createGrpcTransport({ baseUrl: flightUrl }))
-    const jsonl = JsonLines.layer(jsonlUrl)
     const admin = Admin.layer(adminUrl)
     const anvil = Anvil.layer(anvilRpcUrl)
 
-    return Layer.mergeAll(admin, jsonl, flight, anvil)
+    return Layer.mergeAll(admin, flight, anvil)
   }).pipe(
     Layer.unwrapEffect,
     Layer.merge(Fixtures.layer),

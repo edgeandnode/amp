@@ -3,6 +3,7 @@ import * as Prompt from "@effect/cli/Prompt"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import * as Cause from "effect/Cause"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Auth from "../../../Auth.ts"
@@ -17,14 +18,14 @@ export const logout = Command.prompt("logout", Prompt.all([confirm]), ([confirm]
     const auth = yield* Auth.AuthService
 
     if (!confirm) {
-      return yield* Effect.logInfo("Exiting...")
+      return yield* Console.log("Exiting...")
     }
 
     return yield* auth.clearCache.pipe(
       Effect.tapErrorCause((cause) =>
-        Effect.logDebug("Failure removing the auth token from the KV Store", Cause.pretty(cause))
+        Console.debug("Failure removing the auth token from the KV Store", Cause.pretty(cause))
       ),
-      Effect.tap(() => Effect.logInfo("You have successfully logged out.")),
+      Effect.tap(() => Console.log("You have successfully logged out.")),
     )
   })).pipe(
     Command.withDescription("Logs the authenticated user out of the cli"),
