@@ -675,7 +675,6 @@ export const make = Effect.fn(function*(url: string, options?: {
  * Creates a layer for the admin api service.
  *
  * @param url - The url of the admin api service.
- * @param token - The bearer token.
  * @returns A layer for the admin api service.
  */
 export const layer = (url: string) =>
