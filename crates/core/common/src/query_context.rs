@@ -55,27 +55,27 @@ pub fn default_catalog_name() -> ScalarValue {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("invalid plan: {0}")]
-    InvalidPlan(DataFusionError),
+    #[error("invalid plan")]
+    InvalidPlan(#[source] DataFusionError),
 
-    #[error("planning error: {0}")]
-    PlanningError(DataFusionError),
+    #[error("planning error")]
+    PlanningError(#[source] DataFusionError),
 
-    #[error("query execution error: {0}")]
-    ExecutionError(DataFusionError),
+    #[error("query execution error")]
+    ExecutionError(#[source] DataFusionError),
 
     /// Signals a problem with the dataset configuration.
-    #[error("dataset error: {0}")]
-    DatasetError(BoxError),
+    #[error("dataset error")]
+    DatasetError(#[source] BoxError),
 
-    #[error("meta table error: {0}")]
-    MetaTableError(DataFusionError),
+    #[error("meta table error")]
+    MetaTableError(#[source] DataFusionError),
 
     #[error("SQL parse error")]
     SqlParseError(#[source] crate::sql::ParseSqlError),
 
-    #[error("DataFusion configuration error: {0}")]
-    ConfigError(DataFusionError),
+    #[error("DataFusion configuration error")]
+    ConfigError(#[source] DataFusionError),
 
     #[error("table not found: {0}")]
     TableNotFoundError(TableReference),
