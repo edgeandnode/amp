@@ -206,9 +206,9 @@ where
             created_at,
             updated_at
         FROM jobs
-        WHERE descriptor->>'dataset_namespace' = $1
-          AND descriptor->>'dataset_name' = $2
-          AND descriptor->>'manifest_hash' = $3
+        WHERE descriptor->'Dump'->>'dataset_namespace' = $1
+          AND descriptor->'Dump'->>'dataset_name' = $2
+          AND descriptor->'Dump'->>'manifest_hash' = $3
         ORDER BY id ASC
     "#};
     let res = sqlx::query_as(query)
