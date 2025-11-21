@@ -88,7 +88,6 @@ export const query = Command.make("query", {
     Layer.unwrapEffect(Effect.gen(function*() {
       const auth = yield* Auth.AuthService
 
-      // Functional approach: try bearerToken from cli --bearer-token option, fallback to auth cache, then map to interceptor
       const maybeToken: Option.Option<string> = yield* args.bearerToken.pipe(
         Option.match({
           onSome: (token) => Effect.succeed(Option.some(token)),
