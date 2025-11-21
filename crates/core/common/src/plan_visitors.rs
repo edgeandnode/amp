@@ -13,7 +13,7 @@ use datafusion::{
     },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
-    sql::TableReference,
+    sql::{TableReference, utils::UNNEST_PLACEHOLDER},
 };
 
 use crate::{
@@ -33,7 +33,9 @@ pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), Data
         if let LogicalPlan::Projection(projection) = node {
             for expr in projection.expr.iter() {
                 if let Expr::Alias(alias) = expr
-                    && alias.name.starts_with('_') {
+                    && alias.name.starts_with('_')
+                    && !alias.name.starts_with(UNNEST_PLACEHOLDER) // DF built-in we want to allow
+                     {
                         return plan_err!(
                             "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
                             alias.name
