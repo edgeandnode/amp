@@ -1,6 +1,6 @@
 {
   "name": "@edgeandnode/amp",
-  "version": "0.0.50",
+  "version": "0.0.51",
   "type": "module",
   "license": "BUSL-1.1",
   "description": "Build and manage blockchain datasets.",
