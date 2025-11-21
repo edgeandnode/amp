@@ -131,7 +131,3 @@ For many tables, consider:
   - Consider running multiple instances for horizontal scaling
 - Running multiple ampsync instances for different datasets
 - Monitoring PostgreSQL connection usage
-
-## License
-
-See [LICENSE](../../../LICENSE) file for details.

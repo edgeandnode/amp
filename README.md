@@ -1,12 +1,6 @@
-# Project Amp
+# Amp
 
-_The data goes in the bucket_
-
-**This repository is currently private. But it may eventually be open sourced, retaining commit history, issues and PRs so don't commit sensitive stuff.**
-
-## What is this
-
-An experiment in ETL architecture for data services on The Graph. 'Project Amp' is a codename.
+The blockchain native database.
 
 ## Installation
 
@@ -14,12 +8,12 @@ The easiest way to install Amp is using `ampup`, the official version manager an
 
 ```sh
 # Install ampup
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install | sh
+curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
 ```
 
-This will install `ampup` and the latest version of `ampd`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.
+This will install `ampup` and the latest version of `ampd` and `ampctl`. You may need to restart your terminal or run `source ~/.zshenv` (or your shell's equivalent) to update your PATH.
 
-Once installed, you can manage `ampd` versions:
+Once installed, you can manage `ampd` and `ampctl` versions:
 
 ```sh
 # Install or update to the latest version
@@ -148,3 +142,7 @@ docker-compose up -d
 This will (among other things) run the `grafana/otel-lgmt` image. More info about the image can be found [here](https://github.com/grafana/docker-otel-lgtm/).
 
 More detailed instructions regarding telemetry can be found in [here](./docs/telemetry.md).
+
+## License
+
+See [LICENSE](LICENSE) file for details.
