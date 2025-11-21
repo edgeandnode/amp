@@ -3,7 +3,7 @@ use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 
-const AMPUP_API_URL: &str = "https://ampup.sh/releases";
+const AMPUP_API_URL: &str = "https://ampup.sh/api";
 const GITHUB_API_URL: &str = "https://api.github.com";
 
 #[derive(Debug)]
