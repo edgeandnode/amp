@@ -48,7 +48,7 @@ export const dev = Command.make("dev", { args: { adminUrl } }).pipe(
   ),
   Command.provide(({ args }) =>
     ConfigLoader.ConfigLoader.Default.pipe(
-      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
+      Layer.provideMerge(Admin.layer(args.adminUrl)),
       Layer.provide(Auth.layer),
     )
   ),

@@ -553,8 +553,8 @@ export const studio = Command.make("studio", {
   ),
   Command.provide(ConfigLoader.ConfigLoader.Default),
   Command.provide(FoundryQueryableEventResolver.layer),
-  Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
+  Command.provide(({ args }) => Admin.layer(args.adminUrl)),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: args.flightUrl.toString() }))),
 )
 
 const openBrowser = (

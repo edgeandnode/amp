@@ -52,7 +52,7 @@ export const deploy = Command.make("deploy", {
   ),
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.configFile).pipe(
-      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
+      Layer.provideMerge(Admin.layer(args.adminUrl)),
       Layer.provide(Auth.layer),
     )
   ),

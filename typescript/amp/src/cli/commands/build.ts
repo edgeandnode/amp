@@ -45,7 +45,7 @@ export const build = Command.make("build", {
   ),
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.config).pipe(
-      Layer.provide(Admin.layer(`${args.adminUrl}`)),
+      Layer.provide(Admin.layer(args.adminUrl)),
       Layer.provide(Auth.layer),
     )
   ),

@@ -490,7 +490,7 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
  * @param url - The url of the admin api service.
  * @returns An admin api service instance.
  */
-export const make = Effect.fn(function*(url: string, options?: {
+export const make = Effect.fn(function*(url: string | URL, options?: {
   readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
   readonly transformResponse?:
     | ((effect: Effect.Effect<unknown, unknown>) => Effect.Effect<unknown, unknown>)
@@ -677,7 +677,7 @@ export const make = Effect.fn(function*(url: string, options?: {
  * @param url - The url of the admin api service.
  * @returns A layer for the admin api service.
  */
-export const layer = (url: string) =>
+export const layer = (url: string | URL) =>
   Layer.effect(Admin)(
     Effect.gen(function*() {
       const auth = yield* Effect.serviceOption(Auth.Auth)

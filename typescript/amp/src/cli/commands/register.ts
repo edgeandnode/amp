@@ -38,7 +38,7 @@ export const register = Command.make("register", {
   ),
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.configFile).pipe(
-      Layer.provideMerge(Admin.layer(`${args.adminUrl}`)),
+      Layer.provideMerge(Admin.layer(args.adminUrl)),
     )
   ),
 )

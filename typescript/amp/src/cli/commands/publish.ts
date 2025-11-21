@@ -110,7 +110,7 @@ export const publish = Command.make("publish", {
       AmpRegistry.layer,
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
-      Layer.provideMerge(Admin.layer(`${CLUSTER_ADMIN_URL}`)),
+      Layer.provideMerge(Admin.layer(CLUSTER_ADMIN_URL)),
       Layer.provideMerge(Auth.layer),
     )
   ),
