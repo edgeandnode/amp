@@ -222,17 +222,26 @@ impl Event {
     /// for the non-indexed attributes.
     fn fields(&self) -> Result<Fields, DataFusionError> {
         let mut fields = Vec::new();
-        let names = self.topic_names.iter().chain(&self.body_names);
+
+        // Handle indexed (topic) fields - reference types become bytes32
+        for (name, ty) in self.topic_names.iter().zip(&self.topic_types) {
+            let name = name.clone();
+            let df = sol_to_arrow_type_for_indexed(ty)?;
+            let field = Field::new(name, df, true);
+            fields.push(field);
+        }
+
+        // Handle non-indexed (body) fields - use original types
         let DynSolType::Tuple(body_types) = &self.body_tuple else {
             return internal_err!("event: body_tuple is not a tuple");
         };
-        let types = self.topic_types.iter().chain(body_types);
-        for (name, ty) in names.zip(types) {
+        for (name, ty) in self.body_names.iter().zip(body_types) {
             let name = name.clone();
             let df = sol_to_arrow_type(ty)?;
             let field = Field::new(name, df, true);
             fields.push(field);
         }
+
         Ok(Fields::from(fields))
     }
 
@@ -1320,6 +1329,24 @@ fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
     Ok(df)
 }
 
+/// Convert a Solidity type to an Arrow DataType for indexed event parameters.
+/// Reference types (string, bytes, arrays, tuples) are stored as their keccak256 hash
+/// (bytes32) in indexed event parameters, so we return FixedSizeBinary(32) for those.
+/// This matches the actual data being stored in topics.
+fn sol_to_arrow_type_for_indexed(ty: &DynSolType) -> Result<DataType, DataFusionError> {
+    use DynSolType::*;
+    match ty {
+        // Value types can be stored directly in topics
+        Bool | Int(_) | Uint(_) | FixedBytes(_) | Address => sol_to_arrow_type(ty),
+        // Reference types are stored as keccak256 hash (bytes32)
+        String | Bytes | Array(_) | FixedArray(_, _) | Tuple(_) => {
+            Ok(DataType::FixedSizeBinary(32))
+        }
+        // Function type should error
+        Function => sol_to_arrow_type(ty),
+    }
+}
+
 fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
     let sz = match sol_type {
         DynSolType::Int(sz) => *sz,
@@ -1654,5 +1681,133 @@ mod tests {
         cmp(&result, 4, &*SQRT_PRICE_X96, "sqrt_price_x96");
         cmp(&result, 5, &*LIQUIDITY, "liquidity");
         cmp(&result, 6, &*TICK, "tick");
+    }
+
+    #[test]
+    fn evm_decode_log_indexed_reference_types() {
+        // Regression test for indexed reference type handling.
+        // When reference types (string, bytes, arrays, tuples) are indexed in Solidity events,
+        // they are stored as their keccak256 hash (bytes32) in the topics, not as the actual data.
+        const EVENT_SIG: &str = "DataStored(string indexed key, bytes indexed data, uint256 value)";
+
+        let evm_decode_log = EvmDecodeLog::new();
+
+        // Build topic arrays for a single DataStored event
+        // topic0 would be the event signature hash (not needed for decode)
+        // topic1: keccak256("myKey") - indexed string stored as hash
+        let mut topic1_builder = FixedSizeBinaryBuilder::new(32);
+        let topic1_value = hex!("a2e0a8d4e5b3c2e1e5c8d0f2a1b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1");
+        topic1_builder.append_value(topic1_value).unwrap();
+        let topic1 = topic1_builder.finish();
+
+        // topic2: keccak256(someBytes) - indexed bytes stored as hash
+        let mut topic2_builder = FixedSizeBinaryBuilder::new(32);
+        let topic2_value = hex!("b3f1c9e5d7a8f2b4c6e0d8f1a3b5c7e9d1f3a5b7c9e1f3a5b7c9e1f3a5b7c9e1");
+        topic2_builder.append_value(topic2_value).unwrap();
+        let topic2 = topic2_builder.finish();
+
+        // topic3: null (only 2 indexed params)
+        let mut topic3_builder = FixedSizeBinaryBuilder::new(32);
+        topic3_builder.append_null();
+        let topic3 = topic3_builder.finish();
+
+        // data: value (non-indexed uint256)
+        let mut data_builder = BinaryBuilder::new();
+        data_builder.append_value(hex!(
+            "000000000000000000000000000000000000000000000000000000000000002a"
+        ));
+        let data = data_builder.finish();
+
+        let args = vec![
+            ColumnarValue::Array(Arc::new(topic1)),
+            ColumnarValue::Array(Arc::new(topic2)),
+            ColumnarValue::Array(Arc::new(topic3)),
+            ColumnarValue::Array(Arc::new(data)),
+            ColumnarValue::Scalar(ScalarValue::Utf8(Some(EVENT_SIG.to_string()))),
+        ];
+
+        let arg_fields = vec![
+            Field::new("topic1", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("topic2", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("topic3", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("data", DataType::Binary, true).into(),
+            Field::new("signature", DataType::Utf8, false).into(),
+        ];
+
+        let args = ScalarFunctionArgs {
+            args,
+            arg_fields,
+            number_rows: 1,
+            return_field: Field::new_struct(
+                evm_decode_log.name(),
+                Event::try_from(&ScalarValue::new_utf8(EVENT_SIG))
+                    .unwrap()
+                    .fields()
+                    .unwrap(),
+                false,
+            )
+            .into(),
+            config_options: Default::default(),
+        };
+
+        let result = evm_decode_log.invoke_with_args(args).unwrap();
+        let ColumnarValue::Array(result) = result else {
+            panic!("expected Array, got {:?}", result);
+        };
+
+        // Verify the result is a struct array with the correct schema
+        let struct_array = result.as_any().downcast_ref::<StructArray>().unwrap();
+
+        // Check that we have 3 fields: key, data, value
+        assert_eq!(struct_array.num_columns(), 3, "expected 3 fields");
+
+        // Verify field types - this is the critical part of the test
+        let fields = struct_array.fields();
+
+        // The indexed string "key" should be FixedSizeBinary(32) because it's stored as a hash
+        assert_eq!(fields[0].name(), "key", "first field should be 'key'");
+        assert_eq!(
+            fields[0].data_type(),
+            &DataType::FixedSizeBinary(32),
+            "indexed string should be FixedSizeBinary(32) (keccak256 hash)"
+        );
+
+        // The indexed bytes "data" should be FixedSizeBinary(32) because it's stored as a hash
+        assert_eq!(fields[1].name(), "data", "second field should be 'data'");
+        assert_eq!(
+            fields[1].data_type(),
+            &DataType::FixedSizeBinary(32),
+            "indexed bytes should be FixedSizeBinary(32) (keccak256 hash)"
+        );
+
+        // The non-indexed uint256 "value" should be Utf8 (as uint256 is too large for Decimal)
+        assert_eq!(fields[2].name(), "value", "third field should be 'value'");
+        assert_eq!(
+            fields[2].data_type(),
+            &DataType::Utf8,
+            "value should be Utf8 (uint256 is too large for Decimal types)"
+        );
+
+        // Verify the actual values
+        let key_array = struct_array
+            .column(0)
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        assert_eq!(key_array.value(0), topic1_value, "key hash should match");
+
+        let data_array = struct_array
+            .column(1)
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        assert_eq!(data_array.value(0), topic2_value, "data hash should match");
+
+        let value_array = struct_array
+            .column(2)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(value_array.value(0), "42", "value should match");
     }
 }
