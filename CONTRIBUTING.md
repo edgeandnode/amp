@@ -63,23 +63,6 @@ git checkout -b feature/your-feature-name
 git checkout -b fix/bug-description
 ```
 
-**Branch naming conventions:**
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation changes
-- `refactor/` - Code refactoring
-- `test/` - Test additions or fixes
-
-### 2. Development Checklist
-
-Before submitting your PR, ensure:
-
-- [ ] Code is formatted: `just fmt-file <file>` or `just fmt-rs`
-- [ ] Code compiles: `just check-crate <crate>`
-- [ ] All clippy warnings are fixed: `just clippy-crate <crate>`
-- [ ] Tests pass: `just test-local`
-- [ ] CLA is signed (first-time contributors)
-
 ## Contributor License Agreement
 
 **Before your first contribution can be merged, you must sign our Contributor License Agreement (CLA).**
