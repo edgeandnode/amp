@@ -7,12 +7,14 @@ import { Table } from "apache-arrow"
 import * as Chunk from "effect/Chunk"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
 import * as Arrow from "../../Arrow.ts"
+import * as Auth from "../../Auth.ts"
 import { flightUrl } from "../common.ts"
 
 export const query = Command.make("query", {
@@ -82,21 +84,40 @@ export const query = Command.make("query", {
       }))
     }),
   ),
-  Command.provide(({ args }) => {
-    const interceptors: Array<Interceptor> = []
-    if (Option.isSome(args.bearerToken)) {
-      const token = args.bearerToken.value
-      interceptors.push((next) => (req) => {
-        req.header.set("Authorization", `Bearer ${token}`)
-        return next(req)
-      })
-    }
+  Command.provide(({ args }) =>
+    Layer.unwrapEffect(Effect.gen(function*() {
+      const auth = yield* Auth.AuthService
 
-    const transportOptions: GrpcTransportOptions = {
-      baseUrl: `${args.flightUrl}`,
-      interceptors,
-    }
+      // Functional approach: try bearerToken from cli --bearer-token option, fallback to auth cache, then map to interceptor
+      const maybeToken: Option.Option<string> = yield* args.bearerToken.pipe(
+        Option.match({
+          onSome: (token) => Effect.succeed(Option.some(token)),
+          onNone: () =>
+            auth.getCache().pipe(
+              Effect.map(Option.map((authSchema) => `${authSchema.accessToken}`)),
+            ),
+        }),
+      )
 
-    return ArrowFlight.layer(createGrpcTransport(transportOptions))
-  }),
+      const interceptors: Array<Interceptor> = maybeToken.pipe(
+        Option.match({
+          onSome: (token) => {
+            const authInterceptor: Interceptor = (next) => (req) => {
+              req.header.set("Authorization", `Bearer ${token}`)
+              return next(req)
+            }
+            return [authInterceptor]
+          },
+          onNone: () => [],
+        }),
+      )
+
+      const transportOptions: GrpcTransportOptions = {
+        baseUrl: `${args.flightUrl}`,
+        interceptors,
+      }
+
+      return ArrowFlight.layer(createGrpcTransport(transportOptions))
+    })).pipe(Layer.provide(Auth.layer))
+  ),
 )
