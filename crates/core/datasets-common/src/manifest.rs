@@ -145,7 +145,7 @@ pub struct ArrowSchema {
 
 impl ArrowSchema {
     /// Convert to DataFusion SchemaRef
-    pub fn to_schema_ref(self) -> SchemaRef {
+    pub fn into_schema_ref(self) -> SchemaRef {
         let fields = self
             .fields
             .into_iter()
@@ -158,7 +158,7 @@ impl ArrowSchema {
 // Implement From to allow .into() calls
 impl From<ArrowSchema> for SchemaRef {
     fn from(schema: ArrowSchema) -> Self {
-        schema.to_schema_ref()
+        schema.into_schema_ref()
     }
 }
 
