@@ -31,10 +31,6 @@ ON file_metadata (location_id, file_path);
 -- Drop the temporary default constraint
 ALTER TABLE file_metadata ALTER COLUMN file_path DROP DEFAULT;
 
--- Drop the gc_manifest_expiration_check constraint if it exists
-ALTER TABLE gc_manifest
-    DROP CONSTRAINT IF EXISTS gc_manifest_expiration_check;
-
 -- Create `gc_manifest.file_name` column (with temporary default to allow NOT NULL)
 ALTER TABLE gc_manifest
     ADD COLUMN IF NOT EXISTS file_name TEXT NOT NULL DEFAULT '';
