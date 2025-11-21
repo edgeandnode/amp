@@ -44,6 +44,15 @@ impl HasTables for evm_rpc_datasets::Manifest {
     }
 }
 
+impl HasTables for solana_datasets::Manifest {
+    fn into_tables(self) -> BTreeMap<String, TableSchema> {
+        self.tables
+            .into_iter()
+            .map(|(name, table)| (name, table.schema))
+            .collect()
+    }
+}
+
 impl HasTables for eth_beacon_datasets::Manifest {
     fn into_tables(self) -> BTreeMap<String, TableSchema> {
         self.tables
@@ -143,6 +152,7 @@ fn parse_manifest_from_text(
     // Deserialize full manifest based on kind
     let tables = match kind {
         DatasetKind::EvmRpc => parse_manifest::<evm_rpc_datasets::Manifest>(text, "EVM-RPC")?,
+        DatasetKind::Solana => parse_manifest::<solana_datasets::Manifest>(text, "Solana")?,
         DatasetKind::EthBeacon => {
             parse_manifest::<eth_beacon_datasets::Manifest>(text, "Eth-Beacon")?
         }

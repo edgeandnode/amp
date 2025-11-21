@@ -1,0 +1,3 @@
+kind = "solana"
+http_url = "${SOLANA_MAINNET_HTTP_URL}"
+network = "mainnet"

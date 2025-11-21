@@ -7,6 +7,7 @@ The `kind` field determines what dataset type schemas are supported:
 
 - for `eth-beacon` kind datasets, see [eth-beacon.spec.json](./eth-beacon.spec.json)
 - for `evm-rpc` kind datasets, see [evm-rpc.spec.json](./evm-rpc.spec.json)
+- for `solana` datasets, see [solana.spec.json](./solana.spec.json)
 - for `firehose` kind datasets, see [firehose.spec.json](./firehose.spec.json)
 - for `manifest` kind datasets, see [derived.spec.json](./derived.spec.json)
 

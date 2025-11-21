@@ -23,6 +23,7 @@ monitoring = { path = "../../core/monitoring" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = "3.14.0"
+solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
