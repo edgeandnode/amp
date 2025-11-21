@@ -86,7 +86,7 @@ export const query = Command.make("query", {
   ),
   Command.provide(({ args }) =>
     Layer.unwrapEffect(Effect.gen(function*() {
-      const auth = yield* Auth.AuthService
+      const auth = yield* Auth.Auth
 
       const maybeToken: Option.Option<string> = yield* args.bearerToken.pipe(
         Option.match({

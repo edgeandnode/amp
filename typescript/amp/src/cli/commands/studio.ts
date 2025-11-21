@@ -522,36 +522,34 @@ export const studio = Command.make("studio", {
 }).pipe(
   Command.withDescription("Opens the amp dataset studio visualization tool"),
   Command.withHandler(({ args }) =>
-    Effect.gen(function*() {
-      yield* Server.pipe(
-        HttpServer.withLogAddress,
-        Layer.provide(NodeHttpServer.layer(createServer, { port: args.port })),
-        Layer.tap(() =>
-          Effect.gen(function*() {
-            if (args.open) {
-              return yield* openBrowser(args.port, args.browser).pipe(
-                Effect.tapErrorCause((cause) =>
-                  Console.warn(
-                    `Failure opening amp dataset studio in your browser. Open at http://localhost:${args.port}`,
-                    {
-                      cause,
-                    },
-                  )
-                ),
-                Effect.orElseSucceed(() => Effect.void),
-              )
-            }
-            return Effect.void
-          })
-        ),
-        Layer.tap(() =>
-          Console.log(
-            `🎉 amp dataset studio started and running at http://localhost:${args.port}`,
-          )
-        ),
-        Layer.launch,
-      )
-    })
+    Server.pipe(
+      HttpServer.withLogAddress,
+      Layer.provide(NodeHttpServer.layer(createServer, { port: args.port })),
+      Layer.tap(() =>
+        Effect.gen(function*() {
+          if (args.open) {
+            return yield* openBrowser(args.port, args.browser).pipe(
+              Effect.tapErrorCause((cause) =>
+                Console.warn(
+                  `Failure opening amp dataset studio in your browser. Open at http://localhost:${args.port}`,
+                  {
+                    cause,
+                  },
+                )
+              ),
+              Effect.orElseSucceed(() => Effect.void),
+            )
+          }
+          return yield* Effect.void
+        })
+      ),
+      Layer.tap(() =>
+        Console.log(
+          `🎉 amp dataset studio started and running at http://localhost:${args.port}`,
+        )
+      ),
+      Layer.launch,
+    )
   ),
   Command.provide(ConfigLoader.ConfigLoader.Default),
   Command.provide(FoundryQueryableEventResolver.layer),

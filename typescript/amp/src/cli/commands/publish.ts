@@ -36,7 +36,7 @@ export const publish = Command.make("publish", {
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
       const context = yield* ManifestContext.ManifestContext
-      const auth = yield* Auth.AuthService
+      const auth = yield* Auth.Auth
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
       const client = yield* Admin.Admin
 
@@ -110,10 +110,7 @@ export const publish = Command.make("publish", {
       AmpRegistry.layer,
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
-      Layer.provideMerge(Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
-        return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token)?.accessToken)
-      }))),
+      Layer.provideMerge(Admin.layer(`${CLUSTER_ADMIN_URL}`)),
       Layer.provideMerge(Auth.layer),
     )
   ),

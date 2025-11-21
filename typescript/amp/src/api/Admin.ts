@@ -10,8 +10,11 @@ import type * as HttpClientError from "@effect/platform/HttpClientError"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import { constant } from "effect/Function"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Auth from "../Auth.ts"
 import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
@@ -675,14 +678,24 @@ export const make = Effect.fn(function*(url: string, options?: {
  * @param token - The bearer token.
  * @returns A layer for the admin api service.
  */
-export const layer = (url: string, token?: string) =>
-  Effect.gen(function*() {
-    const api = yield* make(url, {
-      transformClient: token === undefined ? undefined : (client) =>
-        client.pipe(
-          HttpClient.mapRequestInput(HttpClientRequest.setHeader("Authorization", `Bearer ${token}`)),
-        ),
-    })
+export const layer = (url: string) =>
+  Layer.effect(Admin)(
+    Effect.gen(function*() {
+      const auth = yield* Effect.serviceOption(Auth.Auth)
 
-    return api
-  }).pipe(Layer.effect(Admin), Layer.provide(FetchHttpClient.layer))
+      const transformClient = auth.pipe(
+        Option.map((auth) =>
+          HttpClient.mapRequestEffect(Effect.fnUntraced(function*(request) {
+            const cache = yield* auth.getCache()
+            return Option.match(cache, {
+              onSome: (cache) => HttpClientRequest.bearerToken(request, cache.accessToken),
+              onNone: constant(request),
+            })
+          }))
+        ),
+        Option.getOrUndefined,
+      )
+
+      return yield* make(url, { transformClient })
+    }),
+  ).pipe(Layer.provide(FetchHttpClient.layer))

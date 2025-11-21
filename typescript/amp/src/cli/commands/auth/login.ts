@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber"
 import * as Fn from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -130,7 +131,7 @@ const DeviceTokenPollingResponse = Schema.Union(
 )
 
 const checkAlreadyAuthenticated = Effect.gen(function*() {
-  const auth = yield* Auth.AuthService
+  const auth = yield* Auth.Auth
 
   const authResult = yield* auth.getCache()
   return Option.isSome(authResult)
@@ -331,7 +332,7 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
     return yield* Effect.logInfo("amp cli already authenticated!")
   }
 
-  const auth = yield* Auth.AuthService
+  const auth = yield* Auth.Auth
 
   // Step 1: Request device authorization from the backend
   const { codeVerifier, deviceAuth } = yield* requestDeviceAuthorization()
@@ -350,9 +351,11 @@ const authenticate = Effect.fn("PerformCliAuthentication")(function*(alreadyAuth
   // Step 4: Store the tokens
   const now = yield* DateTime.now
   const expiry = Fn.pipe(now, DateTime.add({ seconds: tokenResponse.expires_in }), DateTime.toEpochMillis)
-  yield* auth.setCache(Auth.AuthStorageSchema.make({
-    accessToken: Model.AccessToken.make(tokenResponse.access_token),
-    refreshToken: Model.RefreshToken.make(tokenResponse.refresh_token),
+  const accessToken = Model.AccessToken.make(tokenResponse.access_token)
+  const refreshToken = Model.RefreshToken.make(tokenResponse.refresh_token)
+  yield* auth.setCache(Model.CachedAuthInfo.make({
+    accessToken: Redacted.make(accessToken),
+    refreshToken: Redacted.make(refreshToken),
     userId: tokenResponse.user_id,
     accounts: tokenResponse.user_accounts,
     expiry,

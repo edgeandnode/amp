@@ -15,7 +15,7 @@ const confirm = Prompt.confirm({
 
 export const logout = Command.prompt("logout", Prompt.all([confirm]), ([confirm]) =>
   Effect.gen(function*() {
-    const auth = yield* Auth.AuthService
+    const auth = yield* Auth.Auth
 
     if (!confirm) {
       return yield* Console.log("Exiting...")
