@@ -94,6 +94,18 @@ fn dataset_restore(namespace: &Namespace, name: &Name, version: &Revision) -> St
     format!("datasets/{namespace}/{name}/versions/{version}/restore")
 }
 
+/// Build URL path for listing jobs for a dataset revision.
+///
+/// GET `/datasets/{namespace}/{name}/versions/{revision}/jobs`
+fn dataset_list_jobs(reference: &Reference) -> String {
+    format!(
+        "datasets/{}/{}/versions/{}/jobs",
+        reference.namespace(),
+        reference.name(),
+        reference.revision()
+    )
+}
+
 /// Client for dataset-related API operations.
 ///
 /// Created via [`Client::datasets`](crate::client::Client::datasets).
@@ -981,6 +993,99 @@ impl<'a> DatasetsClient<'a> {
             }
         }
     }
+
+    /// List all jobs for a specific dataset revision.
+    ///
+    /// GETs from `/datasets/{namespace}/{name}/versions/{revision}/jobs` endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ListJobsError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(reference = %reference))]
+    pub async fn list_jobs(
+        &self,
+        reference: &Reference,
+    ) -> Result<Vec<super::jobs::JobInfo>, ListJobsError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&dataset_list_jobs(reference))
+            .expect("valid URL");
+
+        tracing::debug!("Fetching jobs for dataset");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(ListJobsError::NetworkError)?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let body: JobsResponse = response.json().await.map_err(|err| {
+                    tracing::error!(
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "Failed to parse jobs response"
+                    );
+                    ListJobsError::DeserializationError(err)
+                })?;
+                Ok(body.jobs)
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "Failed to read error response"
+                    );
+                    ListJobsError::UnexpectedResponse {
+                        status_code: status.as_u16(),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "Failed to parse error response"
+                    );
+                    ListJobsError::UnexpectedResponse {
+                        status_code: status.as_u16(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH" => Err(ListJobsError::InvalidPath(error_response.into())),
+                    "DATASET_NOT_FOUND" => {
+                        Err(ListJobsError::DatasetNotFound(error_response.into()))
+                    }
+                    "RESOLVE_REVISION_ERROR" => {
+                        Err(ListJobsError::ResolveRevisionError(error_response.into()))
+                    }
+                    "LIST_JOBS_ERROR" => Err(ListJobsError::ListJobsError(error_response.into())),
+                    _ => Err(ListJobsError::ApiError(error_response.into())),
+                }
+            }
+            _ => {
+                let _text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(ListJobsError::UnexpectedResponse {
+                    status_code: status.as_u16(),
+                })
+            }
+        }
+    }
 }
 
 /// Request body for POST /datasets endpoint.
@@ -1625,4 +1730,69 @@ pub enum GetManifestError {
     /// Unexpected response from API
     #[error("unexpected response (status {status}): {message}")]
     UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response from the list jobs endpoint.
+#[derive(Debug, serde::Deserialize)]
+struct JobsResponse {
+    jobs: Vec<super::jobs::JobInfo>,
+}
+
+/// Errors that can occur when listing jobs for a dataset.
+#[derive(Debug, thiserror::Error)]
+pub enum ListJobsError {
+    /// Invalid path parameters (400, INVALID_PATH)
+    ///
+    /// This occurs when:
+    /// - The namespace, name, or revision in the URL path is invalid
+    /// - Path parameter parsing fails
+    #[error("invalid path")]
+    InvalidPath(#[source] ApiError),
+
+    /// Dataset or revision not found (404, DATASET_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - The specified dataset doesn't exist
+    /// - The specified revision doesn't exist for this dataset
+    /// - The revision resolves to a manifest that doesn't exist
+    #[error("dataset not found")]
+    DatasetNotFound(#[source] ApiError),
+
+    /// Failed to resolve revision (500, RESOLVE_REVISION_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to resolve revision to manifest hash
+    /// - Database connection issues
+    /// - Internal database errors
+    #[error("resolve revision error")]
+    ResolveRevisionError(#[source] ApiError),
+
+    /// Failed to list jobs from metadata database (500, LIST_JOBS_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to query jobs filtered by manifest hash
+    /// - Database connection issues
+    /// - Internal database errors
+    #[error("list jobs error")]
+    ListJobsError(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error: {0}")]
+    NetworkError(#[source] reqwest::Error),
+
+    /// Failed to deserialize success response
+    ///
+    /// This occurs when:
+    /// - Response JSON doesn't match expected JobsResponse schema
+    /// - Response is not valid JSON
+    #[error("failed to deserialize response: {0}")]
+    DeserializationError(#[source] reqwest::Error),
+
+    /// API error returned by the server (catch-all for unrecognized error codes)
+    #[error("API error: {0}")]
+    ApiError(#[from] ApiError),
+
+    /// Unexpected response from the API
+    #[error("unexpected response with status {status_code}")]
+    UnexpectedResponse { status_code: u16 },
 }
