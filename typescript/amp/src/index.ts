@@ -118,7 +118,7 @@ export const createClient = (transport: Transport) => {
           Stream.mapEffect(Effect.fn(function*(batch) {
             const schema = Schema.Array(Arrow.generateSchema(batch.data.schema))
             const table = new Table(batch.data)
-            const data = yield* Schema.validate(schema)([...table])
+            const data = yield* Schema.encode(schema)([...table])
             return data
           })),
           Stream.toAsyncIterable,
@@ -131,7 +131,7 @@ export const createClient = (transport: Transport) => {
           Stream.mapEffect(Effect.fn(function*(batch) {
             const schema = Schema.Array(Arrow.generateSchema(batch.schema))
             const table = new Table(batch)
-            const data = yield* Schema.validate(schema)([...table])
+            const data = yield* Schema.encode(schema)([...table])
             return data
           })),
           Stream.toAsyncIterable,
