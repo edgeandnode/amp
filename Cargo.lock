@@ -902,7 +902,6 @@ name = "ampsync"
 version = "0.1.0"
 dependencies = [
  "amp-client",
- "ampctl",
  "anyhow",
  "arrow-array",
  "arrow-schema",
@@ -911,25 +910,17 @@ dependencies = [
  "bytes",
  "clap",
  "common",
- "dataset-store",
  "datasets-common",
- "datasets-derived",
- "eth-beacon-datasets",
- "evm-rpc-datasets",
- "firehose-datasets",
  "futures",
  "monitoring",
  "pg_escape",
  "pgtemp",
- "serde",
- "serde_json",
  "sqlparser",
  "sqlx",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
  "tracing",
- "url",
  "uuid",
 ]
 

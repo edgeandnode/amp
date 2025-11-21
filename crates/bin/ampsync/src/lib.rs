@@ -4,7 +4,6 @@ pub mod commands;
 pub mod config;
 pub mod engine;
 pub mod manager;
-pub mod manifest;
 pub mod sql;
 pub mod task;
 
