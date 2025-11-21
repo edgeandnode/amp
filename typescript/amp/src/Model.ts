@@ -371,22 +371,6 @@ export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFireh
 export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetEthBeacon, DatasetFirehose)
 export type DatasetManifest = Schema.Schema.Type<typeof DatasetManifest>
 
-export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({
-  kind: Schema.Literal("evm-rpc"),
-  network: Network,
-  url: Schema.URL,
-}, {
-  title: "EvmRpcProvider",
-  description: "an evm-rpc provider definition",
-}) {}
-
-export const Provider = Schema.Union(EvmRpcProvider).pipe(
-  Schema.annotations({
-    title: "Provider",
-    description: "a provider definition",
-  }),
-)
-
 export const JobId = Schema.Number.pipe(
   Schema.annotations({
     title: "JobId",
