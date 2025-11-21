@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
-use crate::{config::SyncConfig, engine::Engine, manager::StreamManager, manifest};
+use crate::{config::SyncConfig, engine::Engine, manager::StreamManager};
 
 pub async fn run(config: SyncConfig) -> Result<()> {
     info!("Starting ampsync");
@@ -22,22 +22,17 @@ pub async fn run(config: SyncConfig) -> Result<()> {
         .context("Failed to run state store migrations")?;
     info!("State store migrations complete");
 
-    // Fetch dataset manifest
-    let manifest = manifest::fetch_manifest(&config)
-        .await
-        .context("Failed to fetch dataset manifest")?;
-    info!("Manifest loaded: {} tables found", manifest.tables.len());
-
-    // Create tables
-    let engine = Engine::new(pool.clone());
-    for (table_name, schema) in &manifest.tables {
-        info!("Creating table: {}", table_name);
-        engine
-            .create_table(table_name, schema)
-            .await
-            .with_context(|| format!("Failed to create table: {}", table_name))?;
+    info!("Tables to sync: {} tables", config.tables.len());
+    for table_name in &config.tables {
+        info!("  - {}", table_name);
     }
-    info!("All tables created");
+
+    // Create engine
+    let engine = Engine::new(pool.clone());
+
+    // Convert PartialReference to full Reference by filling in defaults
+    let dataset = config.dataset.to_full_reference();
+    info!("Dataset: {}", dataset);
 
     // Create streaming client
     let mut client = AmpClient::from_endpoint(&config.amp_flight_addr)
@@ -52,8 +47,8 @@ pub async fn run(config: SyncConfig) -> Result<()> {
 
     info!("Amp client initialized");
 
-    // Spawn streaming tasks
-    let manager = StreamManager::spawn_all(&manifest, &config, engine, client, pool);
+    // Spawn streaming tasks (table creation happens in StreamTask::new)
+    let manager = StreamManager::new(&config.tables, dataset, &config, engine, client, pool);
 
     // Wait for shutdown signal
     info!("Ampsync is running. Press Ctrl+C to stop.");

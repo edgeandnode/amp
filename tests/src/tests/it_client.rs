@@ -52,12 +52,16 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
 
     test.mine(1).await;
     test.dump("_/anvil_rpc@0.0.0", 1).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     test.mine(1).await;
     test.dump("_/anvil_rpc@0.0.0", 2).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     test.reorg(1).await;
     test.mine(1).await;
     test.dump("_/anvil_rpc@0.0.0", 3).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     test.dump("_/anvil_rpc@0.0.0", 3).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     assert_eq!(
         handle.await.expect("Failed to await control messages task"),

@@ -13,11 +13,9 @@ use std::{
 };
 
 use arrow_array::RecordBatch;
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use arrow_to_postgres::ArrowToPostgresBinaryEncoder;
 use backon::{ExponentialBuilder, Retryable};
-// Import TableSchema from datasets_common
-use datasets_common::manifest::TableSchema;
 use monitoring::logging;
 use sqlx::PgPool;
 use tokio::sync::Mutex;
@@ -406,23 +404,15 @@ impl Engine {
     pub async fn create_table(
         &self,
         table_name: &str,
-        table_schema: &TableSchema,
+        stream_schema: SchemaRef,
     ) -> Result<(), CreateTableError> {
-        // Convert TableSchema ArrowSchema to Arrow fields
-        let user_fields: Vec<Arc<Field>> = table_schema
-            .arrow
-            .fields
-            .iter()
-            .map(|f| Arc::new(Field::new(&f.name, f.type_.as_arrow().clone(), f.nullable)))
-            .collect();
-
         // Build schema with system columns prepended
         // System columns: _tx_id, _row_index
         let mut fields = vec![
             Arc::new(Field::new("_tx_id", DataType::Int64, false)),
             Arc::new(Field::new("_row_index", DataType::Int32, false)),
         ];
-        fields.extend(user_fields);
+        fields.extend(stream_schema.fields().iter().cloned());
         let full_schema = Schema::new(fields);
 
         // Get PostgreSQL type mapping from arrow-to-postgres
@@ -761,7 +751,6 @@ impl Engine {
 mod tests {
     use arrow_array::{Int32Array, Int64Array};
     use arrow_schema::{DataType, Field, Schema};
-    use datasets_common::manifest::{ArrowSchema, Field as ManifestField, TableSchema};
 
     use super::*;
 
@@ -775,27 +764,12 @@ mod tests {
             .unwrap();
         let engine = Engine::new(pool);
 
-        let table_schema = TableSchema {
-            arrow: ArrowSchema {
-                fields: vec![
-                    ManifestField {
-                        name: "id".to_string(),
-                        type_: DataType::Int64.into(),
-                        nullable: false,
-                    },
-                    ManifestField {
-                        name: "name".to_string(),
-                        type_: DataType::Utf8.into(),
-                        nullable: false,
-                    },
-                ],
-            },
-        };
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+        ]));
 
-        engine
-            .create_table("test_table", &table_schema)
-            .await
-            .unwrap();
+        engine.create_table("test_table", schema).await.unwrap();
 
         // Verify table exists and has correct schema
         let result: (i64,) = sqlx::query_as(
@@ -819,19 +793,12 @@ mod tests {
         let engine = Engine::new(pool);
 
         // Create table
-        let table_schema = TableSchema {
-            arrow: ArrowSchema {
-                fields: vec![ManifestField {
-                    name: "value".to_string(),
-                    type_: DataType::Int64.into(),
-                    nullable: false,
-                }],
-            },
-        };
-        engine
-            .create_table("test_table", &table_schema)
-            .await
-            .unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        engine.create_table("test_table", schema).await.unwrap();
 
         // Create batch with system columns (_tx_id, _row_index) + user columns
         let num_rows = 3;
@@ -887,19 +854,12 @@ mod tests {
         let engine = Engine::new(pool);
 
         // Create table
-        let table_schema = TableSchema {
-            arrow: ArrowSchema {
-                fields: vec![ManifestField {
-                    name: "value".to_string(),
-                    type_: DataType::Int64.into(),
-                    nullable: false,
-                }],
-            },
-        };
-        engine
-            .create_table("test_table", &table_schema)
-            .await
-            .unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        engine.create_table("test_table", schema).await.unwrap();
 
         // Create batch with system columns (_tx_id, _row_index) + user columns
         let batch_with_meta = RecordBatch::try_new(
@@ -1054,19 +1014,12 @@ mod tests {
         let engine = Engine::new(pool);
 
         // Create table
-        let table_schema = TableSchema {
-            arrow: ArrowSchema {
-                fields: vec![ManifestField {
-                    name: "value".to_string(),
-                    type_: DataType::Int64.into(),
-                    nullable: false,
-                }],
-            },
-        };
-        engine
-            .create_table("test_chunking", &table_schema)
-            .await
-            .unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        engine.create_table("test_chunking", schema).await.unwrap();
 
         // Create a large batch (2000 rows) with system columns
         let num_rows = 2000;

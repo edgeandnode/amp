@@ -3,6 +3,9 @@ use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 
+const AMPUP_API_URL: &str = "https://ampup.sh/api";
+const GITHUB_API_URL: &str = "https://api.github.com";
+
 #[derive(Debug)]
 pub enum GitHubError {
     ReleaseNotFound {
@@ -167,6 +170,8 @@ pub struct GitHubClient {
     client: reqwest::Client,
     repo: String,
     token: Option<String>,
+    /// Base URL for API requests (either custom API or GitHub API)
+    api: String,
 }
 
 impl GitHubClient {
@@ -191,10 +196,18 @@ impl GitHubClient {
             .build()
             .context("Failed to create request client")?;
 
+        // Use custom endpoints for edgeandnode/amp and otherwise leverages the github api
+        let api = if repo == "edgeandnode/amp" && github_token.is_none() {
+            AMPUP_API_URL.to_string()
+        } else {
+            format!("{}/repos/{}/releases", GITHUB_API_URL, repo)
+        };
+
         Ok(Self {
             client,
             repo,
             token: github_token,
+            api,
         })
     }
 
@@ -216,10 +229,7 @@ impl GitHubClient {
 
     /// Fetch release from GitHub API
     async fn get_release(&self, path: &str) -> Result<Release> {
-        let url = format!(
-            "https://api.github.com/repos/{}/releases/{}",
-            self.repo, path
-        );
+        let url = format!("{}/{}", self.api, path);
 
         let response = self
             .client

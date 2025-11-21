@@ -1,4 +1,3 @@
-use ampctl::client::BearerToken;
 use clap::{Args, Parser, Subcommand};
 use datasets_common::partial_reference::PartialReference;
 
@@ -37,6 +36,22 @@ pub struct SyncConfig {
     #[arg(short = 'd', long, env = "DATASET", required = true)]
     pub dataset: PartialReference,
 
+    /// Tables to synchronize (required, comma-separated)
+    ///
+    /// Specify which tables from the dataset to sync to PostgreSQL.
+    /// Example: --tables logs,blocks,transactions
+    ///
+    /// Can also be set via TABLES environment variable
+    #[arg(
+        short = 't',
+        long,
+        env = "TABLES",
+        required = true,
+        value_delimiter = ',',
+        num_args = 1..
+    )]
+    pub tables: Vec<String>,
+
     /// PostgreSQL connection URL (required)
     ///
     /// Format: postgresql://[user]:[password]@[host]:[port]/[database]
@@ -50,16 +65,6 @@ pub struct SyncConfig {
     #[arg(long, env = "AMP_FLIGHT_ADDR", default_value = "http://localhost:1602")]
     pub amp_flight_addr: String,
 
-    /// Amp Admin API server address (default: http://localhost:1610)
-    ///
-    /// Can also be set via AMP_ADMIN_API_ADDR environment variable
-    #[arg(
-        long,
-        env = "AMP_ADMIN_API_ADDR",
-        default_value = "http://localhost:1610"
-    )]
-    pub amp_admin_api_addr: String,
-
     /// Maximum database connections (default: 10, valid range: 1-1000)
     ///
     /// Can also be set via MAX_DB_CONNECTIONS environment variable
@@ -72,21 +77,13 @@ pub struct SyncConfig {
     #[arg(long, env = "RETENTION_BLOCKS", default_value_t = 128, value_parser = clap::value_parser!(u64).range(64..))]
     pub retention_blocks: u64,
 
-    /// Maximum backoff duration in seconds for manifest fetch retries (default: 60)
+    /// Authentication token for Arrow Flight
     ///
-    /// Retries continue indefinitely for transient errors, but backoff is capped at this value.
-    /// Can also be set via MANIFEST_FETCH_MAX_BACKOFF_SECS environment variable
-    #[arg(long, env = "MANIFEST_FETCH_MAX_BACKOFF_SECS", default_value_t = 60)]
-    pub manifest_fetch_max_backoff_secs: u64,
-
-    /// Authentication token for Admin API and Arrow Flight
-    ///
-    /// Bearer token for authenticating requests to both the Admin API (for manifest fetching)
-    /// and the Arrow Flight server (for data streaming).
+    /// Bearer token for authenticating requests to the Arrow Flight server (for data streaming).
     ///
     /// The token will be sent as an Authorization header: `Authorization: Bearer <token>`
     ///
     /// Can also be set via AMP_AUTH_TOKEN environment variable
     #[arg(long, env = "AMP_AUTH_TOKEN")]
-    pub auth_token: Option<BearerToken>,
+    pub auth_token: Option<String>,
 }
