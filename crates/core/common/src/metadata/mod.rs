@@ -26,7 +26,7 @@ pub use size::{Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_n
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
     pub file_id: FileId,
-    pub file_path: String,
+    pub file_name: String,
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
     pub parquet_meta: parquet::ParquetMeta,
@@ -38,14 +38,17 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
         FileMetadataRow {
             id: file_id,
             location_id,
-            file_path,
+            file_name,
+            url,
             object_size,
             object_e_tag: e_tag,
             object_version: version,
             metadata,
+            ..
         }: FileMetadataRow,
     ) -> Result<Self, Self::Error> {
-        let location = Path::parse(&file_path)?;
+        let url = url.join(&file_name)?;
+        let location = Path::from_url_path(url.path())?;
 
         let parquet_meta: parquet::ParquetMeta = serde_json::from_value(metadata)?;
 
@@ -61,7 +64,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
 
         Ok(Self {
             file_id,
-            file_path,
+            file_name,
             location_id,
             object_meta,
             parquet_meta,
@@ -85,11 +88,10 @@ pub async fn extract_footer_bytes_from_file(
 pub async fn amp_metadata_from_parquet_file(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(Path, ParquetMeta, FooterBytes), BoxError> {
+) -> Result<(String, ParquetMeta, FooterBytes), BoxError> {
     let parquet_metadata = extract_parquet_metadata_from_file(object_meta, object_store).await?;
 
     let file_metadata = parquet_metadata.file_metadata();
-    let file_path = object_meta.location.clone();
 
     let key_value_metadata =
         file_metadata
@@ -124,11 +126,13 @@ pub async fn amp_metadata_from_parquet_file(
             ))
         })?;
 
+    let file_name = object_meta.location.filename().unwrap().to_string();
+
     let mut footer_bytes = Vec::new();
 
     ParquetMetaDataWriter::new(&mut footer_bytes, &parquet_metadata).finish()?;
 
-    Ok((file_path, parquet_meta, footer_bytes))
+    Ok((file_name, parquet_meta, footer_bytes))
 }
 
 async fn extract_parquet_metadata_from_file(
