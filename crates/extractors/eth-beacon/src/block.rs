@@ -11,7 +11,7 @@ use common::{
 
 pub fn table(network: String) -> Table {
     let name = "blocks".parse().expect("table name is valid");
-    Table::new(name, schema().into(), network, vec![]).expect("table creation succeeds")
+    Table::new(name, schema().into(), network, vec![])
 }
 
 pub fn schema() -> Schema {

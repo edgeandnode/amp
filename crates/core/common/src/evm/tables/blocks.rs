@@ -22,7 +22,6 @@ pub fn table(network: String) -> Table {
         network,
         vec!["block_num".to_string(), "timestamp".to_string()],
     )
-    .expect("table creation succeeds")
 }
 
 pub const TABLE_NAME: &str = "blocks";
