@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
 use futures::TryStreamExt as _;
 use metadata_db::LocationId;
-use object_store::ObjectMeta;
+use object_store::{ObjectMeta, path::Path};
 
 /// Validates consistency between metadata database and object store for a table
 ///
@@ -42,13 +42,17 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
 
     let registered_files: BTreeSet<String> = files
         .into_iter()
-        .filter_map(|m| {
+        .map(|m| {
             // Extract filename from full path
-            object_store::path::Path::parse(&m.file_path)
-                .ok()
-                .and_then(|p| p.filename().map(|s| s.to_string()))
+            m.object_meta
+                .location
+                .filename()
+                .map(|s| s.to_string())
+                .ok_or_else(|| {
+                    ConsistencyError::missing_file_name(location_id, &m.object_meta.location)
+                })
         })
-        .collect();
+        .collect::<Result<_, ConsistencyError>>()?;
 
     let store = table.object_store();
     let path = table.path();
@@ -62,8 +66,15 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             source: err,
         })?
         .into_iter()
-        .filter_map(|object| Some((object.location.filename()?.to_string(), object)))
-        .collect();
+        .map(|object| {
+            let filename = object
+                .location
+                .filename()
+                .map(|s| s.to_string())
+                .ok_or_else(|| ConsistencyError::missing_file_name(location_id, &object.location));
+            Ok((filename?, object))
+        })
+        .collect::<Result<_, ConsistencyError>>()?;
 
     // TODO: Move the orphaned files deletion logic out of this check function. This side effect
     //  should be handled somewhere else (e.g., by the garbage collector).
@@ -185,4 +196,19 @@ pub enum ConsistencyError {
         filename: String,
         path: String,
     },
+}
+
+impl ConsistencyError {
+    fn missing_file_name(location_id: LocationId, loocation: &Path) -> Self {
+        use object_store::{Error::InvalidPath, path::Error::EmptySegment};
+
+        let path = loocation.to_string();
+
+        Self::ListObjectStore {
+            location_id,
+            source: InvalidPath {
+                source: EmptySegment { path },
+            },
+        }
+    }
 }
