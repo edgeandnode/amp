@@ -20,7 +20,7 @@ ALTER TABLE file_metadata ADD COLUMN IF NOT EXISTS file_path TEXT NOT NULL DEFAU
 
 -- Populate file_path with full path by joining url from physical_tables with file_name
 UPDATE file_metadata fm
-SET file_path = RTRIM(pt.url, '/') || '/' || fm.file_name
+SET file_path = RTRIM(pt.path, '/') || '/' || fm.file_name
 FROM physical_tables pt
 WHERE fm.location_id = pt.id;
 
