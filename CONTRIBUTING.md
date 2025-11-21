@@ -123,65 +123,6 @@ returning millions of rows.
 Closes #123
 ```
 
-## Submitting Changes
-
-### Pull Request Process
-
-1. **Ensure all checks pass locally**:
-   ```bash
-   just fmt-rs        # Format code
-   just check-rs      # Check compilation
-   just clippy        # Lint code (fix ALL warnings)
-   just test-local    # Run tests
-   ```
-
-2. **Open a Pull Request** on GitHub:
-   - Use a clear, descriptive title
-   - Reference any related issues (e.g., "Fixes #123" or "Closes #456")
-   - Describe what changed and why
-   - Include any breaking changes or migration notes
-   - **Disclose if you used AI tools** to generate any code
-   - Add screenshots/examples for UI or behavior changes
-
-3. **Sign the CLA** (first-time contributors):
-   - The CLA Assistant bot will comment on your PR
-   - Follow the instructions to sign electronically
-   - Your PR cannot be merged until the CLA is signed
-
-4. **Respond to feedback**:
-   - Address review comments promptly
-   - Push new commits to your branch (they'll appear in the PR)
-   - Mark conversations as resolved when addressed
-   - Re-run checks after changes
-
-### PR Review Process
-
-- All PRs require at least one approval from a maintainer
-- CI checks must pass:
-  - Code formatting (`fmt-check`)
-  - Compilation (`check`)
-  - Linting (`clippy` - zero warnings required)
-  - Tests (`test`)
-- The CLA must be signed
-- PRs may require multiple rounds of review
-- Be patient and responsive to feedback
-
-## Getting Help
-
-If you need assistance:
-
-- **Questions**: Open a GitHub issue with the `question` label
-- **Bugs**: Check existing issues or open a new one with detailed reproduction steps
-- **General Discussion**: Comment on relevant issues or PRs
-
-## Additional Resources
-
-- **Rust Book**: https://doc.rust-lang.org/book/
-- **Just Manual**: https://github.com/casey/just
-- **Cargo Nextest**: https://nexte.st/
-- **DataFusion**: https://arrow.apache.org/datafusion/
-- **Apache Arrow**: https://arrow.apache.org/
-
 ## License
 
 By contributing to Amp, you agree that your contributions will be licensed according to the terms specified in the [Contributor License Agreement](CLA.md). The project code is licensed under the terms in the [LICENSE](LICENSE) file.
