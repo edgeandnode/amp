@@ -15,17 +15,16 @@ Configuration can be provided via **CLI arguments** or **environment variables**
 Run `ampsync --help` for full documentation.
 
 ```bash
-ampsync [OPTIONS]
+ampsync sync [OPTIONS]
 
 Options:
-  -d, --dataset-name <NAME>                    Dataset to sync (required)
+  -d, --dataset <DATASET>                      Dataset to sync (required)
+  -t, --tables <TABLES>                        Tables to sync, comma-separated (required)
       --database-url <URL>                     PostgreSQL connection URL (required)
-  -v, --dataset-version <VERSION>              Dataset version (default: "latest")
       --amp-flight-addr <ADDR>                 Amp Flight server (default: http://localhost:1602)
-      --amp-admin-api-addr <ADDR>              Amp Admin API (default: http://localhost:1610)
       --max-db-connections <N>                 Max connections (default: 10, range: 1-1000)
       --retention-blocks <N>                   Retention blocks (default: 128, min: 64)
-      --manifest-fetch-max-backoff-secs <N>    Max backoff for manifest retries (default: 60)
+      --auth-token <TOKEN>                     Authentication token for Arrow Flight
   -h, --help                                   Print help
   -V, --version                                Print version
 ```
@@ -34,16 +33,26 @@ Options:
 
 All CLI arguments can also be set via environment variables:
 
-- **`DATASET_NAME`** (required): Dataset to sync (e.g., "uniswap_v3")
+- **`DATASET`** (required): Dataset reference to sync. Supports flexible formats:
+  - Full: `namespace/name@revision` (e.g., `_/eth_rpc@1.0.0`)
+  - No namespace: `name@revision` (e.g., `eth_rpc@1.0.0`, defaults to `_` namespace)
+  - No revision: `namespace/name` (e.g., `_/eth_rpc`, defaults to `latest`)
+  - Minimal: `name` (e.g., `eth_rpc`, defaults to `_/eth_rpc@latest`)
+
+  Revision can be:
+  - Semantic version (e.g., `1.0.0`)
+  - Hash (64-character hex string)
+  - `latest` (resolves to latest version)
+  - `dev` (resolves to development version)
+
+- **`TABLES`** (required): Comma-separated list of tables to sync (e.g., "logs,blocks,transactions")
 - **`DATABASE_URL`** (required): PostgreSQL connection URL
   Format: `postgresql://[user]:[password]@[host]:[port]/[database]`
   Example: `postgresql://user:pass@localhost:5432/amp`
-- **`DATASET_VERSION`** (default: `latest`): Pin to specific version
 - **`AMP_FLIGHT_ADDR`** (default: `http://localhost:1602`): Amp Arrow Flight server
-- **`AMP_ADMIN_API_ADDR`** (default: `http://localhost:1610`): Amp Admin API server
 - **`MAX_DB_CONNECTIONS`** (default: `10`): Database connection pool size (valid range: 1-1000)
 - **`RETENTION_BLOCKS`** (default: `128`): Watermark retention window (must be >= 64)
-- **`MANIFEST_FETCH_MAX_BACKOFF_SECS`** (default: `60`): Maximum backoff duration in seconds for manifest fetch retries. Transient errors (network issues, HTTP status errors) will retry indefinitely with exponential backoff capped at this value. Fatal errors (validation failures) fail immediately.
+- **`AMP_AUTH_TOKEN`** (optional): Bearer token for authenticating requests to the Arrow Flight server
 
 ## Running
 
@@ -69,11 +78,12 @@ services:
 
   ampsync:
     image: ghcr.io/edgeandnode/ampsync:latest
+    command: ["sync"]
     environment:
-      DATASET_NAME: uniswap_v3
+      DATASET: uniswap_v3
+      TABLES: logs,blocks,transactions
       DATABASE_URL: postgresql://amp:amp@postgres:5432/amp
       AMP_FLIGHT_ADDR: http://amp:1602
-      AMP_ADMIN_API_ADDR: http://amp:1610
       RUST_LOG: info,ampsync=debug
     depends_on:
       - postgres
