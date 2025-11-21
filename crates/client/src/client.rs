@@ -2,7 +2,6 @@
 
 use std::{
     future::{Future, IntoFuture},
-    io::Cursor,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -13,7 +12,7 @@ use arrow_flight::sql::client::FlightSqlServiceClient;
 use async_stream::try_stream;
 use common::{
     BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef, ipc::reader::StreamReader},
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
     metadata::segments::{BlockRange, ResumeWatermark},
 };
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
@@ -407,14 +406,12 @@ impl AmpClient {
         let flight_info = result.map_err(Error::Arrow)?;
 
         // Decode schema from FlightInfo
-        let schema = {
-            // Use StreamReader to decode the IPC message properly
-            let cursor = Cursor::new(&flight_info.schema);
-            let reader = StreamReader::try_new(cursor, None)
-                .map_err(|err| Error::Protocol(ProtocolError::InvalidSchema(err)))?;
-
-            Arc::new(reader.schema().as_ref().clone())
-        };
+        let schema = Arc::new(
+            flight_info
+                .clone()
+                .try_decode_schema()
+                .map_err(|err| Error::Protocol(ProtocolError::InvalidSchema(err)))?,
+        );
 
         let ticket = flight_info
             .endpoint
