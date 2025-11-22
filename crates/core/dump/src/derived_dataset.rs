@@ -111,7 +111,7 @@ use datasets_derived::{
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
-use tracing::instrument;
+use tracing::{Instrument, instrument};
 
 use crate::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
@@ -154,44 +154,47 @@ pub async fn dump(
         let opts = opts.clone();
         let metrics = ctx.metrics.clone();
 
-        join_set.spawn(async move {
-            let dataset = table.table().dataset();
-            let table_name = table.table_name().to_string();
-            let manifest = ctx
-                .dataset_store
-                .get_derived_manifest(dataset.manifest_hash())
+        join_set.spawn(
+            async move {
+                let dataset = table.table().dataset();
+                let table_name = table.table_name().to_string();
+                let manifest = ctx
+                    .dataset_store
+                    .get_derived_manifest(dataset.manifest_hash())
+                    .await
+                    .map_err(|err| -> BoxError {
+                        Error::GetDerivedManifest {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                        .into()
+                    })?;
+
+                dump_table(
+                    ctx,
+                    manifest,
+                    &env,
+                    table.clone(),
+                    compactor,
+                    &opts,
+                    microbatch_max_interval,
+                    end,
+                    metrics,
+                )
                 .await
                 .map_err(|err| -> BoxError {
-                    Error::GetDerivedManifest {
+                    Error::DumpTable {
                         table_name: table_name.clone(),
                         source: err,
                     }
                     .into()
                 })?;
 
-            dump_table(
-                ctx,
-                manifest,
-                &env,
-                table.clone(),
-                compactor,
-                &opts,
-                microbatch_max_interval,
-                end,
-                metrics,
-            )
-            .await
-            .map_err(|err| -> BoxError {
-                Error::DumpTable {
-                    table_name: table_name.clone(),
-                    source: err,
-                }
-                .into()
-            })?;
-
-            tracing::info!("dump of `{}` completed successfully", table_name);
-            Ok(())
-        });
+                tracing::info!("dump of `{}` completed successfully", table_name);
+                Ok(())
+            }
+            .in_current_span(),
+        );
     }
 
     // Wait for all tables to complete with fail-fast behavior
@@ -367,58 +370,61 @@ pub async fn dump_table(
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
-    join_set.spawn(async move {
-        let plan = planning_ctx.plan_sql(query.clone()).await?;
-        if let Err(err) = plan.is_incremental() {
-            return Err(format!("syncing table {table_name} is not supported: {err}",).into());
-        }
+    join_set.spawn(
+        async move {
+            let plan = planning_ctx.plan_sql(query.clone()).await?;
+            if let Err(err) = plan.is_incremental() {
+                return Err(format!("syncing table {table_name} is not supported: {err}",).into());
+            }
 
-        let Some(start) = catalog.earliest_block().await? else {
-            // If the dependencies have synced nothing, we have nothing to do.
-            tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
-            return Ok::<(), BoxError>(());
-        };
-
-        let resolved = end
-            .resolve(start, async {
-                let query_ctx =
-                    QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                query_ctx
-                    .max_end_block(&plan.clone().attach_to(&query_ctx)?)
-                    .await
-            })
-            .await?;
-
-        let end = match resolved {
-            ResolvedEndBlock::Continuous => None,
-            ResolvedEndBlock::NoDataAvailable => {
+            let Some(start) = catalog.earliest_block().await? else {
+                // If the dependencies have synced nothing, we have nothing to do.
                 tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
                 return Ok::<(), BoxError>(());
-            }
-            ResolvedEndBlock::Block(block) => Some(block),
-        };
+            };
 
-        let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
-        let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
-        dump_sql_query(
-            &ctx,
-            &env,
-            &catalog,
-            plan.clone(),
-            start,
-            end,
-            resume_watermark,
-            table.clone(),
-            compactor,
-            &opts,
-            microbatch_max_interval,
-            &ctx.notification_multiplexer,
-            metrics.clone(),
-        )
-        .await?;
+            let resolved = end
+                .resolve(start, async {
+                    let query_ctx =
+                        QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
+                    query_ctx
+                        .max_end_block(&plan.clone().attach_to(&query_ctx)?)
+                        .await
+                })
+                .await?;
 
-        Ok(())
-    });
+            let end = match resolved {
+                ResolvedEndBlock::Continuous => None,
+                ResolvedEndBlock::NoDataAvailable => {
+                    tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+                    return Ok::<(), BoxError>(());
+                }
+                ResolvedEndBlock::Block(block) => Some(block),
+            };
+
+            let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
+            let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
+            dump_sql_query(
+                &ctx,
+                &env,
+                &catalog,
+                plan.clone(),
+                start,
+                end,
+                resume_watermark,
+                table.clone(),
+                compactor,
+                &opts,
+                microbatch_max_interval,
+                &ctx.notification_multiplexer,
+                metrics.clone(),
+            )
+            .await?;
+
+            Ok(())
+        }
+        .in_current_span(),
+    );
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
