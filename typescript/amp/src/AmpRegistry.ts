@@ -76,7 +76,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     const getRequest = <A, I>(
       url: string,
       responseSchema: Schema.Schema<A, I, never>,
-      auth?: Auth.AuthStorageSchema,
+      auth?: Model.CachedAuthInfo,
     ): Effect.Effect<Option.Option<A>, RegistryApiError, never> => {
       const request = HttpClientRequest.get(url, { acceptJson: true })
       const authenticatedRequest = auth
@@ -111,7 +111,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     const makeAuthenticatedRequest = <A, AE, I, IE>(
       method: "POST" | "PUT",
       url: string,
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       bodySchema: Schema.Schema<I, IE, never>,
       body: I,
       responseSchema: Schema.Schema<A, AE, never>,
@@ -180,7 +180,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Option.some(dataset) if found, Option.none() if not found
      */
     const getOwnedDataset = (
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
     ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
@@ -194,7 +194,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Option of dataset from either endpoint
      */
     const getDatasetWithFallback = (
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
     ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
@@ -214,7 +214,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Created dataset
      */
     const publishDataset = (
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       dto: AmpRegistryInsertDatasetDto,
     ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
       makeAuthenticatedRequest(
@@ -235,7 +235,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Created version
      */
     const publishVersion = (
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       dto: AmpRegistryInsertDatasetVersionDto,
@@ -258,7 +258,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      * @returns Updated dataset
      */
     const updateDatasetMetadata = (
-      auth: Auth.AuthStorageSchema,
+      auth: Model.CachedAuthInfo,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       dto: AmpRegistryUpdateDatasetMetadataDto,
@@ -340,7 +340,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      */
     const publishFlow = Effect.fn("DatasetPublishFlow")(function*(
       args: Readonly<{
-        auth: Auth.AuthStorageSchema
+        auth: Model.CachedAuthInfo
         context: ManifestContext.DatasetContext
         versionTag: Model.DatasetRevision
         changelog?: string | undefined
