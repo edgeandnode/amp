@@ -43,51 +43,6 @@ jobs:
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampctl -p ampup -p ampsync
 
-      - name: Sign binaries
-        if: contains(matrix.target, 'apple-darwin')
-        run: |
-          # Decode certificate (macOS uses -D, not --decode)
-          echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -D > certificate.p12
-
-          # Create temporary keychain
-          security create-keychain -p actions macos-build.keychain
-          security default-keychain -s macos-build.keychain
-          security unlock-keychain -p actions macos-build.keychain
-
-          # Import certificate
-          security import certificate.p12 -k macos-build.keychain -P "${{ secrets.APPLE_CERT_PASSWORD }}" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions macos-build.keychain
-
-          # Sign all binaries
-          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
-            --options runtime \
-            --entitlements entitlements.plist \
-            --timestamp \
-            target/${{ matrix.target }}/release/ampd
-
-          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
-            --options runtime \
-            --entitlements entitlements.plist \
-            --timestamp \
-            target/${{ matrix.target }}/release/ampctl
-
-          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
-            --options runtime \
-            --entitlements entitlements.plist \
-            --timestamp \
-            target/${{ matrix.target }}/release/ampup
-
-          /usr/bin/codesign --force --sign "${{ secrets.APPLE_TEAM_ID }}" \
-            --options runtime \
-            --entitlements entitlements.plist \
-            --timestamp \
-            target/${{ matrix.target }}/release/ampsync
-
-          # Reset to login keychain before deleting
-          security default-keychain -s login.keychain-db
-          security delete-keychain macos-build.keychain
-          rm certificate.p12
-
       - name: Upload ampd artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -117,7 +72,7 @@ jobs:
           retention-days: 30
 
   notarize:
-    name: Notarize (${{ matrix.target }}-${{ matrix.binary }})
+    name: Sign and Notarize (${{ matrix.target }}-${{ matrix.binary }})
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -128,20 +83,29 @@ jobs:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
 
     steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
       - name: Download artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: ${{ matrix.target }}-${{ matrix.binary }}
           path: ./
 
+      - name: Setup signing certificate
+        run: echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -d > certificate.p12
+
       - name: Setup App Store Connect API Key
         run: echo '${{ secrets.APPLE_APP_STORE_CONNECT_API_KEY_JSON }}' > api_key.json
 
-      - name: Notarize binary
+      - name: Sign and notarize binary
         uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
         with:
           input_path: ${{ matrix.binary }}
-          sign: false
+          sign: true
+          p12_file: certificate.p12
+          p12_password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          code_signature_flags: runtime
+          entitlements_xml_file: entitlements.plist
           notarize: true
           app_store_connect_api_key_json_file: api_key.json
 
@@ -219,7 +183,7 @@ jobs:
   containerize:
     name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest
-    needs: [build, notarize]
+    needs: build
     permissions:
       contents: read
       packages: write
