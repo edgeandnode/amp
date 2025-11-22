@@ -553,6 +553,25 @@ impl StreamingQuery {
         ctx: &QueryContext,
         watermark: &Watermark,
     ) -> Result<bool, BoxError> {
+        // Panic safety: The `blocks_ctx` always has a single table.
+        let blocks_segments = &ctx.catalog().table_snapshots()[0];
+
+        // Optimization: Check segment metadata first to avoid expensive query,
+        // Walk segments in reverse to find one that covers this block number.
+        for segment in blocks_segments.canonical_segments().iter().rev() {
+            if *segment.range.numbers.start() <= watermark.number {
+                // Found segment that could contain this block
+                if *segment.range.numbers.end() == watermark.number {
+                    // Exact match on segment end - use segment hash directly
+                    return Ok(segment.range.hash == watermark.hash);
+                }
+                // Block is inside segment but not at end.
+                // So we will need to query the data file to find the hash.
+                break;
+            }
+        }
+
+        // Fallback to database query
         self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
             .await
             .map(|row| row.is_some())
