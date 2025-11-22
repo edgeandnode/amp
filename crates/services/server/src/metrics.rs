@@ -40,6 +40,9 @@ pub struct MetricsRegistry {
 
     /// Total bytes sent incrementally via streaming queries
     pub streaming_bytes_sent: telemetry::metrics::Counter,
+
+    /// Peak query memory usage in bytes
+    pub query_memory_peak_bytes: telemetry::metrics::Histogram<u64>,
 }
 
 impl MetricsRegistry {
@@ -115,6 +118,12 @@ impl MetricsRegistry {
                 "streaming_bytes_sent_total",
                 "Total bytes sent incrementally via streaming queries",
             ),
+            query_memory_peak_bytes: telemetry::metrics::Histogram::new_u64(
+                meter,
+                "query_memory_peak_bytes",
+                "Peak memory usage per query",
+                "bytes",
+            ),
         }
     }
 
@@ -156,5 +165,10 @@ impl MetricsRegistry {
     /// Record streaming query lifetime
     pub fn record_streaming_lifetime(&self, duration_millis: f64) {
         self.streaming_query_lifetime.record(duration_millis);
+    }
+
+    /// Record query memory usage
+    pub fn record_query_memory(&self, peak_bytes: u64) {
+        self.query_memory_peak_bytes.record(peak_bytes);
     }
 }
