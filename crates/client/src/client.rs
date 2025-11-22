@@ -77,6 +77,9 @@ impl FuturesStream for BatchStream {
 ///
 /// Returns `ResponseBatch` with metadata. Most users should use `client.stream()`
 /// for streaming queries with reorg detection, or `client.query()` for batch queries.
+///
+/// The stream lazily establishes the connection on first poll. Flight info is fetched
+/// eagerly for schema access, but data is deferred until it is actually requested.
 pub struct RawStream {
     pub(crate) inner: BoxStream<'static, Result<ResponseBatch, Error>>,
     pub(crate) schema: SchemaRef,
@@ -401,7 +404,7 @@ impl AmpClient {
 
         let flight_info = result.map_err(Error::Arrow)?;
 
-        // Decode schema from FlightInfo
+        // Eagerly decode schema from FlightInfo
         let schema = Arc::new(
             flight_info
                 .clone()
@@ -416,24 +419,30 @@ impl AmpClient {
             .and_then(|endpoint| endpoint.ticket)
             .ok_or(Error::Protocol(ProtocolError::MissingFlightTicket))?;
 
-        // Manually inject authorization header into DoGet request as we are using the inner client
-        let mut request = tonic::Request::new(ticket);
-        if let Some(token) = self.client.token() {
-            let auth_value = format!("Bearer {}", token);
-            if let Ok(metadata_value) = auth_value.parse() {
-                request
-                    .metadata_mut()
-                    .insert("authorization", metadata_value);
+        let mut client = self.client.clone();
+        let token = client.token().map(|s| s.to_string());
+
+        let inner = try_stream! {
+            // Lazy initialization happens here on first poll
+            let mut request = tonic::Request::new(ticket);
+            if let Some(token) = token {
+                let auth_value = format!("Bearer {}", token);
+                if let Ok(metadata_value) = auth_value.parse() {
+                    request.metadata_mut().insert("authorization", metadata_value);
+                }
+            }
+
+            let flight_data = client.inner_mut().do_get(request).await?.into_inner();
+            let mut decoder = decode::FlightDataDecoder::new(flight_data);
+
+            // Stream batches from decoder
+            while let Some(batch) = decoder.next().await {
+                yield batch?;
             }
         }
+        .boxed();
 
-        let flight_data = self.client.inner_mut().do_get(request).await?.into_inner();
-        let decoder = decode::FlightDataDecoder::new(flight_data);
-
-        Ok(RawStream {
-            inner: decoder.boxed(),
-            schema,
-        })
+        Ok(RawStream { inner, schema })
     }
 }
 
