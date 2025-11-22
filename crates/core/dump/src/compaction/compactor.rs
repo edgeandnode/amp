@@ -113,7 +113,7 @@ impl Compactor {
             CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
         {
             let groups = plan.collect::<Vec<_>>().await;
-            tracing::debug!(
+            tracing::trace!(
                 table = %table_name,
                 group_count = groups.len(),
                 "Compaction Groups: {:?}",
