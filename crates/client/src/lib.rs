@@ -30,7 +30,7 @@
 //!
 //! // Create protocol stream (default - stateless reorg detection)
 //! let mut stream = client
-//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...'")
 //!     .await?;
 //!
 //! while let Some(msg) = stream.next().await {
@@ -61,7 +61,7 @@
 //!
 //! // Create transactional stream with state persistence
 //! let mut stream = client
-//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...'")
 //!     .transactional(InMemoryStateStore::new(), 128)
 //!     .await?;
 //!
@@ -97,7 +97,7 @@
 //!
 //! let client = AmpClient::from_endpoint("http://localhost:1602").await?;
 //! let mut stream = client
-//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...'")
 //!     .cdc(state_store, batch_store, 128)
 //!     .await?;
 //!

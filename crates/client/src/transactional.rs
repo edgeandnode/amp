@@ -562,10 +562,10 @@ impl StateActor {
 ///
 /// ```rust,ignore
 /// // Simple usage - just await the builder
-/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+/// let stream = client.stream("SELECT * FROM eth.logs").await?;
 ///
 /// // With configuration
-/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+/// let stream = client.stream("SELECT * FROM eth.logs")
 ///     .transactional(store, 128)  // Use persistent state store
 ///     .await?;
 /// ```
@@ -581,7 +581,7 @@ impl TransactionalStreamBuilder {
     ///
     /// # Arguments
     /// - `client`: Amp client
-    /// - `sql`: SQL query string (should include `SETTINGS stream = true`)
+    /// - `sql`: SQL query string
     /// - `store`: State store for persistence
     /// - `retention`: Retention window in blocks
     pub(crate) fn new(
@@ -634,7 +634,7 @@ impl IntoFuture for TransactionalStreamBuilder {
 ///
 /// ## Low-Level: Manual Commit
 /// ```rust,ignore
-/// let mut stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+/// let mut stream = client.stream("SELECT * FROM eth.logs")
 ///     .transactional(LmdbStore::new("state.db"), 128)
 ///     .await?;
 ///
@@ -656,7 +656,7 @@ impl IntoFuture for TransactionalStreamBuilder {
 ///
 /// ## High-Level: Auto-Commit
 /// ```rust,ignore
-/// client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+/// client.stream("SELECT * FROM eth.logs")
 ///     .transactional(LmdbStore::new("state.db"), 128)
 ///     .await?
 ///     .for_each(|event| async move {

@@ -77,6 +77,9 @@ impl FuturesStream for BatchStream {
 ///
 /// Returns `ResponseBatch` with metadata. Most users should use `client.stream()`
 /// for streaming queries with reorg detection, or `client.query()` for batch queries.
+///
+/// The stream lazily establishes the connection on first poll. Flight info is fetched
+/// eagerly for schema access, but data is deferred until it is actually requested.
 pub struct RawStream {
     pub(crate) inner: BoxStream<'static, Result<ResponseBatch, Error>>,
     pub(crate) schema: SchemaRef,
@@ -131,7 +134,7 @@ pub enum ProtocolMessage {
 /// # Example
 ///
 /// ```rust,ignore
-/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+/// let stream = client.stream("SELECT * FROM eth.logs").await?;
 ///
 /// while let Some(msg) = stream.next().await {
 ///     match msg? {
@@ -333,13 +336,13 @@ impl AmpClient {
     ///
     /// ```rust,ignore
     /// // Protocol stream (default - stateless reorg detection)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+    /// let stream = client.stream("SELECT * FROM eth.logs").await?;
     ///
     /// // Raw stream (response batches)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").raw().await?;
+    /// let stream = client.stream("SELECT * FROM eth.logs").raw().await?;
     ///
     /// // Transactional stream (stateful with commits)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    /// let stream = client.stream("SELECT * FROM eth.logs")
     ///     .transactional(store, 128)
     ///     .await?;
     /// ```
@@ -350,14 +353,10 @@ impl AmpClient {
         }
     }
 
-    /// Execute a SQL query and return a stream of results.
-    ///
-    /// **Important**: This method is for **non-streaming queries only**. If your query includes
-    /// `SETTINGS stream = true`, use `client.stream()` instead to get proper reorg detection
-    /// and watermark handling.
+    /// Execute a SQL batch query and return a stream of results.
     ///
     /// # Arguments
-    /// - `sql`: SQL query string (should NOT include `SETTINGS stream = true`)
+    /// - `sql`: SQL query string
     ///
     /// # Example
     /// ```rust,ignore
@@ -405,7 +404,7 @@ impl AmpClient {
 
         let flight_info = result.map_err(Error::Arrow)?;
 
-        // Decode schema from FlightInfo
+        // Eagerly decode schema from FlightInfo
         let schema = Arc::new(
             flight_info
                 .clone()
@@ -420,24 +419,30 @@ impl AmpClient {
             .and_then(|endpoint| endpoint.ticket)
             .ok_or(Error::Protocol(ProtocolError::MissingFlightTicket))?;
 
-        // Manually inject authorization header into DoGet request as we are using the inner client
-        let mut request = tonic::Request::new(ticket);
-        if let Some(token) = self.client.token() {
-            let auth_value = format!("Bearer {}", token);
-            if let Ok(metadata_value) = auth_value.parse() {
-                request
-                    .metadata_mut()
-                    .insert("authorization", metadata_value);
+        let mut client = self.client.clone();
+        let token = client.token().map(|s| s.to_string());
+
+        let inner = try_stream! {
+            // Lazy initialization happens here on first poll
+            let mut request = tonic::Request::new(ticket);
+            if let Some(token) = token {
+                let auth_value = format!("Bearer {}", token);
+                if let Ok(metadata_value) = auth_value.parse() {
+                    request.metadata_mut().insert("authorization", metadata_value);
+                }
+            }
+
+            let flight_data = client.inner_mut().do_get(request).await?.into_inner();
+            let mut decoder = decode::FlightDataDecoder::new(flight_data);
+
+            // Stream batches from decoder
+            while let Some(batch) = decoder.next().await {
+                yield batch?;
             }
         }
+        .boxed();
 
-        let flight_data = self.client.inner_mut().do_get(request).await?.into_inner();
-        let decoder = decode::FlightDataDecoder::new(flight_data);
-
-        Ok(RawStream {
-            inner: decoder.boxed(),
-            schema,
-        })
+        Ok(RawStream { inner, schema })
     }
 }
 
@@ -485,7 +490,7 @@ impl StreamBuilder {
     /// let state_store = InMemoryStateStore::new();
     /// let batch_store = InMemoryBatchStore::new();
     /// let mut stream = client
-    ///     .stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    ///     .stream("SELECT * FROM eth.logs")
     ///     .cdc(state_store, batch_store, 128)
     ///     .await?;
     /// ```

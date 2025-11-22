@@ -12,7 +12,7 @@
 //! let state_store = InMemoryStateStore::new();
 //! let batch_store = InMemoryBatchStore::new();
 //! let mut stream = client
-//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...' SETTINGS stream = true")
+//!     .stream("SELECT * FROM eth.logs WHERE address = '0x...'")
 //!     .cdc(state_store, batch_store, 128)
 //!     .await?;
 //!
@@ -148,13 +148,13 @@ pub enum CdcEvent {
 /// let state_store = InMemoryStateStore::new();
 /// let batch_store = InMemoryBatchStore::new();
 /// let mut stream = client
-///     .stream("SELECT * FROM eth.logs SETTINGS stream = true")
+///     .stream("SELECT * FROM eth.logs")
 ///     .cdc(state_store, batch_store, 128)
 ///     .await?;
 ///
 /// while let Some(result) = stream.next().await {
 ///     let (event, commit) = result?;
-///     
+///
 ///     match event {
 ///         CdcEvent::Insert { id, batch } => {
 ///             forward_insert(id, batch).await?;
@@ -287,7 +287,7 @@ impl CdcStreamBuilder {
     ///
     /// # Arguments
     /// - `client`: Amp client
-    /// - `sql`: SQL query string (should include `SETTINGS stream = true`)
+    /// - `sql`: SQL query string
     /// - `state_store`: StateStore for watermark persistence
     /// - `batch_store`: BatchStore for batch content persistence
     /// - `retention`: Retention window in blocks
