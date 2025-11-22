@@ -1,0 +1,7 @@
+- name: memory_limit_exceeded
+  query: |
+    WITH a AS (SELECT unnest(generate_series(1, 50000)) AS x),
+         b AS (SELECT unnest(generate_series(1, 50000)) AS y)
+    SELECT COUNT(*) FROM a INNER JOIN b ON a.x = b.y
+  failure: |
+    query execution error | Caused by: Resources exhausted: global memory limit of 1024.0 KB exceeded

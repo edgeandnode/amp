@@ -13,7 +13,7 @@ use datafusion::{
     error::DataFusionError,
     execution::memory_pool::{
         FairSpillPool, GreedyMemoryPool, MemoryLimit, MemoryPool, MemoryReservation,
-        TrackConsumersPool, UnboundedMemoryPool,
+        TrackConsumersPool, UnboundedMemoryPool, human_readable_size,
     },
 };
 
@@ -38,7 +38,7 @@ pub fn make_memory_pool(kind: MemoryPoolKind, max_mem_bytes: usize) -> Arc<dyn M
     }
 }
 
-fn format_oom_error(err: DataFusionError) -> DataFusionError {
+fn format_oom_error(err: DataFusionError, prefix: &str) -> DataFusionError {
     let single_line = err
         .to_string()
         .lines()
@@ -46,7 +46,14 @@ fn format_oom_error(err: DataFusionError) -> DataFusionError {
         .collect::<Vec<_>>()
         .join(" | ");
 
-    DataFusionError::ResourcesExhausted(format!("OOM error: {}", single_line))
+    DataFusionError::ResourcesExhausted(format!("{prefix}: {single_line}"))
+}
+
+fn display_limit(limit: MemoryLimit) -> String {
+    match limit {
+        MemoryLimit::Finite(limit) => human_readable_size(limit),
+        MemoryLimit::Infinite | MemoryLimit::Unknown => "unlimited".to_string(),
+    }
 }
 
 /// A tiered memory pool that enforces limits at two levels (e.g., global and per-query).
@@ -145,11 +152,17 @@ impl MemoryPool for TieredMemoryPool {
                     Err(e) => {
                         // Rollback parent allocation on child failure
                         self.parent.shrink(reservation, additional);
-                        Err(format_oom_error(e))
+                        let limit = display_limit(self.child.memory_limit());
+                        let prefix = format!("query memory limit of {limit} exceeded");
+                        Err(format_oom_error(e, &prefix))
                     }
                 }
             }
-            Err(e) => Err(format_oom_error(e)),
+            Err(e) => {
+                let limit = display_limit(self.parent.memory_limit());
+                let prefix = format!("global memory limit of {limit} exceeded");
+                Err(format_oom_error(e, &prefix))
+            }
         }
     }
 
