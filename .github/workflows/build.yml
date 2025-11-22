@@ -102,6 +102,7 @@ jobs:
         uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
         with:
           input_path: binaries/${{ matrix.binary }}.zip
+          sign: false
           notarize: true
           app_store_connect_api_key_json_file: key.json
 
