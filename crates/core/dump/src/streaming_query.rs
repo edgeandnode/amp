@@ -93,15 +93,29 @@ struct MicrobatchRange {
     direction: StreamDirection,
 }
 
+struct SegmentStart {
+    number: BlockNum,
+    prev_hash: Option<BlockHash>,
+}
+
+impl From<BlockRow> for SegmentStart {
+    fn from(row: BlockRow) -> Self {
+        Self {
+            number: row.number,
+            prev_hash: row.prev_hash,
+        }
+    }
+}
+
 /// Direction of the stream. Helpful to distinguish reorgs, with the payload being the first block
 /// after the base of the fork.
 enum StreamDirection {
-    ForwardFrom(BlockRow),
-    ReorgFrom(BlockRow),
+    ForwardFrom(SegmentStart),
+    ReorgFrom(SegmentStart),
 }
 
 impl StreamDirection {
-    fn block(&self) -> &BlockRow {
+    fn segment_start(&self) -> &SegmentStart {
         match self {
             StreamDirection::ForwardFrom(block) => block,
             StreamDirection::ReorgFrom(block) => block,
@@ -371,7 +385,7 @@ impl StreamingQuery {
             debug!("no next microbatch start found");
             return Ok(None);
         };
-        let start = direction.block();
+        let start = direction.segment_start();
         let Some(end) = self
             .next_microbatch_end(&blocks_ctx, start, common_watermark)
             .await?
@@ -399,17 +413,20 @@ impl StreamingQuery {
             // start stream
             None => {
                 let block = self.blocks_table_fetch(ctx, self.start_block, None).await?;
-                Ok(block.map(StreamDirection::ForwardFrom))
+                Ok(block.map(|b| StreamDirection::ForwardFrom(b.into())))
             }
             // continue stream
             Some(prev) if self.blocks_table_contains(ctx, prev).await? => {
-                let block = self.blocks_table_fetch(ctx, prev.number + 1, None).await?;
-                Ok(block.map(StreamDirection::ForwardFrom))
+                let segment_start = SegmentStart {
+                    number: prev.number + 1,
+                    prev_hash: Some(prev.hash),
+                };
+                Ok(Some(StreamDirection::ForwardFrom(segment_start)))
             }
             // rewind stream due to reorg
             Some(prev) => {
                 let block = self.reorg_base(ctx, prev).await?;
-                Ok(block.map(StreamDirection::ReorgFrom))
+                Ok(block.map(|b| StreamDirection::ReorgFrom(b.into())))
             }
         }
     }
@@ -418,7 +435,7 @@ impl StreamingQuery {
     async fn next_microbatch_end(
         &mut self,
         ctx: &QueryContext,
-        start: &BlockRow,
+        start: &SegmentStart,
         common_watermark: Watermark,
     ) -> Result<Option<Watermark>, BoxError> {
         let number = {
