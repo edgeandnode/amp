@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // These comments break doc tests, so we disable them.
         prost_config.disable_comments(&["google.protobuf.Timestamp", "google.protobuf.Any"]);
 
-        let config = tonic_build::configure()
+        let config = tonic_prost_build::configure()
             .build_server(false)
             .out_dir("src/proto");
 
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
             .emit_rerun_if_changed(false); // See https://github.com/hyperium/tonic/issues/1070
 
-        config.compile_protos_with_config(
+        config.compile_with_config(
             prost_config,
             &["proto/firehose.proto", "proto/ethereum.proto"],
             &[""],

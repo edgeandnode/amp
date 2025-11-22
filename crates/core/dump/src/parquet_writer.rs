@@ -11,7 +11,7 @@ use common::{
         },
         segments::BlockRange,
     },
-    parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
+    parquet::{arrow::AsyncArrowWriter, errors::ParquetError, file::metadata::KeyValue},
 };
 use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
@@ -146,7 +146,7 @@ impl ParquetFileWriter {
             self.filename,
             range.start(),
             range.end(),
-            meta.num_rows,
+            meta.file_metadata().num_rows(),
         );
 
         let location = Path::from_url_path(self.file_url.path())?;

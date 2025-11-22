@@ -34,7 +34,10 @@ pub struct FlightClient {
 impl FlightClient {
     /// Create a new Flight client connected to the provided Flight server URL.
     pub async fn new(url: impl Into<String>) -> Result<Self, BoxError> {
-        let flight_client = FlightServiceClient::connect(url.into()).await?;
+        let conn = tonic::transport::Endpoint::from_shared(url.into())?
+            .connect()
+            .await?;
+        let flight_client = FlightServiceClient::new(conn);
         let client = FlightSqlServiceClient::new_from_inner(flight_client);
 
         Ok(Self {
