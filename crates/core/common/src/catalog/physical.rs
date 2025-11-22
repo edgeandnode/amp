@@ -605,6 +605,7 @@ impl PhysicalTable {
         &self.table
     }
 
+    #[tracing::instrument(skip_all, err, fields(table = %self.table_ref_compact()))]
     pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
         self.stream_file_metadata().try_collect().await
     }
