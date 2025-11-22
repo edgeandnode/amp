@@ -87,8 +87,7 @@ jobs:
           sign: true
           p12_file: certificate.p12
           p12_password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          code_signature_flags: runtime
-          entitlements_xml_file: entitlements.plist
+          sign_args: --code-signature-flags runtime --entitlements-xml-file entitlements.plist
           notarize: true
           app_store_connect_api_key_json_file: api_key.json
 
