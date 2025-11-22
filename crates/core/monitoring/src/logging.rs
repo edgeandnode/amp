@@ -4,12 +4,13 @@ use std::{io::IsTerminal, sync::Once};
 
 use opentelemetry::trace::TracerProvider;
 use tracing_subscriber::{
-    self, EnvFilter, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
+    self, EnvFilter, filter::LevelFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt
 };
 
 use crate::telemetry;
 
 static AMP_LOG_ENV_VAR: &str = "AMP_LOG";
+static AMP_LOG_SPAN_EVENT_ENV_VAR: &str = "AMP_LOG_SPAN_EVENT";
 
 /// Initializes a tracing subscriber for logging.
 pub fn init() {
@@ -19,9 +20,12 @@ pub fn init() {
     INIT.call_once(|| {
         let env_filter = env_filter();
 
+        let span_events = span_events();
+
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
             .with_writer(std::io::stderr)
+            .with_span_events(span_events)
             .with_ansi(std::io::stderr().is_terminal())
             .init();
     });
@@ -98,6 +102,14 @@ fn env_filter() -> EnvFilter {
     }
 
     env_filter
+}
+
+fn span_events() -> FmtSpan {
+    match std::env::var(AMP_LOG_SPAN_EVENT_ENV_VAR).as_deref() {
+        Ok("close") => FmtSpan::CLOSE,
+        Ok("full") => FmtSpan::FULL,
+        _ => FmtSpan::NONE,
+    }
 }
 
 /// Collect the error source chain as a vector of strings for tracing.
