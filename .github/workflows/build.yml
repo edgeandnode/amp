@@ -43,32 +43,15 @@ jobs:
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampctl -p ampup -p ampsync
 
-      - name: Upload ampd artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ matrix.target }}-ampd
-          path: target/${{ matrix.target }}/release/ampd
-          retention-days: 30
-
-      - name: Upload ampctl artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.target }}-ampctl
-          path: target/${{ matrix.target }}/release/ampctl
-          retention-days: 30
-
-      - name: Upload ampup artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.target }}-ampup
-          path: target/${{ matrix.target }}/release/ampup
-          retention-days: 30
-
-      - name: Upload ampsync artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.target }}-ampsync
-          path: target/${{ matrix.target }}/release/ampsync
+          name: ${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/ampd
+            target/${{ matrix.target }}/release/ampctl
+            target/${{ matrix.target }}/release/ampup
+            target/${{ matrix.target }}/release/ampsync
           retention-days: 30
 
   notarize:
@@ -88,8 +71,8 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: ${{ matrix.target }}-${{ matrix.binary }}
-          path: ./
+          name: ${{ matrix.target }}
+          path: ./binaries/
 
       - name: Setup signing certificate
         run: echo "${{ secrets.APPLE_CERT_DATA }}" | base64 -d > certificate.p12
@@ -100,7 +83,7 @@ jobs:
       - name: Sign and notarize binary
         uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
         with:
-          input_path: ${{ matrix.binary }}
+          input_path: binaries/${{ matrix.binary }}
           sign: true
           p12_file: certificate.p12
           p12_password: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -113,9 +96,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.target }}-${{ matrix.binary }}-notarized
-          path: ${{ matrix.binary }}
+          path: binaries/${{ matrix.binary }}
           retention-days: 30
-          overwrite: true
 
   release:
     name: Release
@@ -138,27 +120,27 @@ jobs:
           # Organize binaries for release
           mkdir -p release
 
-          # Copy and rename ampd binaries (Linux from build, macOS from notarize)
-          cp artifacts/x86_64-unknown-linux-gnu-ampd/ampd release/ampd-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-ampd/ampd release/ampd-linux-aarch64
+          # Copy and rename ampd binaries
+          cp artifacts/x86_64-unknown-linux-gnu/ampd release/ampd-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/ampd release/ampd-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampd-notarized/ampd release/ampd-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampd-notarized/ampd release/ampd-darwin-aarch64
 
-          # Copy and rename ampctl binaries (Linux from build, macOS from notarize)
-          cp artifacts/x86_64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-aarch64
+          # Copy and rename ampctl binaries
+          cp artifacts/x86_64-unknown-linux-gnu/ampctl release/ampctl-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/ampctl release/ampctl-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-aarch64
 
-          # Copy and rename ampup binaries (Linux from build, macOS from notarize)
-          cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
+          # Copy and rename ampup binaries
+          cp artifacts/x86_64-unknown-linux-gnu/ampup release/ampup-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/ampup release/ampup-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-aarch64
 
-          # Copy and rename ampsync binaries (Linux from build, macOS from notarize)
-          cp artifacts/x86_64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-aarch64
+          # Copy and rename ampsync binaries
+          cp artifacts/x86_64-unknown-linux-gnu/ampsync release/ampsync-linux-x86_64
+          cp artifacts/aarch64-unknown-linux-gnu/ampsync release/ampsync-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampsync-notarized/ampsync release/ampsync-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampsync-notarized/ampsync release/ampsync-darwin-aarch64
 
@@ -204,16 +186,16 @@ jobs:
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
-      - name: Download Linux AMD64 binary
+      - name: Download Linux AMD64 binaries
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: x86_64-unknown-linux-gnu-${{ matrix.binary }}
+          name: x86_64-unknown-linux-gnu
           path: ./amd64/
 
-      - name: Download Linux ARM64 binary
+      - name: Download Linux ARM64 binaries
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: aarch64-unknown-linux-gnu-${{ matrix.binary }}
+          name: aarch64-unknown-linux-gnu
           path: ./arm64/
 
       - name: Login to GitHub Container Registry
