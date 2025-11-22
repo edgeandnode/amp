@@ -26,7 +26,7 @@ use crate::{
 ///
 /// // Create stores (reuse pool)
 /// let store = PostgresStateStore::new(pool.clone(), "my-stream-id").await?;
-/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+/// let stream = client.stream("SELECT * FROM eth.logs")
 ///     .transactional(store, 128)
 ///     .await?;
 /// ```

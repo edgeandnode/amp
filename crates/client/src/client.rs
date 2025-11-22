@@ -131,7 +131,7 @@ pub enum ProtocolMessage {
 /// # Example
 ///
 /// ```rust,ignore
-/// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+/// let stream = client.stream("SELECT * FROM eth.logs").await?;
 ///
 /// while let Some(msg) = stream.next().await {
 ///     match msg? {
@@ -333,13 +333,13 @@ impl AmpClient {
     ///
     /// ```rust,ignore
     /// // Protocol stream (default - stateless reorg detection)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").await?;
+    /// let stream = client.stream("SELECT * FROM eth.logs").await?;
     ///
     /// // Raw stream (response batches)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true").raw().await?;
+    /// let stream = client.stream("SELECT * FROM eth.logs").raw().await?;
     ///
     /// // Transactional stream (stateful with commits)
-    /// let stream = client.stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    /// let stream = client.stream("SELECT * FROM eth.logs")
     ///     .transactional(store, 128)
     ///     .await?;
     /// ```
@@ -350,14 +350,10 @@ impl AmpClient {
         }
     }
 
-    /// Execute a SQL query and return a stream of results.
-    ///
-    /// **Important**: This method is for **non-streaming queries only**. If your query includes
-    /// `SETTINGS stream = true`, use `client.stream()` instead to get proper reorg detection
-    /// and watermark handling.
+    /// Execute a SQL batch query and return a stream of results.
     ///
     /// # Arguments
-    /// - `sql`: SQL query string (should NOT include `SETTINGS stream = true`)
+    /// - `sql`: SQL query string
     ///
     /// # Example
     /// ```rust,ignore
@@ -485,7 +481,7 @@ impl StreamBuilder {
     /// let state_store = InMemoryStateStore::new();
     /// let batch_store = InMemoryBatchStore::new();
     /// let mut stream = client
-    ///     .stream("SELECT * FROM eth.logs SETTINGS stream = true")
+    ///     .stream("SELECT * FROM eth.logs")
     ///     .cdc(state_store, batch_store, 128)
     ///     .await?;
     /// ```
