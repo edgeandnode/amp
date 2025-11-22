@@ -1,10 +1,10 @@
-use std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use datafusion::{
     error::DataFusionError,
     execution::{
         disk_manager::{DiskManagerBuilder, DiskManagerMode},
-        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool, TrackConsumersPool},
+        memory_pool::MemoryPool,
         runtime_env::RuntimeEnvBuilder,
     },
     parquet::{
@@ -23,7 +23,13 @@ use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_d
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{Store, metadata::Overflow, query_context::QueryEnv, store::ObjectStoreUrl};
+use crate::{
+    Store,
+    memory_pool::{MemoryPoolKind, make_memory_pool},
+    metadata::Overflow,
+    query_context::QueryEnv,
+    store::ObjectStoreUrl,
+};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -32,6 +38,7 @@ pub struct Config {
     pub manifests_store: Arc<Store>,
     pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
+    pub query_max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     /// Maximum interval for derived dataset dump microbatches
     pub microbatch_max_interval: u64,
@@ -384,6 +391,9 @@ pub struct ConfigFile {
     /// How much memory the server can use in MB. 0 means unlimited (default: 0)
     #[serde(default)]
     pub max_mem_mb: usize,
+    /// Per-query memory limit in MB. 0 means unlimited per-query (default: 0)
+    #[serde(default)]
+    pub query_max_mem_mb: usize,
     /// Paths for DataFusion temporary files for spill-to-disk (default: [])
     #[serde(default)]
     pub spill_location: Vec<PathBuf>,
@@ -540,6 +550,7 @@ impl Config {
             manifests_store: Arc::new(manifests_store),
             metadata_db,
             max_mem_mb: config_file.max_mem_mb,
+            query_max_mem_mb: config_file.query_max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
             server_microbatch_max_interval: config_file
@@ -565,20 +576,17 @@ impl Config {
 
         let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
 
-        let memory_pool: Option<Arc<dyn MemoryPool>> = if self.max_mem_mb > 0 {
+        let memory_pool: Arc<dyn MemoryPool> = {
             let max_mem_bytes = self.max_mem_mb * 1024 * 1024;
-            make_memory_pool(spill_allowed, max_mem_bytes)
-        } else {
-            None
+            make_memory_pool(MemoryPoolKind::Greedy, max_mem_bytes)
         };
 
         let mut runtime_config =
             RuntimeEnvBuilder::new().with_disk_manager_builder(disk_manager_builder);
 
-        if let Some(memory_pool) = memory_pool {
-            runtime_config = runtime_config.with_memory_pool(memory_pool);
-        }
+        runtime_config = runtime_config.with_memory_pool(memory_pool);
 
+        // Build RuntimeEnv to extract components
         let runtime_env = runtime_config.build()?;
         let isolate_pool = IsolatePool::new();
 
@@ -588,10 +596,15 @@ impl Config {
             .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
             .build();
 
+        // Extract RuntimeEnv components for per-query customization
         Ok(QueryEnv {
-            df_env: Arc::new(runtime_env),
+            global_memory_pool: runtime_env.memory_pool,
+            disk_manager: runtime_env.disk_manager,
+            cache_manager: runtime_env.cache_manager,
+            object_store_registry: runtime_env.object_store_registry,
             isolate_pool,
             parquet_footer_cache,
+            query_max_mem_mb: self.query_max_mem_mb,
         })
     }
 
@@ -606,24 +619,6 @@ impl Config {
         )
         .await
         .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
-    }
-}
-
-fn make_memory_pool(
-    spill_allowed: bool,
-    max_mem_bytes: usize,
-) -> Option<Arc<dyn MemoryPool + 'static>> {
-    let report_top_k_consumers = NonZeroUsize::new(5).unwrap();
-    if spill_allowed {
-        Some(Arc::new(TrackConsumersPool::new(
-            FairSpillPool::new(max_mem_bytes),
-            report_top_k_consumers,
-        )))
-    } else {
-        Some(Arc::new(TrackConsumersPool::new(
-            GreedyMemoryPool::new(max_mem_bytes),
-            report_top_k_consumers,
-        )))
     }
 }
 

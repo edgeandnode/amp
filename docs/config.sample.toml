@@ -22,8 +22,9 @@ providers_dir = "<config_dir/providers>"
 manifests_dir = "<config_dir/manifests>"
 
 # Memory and performance
-# max_mem_mb = 0        # How much memory the server can use in MB. 0 means unlimited (default: 0)
-# spill_location = []   # Paths for DataFusion temporary files for spill-to-disk (default: [])
+# max_mem_mb = 0            # Global memory limit for all queries in MB. 0 means unlimited (default: 0)
+# query_max_mem_mb = 0      # Per-query memory limit in MB. 0 means unlimited per-query (default: 0)
+# spill_location = []       # Paths for DataFusion temporary files for spill-to-disk (default: [])
 
 # Operational timing
 # poll_interval_secs = 1.0                 # Polling interval for new blocks during dump in seconds (default: 1.0)

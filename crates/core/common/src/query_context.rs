@@ -14,6 +14,7 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
         config::SessionConfig,
         context::{SQLOptions, SessionContext},
+        memory_pool::human_readable_size,
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
@@ -41,6 +42,7 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
+    memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
     plan_visitors::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,
@@ -55,27 +57,27 @@ pub fn default_catalog_name() -> ScalarValue {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("invalid plan: {0}")]
-    InvalidPlan(DataFusionError),
+    #[error("invalid plan")]
+    InvalidPlan(#[source] DataFusionError),
 
-    #[error("planning error: {0}")]
-    PlanningError(DataFusionError),
+    #[error("planning error")]
+    PlanningError(#[source] DataFusionError),
 
-    #[error("query execution error: {0}")]
-    ExecutionError(DataFusionError),
+    #[error("query execution error")]
+    ExecutionError(#[source] DataFusionError),
 
     /// Signals a problem with the dataset configuration.
-    #[error("dataset error: {0}")]
-    DatasetError(BoxError),
+    #[error("dataset error")]
+    DatasetError(#[source] BoxError),
 
-    #[error("meta table error: {0}")]
-    MetaTableError(DataFusionError),
+    #[error("meta table error")]
+    MetaTableError(#[source] DataFusionError),
 
     #[error("SQL parse error")]
     SqlParseError(#[source] crate::sql::ParseSqlError),
 
-    #[error("DataFusion configuration error: {0}")]
-    ConfigError(DataFusionError),
+    #[error("DataFusion configuration error")]
+    ConfigError(#[source] DataFusionError),
 
     #[error("table not found: {0}")]
     TableNotFoundError(TableReference),
@@ -115,9 +117,18 @@ impl IntoResponse for Error {
 /// Handle to the environment resources used by the query engine.
 #[derive(Clone, Debug)]
 pub struct QueryEnv {
-    pub df_env: Arc<RuntimeEnv>,
+    // Inline RuntimeEnv fields for per-query customization
+    pub global_memory_pool: Arc<dyn datafusion::execution::memory_pool::MemoryPool>,
+    pub disk_manager: Arc<datafusion::execution::disk_manager::DiskManager>,
+    pub cache_manager: Arc<datafusion::execution::cache::cache_manager::CacheManager>,
+    pub object_store_registry: Arc<dyn datafusion::execution::object_store::ObjectStoreRegistry>,
+
+    // Existing fields
     pub isolate_pool: IsolatePool,
     pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
+
+    // Per-query memory limit configuration
+    pub query_max_mem_mb: usize,
 }
 
 /// A context for executing queries against a catalog.
@@ -126,6 +137,8 @@ pub struct QueryContext {
     pub env: QueryEnv,
     session_config: SessionConfig,
     catalog: CatalogSnapshot,
+    /// Per-query memory pool (if per-query limits are enabled)
+    tiered_memory_pool: Arc<crate::memory_pool::TieredMemoryPool>,
 }
 
 impl QueryContext {
@@ -172,10 +185,21 @@ impl QueryContext {
         .await
         .map_err(Error::DatasetError)?;
 
+        let tiered_memory_pool: Arc<TieredMemoryPool> = {
+            let per_query_bytes = env.query_max_mem_mb * 1024 * 1024;
+            let child_pool = make_memory_pool(MemoryPoolKind::Greedy, per_query_bytes);
+
+            Arc::new(TieredMemoryPool::new(
+                env.global_memory_pool.clone(),
+                child_pool,
+            ))
+        };
+
         Ok(Self {
             env,
             session_config,
             catalog: catalog_snapshot,
+            tiered_memory_pool,
         })
     }
 
@@ -193,9 +217,17 @@ impl QueryContext {
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
     fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+        // Build per-query RuntimeEnv
+        let runtime_env = Arc::new(RuntimeEnv {
+            memory_pool: self.tiered_memory_pool.clone(),
+            disk_manager: self.env.disk_manager.clone(),
+            cache_manager: self.env.cache_manager.clone(),
+            object_store_registry: self.env.object_store_registry.clone(),
+        });
+
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
-            .with_runtime_env(self.env.df_env.clone())
+            .with_runtime_env(runtime_env)
             .with_default_features()
             .with_physical_optimizer_rule(create_instrumentation_rule())
             .build();
@@ -228,7 +260,15 @@ impl QueryContext {
         logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
         let ctx = self.datafusion_ctx()?;
-        execute_plan(&ctx, plan, logical_optimize).await
+
+        let result = execute_plan(&ctx, plan, logical_optimize).await;
+
+        tracing::debug!(
+            peak_memory_mb = human_readable_size(self.tiered_memory_pool.peak_reserved()),
+            "Query memory usage"
+        );
+
+        result
     }
 
     /// This will load the result set entirely in memory, so it should be used with caution.
