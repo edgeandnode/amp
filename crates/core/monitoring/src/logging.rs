@@ -4,7 +4,8 @@ use std::{io::IsTerminal, sync::Once};
 
 use opentelemetry::trace::TracerProvider;
 use tracing_subscriber::{
-    self, EnvFilter, filter::LevelFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt
+    self, EnvFilter, filter::LevelFilter, fmt::format::FmtSpan, layer::SubscriberExt,
+    util::SubscriberInitExt,
 };
 
 use crate::telemetry;
