@@ -90,7 +90,7 @@ The binary will be available at `target/release/ampd`.
 
 ### Python Quickstart
 
-To quickly dive into the power of Amp with Python, best is to run the [`marimo_example_nb.ipynb](python/notebooks/marimo_example_nb.pyy). Follow the instructions in thy [Python README](python/README.md).
+The python client and connectors have moved to https://github.com/edgeandnode/amp-python. Head over there to get started querying and exploring data in an interactive python notebook or using the connectors to load data to your other datastores.
 
 ## Components
 
