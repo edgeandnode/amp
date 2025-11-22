@@ -88,46 +88,6 @@ jobs:
           security delete-keychain macos-build.keychain
           rm certificate.p12
 
-      - name: Notarize ampd
-        if: contains(matrix.target, 'apple-darwin')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/ampd
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
-          verbose: true
-
-      - name: Notarize ampctl
-        if: contains(matrix.target, 'apple-darwin')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/ampctl
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
-          verbose: true
-
-      - name: Notarize ampup
-        if: contains(matrix.target, 'apple-darwin')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/ampup
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
-          verbose: true
-
-      - name: Notarize ampsync
-        if: contains(matrix.target, 'apple-darwin')
-        uses: lando/notarize-action@b5c3ef16cf2fbcf2af26dc58c90255ec242abeed # v2
-        with:
-          product-path: target/${{ matrix.target }}/release/ampsync
-          appstore-connect-username: ${{ secrets.NOTARIZATION_USERNAME }}
-          appstore-connect-password: ${{ secrets.NOTARIZATION_PASSWORD }}
-          appstore-connect-team-id: ${{ secrets.APPLE_TEAM_ID }}
-          verbose: true
-
       - name: Upload ampd artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -156,9 +116,46 @@ jobs:
           path: target/${{ matrix.target }}/release/ampsync
           retention-days: 30
 
+  notarize:
+    name: Notarize (${{ matrix.target }}-${{ matrix.binary }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        binary: [ampd, ampctl, ampup, ampsync]
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: ${{ matrix.target }}-${{ matrix.binary }}
+          path: ./
+
+      - name: Setup App Store Connect API Key
+        run: echo '${{ secrets.APPLE_APP_STORE_CONNECT_API_KEY_JSON }}' > api_key.json
+
+      - name: Notarize binary
+        uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
+        with:
+          input_path: ${{ matrix.binary }}
+          sign: false
+          notarize: true
+          app_store_connect_api_key_json_file: api_key.json
+
+      - name: Upload notarized artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.target }}-${{ matrix.binary }}-notarized
+          path: ${{ matrix.binary }}
+          retention-days: 30
+          overwrite: true
+
   release:
     name: Release
-    needs: build
+    needs: [build, notarize]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -177,29 +174,29 @@ jobs:
           # Organize binaries for release
           mkdir -p release
 
-          # Copy and rename ampd binaries
+          # Copy and rename ampd binaries (Linux from build, macOS from notarize)
           cp artifacts/x86_64-unknown-linux-gnu-ampd/ampd release/ampd-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampd/ampd release/ampd-linux-aarch64
-          cp artifacts/x86_64-apple-darwin-ampd/ampd release/ampd-darwin-x86_64
-          cp artifacts/aarch64-apple-darwin-ampd/ampd release/ampd-darwin-aarch64
+          cp artifacts/x86_64-apple-darwin-ampd-notarized/ampd release/ampd-darwin-x86_64
+          cp artifacts/aarch64-apple-darwin-ampd-notarized/ampd release/ampd-darwin-aarch64
 
-          # Copy and rename ampctl binaries
+          # Copy and rename ampctl binaries (Linux from build, macOS from notarize)
           cp artifacts/x86_64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampctl/ampctl release/ampctl-linux-aarch64
-          cp artifacts/x86_64-apple-darwin-ampctl/ampctl release/ampctl-darwin-x86_64
-          cp artifacts/aarch64-apple-darwin-ampctl/ampctl release/ampctl-darwin-aarch64
+          cp artifacts/x86_64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-x86_64
+          cp artifacts/aarch64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-aarch64
 
-          # Copy and rename ampup binaries
+          # Copy and rename ampup binaries (Linux from build, macOS from notarize)
           cp artifacts/x86_64-unknown-linux-gnu-ampup/ampup release/ampup-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampup/ampup release/ampup-linux-aarch64
-          cp artifacts/x86_64-apple-darwin-ampup/ampup release/ampup-darwin-x86_64
-          cp artifacts/aarch64-apple-darwin-ampup/ampup release/ampup-darwin-aarch64
+          cp artifacts/x86_64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-x86_64
+          cp artifacts/aarch64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-aarch64
 
-          # Copy and rename ampsync binaries
+          # Copy and rename ampsync binaries (Linux from build, macOS from notarize)
           cp artifacts/x86_64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-x86_64
           cp artifacts/aarch64-unknown-linux-gnu-ampsync/ampsync release/ampsync-linux-aarch64
-          cp artifacts/x86_64-apple-darwin-ampsync/ampsync release/ampsync-darwin-x86_64
-          cp artifacts/aarch64-apple-darwin-ampsync/ampsync release/ampsync-darwin-aarch64
+          cp artifacts/x86_64-apple-darwin-ampsync-notarized/ampsync release/ampsync-darwin-x86_64
+          cp artifacts/aarch64-apple-darwin-ampsync-notarized/ampsync release/ampsync-darwin-aarch64
 
           # Make all binaries executable
           chmod +x release/*
@@ -222,7 +219,7 @@ jobs:
   containerize:
     name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, notarize]
     permissions:
       contents: read
       packages: write
