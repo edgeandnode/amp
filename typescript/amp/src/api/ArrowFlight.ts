@@ -88,11 +88,8 @@ const createResponseStream: (
       catch: (cause) => new ArrowFlightError({ cause, method: "getFlightInfo" }),
     })
 
-    const response = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
-      resume(Effect.sync(() => client.doGet(ticket, { signal })))
-    })
-
     let meta: Uint8Array
+    const response = client.doGet(ticket)
     const ipc = Stream.fromAsyncIterable(response, (cause) => new ArrowFlightError({ cause, method: "doGet" })).pipe(
       Stream.map((data) => {
         // NOTE: This is a hack to forward the app metadata through the stream.
@@ -103,8 +100,8 @@ const createResponseStream: (
     )
 
     const reader = yield* Effect.tryPromise({
-      catch: (cause) => new ArrowFlightError({ cause, method: "doGet" }),
       try: () => RecordBatchReader.from(ipc),
+      catch: (cause) => new ArrowFlightError({ cause, method: "doGet" }),
     })
 
     return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause, method: "doGet" })).pipe(
