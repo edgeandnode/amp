@@ -16,7 +16,7 @@ snmalloc = ["dep:snmalloc-rs"]
 [dependencies]
 clap.workspace = true
 common = { path = "../../core/common" }
-console-subscriber = { version = "0.4.1", default-features = false, optional = true }
+console-subscriber = { version = "0.5.0", default-features = false, optional = true }
 controller = { path = "../../services/controller" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
