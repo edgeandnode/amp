@@ -131,7 +131,7 @@ pub struct CompactionPlan<'a> {
 
 impl<'a> CompactionPlan<'a> {
     #[tracing::instrument(skip_all)]
-    pub async fn from_snapshot(
+    pub fn from_snapshot(
         table: &'a TableSnapshot,
         opts: Arc<WriterProperties>,
         metrics: &Option<Arc<MetricsRegistry>>,
