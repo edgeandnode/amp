@@ -108,24 +108,22 @@ impl Compactor {
         let opts = Arc::clone(&self.opts);
         let table_name = self.table.table_name();
 
-        // await: We need to await the PhysicalTable::segments method
-        let mut comapction_futures_stream = if let Some(plan) =
-            CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics).await?
-        {
-            let groups = plan.collect::<Vec<_>>().await;
-            tracing::trace!(
-                table = %table_name,
-                group_count = groups.len(),
-                "Compaction Groups: {:?}",
-                groups
-            );
+        let mut comapction_futures_stream =
+            if let Some(plan) = CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics)? {
+                let groups = plan.collect::<Vec<_>>().await;
+                tracing::trace!(
+                    table = %table_name,
+                    group_count = groups.len(),
+                    "Compaction Groups: {:?}",
+                    groups
+                );
 
-            stream::iter(groups)
-                .map(|group| group.compact())
-                .buffered(self.opts.compactor.write_concurrency)
-        } else {
-            return Ok(self);
-        };
+                stream::iter(groups)
+                    .map(|group| group.compact())
+                    .buffered(self.opts.compactor.write_concurrency)
+            } else {
+                return Ok(self);
+            };
 
         while let Some(res) = comapction_futures_stream.next().await {
             match res {
