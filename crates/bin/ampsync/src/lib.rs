@@ -3,6 +3,7 @@ pub mod arrow;
 pub mod commands;
 pub mod config;
 pub mod engine;
+pub mod health;
 pub mod manager;
 pub mod sql;
 pub mod task;

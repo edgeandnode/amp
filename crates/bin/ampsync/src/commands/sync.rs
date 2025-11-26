@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
-use crate::{config::SyncConfig, engine::Engine, manager::StreamManager};
+use crate::{config::SyncConfig, engine::Engine, health, manager::StreamManager};
 
 pub async fn run(config: SyncConfig) -> Result<()> {
     info!("Starting ampsync");
@@ -49,6 +49,20 @@ pub async fn run(config: SyncConfig) -> Result<()> {
 
     // Spawn streaming tasks (table creation happens in StreamTask::new)
     let manager = StreamManager::new(&config.tables, dataset, &config, engine, client, pool);
+
+    // Start health server if configured
+    if let Some(port) = config.health_port {
+        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+        let (bound_addr, health_fut) = health::serve(addr)
+            .await
+            .context("Failed to start health server")?;
+        info!("Health server listening on {}", bound_addr);
+        tokio::spawn(async move {
+            if let Err(e) = health_fut.await {
+                tracing::error!(error = %e, "Health server error");
+            }
+        });
+    }
 
     // Wait for shutdown signal
     info!("Ampsync is running. Press Ctrl+C to stop.");
