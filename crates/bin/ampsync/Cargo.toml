@@ -20,6 +20,7 @@ default = []
 [dependencies]
 amp-client = { path = "../../client", features = ["postgres"] }
 anyhow.workspace = true
+axum.workspace = true
 arrow-array = { version = "56", default-features = false }
 arrow-schema = { version = "56" }
 arrow-to-postgres = { path = "../../arrow-to-postgres" }

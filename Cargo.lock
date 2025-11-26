@@ -906,6 +906,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "arrow-to-postgres",
+ "axum 0.8.6",
  "backon",
  "bytes",
  "clap",
