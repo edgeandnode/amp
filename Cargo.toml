@@ -141,5 +141,4 @@ tonic = { version = "0.13", features = [
 tonic-build = "0.13"
 
 [profile.release]
-# This was measured to increase binary size by only 15%
-debug = true
+debug = "line-tables-only"
