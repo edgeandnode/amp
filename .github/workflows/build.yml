@@ -184,7 +184,7 @@ jobs:
 
   containerize:
     name: Containerize (${{ matrix.title }})
-    runs-on: namespace-profile-linux-default
+    runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: read
