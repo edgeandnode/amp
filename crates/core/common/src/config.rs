@@ -569,9 +569,9 @@ impl Config {
     pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
         let spill_allowed = !self.spill_location.is_empty();
         let disk_manager_mode = if spill_allowed {
-            DiskManagerMode::Disabled
-        } else {
             DiskManagerMode::Directories(self.spill_location.clone())
+        } else {
+            DiskManagerMode::Disabled
         };
 
         let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
