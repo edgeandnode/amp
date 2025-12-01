@@ -39,6 +39,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           cache: true
+          rustflags: ""
 
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
