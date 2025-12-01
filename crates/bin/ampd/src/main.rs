@@ -132,9 +132,12 @@ async fn main_inner() -> Result<(), BoxError> {
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
+            let server_config = server_cmd::config_from_common(&config);
+
             let result = server_cmd::run(
-                config,
+                server_config,
                 metadata_db,
+                &config.addrs,
                 flight_server,
                 jsonl_server,
                 metrics_meter.as_ref(),

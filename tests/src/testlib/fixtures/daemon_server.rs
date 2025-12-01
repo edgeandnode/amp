@@ -11,7 +11,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
-use server::service::BoundAddrs;
+use server::{config::Config as ServerConfig, service::BoundAddrs};
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon server instances in tests.
@@ -56,7 +56,7 @@ impl DaemonServer {
 
         // For tests, leak the meter to get a 'static reference
         // This is acceptable in tests since they're short-lived
-        let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
+        let meter_ref: Option<&'static opentelemetry::metrics::Meter> =
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
         let flight_at = if enable_flight {
@@ -70,8 +70,9 @@ impl DaemonServer {
             None
         };
 
+        let server_config = Arc::new(server_config_from_common(&config));
         let (server_addrs, server) =
-            server::service::new(config.clone(), metadb, flight_at, jsonl_at, meter_ref).await?;
+            server::service::new(server_config, metadb, flight_at, jsonl_at, meter_ref).await?;
 
         let server_task = tokio::spawn(server);
 
@@ -143,5 +144,19 @@ impl Drop for DaemonServer {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon server task");
         self._server_task.abort();
+    }
+}
+
+/// Convert common::config::Config to server::config::Config
+fn server_config_from_common(config: &Config) -> ServerConfig {
+    ServerConfig {
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        server_microbatch_max_interval: config.server_microbatch_max_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet_cache_size_mb: config.parquet.cache_size_mb,
     }
 }
