@@ -43,6 +43,17 @@ jobs:
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampctl -p ampup -p ampsync
 
+      - name: Compress debug sections (Linux only)
+        if: contains(matrix.target, 'linux')
+        run: |
+          for binary in ampd ampctl ampup ampsync; do
+            path="target/${{ matrix.target }}/release/$binary"
+            size_before=$(stat -c%s "$path")
+            objcopy --compress-debug-sections=zlib-gnu "$path"
+            size_after=$(stat -c%s "$path")
+            echo "$binary: $size_before -> $size_after bytes"
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
