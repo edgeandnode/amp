@@ -1,10 +1,12 @@
-use std::{pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
-use common::{BoxError, config::Config};
+use common::{BoxError, config::Config as CommonConfig};
 use metadata_db::MetadataDb;
 
+use crate::server_cmd::config_from_common;
+
 pub async fn run(
-    config: Config,
+    config: CommonConfig,
     metadata_db: MetadataDb,
     flight_server: bool,
     jsonl_server: bool,
@@ -13,6 +15,9 @@ pub async fn run(
 ) -> Result<(), Error> {
     let worker_id = "worker".parse().expect("Invalid worker ID");
     let config = Arc::new(config);
+
+    // Convert to server-specific config
+    let server_config = Arc::new(config_from_common(&config));
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
@@ -40,7 +45,7 @@ pub async fn run(
             None
         };
         let (addrs, fut) = server::service::new(
-            config.clone(),
+            server_config.clone(),
             metadata_db.clone(),
             flight_at,
             jsonl_at,

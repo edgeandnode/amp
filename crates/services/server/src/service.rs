@@ -11,7 +11,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, config::Config, utils::shutdown_signal};
+use common::{BoxError, utils::shutdown_signal};
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
@@ -19,7 +19,7 @@ use monitoring::{logging, telemetry::metrics::Meter};
 use thiserror::Error;
 use tokio::net::TcpListener;
 
-use crate::{flight, jsonl};
+use crate::{config::Config, flight, jsonl};
 
 /// Create and initialize the server service
 ///

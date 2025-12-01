@@ -9,11 +9,11 @@ arrow-flight.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+bincode.workspace = true
 bytes.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
-datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
@@ -26,4 +26,3 @@ tokio = { workspace = true, features = ["net"] }
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"] }
 tracing.workspace = true
-bincode.workspace = true

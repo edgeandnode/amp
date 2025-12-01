@@ -1,42 +1,51 @@
 use std::sync::Arc;
 
-use common::{BoxError, config::Config};
+use common::{
+    BoxError,
+    config::{Addrs, Config as CommonConfig},
+};
 use metadata_db::MetadataDb;
+use server::config::Config as ServerConfig;
 
 pub async fn run(
-    config: Config,
+    server_config: ServerConfig,
     metadata_db: MetadataDb,
+    addrs: &Addrs,
     flight_server: bool,
     jsonl_server: bool,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), Error> {
-    let config = Arc::new(config);
-
-    if config.max_mem_mb == 0 {
+    if server_config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
     } else {
-        tracing::info!("Memory limit is {} MB", config.max_mem_mb);
+        tracing::info!("Memory limit is {} MB", server_config.max_mem_mb);
     }
 
     tracing::info!(
         "Spill to disk allowed: {}",
-        !config.spill_location.is_empty()
+        !server_config.spill_location.is_empty()
     );
 
     let flight_at = if flight_server {
-        Some(config.addrs.flight_addr)
+        Some(addrs.flight_addr)
     } else {
         None
     };
     let jsonl_at = if jsonl_server {
-        Some(config.addrs.jsonl_addr)
+        Some(addrs.jsonl_addr)
     } else {
         None
     };
 
-    let (addrs, server) = server::service::new(config, metadata_db, flight_at, jsonl_at, meter)
-        .await
-        .map_err(|err| Error::ServerStart(Box::new(err)))?;
+    let (addrs, server) = server::service::new(
+        Arc::new(server_config),
+        metadata_db,
+        flight_at,
+        jsonl_at,
+        meter,
+    )
+    .await
+    .map_err(|err| Error::ServerStart(Box::new(err)))?;
 
     if let Some(addr) = addrs.flight_addr {
         tracing::info!("Arrow Flight RPC server running at {}", addr);
@@ -67,4 +76,18 @@ pub enum Error {
     /// an error during operation.
     #[error("Server runtime error: {0}")]
     ServerRuntime(#[source] BoxError),
+}
+
+/// Convert common config to server-specific config
+pub fn config_from_common(config: &CommonConfig) -> ServerConfig {
+    ServerConfig {
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        server_microbatch_max_interval: config.server_microbatch_max_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet_cache_size_mb: config.parquet.cache_size_mb,
+    }
 }

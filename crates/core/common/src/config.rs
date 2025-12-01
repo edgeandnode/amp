@@ -2,33 +2,21 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use datafusion::{
     error::DataFusionError,
-    execution::{
-        disk_manager::{DiskManagerBuilder, DiskManagerMode},
-        memory_pool::MemoryPool,
-        runtime_env::RuntimeEnvBuilder,
-    },
-    parquet::{
-        basic::{Compression, ZstdLevel},
-        file::metadata::ParquetMetaData,
-    },
+    parquet::basic::{Compression, ZstdLevel},
 };
 use figment::{
     Figment,
     providers::{Env, Format as _, Toml},
 };
-use foyer::CacheBuilder;
 use fs_err as fs;
-use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
 use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    Store,
-    memory_pool::{MemoryPoolKind, make_memory_pool},
     metadata::Overflow,
     query_context::QueryEnv,
-    store::ObjectStoreUrl,
+    store::{ObjectStoreUrl, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -567,45 +555,12 @@ impl Config {
     }
 
     pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
-        let spill_allowed = !self.spill_location.is_empty();
-        let disk_manager_mode = if spill_allowed {
-            DiskManagerMode::Directories(self.spill_location.clone())
-        } else {
-            DiskManagerMode::Disabled
-        };
-
-        let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
-
-        let memory_pool: Arc<dyn MemoryPool> = {
-            let max_mem_bytes = self.max_mem_mb * 1024 * 1024;
-            make_memory_pool(MemoryPoolKind::Greedy, max_mem_bytes)
-        };
-
-        let mut runtime_config =
-            RuntimeEnvBuilder::new().with_disk_manager_builder(disk_manager_builder);
-
-        runtime_config = runtime_config.with_memory_pool(memory_pool);
-
-        // Build RuntimeEnv to extract components
-        let runtime_env = runtime_config.build()?;
-        let isolate_pool = IsolatePool::new();
-
-        // Create ParquetMetaData footer cache with the configured memory limit
-        let cache_size_bytes = self.parquet.cache_size_mb * 1024 * 1024; // Convert MB to bytes
-        let parquet_footer_cache = CacheBuilder::new(cache_size_bytes as usize)
-            .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
-            .build();
-
-        // Extract RuntimeEnv components for per-query customization
-        Ok(QueryEnv {
-            global_memory_pool: runtime_env.memory_pool,
-            disk_manager: runtime_env.disk_manager,
-            cache_manager: runtime_env.cache_manager,
-            object_store_registry: runtime_env.object_store_registry,
-            isolate_pool,
-            parquet_footer_cache,
-            query_max_mem_mb: self.query_max_mem_mb,
-        })
+        crate::query_context::create_query_env(
+            self.max_mem_mb,
+            self.query_max_mem_mb,
+            &self.spill_location,
+            self.parquet.cache_size_mb,
+        )
     }
 
     pub async fn metadata_db(&self) -> Result<MetadataDb, ConfigError> {

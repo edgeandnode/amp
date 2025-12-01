@@ -1,3 +1,4 @@
+pub mod config;
 mod flight;
 mod jsonl;
 pub mod metrics;

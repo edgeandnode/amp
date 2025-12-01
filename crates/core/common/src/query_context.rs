@@ -1,5 +1,6 @@
 use std::{
     ops::RangeInclusive,
+    path::PathBuf,
     sync::{Arc, LazyLock},
 };
 
@@ -14,8 +15,9 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
         config::SessionConfig,
         context::{SQLOptions, SessionContext},
+        disk_manager::{DiskManagerBuilder, DiskManagerMode},
         memory_pool::human_readable_size,
-        runtime_env::RuntimeEnv,
+        runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
     logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
     parquet::file::metadata::ParquetMetaData,
@@ -28,7 +30,7 @@ use datafusion::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
-use foyer::Cache;
+use foyer::{Cache, CacheBuilder};
 use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::FileId;
@@ -129,6 +131,56 @@ pub struct QueryEnv {
 
     // Per-query memory limit configuration
     pub query_max_mem_mb: usize,
+}
+
+/// Creates a QueryEnv with specified memory and cache configuration
+///
+/// Configures DataFusion runtime environment including memory pools, disk spilling,
+/// and parquet footer caching for query execution.
+pub fn create_query_env(
+    max_mem_mb: usize,
+    query_max_mem_mb: usize,
+    spill_location: &[PathBuf],
+    parquet_cache_size_mb: u64,
+) -> Result<QueryEnv, DataFusionError> {
+    let spill_allowed = !spill_location.is_empty();
+    let disk_manager_mode = if spill_allowed {
+        DiskManagerMode::Directories(spill_location.to_vec())
+    } else {
+        DiskManagerMode::Disabled
+    };
+
+    let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
+
+    let memory_pool = {
+        let max_mem_bytes = max_mem_mb * 1024 * 1024;
+        make_memory_pool(MemoryPoolKind::Greedy, max_mem_bytes)
+    };
+
+    let mut runtime_config =
+        RuntimeEnvBuilder::new().with_disk_manager_builder(disk_manager_builder);
+
+    runtime_config = runtime_config.with_memory_pool(memory_pool);
+
+    // Build RuntimeEnv to extract components
+    let runtime_env = runtime_config.build()?;
+    let isolate_pool = IsolatePool::new();
+
+    // Create ParquetMetaData footer cache with the configured memory limit
+    let cache_size_bytes = parquet_cache_size_mb * 1024 * 1024;
+    let parquet_footer_cache = CacheBuilder::new(cache_size_bytes as usize)
+        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .build();
+
+    Ok(QueryEnv {
+        global_memory_pool: runtime_env.memory_pool,
+        disk_manager: runtime_env.disk_manager,
+        cache_manager: runtime_env.cache_manager,
+        object_store_registry: runtime_env.object_store_registry,
+        isolate_pool,
+        parquet_footer_cache,
+        query_max_mem_mb,
+    })
 }
 
 /// A context for executing queries against a catalog.

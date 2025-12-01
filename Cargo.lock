@@ -7960,7 +7960,6 @@ dependencies = [
  "common",
  "datafusion",
  "dataset-store",
- "datasets-derived",
  "dump",
  "futures",
  "metadata-db",

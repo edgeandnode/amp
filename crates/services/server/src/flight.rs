@@ -31,7 +31,6 @@ use common::{
         physical::Catalog,
         sql::{catalog_for_sql, planning_ctx_for_sql},
     },
-    config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
     sql_str::SqlStr,
@@ -58,8 +57,8 @@ use tonic::{Request, Response, Status, service::Routes};
 use tracing::instrument;
 
 use crate::{
-    metrics::MetricsRegistry, non_empty_record_batch_stream::NonEmptyRecordBatchStream,
-    service::InitError,
+    config::Config, metrics::MetricsRegistry,
+    non_empty_record_batch_stream::NonEmptyRecordBatchStream, service::InitError,
 };
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
