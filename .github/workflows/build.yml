@@ -41,7 +41,7 @@ jobs:
           cache: true
 
       - name: Build binaries
-        run: cargo build --target ${{ matrix.target }} --release -p ampd -p ampctl -p ampup -p ampsync
+        run: cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
 
       - name: Compress debug sections (Linux only)
         if: contains(matrix.target, 'linux')
