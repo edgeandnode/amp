@@ -1,9 +1,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
-use common::{
-    ParquetFooterCache, parquet::file::metadata::ParquetMetaData, store::Store as DataStore,
-};
+use common::{CachedParquetData, ParquetFooterCache, store::Store as DataStore};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -94,7 +92,7 @@ pub async fn new(
     // Create shared parquet footer cache
     let parquet_opts = dump::parquet_opts(&config.parquet);
     let parquet_footer_cache = ParquetFooterCache::builder(parquet_opts.cache_size_mb)
-        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
         .build();
 
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state

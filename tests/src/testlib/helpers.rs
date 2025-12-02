@@ -7,14 +7,13 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
-    BoxError, LogicalCatalog, ParquetFooterCache,
+    BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache,
     arrow::array::RecordBatch,
     catalog::{
         JobLabels,
         physical::{Catalog, PhysicalTable},
     },
     metadata::segments::BlockRange,
-    parquet::file::metadata::ParquetMetaData,
     sql,
     sql_str::SqlStr,
 };
@@ -49,7 +48,7 @@ pub async fn dump_internal(
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let opts = dump::parquet_opts(&config.parquet);
     let cache = ParquetFooterCache::builder(opts.cache_size_mb)
-        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
         .build();
     // Always use the data store from config in test scenarios
     let data_store = config.data_store.clone();

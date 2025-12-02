@@ -2,7 +2,12 @@ use std::{ops::Range, sync::Arc};
 
 use bytes::Bytes;
 use datafusion::{
-    datasource::physical_plan::{FileMeta, ParquetFileMetrics, ParquetFileReaderFactory},
+    arrow::datatypes::SchemaRef,
+    common::Statistics,
+    datasource::physical_plan::{
+        FileMeta, ParquetFileMetrics, ParquetFileReaderFactory,
+        parquet::metadata::DFParquetMetadata,
+    },
     error::{DataFusionError, Result as DataFusionResult},
     parquet::{
         arrow::{
@@ -21,7 +26,14 @@ use object_store::ObjectStore;
 
 use crate::BoxError;
 
-type ParquetMetaDataCache = Cache<FileId, Arc<ParquetMetaData>>;
+/// Cached parquet data including metadata and computed statistics.
+#[derive(Clone)]
+pub struct CachedParquetData {
+    pub metadata: Arc<ParquetMetaData>,
+    pub statistics: Arc<Statistics>,
+}
+
+type ParquetMetaDataCache = Cache<FileId, CachedParquetData>;
 
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {
@@ -29,17 +41,16 @@ pub struct AmpReaderFactory {
     pub metadata_db: MetadataDb,
     pub object_store: Arc<dyn ObjectStore>,
     pub parquet_footer_cache: ParquetMetaDataCache,
+    pub schema: SchemaRef,
 }
 
 impl AmpReaderFactory {
-    pub async fn get_cached_metadata(
-        &self,
-        file: FileId,
-    ) -> Result<Arc<ParquetMetaData>, BoxError> {
+    pub async fn get_cached_metadata(&self, file: FileId) -> Result<CachedParquetData, BoxError> {
         get_cached_metadata(
             file,
             self.parquet_footer_cache.clone(),
             self.metadata_db.clone(),
+            self.schema.clone(),
         )
         .await
         .map_err(|e| e.into())
@@ -79,6 +90,7 @@ impl ParquetFileReaderFactory for AmpReaderFactory {
             file_metrics,
             metadata_db,
             parquet_footer_cache: self.parquet_footer_cache.clone(),
+            schema: self.schema.clone(),
         }))
     }
 }
@@ -90,6 +102,7 @@ pub struct AmpReader {
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
     pub parquet_footer_cache: ParquetMetaDataCache,
+    pub schema: SchemaRef,
 }
 
 impl AsyncFileReader for AmpReader {
@@ -114,9 +127,11 @@ impl AsyncFileReader for AmpReader {
     ) -> BoxFuture<'a, ParquetResult<Arc<ParquetMetaData>>> {
         let metadata_db = self.metadata_db.clone();
         let cache = self.parquet_footer_cache.clone();
+        let schema = self.schema.clone();
 
         Box::pin(
-            get_cached_metadata(self.file_id, cache.clone(), metadata_db.clone())
+            get_cached_metadata(self.file_id, cache, metadata_db, schema)
+                .map_ok(|cached| cached.metadata)
                 .map_err(|e| ParquetError::External(e.into())),
         )
     }
@@ -126,10 +141,9 @@ async fn get_cached_metadata(
     file: FileId,
     cache: ParquetMetaDataCache,
     metadata_db: MetadataDb,
-) -> Result<Arc<ParquetMetaData>, foyer::Error> {
+    schema: SchemaRef,
+) -> Result<CachedParquetData, foyer::Error> {
     let file_id = file;
-    let metadata_db = metadata_db.clone();
-    let cache = cache.clone();
 
     cache
         .fetch(file_id, || async move {
@@ -139,11 +153,22 @@ async fn get_cached_metadata(
                 .await
                 .map_err(|e| foyer::Error::Other(e.into()))?;
 
-            let metadata = ParquetMetaDataReader::new()
-                .with_page_index_policy(PageIndexPolicy::Required)
-                .parse_and_finish(&Bytes::from_owner(footer))
-                .map_err(|e| foyer::Error::Other(e.into()))?;
-            Ok(Arc::new(metadata))
+            let metadata = Arc::new(
+                ParquetMetaDataReader::new()
+                    .with_page_index_policy(PageIndexPolicy::Required)
+                    .parse_and_finish(&Bytes::from_owner(footer))
+                    .map_err(|e| foyer::Error::Other(e.into()))?,
+            );
+
+            let statistics = Arc::new(
+                DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &schema)
+                    .map_err(|e| foyer::Error::Other(e.into()))?,
+            );
+
+            Ok(CachedParquetData {
+                metadata,
+                statistics,
+            })
         })
         .await
         .map(|c| c.value().clone())
