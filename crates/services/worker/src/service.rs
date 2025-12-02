@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
-use common::{config::Config, store::Store as DataStore};
+use common::store::Store as DataStore;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -29,6 +29,7 @@ use self::{
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
 use crate::{
+    config::Config,
     info::WorkerInfo,
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
@@ -45,21 +46,13 @@ use crate::{
 ///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
 pub async fn new(
     node_id: NodeId,
-    config: Arc<Config>,
+    config: Config,
     metadata_db: MetadataDb,
     meter: Option<Meter>,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
-    // Create worker info from build information
-    let worker_info = WorkerInfo {
-        version: Some(config.build_info.version.clone()),
-        commit_sha: Some(config.build_info.commit_sha.clone()),
-        commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
-        build_date: Some(config.build_info.build_date.clone()),
-    };
-
     // Register the worker in the Metadata DB and update the latest heartbeat timestamp.
     // Retry on failure
-    register_worker_with_retry(&metadata_db, &node_id, &worker_info)
+    register_worker_with_retry(&metadata_db, &node_id, &config.worker_info)
         .await
         .map_err(InitError::Registration)?;
 
@@ -222,7 +215,7 @@ pub async fn new(
 /// Worker job context parameters
 #[derive(Clone)]
 pub(crate) struct WorkerJobCtx {
-    pub config: Arc<Config>,
+    pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,

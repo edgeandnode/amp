@@ -50,7 +50,8 @@ impl DaemonWorker {
         };
 
         // Two-phase worker initialization
-        let worker_fut = worker::service::new(node_id.clone(), config.clone(), metadb, meter)
+        let worker_config = worker_config_from_common(&config);
+        let worker_fut = worker::service::new(node_id.clone(), worker_config, metadb, meter)
             .await
             .map_err(Box::new)?;
         let worker_task = tokio::spawn(worker_fut);
@@ -104,5 +105,27 @@ impl Drop for DaemonWorker {
     fn drop(&mut self) {
         tracing::debug!(worker_id = %self.node_id, "Aborting daemon worker task");
         self._worker_task.abort();
+    }
+}
+
+/// Convert common::config::Config to worker::config::Config for tests
+fn worker_config_from_common(config: &Config) -> worker::config::Config {
+    worker::config::Config {
+        microbatch_max_interval: config.microbatch_max_interval,
+        poll_interval: config.poll_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet: config.parquet.clone(),
+        data_store: config.data_store.clone(),
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        worker_info: worker::info::WorkerInfo {
+            version: Some(config.build_info.version.clone()),
+            commit_sha: Some(config.build_info.commit_sha.clone()),
+            commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
+            build_date: Some(config.build_info.build_date.clone()),
+        },
     }
 }

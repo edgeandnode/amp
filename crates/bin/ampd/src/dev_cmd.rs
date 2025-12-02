@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use common::{BoxError, config::Config as CommonConfig};
 use metadata_db::MetadataDb;
 
-use crate::server_cmd::config_from_common;
+use crate::{server_cmd, worker_cmd};
 
 pub async fn run(
     config: CommonConfig,
@@ -17,7 +17,10 @@ pub async fn run(
     let config = Arc::new(config);
 
     // Convert to server-specific config
-    let server_config = Arc::new(config_from_common(&config));
+    let server_config = Arc::new(server_cmd::config_from_common(&config));
+
+    // Convert to worker-specific config
+    let worker_config = worker_cmd::config_from_common(&config);
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
@@ -67,9 +70,10 @@ pub async fn run(
     };
 
     // Initialize worker
-    let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter.clone())
-        .await
-        .map_err(Error::WorkerInit)?;
+    let worker_fut =
+        worker::service::new(worker_id, worker_config, metadata_db.clone(), meter.clone())
+            .await
+            .map_err(Error::WorkerInit)?;
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;

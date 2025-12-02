@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use common::config::Config;
 use metadata_db::MetadataDb;
 use worker::node_id::NodeId;
@@ -10,10 +8,11 @@ pub async fn run(
     node_id: NodeId,
     meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), Error> {
-    let config = Arc::new(config);
+    // Convert common config to worker-specific config
+    let worker_config = config_from_common(&config);
 
     // Initialize the worker (setup phase)
-    let worker_fut = worker::service::new(node_id, config, metadata_db, meter)
+    let worker_fut = worker::service::new(node_id, worker_config, metadata_db, meter)
         .await
         .map_err(Error::Init)?;
 
@@ -36,4 +35,26 @@ pub enum Error {
     /// This occurs during the worker's main event loop after successful initialization.
     #[error("Worker runtime error: {0}")]
     Runtime(#[source] worker::service::RuntimeError),
+}
+
+/// Convert common::config::Config to worker::config::Config
+pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
+    worker::config::Config {
+        microbatch_max_interval: config.microbatch_max_interval,
+        poll_interval: config.poll_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet: config.parquet.clone(),
+        data_store: config.data_store.clone(),
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        worker_info: worker::info::WorkerInfo {
+            version: Some(config.build_info.version.clone()),
+            commit_sha: Some(config.build_info.commit_sha.clone()),
+            commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
+            build_date: Some(config.build_info.build_date.clone()),
+        },
+    }
 }
