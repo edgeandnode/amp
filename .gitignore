@@ -18,5 +18,4 @@ build/
 *.tsbuildinfo
 .idea
 .vscode/
-config.toml
 .amp/
