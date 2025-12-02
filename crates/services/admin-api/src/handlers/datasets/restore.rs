@@ -109,7 +109,7 @@ pub async fn handler(
     for table in dataset.resolved_tables(reference.clone().into()) {
         tracing::debug!(dataset_reference=%reference, table_name=%table.name(), "restoring table");
 
-        let data_store = ctx.config.data_store.clone();
+        let data_store = ctx.data_store.clone();
         let metadata_db = ctx.metadata_db.clone();
         let job_labels = job_labels.clone();
         let reference_clone = reference.clone();

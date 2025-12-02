@@ -1,7 +1,10 @@
-use std::sync::Arc;
-
-use ampd::{dev_cmd, migrate_cmd, server_cmd, worker_cmd};
 use common::{BoxError, config::Config};
+
+mod controller_cmd;
+mod dev_cmd;
+mod migrate_cmd;
+mod server_cmd;
+mod worker_cmd;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -167,17 +170,15 @@ async fn main_inner() -> Result<(), BoxError> {
         }
         Command::Controller => {
             let config = load_config(config_path.as_ref(), false).await?;
+            let metadata_db = config.metadata_db().await?;
+            let admin_api_addr = config.addrs.admin_api_addr;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let admin_api_addr = config.addrs.admin_api_addr;
-            let (addr, server) =
-                controller::service::new(Arc::new(config), metrics_meter.as_ref(), admin_api_addr)
-                    .await?;
-
-            tracing::info!("Controller Admin API running at {}", addr);
-            let result = server.await;
+            let result =
+                controller_cmd::run(config, metadata_db, admin_api_addr, metrics_meter.as_ref())
+                    .await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 

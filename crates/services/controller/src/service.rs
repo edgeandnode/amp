@@ -7,15 +7,16 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, config::Config, utils::shutdown_signal};
+use common::{BoxError, utils::shutdown_signal};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
+use metadata_db::MetadataDb;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
-use crate::scheduler::Scheduler;
+use crate::{config::Config, scheduler::Scheduler};
 
 /// Create and initialize the controller service
 ///
@@ -25,11 +26,10 @@ use crate::scheduler::Scheduler;
 /// Returns the bound socket address and a future that runs the server with graceful shutdown.
 pub async fn new(
     config: Arc<Config>,
+    metadata_db: MetadataDb,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
-    let metadata_db = config.metadata_db().await.map_err(Error::MetadataDb)?;
-
     let dataset_store = {
         let provider_configs_store =
             ProviderConfigsStore::new(config.providers_store.prefixed_store());
@@ -49,7 +49,8 @@ pub async fn new(
         metadata_db,
         dataset_store,
         scheduler: Arc::new(scheduler),
-        config,
+        data_store: config.data_store.clone(),
+        build_info: config.build_info.clone(),
     };
 
     // Create controller router with health check endpoint
@@ -87,16 +88,6 @@ pub async fn new(
 /// Errors that can occur when creating the controller service
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to connect to metadata database
-    ///
-    /// This occurs when:
-    /// - Database connection string is invalid or malformed
-    /// - Database server is unreachable or not running
-    /// - Connection pool initialization fails
-    /// - Database authentication fails
-    #[error("failed to connect to metadata database: {0}")]
-    MetadataDb(#[source] common::config::ConfigError),
-
     /// Failed to bind TCP listener to the specified address
     ///
     /// This occurs when:
