@@ -4,44 +4,29 @@
 //! dataset extraction, data validation, and test setup tasks that are frequently
 //! needed across multiple test scenarios.
 
-use std::{collections::BTreeMap, fs, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
-    BoxError, LogicalCatalog, ParquetFooterCache, Store,
+    BoxError, LogicalCatalog, ParquetFooterCache,
     arrow::array::RecordBatch,
     catalog::{
         JobLabels,
         physical::{Catalog, PhysicalTable},
     },
-    config::Config,
     metadata::segments::BlockRange,
     parquet::file::metadata::ParquetMetaData,
     sql,
     sql_str::SqlStr,
-    store::ObjectStoreUrl,
 };
 use dataset_store::{
-    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
-    providers::ProviderConfigsStore,
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
-use monitoring::telemetry::metrics::Meter;
+use worker::config::Config as WorkerConfig;
 
 use super::fixtures::SnapshotContext;
-
-/// Convert common::config::Config to dump::config::Config for tests
-fn dump_config_from_common(config: &Config) -> dump::config::Config {
-    dump::config::Config {
-        poll_interval: config.poll_interval,
-        keep_alive_interval: config.keep_alive_interval,
-        max_mem_mb: config.max_mem_mb,
-        query_max_mem_mb: config.query_max_mem_mb,
-        spill_location: config.spill_location.clone(),
-        parquet: config.parquet.clone(),
-    }
-}
 
 /// Internal dump orchestration function for tests.
 ///
@@ -51,36 +36,23 @@ fn dump_config_from_common(config: &Config) -> dump::config::Config {
 /// used by the worker-based extraction system.
 ///
 /// **Note**: This is an internal function with full control over all parameters.
-/// Most test code should use the simpler `dump_dataset` or `dump_dataset_continuous`
-/// functions instead. This function is only exposed for advanced test scenarios that
-/// need fine-grained control over dump behavior.
-#[expect(clippy::too_many_arguments)]
+/// Most test code should use the simpler `dump_dataset` function instead.
+/// This function is only exposed for advanced test scenarios that need
+/// fine-grained control over dump behavior.
 pub async fn dump_internal(
-    config: Arc<Config>,
+    config: WorkerConfig,
     metadata_db: MetadataDb,
     dataset: Reference,
-    ignore_deps: bool,
     end_block: EndBlock,
     max_writers: u16,
-    run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
-    new_location: Option<String>,
-    fresh: bool,
-    meter: Option<Meter>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let opts = dump::parquet_opts(&config.parquet);
     let cache = ParquetFooterCache::builder(opts.cache_size_mb)
         .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
         .build();
-    let data_store = match new_location {
-        Some(location) => {
-            let data_path = fs::canonicalize(&location)
-                .map_err(|e| format!("Failed to canonicalize path '{}': {}", location, e))?;
-            let base = data_path.parent();
-            Arc::new(Store::new(ObjectStoreUrl::new_with_base(location, base)?)?)
-        }
-        None => config.data_store.clone(),
-    };
+    // Always use the data store from config in test scenarios
+    let data_store = config.data_store.clone();
     let dataset_store = {
         let provider_configs_store =
             ProviderConfigsStore::new(config.providers_store.prefixed_store());
@@ -92,18 +64,9 @@ pub async fn dump_internal(
             dataset_manifests_store,
         )
     };
-    let run_every =
-        run_every_mins.map(|mins| tokio::time::interval(std::time::Duration::from_secs(mins * 60)));
 
-    let datasets = match ignore_deps {
-        true => vec![dataset],
-        false => {
-            let datasets = dataset_and_dependencies(&dataset_store, dataset).await?;
-            let dump_order: Vec<String> = datasets.iter().map(ToString::to_string).collect();
-            tracing::info!("dump order: {}", dump_order.join(", "));
-            datasets
-        }
-    };
+    // Always ignore dependencies in test scenarios
+    let datasets = vec![dataset];
 
     let mut physical_datasets = vec![];
     for dataset_ref in datasets {
@@ -130,24 +93,20 @@ pub async fn dump_internal(
             );
         }
 
-        // Create metrics registry if meter is available
-        let metrics = meter
-            .as_ref()
-            .map(|m| Arc::new(dump::metrics::MetricsRegistry::new(m, job_labels.clone())));
+        // No metrics in test scenarios
+        let metrics = None;
 
         let mut tables = Vec::with_capacity(dataset.tables.len());
 
         for table in dataset.resolved_tables(dataset_ref.clone().into()) {
             let db = metadata_db.clone();
-            let physical_table = if fresh {
-                PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels).await?
-            } else {
-                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
-                    Some(physical_table) => physical_table,
-                    None => {
-                        PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels)
-                            .await?
-                    }
+            // Always reuse existing physical tables in test scenarios (fresh = false)
+            let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone())
+                .await?
+            {
+                Some(physical_table) => physical_table,
+                None => {
+                    PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels).await?
                 }
             }
             .into();
@@ -165,53 +124,25 @@ pub async fn dump_internal(
         .cloned()
         .collect();
 
-    match run_every {
-        None => {
-            for (kind, tables, metrics) in &physical_datasets {
-                let ctx = dump::Ctx {
-                    config: dump_config_from_common(&config),
-                    metadata_db: metadata_db.clone(),
-                    dataset_store: dataset_store.clone(),
-                    data_store: data_store.clone(),
-                    notification_multiplexer: notification_multiplexer.clone(),
-                    metrics: metrics.clone(),
-                };
+    for (kind, tables, metrics) in &physical_datasets {
+        let ctx = dump::Ctx {
+            config: config.dump_config(),
+            metadata_db: metadata_db.clone(),
+            dataset_store: dataset_store.clone(),
+            data_store: data_store.clone(),
+            notification_multiplexer: notification_multiplexer.clone(),
+            metrics: metrics.clone(),
+        };
 
-                dump::dump_tables(
-                    ctx,
-                    *kind,
-                    tables,
-                    max_writers,
-                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    end_block,
-                )
-                .await?
-            }
-        }
-        Some(mut run_every) => loop {
-            run_every.tick().await;
-
-            for (kind, tables, metrics) in &physical_datasets {
-                let ctx = dump::Ctx {
-                    config: dump_config_from_common(&config),
-                    metadata_db: metadata_db.clone(),
-                    dataset_store: dataset_store.clone(),
-                    data_store: data_store.clone(),
-                    notification_multiplexer: notification_multiplexer.clone(),
-                    metrics: metrics.clone(),
-                };
-
-                dump::dump_tables(
-                    ctx,
-                    *kind,
-                    tables,
-                    max_writers,
-                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    end_block,
-                )
-                .await?;
-            }
-        },
+        dump::dump_tables(
+            ctx,
+            *kind,
+            tables,
+            max_writers,
+            microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
+            end_block,
+        )
+        .await?
     }
 
     Ok(all_tables)
@@ -224,12 +155,11 @@ pub async fn dump_internal(
 /// configured source (RPC, Firehose, etc.) and saving it as Parquet files.
 ///
 /// This function uses sensible defaults for test scenarios:
-/// - Ignores dataset dependencies (dumps only the specified dataset)
+/// - Dumps only the specified dataset (dependencies are not resolved)
 /// - Uses single-writer mode (max_writers = 1) for deterministic results
-/// - Does not use continuous dumping mode
 /// - Does not create fresh table revisions (reuses existing when possible)
 pub async fn dump_dataset(
-    config: Arc<Config>,
+    config: WorkerConfig,
     metadata_db: MetadataDb,
     dataset: Reference,
     end_block: u64,
@@ -238,43 +168,9 @@ pub async fn dump_dataset(
         config,
         metadata_db,
         dataset,
-        true,                          // ignore_deps
         EndBlock::Absolute(end_block), // end_block
         1,                             // max_writers (single-writer for determinism)
-        None,                          // run_every_mins (no continuous mode)
         None,                          // microbatch_max_interval_override
-        None,                          // new_location
-        false,                         // fresh
-        None,                          // meter
-    )
-    .await
-}
-
-/// Extract blockchain data in continuous mode, polling at regular intervals.
-///
-/// This function is similar to `dump_dataset` but runs in continuous mode,
-/// repeatedly polling for new data at the specified interval. This is useful
-/// for testing reorg detection and continuous extraction scenarios.
-///
-/// The function will run indefinitely until an error occurs or the task is cancelled.
-pub async fn dump_dataset_continuous(
-    config: Arc<Config>,
-    metadata_db: MetadataDb,
-    dataset: Reference,
-    run_every_mins: u64,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    dump_internal(
-        config,
-        metadata_db,
-        dataset,
-        true,                 // ignore_deps
-        EndBlock::None,       // end_block (continuous mode)
-        1,                    // max_writers
-        Some(run_every_mins), // run_every_mins (enable continuous mode)
-        None,                 // microbatch_max_interval_override
-        None,                 // new_location
-        false,                // fresh
-        None,                 // meter
     )
     .await
 }

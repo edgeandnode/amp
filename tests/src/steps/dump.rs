@@ -38,7 +38,7 @@ impl Step {
 
         let result: Result<(), BoxError> = async {
             let physical_tables = test_helpers::dump_dataset(
-                ctx.daemon_server().config().clone(),
+                ctx.daemon_worker().config().clone(),
                 ctx.metadata_db().clone(),
                 self.dataset.clone(),
                 self.end,

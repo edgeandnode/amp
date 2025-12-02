@@ -318,14 +318,16 @@ async fn bless(
 
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
-    let physical_tables = test_helpers::dump_dataset(config, metadata_db, dataset.clone(), end)
-        .await
-        .map_err(|err| {
-            format!(
-                "Failed to dump dataset '{}' to block {}: {}",
-                dataset, end, err
-            )
-        })?;
+    let worker_config = worker_config_from_common(&config);
+    let physical_tables =
+        test_helpers::dump_dataset(worker_config, metadata_db, dataset.clone(), end)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to dump dataset '{}' to block {}: {}",
+                    dataset, end, err
+                )
+            })?;
 
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");
@@ -339,6 +341,31 @@ async fn bless(
     }
 
     Ok(())
+}
+
+/// Convert common::config::Config to worker::config::Config
+///
+/// Creates a worker configuration with a dummy WorkerInfo since the blessing
+/// process doesn't need real build information.
+fn worker_config_from_common(config: &Config) -> worker::config::Config {
+    worker::config::Config {
+        microbatch_max_interval: config.microbatch_max_interval,
+        poll_interval: config.poll_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet: config.parquet.clone(),
+        data_store: config.data_store.clone(),
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        worker_info: worker::info::WorkerInfo {
+            version: Some("test".to_string()),
+            commit_sha: None,
+            commit_timestamp: None,
+            build_date: None,
+        },
+    }
 }
 
 /// Resolve test data directory from known standard locations.

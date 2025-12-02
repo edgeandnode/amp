@@ -6,13 +6,13 @@
 
 use std::{str::FromStr as _, sync::Arc};
 
-use common::{BoxError, config::Config};
+use common::BoxError;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
 use tokio::task::JoinHandle;
-use worker::{node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
+use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///
@@ -21,7 +21,7 @@ use worker::{node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 /// by aborting the worker task when dropped.
 pub struct DaemonWorker {
     node_id: NodeId,
-    config: Arc<Config>,
+    worker_config: worker::config::Config,
     dataset_store: Arc<DatasetStore>,
     _worker_task: JoinHandle<Result<(), WorkerRuntimeError>>,
 }
@@ -33,7 +33,7 @@ impl DaemonWorker {
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
         node_id: NodeId,
-        config: Arc<Config>,
+        config: Arc<common::config::Config>,
         metadb: MetadataDb,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
@@ -51,14 +51,15 @@ impl DaemonWorker {
 
         // Two-phase worker initialization
         let worker_config = worker_config_from_common(&config);
-        let worker_fut = worker::service::new(node_id.clone(), worker_config, metadb, meter)
-            .await
-            .map_err(Box::new)?;
+        let worker_fut =
+            worker::service::new(node_id.clone(), worker_config.clone(), metadb, meter)
+                .await
+                .map_err(Box::new)?;
         let worker_task = tokio::spawn(worker_fut);
 
         Ok(Self {
             node_id,
-            config,
+            worker_config,
             dataset_store,
             _worker_task: worker_task,
         })
@@ -68,14 +69,8 @@ impl DaemonWorker {
     ///
     /// Convenience method that creates a worker with a worker ID based on the provided name.
     /// This is useful for tests that don't need to specify a custom WorkerNodeId.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The configuration for the worker
-    /// * `metadata_db` - The metadata database instance
-    /// * `worker_name` - Name to use for generating the worker ID
     pub async fn new_with_name(
-        config: Arc<Config>,
+        config: Arc<common::config::Config>,
         metadata_db: MetadataDb,
         worker_name: &str,
     ) -> Result<Self, BoxError> {
@@ -90,9 +85,12 @@ impl DaemonWorker {
         &self.node_id
     }
 
-    /// Get the worker configuration.
-    pub fn config(&self) -> &Arc<Config> {
-        &self.config
+    /// Get the worker-specific configuration.
+    ///
+    /// Returns the `worker::config::Config` that can be used directly with
+    /// worker-related operations like `dump_internal` and `dump_dataset`.
+    pub fn config(&self) -> &Config {
+        &self.worker_config
     }
 
     /// Get the dataset store used by the worker.
@@ -109,7 +107,7 @@ impl Drop for DaemonWorker {
 }
 
 /// Convert common::config::Config to worker::config::Config for tests
-fn worker_config_from_common(config: &Config) -> worker::config::Config {
+fn worker_config_from_common(config: &common::config::Config) -> Config {
     worker::config::Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use common::{
     BoxError, LogicalCatalog, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
-    config::Config,
 };
+use server::config::Config;
 
 /// Snapshot context fixture for comparing dataset snapshots in tests.
 ///
@@ -32,7 +32,7 @@ impl SnapshotContext {
     /// This method creates a snapshot from physical tables, which can be obtained
     /// from dataset snapshot reference data or fresh ETL extraction pipeline dumps.
     pub async fn from_tables(
-        config: &Arc<Config>,
+        config: &Config,
         tables: Vec<Arc<PhysicalTable>>,
     ) -> Result<Self, BoxError> {
         let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
