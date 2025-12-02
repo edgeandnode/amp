@@ -86,4 +86,15 @@ pub struct SyncConfig {
     /// Can also be set via AMP_AUTH_TOKEN environment variable
     #[arg(long, env = "AMP_AUTH_TOKEN")]
     pub auth_token: Option<String>,
+
+    /// Health check server port (optional)
+    ///
+    /// When provided, starts an HTTP server on 0.0.0.0 that exposes a /healthz
+    /// endpoint.
+    ///
+    /// Example: --health-port 8080
+    ///
+    /// Can also be set via HEALTH_PORT environment variable
+    #[arg(long, env = "HEALTH_PORT")]
+    pub health_port: Option<u16>,
 }
