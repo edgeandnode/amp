@@ -6,12 +6,12 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, BoxResult, config::Config};
+use common::{BoxError, BoxResult};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
-use server::{config::Config as ServerConfig, service::BoundAddrs};
+use server::{config::Config, service::BoundAddrs};
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon server instances in tests.
@@ -19,8 +19,6 @@ use tokio::task::JoinHandle;
 /// This fixture wraps a running Amp server instance and provides convenient access
 /// to query server endpoints (Arrow Flight and JSON Lines). The fixture automatically
 /// handles server lifecycle and cleanup by aborting the server task when dropped.
-///
-/// Note: For Admin API access, use the `DaemonController` fixture instead.
 pub struct DaemonServer {
     config: Arc<Config>,
     server_addrs: BoundAddrs,
@@ -36,7 +34,7 @@ impl DaemonServer {
     /// use the `DaemonController` fixture.
     /// The server will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        config: Arc<Config>,
+        config: Arc<common::config::Config>,
         metadb: MetadataDb,
         enable_flight: bool,
         enable_jsonl: bool,
@@ -70,9 +68,9 @@ impl DaemonServer {
             None
         };
 
-        let server_config = Arc::new(server_config_from_common(&config));
+        let config = Arc::new(server_config_from_common(&config));
         let (server_addrs, server) =
-            server::service::new(server_config, metadb, flight_at, jsonl_at, meter_ref).await?;
+            server::service::new(config.clone(), metadb, flight_at, jsonl_at, meter_ref).await?;
 
         let server_task = tokio::spawn(server);
 
@@ -89,14 +87,17 @@ impl DaemonServer {
     /// Convenience method that starts a server with both query services
     /// (Flight and JSON Lines) enabled. For Admin API, use `DaemonController`.
     pub async fn new_with_all_services(
-        config: Arc<Config>,
+        config: Arc<common::config::Config>,
         metadata_db: MetadataDb,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         Self::new(config, metadata_db, true, true, meter).await
     }
 
-    /// Get the server configuration.
+    /// Get the server-specific configuration.
+    ///
+    /// Returns the `server::config::Config` that can be used directly with
+    /// server-related operations.
     pub fn config(&self) -> &Arc<Config> {
         &self.config
     }
@@ -148,8 +149,8 @@ impl Drop for DaemonServer {
 }
 
 /// Convert common::config::Config to server::config::Config
-fn server_config_from_common(config: &Config) -> ServerConfig {
-    ServerConfig {
+fn server_config_from_common(config: &common::config::Config) -> Config {
+    Config {
         providers_store: config.providers_store.clone(),
         manifests_store: config.manifests_store.clone(),
         server_microbatch_max_interval: config.server_microbatch_max_interval,

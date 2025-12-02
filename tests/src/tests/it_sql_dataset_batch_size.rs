@@ -95,7 +95,7 @@ impl TestCtx {
             .expect("Failed to create test context");
 
         let cache = ParquetFooterCache::builder(
-            (ctx.daemon_server().config().parquet.cache_size_mb * 1024 * 1024) as usize,
+            (ctx.daemon_worker().config().parquet.cache_size_mb * 1024 * 1024) as usize,
         )
         .build();
 
@@ -130,17 +130,12 @@ impl TestCtx {
     ) {
         let dataset_ref: Reference = dataset.parse().unwrap();
         test_helpers::dump_internal(
-            self.ctx.daemon_server().config().clone(),
+            self.ctx.daemon_worker().config().clone(),
             self.ctx.metadata_db().clone(),
             dataset_ref,
-            true,                          // ignore_deps
             dump::EndBlock::Absolute(end), // end_block
             max_writers,
-            None,                           // run_every_mins
             microbatch_max_interval.into(), // microbatch_max_interval_override
-            None,                           // new_location
-            false,                          // fresh
-            None,                           // meter
         )
         .await
         .expect("Failed to dump dataset");
@@ -168,7 +163,7 @@ impl TestCtx {
             .find(|t| t.table_name() == table)
             .unwrap();
 
-        let config = self.ctx.daemon_server().config();
+        let config = self.ctx.daemon_worker().config();
         let mut opts = parquet_opts(&config.parquet);
         opts.compactor.active.swap(true, Ordering::SeqCst);
         opts.collector.active.swap(false, Ordering::SeqCst);
@@ -196,7 +191,7 @@ impl TestCtx {
             .iter()
             .find(|t| t.table_name() == table)
             .unwrap();
-        let config = self.ctx.daemon_server().config();
+        let config = self.ctx.daemon_worker().config();
         let mut opts = parquet_opts(&config.parquet);
         opts.compactor.active.swap(false, Ordering::SeqCst);
         opts.collector.active.swap(true, Ordering::SeqCst);

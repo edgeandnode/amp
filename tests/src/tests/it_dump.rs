@@ -49,7 +49,7 @@ async fn evm_rpc_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -120,7 +120,7 @@ async fn eth_beacon_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -191,7 +191,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -262,7 +262,7 @@ async fn evm_rpc_base_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -333,7 +333,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -404,7 +404,7 @@ async fn eth_firehose_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
@@ -475,7 +475,7 @@ async fn base_firehose_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,

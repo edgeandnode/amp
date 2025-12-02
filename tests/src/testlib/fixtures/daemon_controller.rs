@@ -6,7 +6,8 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, BoxResult, config::Config};
+use common::{BoxError, BoxResult};
+use controller::config::Config;
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon controller instances in tests.
@@ -26,7 +27,7 @@ impl DaemonController {
     /// Starts a Amp controller with the provided configuration and metadata database.
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        config: Arc<Config>,
+        config: Arc<common::config::Config>,
         meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         // For tests, leak the meter to get a 'static reference
@@ -38,15 +39,12 @@ impl DaemonController {
         let metadata_db = config.metadata_db().await?;
 
         // Convert common config to controller config
-        let controller_config = Arc::new(controller_config_from_common(&config));
+        let admin_api_addr = config.addrs.admin_api_addr;
+        let config = Arc::new(controller_config_from_common(&config));
 
-        let (admin_api_addr, controller_server) = controller::service::new(
-            controller_config,
-            metadata_db,
-            meter_ref,
-            config.addrs.admin_api_addr,
-        )
-        .await?;
+        let (admin_api_addr, controller_server) =
+            controller::service::new(config.clone(), metadata_db, meter_ref, admin_api_addr)
+                .await?;
 
         let controller_task = tokio::spawn(controller_server);
 
@@ -57,7 +55,10 @@ impl DaemonController {
         })
     }
 
-    /// Get the controller configuration.
+    /// Get the controller-specific configuration.
+    ///
+    /// Returns the `controller::config::Config` that can be used directly with
+    /// controller-related operations.
     pub fn config(&self) -> &Arc<Config> {
         &self.config
     }
@@ -81,8 +82,8 @@ impl Drop for DaemonController {
 }
 
 /// Convert common config to controller config
-fn controller_config_from_common(config: &Config) -> controller::config::Config {
-    controller::config::Config {
+fn controller_config_from_common(config: &common::config::Config) -> Config {
+    Config {
         providers_store: config.providers_store.clone(),
         manifests_store: config.manifests_store.clone(),
         data_store: config.data_store.clone(),

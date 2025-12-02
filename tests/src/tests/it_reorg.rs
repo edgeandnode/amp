@@ -119,22 +119,17 @@ async fn dump_finalized() {
     test.mine(last_block).await;
 
     {
-        let config = test.ctx.daemon_server().config().clone();
+        let worker_config = test.ctx.daemon_worker().config().clone();
         let metadata_db = test.ctx.metadata_db().clone();
         tokio::spawn(async move {
             let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
             test_helpers::dump_internal(
-                config,
+                worker_config,
                 metadata_db,
                 dataset_ref,
-                true, // ignore_deps
                 dump::EndBlock::None,
                 1,
-                None,  // run_every_mins
-                None,  // microbatch_max_interval_override
-                None,  // new_location
-                false, // fresh
-                None,  // meter
+                None, // microbatch_max_interval_override
             )
             .await
             .expect("Failed to start continuous dump task");
@@ -451,7 +446,7 @@ impl ReorgTestCtx {
     async fn dump(&self, dataset: &str, end: BlockNum) {
         let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
         test_helpers::dump_dataset(
-            self.ctx.daemon_server().config().clone(),
+            self.ctx.daemon_worker().config().clone(),
             self.ctx.metadata_db().clone(),
             dataset_ref,
             end,

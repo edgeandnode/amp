@@ -26,7 +26,7 @@ impl Step {
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
         tracing::debug!("Cleaning dump location '{}'", self.clean_dump_location);
 
-        let mut path = PathBuf::from(ctx.daemon_server().config().data_store.url().path());
+        let mut path = PathBuf::from(ctx.daemon_worker().config().data_store.url().path());
         path.push(&self.clean_dump_location);
 
         if path.exists() {

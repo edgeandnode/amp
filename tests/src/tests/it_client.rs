@@ -153,7 +153,7 @@ impl TestCtx {
     /// Dump a dataset using amp dump command.
     async fn dump(&self, dataset: &str, end: BlockNum) {
         test_helpers::dump_dataset(
-            self.ctx.daemon_server().config().clone(),
+            self.ctx.daemon_worker().config().clone(),
             self.ctx.metadata_db().clone(),
             dataset.parse().expect("failed to parse dataset reference"),
             end,
