@@ -31,6 +31,18 @@ use monitoring::telemetry::metrics::Meter;
 
 use super::fixtures::SnapshotContext;
 
+/// Convert common::config::Config to dump::config::Config for tests
+fn dump_config_from_common(config: &Config) -> dump::config::Config {
+    dump::config::Config {
+        poll_interval: config.poll_interval,
+        keep_alive_interval: config.keep_alive_interval,
+        max_mem_mb: config.max_mem_mb,
+        query_max_mem_mb: config.query_max_mem_mb,
+        spill_location: config.spill_location.clone(),
+        parquet: config.parquet.clone(),
+    }
+}
+
 /// Internal dump orchestration function for tests.
 ///
 /// This function orchestrates the full extraction pipeline, including dataset
@@ -157,7 +169,7 @@ pub async fn dump_internal(
         None => {
             for (kind, tables, metrics) in &physical_datasets {
                 let ctx = dump::Ctx {
-                    config: config.clone(),
+                    config: dump_config_from_common(&config),
                     metadata_db: metadata_db.clone(),
                     dataset_store: dataset_store.clone(),
                     data_store: data_store.clone(),
@@ -181,7 +193,7 @@ pub async fn dump_internal(
 
             for (kind, tables, metrics) in &physical_datasets {
                 let ctx = dump::Ctx {
-                    config: config.clone(),
+                    config: dump_config_from_common(&config),
                     metadata_db: metadata_db.clone(),
                     dataset_store: dataset_store.clone(),
                     data_store: data_store.clone(),

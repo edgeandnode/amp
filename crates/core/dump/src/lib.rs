@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use common::{
-    catalog::physical::PhysicalTable, config::Config,
+    catalog::physical::PhysicalTable,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
     store::Store as DataStore,
 };
@@ -13,6 +13,7 @@ use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 mod block_ranges;
 mod check;
 pub mod compaction;
+pub mod config;
 mod derived_dataset;
 pub mod metrics;
 mod parquet_writer;
@@ -21,12 +22,14 @@ mod raw_dataset_writer;
 pub mod streaming_query;
 mod tasks;
 
-pub use block_ranges::{EndBlock, ResolvedEndBlock};
-pub use check::consistency_check;
-pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
-
+pub use self::{
+    block_ranges::{EndBlock, ResolvedEndBlock},
+    check::consistency_check,
+    metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+};
 use crate::{
     compaction::{AmpCompactor, CollectorProperties, CompactorProperties, SegmentSizeLimit},
+    config::Config,
     metrics::MetricsRegistry,
 };
 
@@ -94,7 +97,7 @@ pub enum Error {
 /// Dataset dump context
 #[derive(Clone)]
 pub struct Ctx {
-    pub config: Arc<Config>,
+    pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,

@@ -60,7 +60,7 @@ pub(super) async fn new(
 
     // Create Ctx instance for job execution
     let ctx = Ctx {
-        config: job_ctx.config.clone(),
+        config: job_ctx.config.dump_config(),
         metadata_db: job_ctx.metadata_db.clone(),
         dataset_store: job_ctx.dataset_store.clone(),
         data_store: job_ctx.data_store.clone(),
@@ -124,7 +124,7 @@ pub(super) async fn new(
         tables.push((physical_table, compactor));
     }
 
-    let microbatch_max_interval = ctx.config.microbatch_max_interval;
+    let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
     let fut = async move {
         dump::dump_tables(
             ctx,
