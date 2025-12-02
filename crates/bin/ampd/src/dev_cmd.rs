@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use common::{BoxError, config::Config as CommonConfig};
 use metadata_db::MetadataDb;
 
-use crate::{server_cmd, worker_cmd};
+use crate::{controller_cmd, server_cmd, worker_cmd};
 
 pub async fn run(
     config: CommonConfig,
@@ -22,12 +22,19 @@ pub async fn run(
     // Convert to worker-specific config
     let worker_config = worker_cmd::config_from_common(&config);
 
+    // Convert to controller-specific config
+    let controller_config = controller_cmd::config_from_common(&config);
+
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
-        let (addr, fut) =
-            controller::service::new(config.clone(), meter.as_ref(), config.addrs.admin_api_addr)
-                .await
-                .map_err(Error::ServiceInit)?;
+        let (addr, fut) = controller::service::new(
+            Arc::new(controller_config),
+            metadata_db.clone(),
+            meter.as_ref(),
+            config.addrs.admin_api_addr,
+        )
+        .await
+        .map_err(Error::ServiceInit)?;
 
         tracing::info!("Controller Admin API running at {}", addr);
         Box::pin(fut)

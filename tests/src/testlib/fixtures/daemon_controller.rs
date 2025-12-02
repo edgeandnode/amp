@@ -34,9 +34,19 @@ impl DaemonController {
         let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
             meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
-        let (admin_api_addr, controller_server) =
-            controller::service::new(config.clone(), meter_ref, config.addrs.admin_api_addr)
-                .await?;
+        // Create metadata database from common config
+        let metadata_db = config.metadata_db().await?;
+
+        // Convert common config to controller config
+        let controller_config = Arc::new(controller_config_from_common(&config));
+
+        let (admin_api_addr, controller_server) = controller::service::new(
+            controller_config,
+            metadata_db,
+            meter_ref,
+            config.addrs.admin_api_addr,
+        )
+        .await?;
 
         let controller_task = tokio::spawn(controller_server);
 
@@ -67,5 +77,15 @@ impl Drop for DaemonController {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon controller task");
         self._controller_task.abort();
+    }
+}
+
+/// Convert common config to controller config
+fn controller_config_from_common(config: &Config) -> controller::config::Config {
+    controller::config::Config {
+        providers_store: config.providers_store.clone(),
+        manifests_store: config.manifests_store.clone(),
+        data_store: config.data_store.clone(),
+        build_info: config.build_info.clone(),
     }
 }

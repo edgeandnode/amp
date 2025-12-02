@@ -36,7 +36,6 @@ use async_trait::async_trait;
 use common::{
     Dataset,
     catalog::{JobLabels, physical::PhysicalTable},
-    config::Config,
 };
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::EndBlock;
@@ -46,6 +45,8 @@ use worker::{
     job::{Job, JobDescriptor, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
+
+use crate::config::Config;
 
 /// A worker is considered active if it has sent a heartbeat in this period
 ///
