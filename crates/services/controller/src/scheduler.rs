@@ -269,13 +269,12 @@ impl Scheduler {
         }
 
         for job in failed_jobs {
-            let Some(new_node_id) = active_workers.choose(&mut rand::rng()) else {
-                continue;
-            };
-
-            if let Err(error) =
-                metadata_db::jobs::reschedule_for_retry(&self.metadata_db, job.id, new_node_id)
-                    .await
+            if let Err(error) = metadata_db::jobs::reschedule_for_retry(
+                &self.metadata_db,
+                job.id,
+                job.node_id.clone(),
+            )
+            .await
             {
                 tracing::error!(
                     job_id = %job.id,
@@ -288,7 +287,7 @@ impl Scheduler {
             let job_id: JobId = job.id.into();
             let _result = metadata_db::workers::send_job_notif(
                 &self.metadata_db,
-                new_node_id.clone(),
+                job.node_id,
                 &JobNotification::start(job_id),
             )
             .await;
