@@ -111,6 +111,7 @@ impl From<Job> for metadata_db::Job {
             desc: job.desc,
             created_at: job.created_at,
             updated_at: job.updated_at,
+            retry_count: 0,
         }
     }
 }

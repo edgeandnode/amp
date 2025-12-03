@@ -54,6 +54,13 @@ use crate::config::Config;
 /// this interval. Workers that haven't sent heartbeats are considered dead or unavailable.
 const DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Maximum retry count for failed jobs
+///
+/// Jobs will be retried while retry_count < MAX_RETRY_COUNT (i.e., when retry_count is 0 or 1).
+/// This allows 2 retries (3 total attempts: initial + 2 retries).
+/// After exhausting all retries, the job remains in FAILED state with retry_count = 2.
+const MAX_RETRY_COUNT: i32 = 2;
+
 /// Concrete implementation of the `JobScheduler` trait
 ///
 /// Manages job scheduling and lifecycle operations for the controller service.
@@ -232,6 +239,60 @@ impl Scheduler {
 
         // Commit the transaction
         tx.commit().await.map_err(StopJobError::CommitTransaction)?;
+
+        Ok(())
+    }
+
+    /// Reconcile failed jobs by retrying them with exponential backoff
+    ///
+    /// This method:
+    /// 1. Queries failed jobs that are ready for retry (based on retry_count and backoff time)
+    /// 2. Lists active workers
+    /// 3. For each job: picks a random worker, reschedules it, and sends notification
+    ///
+    /// Jobs are retried while retry_count < MAX_RETRY_COUNT with exponential backoff (2^retry_count seconds, capped at 60s).
+    /// After exhausting retries, jobs remain in FAILED state.
+    pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let failed_jobs =
+            metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db, MAX_RETRY_COUNT)
+                .await?;
+
+        if failed_jobs.is_empty() {
+            return Ok(());
+        }
+
+        let active_workers =
+            metadata_db::workers::list_active(&self.metadata_db, DEAD_WORKER_INTERVAL).await?;
+
+        if active_workers.is_empty() {
+            return Ok(());
+        }
+
+        for job in failed_jobs {
+            let Some(new_node_id) = active_workers.choose(&mut rand::rng()) else {
+                continue;
+            };
+
+            if let Err(error) =
+                metadata_db::jobs::reschedule_for_retry(&self.metadata_db, job.id, new_node_id)
+                    .await
+            {
+                tracing::error!(
+                    job_id = %job.id,
+                    %error,
+                    "Failed to reschedule failed job"
+                );
+                continue;
+            }
+
+            let job_id: JobId = job.id.into();
+            let _result = metadata_db::workers::send_job_notif(
+                &self.metadata_db,
+                new_node_id.clone(),
+                &JobNotification::start(job_id),
+            )
+            .await;
+        }
 
         Ok(())
     }

@@ -107,7 +107,8 @@ where
             j.status      AS writer_job_status,
             j.descriptor  AS writer_job_descriptor,
             j.created_at  AS writer_job_created_at,
-            j.updated_at  AS writer_job_updated_at
+            j.updated_at  AS writer_job_updated_at,
+            j.retry_count AS writer_job_retry_count
         FROM physical_tables l
         LEFT JOIN jobs j ON l.writer = j.id
         WHERE l.id = $1
@@ -130,6 +131,7 @@ where
         writer_job_descriptor: Option<JsonValue>,
         writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
         writer_job_updated_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
+        writer_job_retry_count: Option<i32>,
     }
 
     let Some(row) = sqlx::query_as::<_, Row>(query)
@@ -148,17 +150,25 @@ where
         row.writer_job_descriptor,
         row.writer_job_created_at,
         row.writer_job_updated_at,
+        row.writer_job_retry_count,
     ) {
-        (Some(id), Some(node_id), Some(status), Some(desc), Some(created_at), Some(updated_at)) => {
-            Some(Job {
-                id,
-                node_id,
-                status,
-                desc,
-                created_at,
-                updated_at,
-            })
-        }
+        (
+            Some(id),
+            Some(node_id),
+            Some(status),
+            Some(desc),
+            Some(created_at),
+            Some(updated_at),
+            Some(retry_count),
+        ) => Some(Job {
+            id,
+            node_id,
+            status,
+            desc,
+            created_at,
+            updated_at,
+            retry_count,
+        }),
         _ => None,
     };
 

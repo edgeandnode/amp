@@ -370,6 +370,51 @@ where
         .map_err(Error::Database)
 }
 
+/// Get failed jobs that are ready for retry
+///
+/// Returns failed jobs where:
+/// - retry_count < max_retries
+/// - enough time has passed since last failure based on exponential backoff
+///
+/// The backoff is calculated as 2^retry_count seconds, capped at 60 seconds.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(
+    exe: E,
+    max_retries: i32,
+) -> Result<Vec<Job>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_failed_jobs_ready_for_retry(exe, max_retries)
+        .await
+        .map_err(Error::Database)
+}
+
+/// Reschedule a failed job for retry
+///
+/// This function:
+/// 1. Increments the retry_count
+/// 2. Sets status to SCHEDULED
+/// 3. Assigns the job to the specified worker node
+/// 4. Updates the updated_at timestamp
+///
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful rescheduling if worker notification
+/// is required.
+#[tracing::instrument(skip(exe), err)]
+pub async fn reschedule_for_retry<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+    new_node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::reschedule_for_retry(exe, job_id.into(), new_node_id.into())
+        .await
+        .map_err(Error::Database)
+}
+
 /// Error type for conditional job status updates
 #[derive(Debug, thiserror::Error)]
 pub enum JobStatusUpdateError {
@@ -407,6 +452,12 @@ pub struct Job {
 
     /// Job last update timestamp
     pub updated_at: DateTime<Utc>,
+
+    /// Number of times this job has been retried
+    ///
+    /// Starts at 0 for the initial attempt. Incremented by the scheduler
+    /// when rescheduling a failed job for retry.
+    pub retry_count: i32,
 }
 
 /// In-tree integration tests

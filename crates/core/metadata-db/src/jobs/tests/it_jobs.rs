@@ -693,3 +693,259 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
         .expect("Running job should still exist");
     assert_eq!(running_job.status, JobStatus::Running);
 }
+
+#[tokio::test]
+async fn new_job_has_zero_retry_count() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-retry");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id.clone(), worker_info)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    //* When
+    let job_id =
+        jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to insert job");
+
+    //* Then
+    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job not found");
+    assert_eq!(job.retry_count, 0);
+}
+
+#[tokio::test]
+async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-retry-query");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id.clone(), worker_info)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    // Create a failed job
+    let job_id = jobs::sql::insert(
+        &metadata_db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job");
+
+    // Wait longer than initial backoff (1 second)
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    //* When
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db, 2)
+        .await
+        .expect("Failed to get ready jobs");
+
+    //* Then
+    assert_eq!(ready_jobs.len(), 1);
+    assert_eq!(ready_jobs[0].id, job_id);
+    assert_eq!(ready_jobs[0].retry_count, 0);
+}
+
+#[tokio::test]
+async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-not-ready");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id.clone(), worker_info)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    // Create a failed job
+    jobs::sql::insert(
+        &metadata_db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job");
+
+    //* When (immediately check, before backoff expires)
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db, 2)
+        .await
+        .expect("Failed to get ready jobs");
+
+    //* Then
+    assert_eq!(ready_jobs.len(), 0);
+}
+
+#[tokio::test]
+async fn get_failed_jobs_ready_for_retry_respects_max_retries() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-max-retries");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id.clone(), worker_info)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    // Create a failed job and manually set retry_count to max
+    let job_id = jobs::sql::insert(
+        &metadata_db,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job");
+
+    // Manually update retry_count to max (2)
+    sqlx::query("UPDATE jobs SET retry_count = 2 WHERE id = $1")
+        .bind(job_id)
+        .execute(&metadata_db)
+        .await
+        .expect("Failed to update retry_count");
+
+    // Wait for backoff
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    //* When
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db, 2)
+        .await
+        .expect("Failed to get ready jobs");
+
+    //* Then
+    assert_eq!(ready_jobs.len(), 0);
+}
+
+#[tokio::test]
+async fn reschedule_for_retry_increments_retry_count() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id1 = WorkerNodeId::from_ref_unchecked("test-worker-1");
+    let worker_id2 = WorkerNodeId::from_ref_unchecked("test-worker-2");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id1.clone(), worker_info.clone())
+        .await
+        .expect("Failed to register worker 1");
+    workers::register(&metadata_db, worker_id2.clone(), worker_info)
+        .await
+        .expect("Failed to register worker 2");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::sql::insert(
+        &metadata_db,
+        worker_id1.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job");
+
+    let job_before = jobs::sql::get_by_id(&metadata_db, job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job not found");
+    assert_eq!(job_before.retry_count, 0);
+
+    //* When
+    jobs::sql::reschedule_for_retry(&metadata_db, job_id, worker_id2.clone())
+        .await
+        .expect("Failed to reschedule job");
+
+    //* Then
+    let job_after = jobs::sql::get_by_id(&metadata_db, job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job not found");
+    assert_eq!(job_after.retry_count, 1);
+    assert_eq!(job_after.status, JobStatus::Scheduled);
+    assert_eq!(job_after.node_id, worker_id2);
+}
+
+#[tokio::test]
+async fn reschedule_for_retry_updates_status_and_worker() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
+
+    let worker_id1 = WorkerNodeId::from_ref_unchecked("test-worker-original");
+    let worker_id2 = WorkerNodeId::from_ref_unchecked("test-worker-new");
+    let worker_info = WorkerInfo::default();
+    workers::register(&metadata_db, worker_id1.clone(), worker_info.clone())
+        .await
+        .expect("Failed to register worker 1");
+    workers::register(&metadata_db, worker_id2.clone(), worker_info)
+        .await
+        .expect("Failed to register worker 2");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::sql::insert(
+        &metadata_db,
+        worker_id1.clone(),
+        &job_desc_str,
+        JobStatus::Failed,
+    )
+    .await
+    .expect("Failed to insert job");
+
+    //* When
+    jobs::sql::reschedule_for_retry(&metadata_db, job_id, worker_id2.clone())
+        .await
+        .expect("Failed to reschedule job");
+
+    //* Then
+    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job not found");
+    assert_eq!(job.status, JobStatus::Scheduled);
+    assert_eq!(job.node_id, worker_id2);
+    assert!(job.updated_at > job.created_at);
+}

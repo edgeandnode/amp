@@ -116,7 +116,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id, node_id, status, descriptor, created_at, updated_at
+        SELECT id, node_id, status, descriptor, created_at, updated_at, retry_count
         FROM jobs
         WHERE id = $1
     "#};
@@ -140,7 +140,8 @@ where
             status,
             descriptor,
             created_at,
-            updated_at
+            updated_at,
+            retry_count
         FROM jobs
         WHERE node_id = $1 AND status = ANY($2)
         ORDER BY id ASC
@@ -172,7 +173,8 @@ where
             j.status,
             j.descriptor,
             j.created_at,
-            j.updated_at
+            j.updated_at,
+            j.retry_count
         FROM jobs j
         INNER JOIN physical_tables l ON j.id = l.writer
         WHERE l.manifest_hash = $1
@@ -204,7 +206,8 @@ where
             status,
             descriptor,
             created_at,
-            updated_at
+            updated_at,
+            retry_count
         FROM jobs
         WHERE descriptor->'Dump'->>'dataset_namespace' = $1
           AND descriptor->'Dump'->>'dataset_name' = $2
@@ -289,7 +292,8 @@ where
                     status,
                     descriptor,
                     created_at,
-                    updated_at
+                    updated_at,
+                    retry_count
                 FROM jobs
                 ORDER BY id DESC
                 LIMIT $1
@@ -305,7 +309,8 @@ where
                     status,
                     descriptor,
                     created_at,
-                    updated_at
+                    updated_at,
+                    retry_count
                 FROM jobs
                 WHERE status = ANY($2)
                 ORDER BY id DESC
@@ -345,7 +350,8 @@ where
                     status,
                     descriptor,
                     created_at,
-                    updated_at
+                    updated_at,
+                    retry_count
                 FROM jobs
                 WHERE id < $2
                 ORDER BY id DESC
@@ -366,7 +372,8 @@ where
                     status,
                     descriptor,
                     created_at,
-                    updated_at
+                    updated_at,
+                    retry_count
                 FROM jobs
                 WHERE id < $2 AND status = ANY($3)
                 ORDER BY id DESC
@@ -381,4 +388,73 @@ where
                 .await
         }
     }
+}
+
+/// Get failed jobs that are ready for retry
+///
+/// Returns failed jobs where:
+/// - retry_count < max_retries (default 2)
+/// - enough time has passed since last failure based on exponential backoff
+///
+/// The backoff is calculated as 2^retry_count seconds, capped at 60 seconds.
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(
+    exe: E,
+    max_retries: i32,
+) -> Result<Vec<Job>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at,
+            retry_count
+        FROM jobs
+        WHERE status = 'FAILED'
+          AND retry_count < $1
+          AND updated_at + INTERVAL '1 second' * LEAST(POW(2, retry_count)::integer, 60) <= timezone('UTC', now())
+        ORDER BY id ASC
+    "#};
+
+    sqlx::query_as(query).bind(max_retries).fetch_all(exe).await
+}
+
+/// Reschedule a failed job for retry
+///
+/// This function:
+/// 1. Increments the retry_count
+/// 2. Sets status to SCHEDULED
+/// 3. Assigns the job to the specified worker node
+/// 4. Updates the updated_at timestamp
+///
+/// Returns an error if the job doesn't exist or if the database operation fails.
+pub async fn reschedule_for_retry<'c, E>(
+    exe: E,
+    job_id: JobId,
+    new_node_id: WorkerNodeId<'_>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        UPDATE jobs
+        SET
+            retry_count = retry_count + 1,
+            status = 'SCHEDULED',
+            node_id = $2,
+            updated_at = timezone('UTC', now())
+        WHERE id = $1
+    "#};
+
+    sqlx::query(query)
+        .bind(job_id)
+        .bind(new_node_id)
+        .execute(exe)
+        .await?;
+
+    Ok(())
 }
