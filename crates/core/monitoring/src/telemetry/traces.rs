@@ -1,10 +1,41 @@
 use opentelemetry_otlp::{ExporterBuildError, Protocol, WithExportConfig};
-pub use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider as Inner;
 
-pub type Result = std::result::Result<SdkTracerProvider, ExporterBuildError>;
+pub type Result = std::result::Result<TracerProvider, ExporterBuildError>;
+
+/// RAII wrapper for OpenTelemetry tracer provider.
+///
+/// When dropped, flushes pending traces and shuts down the provider.
+pub struct TracerProvider(Inner);
+
+impl std::ops::Deref for TracerProvider {
+    type Target = Inner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for TracerProvider {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.force_flush() {
+            tracing::error!(
+                error = %err,
+                error_source = crate::logging::error_source(&err),
+                "failed to flush OpenTelemetry tracing provider"
+            );
+        }
+        if let Err(err) = self.0.shutdown() {
+            tracing::error!(
+                error = %err,
+                error_source = crate::logging::error_source(&err),
+                "failed to shutdown OpenTelemetry tracing provider"
+            );
+        }
+    }
+}
 
 /// Create a new OpenTelemetry tracer provider set up with the given URL and HTTP transport.
-pub fn provider(url: String, trace_ratio: f64) -> Result {
+pub fn provider(url: &str, trace_ratio: f64) -> Result {
     let resource = opentelemetry_sdk::Resource::builder()
         .with_attribute(opentelemetry::KeyValue::new("service.name", "tracing"))
         .build();
@@ -15,7 +46,7 @@ pub fn provider(url: String, trace_ratio: f64) -> Result {
         .with_endpoint(url)
         .build()?;
 
-    let provider = SdkTracerProvider::builder()
+    let provider = Inner::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource)
         .with_sampler(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(
@@ -23,13 +54,5 @@ pub fn provider(url: String, trace_ratio: f64) -> Result {
         ))
         .build();
 
-    Ok(provider)
-}
-/// Flushes the OpenTelemetry tracing provider and shuts it down. This ensures that all
-/// pending traces are sent before the application exits.
-pub fn provider_flush_shutdown(
-    provider: SdkTracerProvider,
-) -> std::result::Result<(), opentelemetry_sdk::error::OTelSdkError> {
-    provider.force_flush()?;
-    provider.shutdown()
+    Ok(TracerProvider(provider))
 }

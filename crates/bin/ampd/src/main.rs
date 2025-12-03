@@ -100,22 +100,11 @@ async fn main_inner() -> Result<(), BoxError> {
 
             let config = load_config(config_path.as_ref(), true).await?;
 
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = dev_cmd::run(
-                config,
-                metrics_meter,
-                flight_server,
-                jsonl_server,
-                admin_server,
-            )
-            .await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
+            dev_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
+                .await
+                .map_err(Into::into)
         }
         Command::Server {
             mut flight_server,
@@ -130,58 +119,39 @@ async fn main_inner() -> Result<(), BoxError> {
             let config = load_config(config_path.as_ref(), false).await?;
             let addrs = config.addrs.clone();
 
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result =
-                server_cmd::run(config, metrics_meter, &addrs, flight_server, jsonl_server).await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
+            server_cmd::run(config, meter, &addrs, flight_server, jsonl_server)
+                .await
+                .map_err(Into::into)
         }
         Command::Worker { node_id } => {
             let node_id = node_id.parse()?;
 
             let config = load_config(config_path.as_ref(), false).await?;
 
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = worker_cmd::run(config, metrics_meter, node_id).await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
+            worker_cmd::run(config, meter, node_id)
+                .await
+                .map_err(Into::into)
         }
         Command::Controller => {
             let config = load_config(config_path.as_ref(), false).await?;
             let admin_api_addr = config.addrs.admin_api_addr;
 
-            let (tracing_provider, metrics_provider, metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = controller_cmd::run(config, metrics_meter, admin_api_addr).await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
+            controller_cmd::run(config, meter, admin_api_addr)
+                .await
+                .map_err(Into::into)
         }
         Command::Migrate => {
             let config = load_config(config_path.as_ref(), false).await?;
 
-            let (tracing_provider, metrics_provider, _metrics_meter) =
-                monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, _meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = migrate_cmd::run(config).await;
-
-            monitoring::deinit(metrics_provider, tracing_provider)?;
-
-            result?;
-            Ok(())
+            migrate_cmd::run(config).await.map_err(Into::into)
         }
     }
 }

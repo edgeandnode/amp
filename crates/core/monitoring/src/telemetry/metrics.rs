@@ -6,34 +6,63 @@ use std::{
 
 pub use opentelemetry::{KeyValue, metrics::Meter};
 use opentelemetry_otlp::{ExporterBuildError, Protocol, WithExportConfig};
-pub use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider as Inner;
 
 pub const DEFAULT_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 
-pub type Result = std::result::Result<(SdkMeterProvider, Meter), ExporterBuildError>;
-
 const AMP_METER: &str = "amp-meter";
 
+/// RAII wrapper for OpenTelemetry meter provider.
+///
+/// When dropped, flushes pending metrics and shuts down the provider.
+pub struct MeterProvider(Inner);
+
+impl std::ops::Deref for MeterProvider {
+    type Target = Inner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for MeterProvider {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.force_flush() {
+            tracing::error!(
+                error = %err,
+                error_source = crate::logging::error_source(&err),
+                "failed to flush OpenTelemetry metrics provider"
+            );
+        }
+        if let Err(err) = self.0.shutdown() {
+            tracing::error!(
+                error = %err,
+                error_source = crate::logging::error_source(&err),
+                "failed to shutdown OpenTelemetry metrics provider"
+            );
+        }
+    }
+}
+
 /// Starts a periodic OpenTelemetry metrics exporter over binary HTTP transport.
-pub fn start(url: String, export_interval: Option<Duration>) -> Result {
+pub fn start(
+    url: &str,
+    export_interval: Option<Duration>,
+) -> Result<(MeterProvider, Meter), ExporterBuildError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
         .with_endpoint(url)
         .build()?;
-    // If not set, use the default periodic exporter value.
     let export_interval = export_interval.unwrap_or(DEFAULT_METRICS_EXPORT_INTERVAL);
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(export_interval)
         .build();
 
-    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-        .with_reader(reader)
-        .build();
+    let meter_provider = Inner::builder().with_reader(reader).build();
     opentelemetry::global::set_meter_provider(meter_provider.clone());
     let meter = opentelemetry::global::meter(AMP_METER);
 
-    Ok((meter_provider, meter))
+    Ok((MeterProvider(meter_provider), meter))
 }
 
 /// An OpenTelemetry gauge.
@@ -282,14 +311,4 @@ impl ReadableCounter {
     pub fn get(&self) -> u64 {
         self.copy.load(Ordering::Relaxed)
     }
-}
-
-/// Flushes the OpenTelemetry metrics provider and shuts it down. This ensures that all
-/// metrics are sent before the application exits. Note that during normal operation, metrics
-/// are sent periodically.
-pub fn provider_flush_shutdown(
-    provider: SdkMeterProvider,
-) -> std::result::Result<(), opentelemetry_sdk::error::OTelSdkError> {
-    provider.force_flush()?;
-    provider.shutdown()
 }
