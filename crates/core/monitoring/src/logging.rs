@@ -33,8 +33,11 @@ pub fn init() {
 }
 
 /// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
-pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
+pub fn init_with_telemetry(url: &str, trace_ratio: f64) -> telemetry::traces::Result {
     let env_filter = env_filter();
+
+    // Clamp trace_ratio to valid range [0.0, 1.0]
+    let trace_ratio = trace_ratio.clamp(0.0, 1.0);
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
@@ -95,7 +98,7 @@ fn env_filter() -> EnvFilter {
     let log_level = std::env::var(AMP_LOG_ENV_VAR).unwrap_or_else(|_| "info".to_string());
 
     for crate_name in AMP_CRATES {
-        // Add directives for each crate in AMP_CRATES, if not overriden by RUST_LOG
+        // Add directives for each crate in AMP_CRATES, if not overridden by RUST_LOG
         if !directive_string.contains(&format!("{crate_name}=")) {
             env_filter =
                 env_filter.add_directive(format!("{crate_name}={log_level}").parse().unwrap());

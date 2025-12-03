@@ -3,37 +3,21 @@
 //! This module provides helpers for testing metrics using in-memory exporters,
 //! allowing tests to validate that metrics are recorded correctly without requiring
 //! external observability infrastructure.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use crate::testlib::metrics_utils::{TestMetricsContext, find_counter};
-//!
-//! #[tokio::test]
-//! async fn test_my_metric() {
-//!     let ctx = TestMetricsContext::new();
-//!     let registry = MyMetricsRegistry::new(&ctx.meter());
-//!
-//!     // Record some metrics
-//!     registry.my_counter.inc();
-//!
-//!     // Collect and validate
-//!     let metrics = ctx.collect().await;
-//!     let counter = find_counter(&metrics, "my_counter").expect("counter not found");
-//!     assert_eq!(counter.value, 1);
-//! }
-//! ```
 
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use opentelemetry::metrics::{Meter, MeterProvider as _};
+use opentelemetry_sdk::metrics::{
+    InMemoryMetricExporter, SdkMeterProvider,
+    data::{AggregatedMetrics, MetricData, ResourceMetrics},
+};
 
 /// Test context for metrics collection.
 ///
 /// Provides an in-memory metrics exporter and meter for testing, allowing
 /// tests to record and validate metrics without external dependencies.
 pub struct TestMetricsContext {
-    provider: monitoring::telemetry::metrics::SdkMeterProvider,
+    provider: SdkMeterProvider,
     exporter: InMemoryMetricExporter,
-    meter: monitoring::telemetry::metrics::Meter,
+    meter: Meter,
 }
 
 impl TestMetricsContext {
@@ -42,11 +26,9 @@ impl TestMetricsContext {
     /// Sets up an in-memory exporter and meter provider that can be used
     /// to create metrics registries for testing.
     pub fn new() -> Self {
-        use opentelemetry::metrics::MeterProvider;
-
         let exporter = InMemoryMetricExporter::default();
 
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+        let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(exporter.clone())
             .build();
 
@@ -60,7 +42,7 @@ impl TestMetricsContext {
     }
 
     /// Get a reference to the meter for creating metrics.
-    pub fn meter(&self) -> &monitoring::telemetry::metrics::Meter {
+    pub fn meter(&self) -> &Meter {
         &self.meter
     }
 
@@ -69,7 +51,7 @@ impl TestMetricsContext {
     /// This creates a meter that's connected to the same provider and exporter,
     /// ensuring all metrics are collected together. Use this instead of cloning
     /// the meter when passing it to components that take ownership.
-    pub fn create_meter(&self) -> monitoring::telemetry::metrics::Meter {
+    pub fn create_meter(&self) -> opentelemetry::metrics::Meter {
         use opentelemetry::metrics::MeterProvider;
         self.provider.meter("test-meter")
     }
@@ -107,12 +89,7 @@ impl Default for TestMetricsContext {
 /// Find a counter metric by name in the collected metrics.
 ///
 /// Returns the first counter found with the given name, or None if not found.
-pub fn find_counter(
-    metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    name: &str,
-) -> Option<CounterData> {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-
+pub fn find_counter(metrics: &[ResourceMetrics], name: &str) -> Option<CounterData> {
     for resource_metric in metrics {
         for scope_metric in resource_metric.scope_metrics() {
             for metric in scope_metric.metrics() {
@@ -141,12 +118,7 @@ pub fn find_counter(
 /// Find all counter data points for a given metric name.
 ///
 /// Returns all data points (potentially with different label combinations) for the counter.
-pub fn find_all_counter_points(
-    metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    name: &str,
-) -> Vec<CounterData> {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-
+pub fn find_all_counter_points(metrics: &[ResourceMetrics], name: &str) -> Vec<CounterData> {
     let mut results = Vec::new();
 
     for resource_metric in metrics {
@@ -176,12 +148,7 @@ pub fn find_all_counter_points(
 }
 
 /// Find a gauge metric by name in the collected metrics.
-pub fn find_gauge(
-    metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    name: &str,
-) -> Option<GaugeData> {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-
+pub fn find_gauge(metrics: &[ResourceMetrics], name: &str) -> Option<GaugeData> {
     for resource_metric in metrics {
         for scope_metric in resource_metric.scope_metrics() {
             for metric in scope_metric.metrics() {
@@ -222,12 +189,7 @@ pub fn find_gauge(
 }
 
 /// Find a histogram metric by name in the collected metrics.
-pub fn find_histogram(
-    metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-    name: &str,
-) -> Option<HistogramData> {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-
+pub fn find_histogram(metrics: &[ResourceMetrics], name: &str) -> Option<HistogramData> {
     for resource_metric in metrics {
         for scope_metric in resource_metric.scope_metrics() {
             for metric in scope_metric.metrics() {
@@ -263,8 +225,6 @@ pub fn find_all_histogram_points(
     metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
     name: &str,
 ) -> Vec<HistogramData> {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-
     let mut results = Vec::new();
 
     for resource_metric in metrics {
@@ -300,9 +260,7 @@ pub fn find_all_histogram_points(
 /// List all metric names in the collected metrics.
 ///
 /// Useful for debugging to see what metrics were actually recorded.
-pub fn list_metric_names(
-    metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-) -> Vec<String> {
+pub fn list_metric_names(metrics: &[ResourceMetrics]) -> Vec<String> {
     let mut names = Vec::new();
 
     for resource_metric in metrics {
