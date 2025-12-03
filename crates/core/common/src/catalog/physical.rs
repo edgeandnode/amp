@@ -7,9 +7,7 @@ use datafusion::{
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{
-            FileGroup, FileScanConfigBuilder, ParquetSource, parquet::metadata::DFParquetMetadata,
-        },
+        physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
     error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
@@ -166,11 +164,9 @@ impl TableSnapshot {
         segment: &Segment,
     ) -> Result<PartitionedFile, BoxError> {
         let metadata = self.reader_factory.get_cached_metadata(segment.id).await?;
-        let statistics =
-            DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &self.schema())?;
         let file = PartitionedFile::from(segment.object.clone())
             .with_extensions(Arc::new(segment.id))
-            .with_statistics(Arc::new(statistics));
+            .with_statistics(metadata.statistics);
         Ok(file)
     }
 }
@@ -680,6 +676,7 @@ impl PhysicalTable {
             metadata_db: self.metadata_db.clone(),
             object_store: Arc::clone(&self.object_store),
             parquet_footer_cache,
+            schema: self.schema(),
         };
 
         Ok(TableSnapshot {

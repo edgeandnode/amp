@@ -18,22 +18,18 @@ pub mod utils;
 use std::{
     future::Future,
     ops::RangeInclusive,
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
-pub use datafusion::{arrow, parquet};
-use datafusion::{
-    arrow::{
-        array::{ArrayRef, AsArray as _, RecordBatch},
-        datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
-        error::ArrowError,
-    },
-    parquet::file::metadata::ParquetMetaData,
+use datafusion::arrow::{
+    array::{ArrayRef, AsArray as _, RecordBatch},
+    datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
+    error::ArrowError,
 };
+pub use datafusion::{arrow, parquet};
 pub use foyer::Cache;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
@@ -64,7 +60,8 @@ pub type EvmAddressArrayType = FixedSizeBinaryArray;
 /// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 
-pub type ParquetFooterCache = Cache<FileId, Arc<ParquetMetaData>>;
+pub use catalog::reader::CachedParquetData;
+pub type ParquetFooterCache = Cache<FileId, CachedParquetData>;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Timestamp(pub Duration);

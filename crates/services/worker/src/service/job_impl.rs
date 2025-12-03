@@ -3,9 +3,8 @@
 use std::{future::Future, sync::Arc};
 
 use common::{
-    BoxError, ParquetFooterCache,
+    BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
-    parquet::file::metadata::ParquetMetaData,
 };
 use datasets_common::{
     hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
@@ -115,11 +114,13 @@ pub(super) async fn new(
             source: err,
         })?
         .into();
-        let capacity = opts.cache_size_mb;
-        let cache = ParquetFooterCache::builder(capacity)
-            .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
-            .build();
-        let compactor = AmpCompactor::start(&physical_table, cache, &opts, metrics.clone()).into();
+        let compactor = AmpCompactor::start(
+            &physical_table,
+            job_ctx.parquet_footer_cache.clone(),
+            &opts,
+            metrics.clone(),
+        )
+        .into();
 
         tables.push((physical_table, compactor));
     }

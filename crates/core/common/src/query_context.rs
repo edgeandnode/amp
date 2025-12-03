@@ -20,7 +20,6 @@ use datafusion::{
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
     logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
-    parquet::file::metadata::ParquetMetaData,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
@@ -30,16 +29,15 @@ use datafusion::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
-use foyer::{Cache, CacheBuilder};
+use foyer::CacheBuilder;
 use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::FileId;
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, arrow, block_range_intersection,
+    BlockNum, BoxError, CachedParquetData, ParquetFooterCache, arrow, block_range_intersection,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -127,7 +125,7 @@ pub struct QueryEnv {
 
     // Existing fields
     pub isolate_pool: IsolatePool,
-    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
+    pub parquet_footer_cache: ParquetFooterCache,
 
     // Per-query memory limit configuration
     pub query_max_mem_mb: usize,
@@ -169,7 +167,7 @@ pub fn create_query_env(
     // Create ParquetMetaData footer cache with the configured memory limit
     let cache_size_bytes = parquet_cache_size_mb * 1024 * 1024;
     let parquet_footer_cache = CacheBuilder::new(cache_size_bytes as usize)
-        .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
         .build();
 
     Ok(QueryEnv {

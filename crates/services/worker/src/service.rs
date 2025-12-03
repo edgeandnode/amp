@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
-use common::store::Store as DataStore;
+use common::{CachedParquetData, ParquetFooterCache, store::Store as DataStore};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -89,6 +89,12 @@ pub async fn new(
     // Create notification multiplexer
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
+    // Create shared parquet footer cache
+    let parquet_opts = dump::parquet_opts(&config.parquet);
+    let parquet_footer_cache = ParquetFooterCache::builder(parquet_opts.cache_size_mb)
+        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
+        .build();
+
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
     // from the last known state.
     //
@@ -111,6 +117,7 @@ pub async fn new(
             data_store,
             notification_multiplexer,
             meter,
+            parquet_footer_cache,
         },
     );
 
@@ -221,6 +228,7 @@ pub(crate) struct WorkerJobCtx {
     pub data_store: Arc<DataStore>,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,
+    pub parquet_footer_cache: ParquetFooterCache,
 }
 
 pub struct Worker {
