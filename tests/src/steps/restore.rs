@@ -29,8 +29,8 @@ impl Step {
         let ampctl = ctx.new_ampctl();
         test_helpers::restore_dataset_snapshot(
             &ampctl,
-            ctx.daemon_server().dataset_store(),
-            ctx.metadata_db(),
+            ctx.daemon_controller().dataset_store(),
+            ctx.daemon_controller().metadata_db(),
             &self.snapshot_name,
         )
         .await?;

@@ -1,23 +1,42 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use common::{BoxError, config::Config as CommonConfig};
-use metadata_db::MetadataDb;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use monitoring::telemetry::metrics::Meter;
 
 /// Run the controller service (Admin API server)
-pub async fn run(
-    config: CommonConfig,
-    metadata_db: MetadataDb,
-    meter: Option<Meter>,
-    at: SocketAddr,
-) -> Result<(), Error> {
+pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> Result<(), Error> {
+    let metadata_db = config
+        .metadata_db()
+        .await
+        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
+
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store =
+            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
+
     // Convert to controller-specific config
     let controller_config = config_from_common(&config);
 
-    let (addr, server) =
-        controller::service::new(Arc::new(controller_config), metadata_db, meter, at)
-            .await
-            .map_err(Error::ServiceInit)?;
+    let (addr, server) = controller::service::new(
+        Arc::new(controller_config),
+        metadata_db,
+        dataset_store,
+        meter,
+        at,
+    )
+    .await
+    .map_err(Error::ServiceInit)?;
 
     tracing::info!("Controller Admin API running at {}", addr);
 
@@ -29,6 +48,13 @@ pub async fn run(
 /// Errors that can occur during controller execution
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to connect to metadata database
+    ///
+    /// This occurs when the controller cannot establish a connection to the
+    /// PostgreSQL metadata database.
+    #[error("Failed to connect to metadata database: {0}")]
+    MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+
     /// Failed to initialize the controller service (Admin API)
     ///
     /// This occurs during the initialization phase when attempting to bind and
@@ -47,8 +73,6 @@ pub enum Error {
 /// Convert common config to controller-specific config
 pub fn config_from_common(config: &CommonConfig) -> controller::config::Config {
     controller::config::Config {
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         data_store: config.data_store.clone(),
         build_info: config.build_info.clone(),
     }

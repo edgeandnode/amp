@@ -154,7 +154,8 @@ impl TestCtx {
     async fn dump(&self, dataset: &str, end: BlockNum) {
         test_helpers::dump_dataset(
             self.ctx.daemon_worker().config().clone(),
-            self.ctx.metadata_db().clone(),
+            self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().dataset_store().clone(),
             dataset.parse().expect("failed to parse dataset reference"),
             end,
         )

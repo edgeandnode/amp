@@ -2,9 +2,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use backon::{ExponentialBuilder, Retryable};
 use common::{CachedParquetData, ParquetFooterCache, store::Store as DataStore};
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use dataset_store::DatasetStore;
 use futures::{TryStreamExt as _, future::BoxFuture};
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,
@@ -47,6 +45,7 @@ use crate::{
 pub async fn new(
     config: Config,
     metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
@@ -69,19 +68,6 @@ pub async fn new(
 
     // Create the job queue
     let queue = JobQueue::new(metadata_db.clone());
-
-    // Construct dataset store
-    let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store =
-            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
-    };
 
     // Clone data store
     let data_store = config.data_store.clone();

@@ -1,36 +1,46 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use common::{BoxError, config::Config as CommonConfig};
-use metadata_db::MetadataDb;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use monitoring::telemetry::metrics::Meter;
 
 use crate::{controller_cmd, server_cmd, worker_cmd};
 
 pub async fn run(
     config: CommonConfig,
-    metadata_db: MetadataDb,
     meter: Option<Meter>,
     flight_server: bool,
     jsonl_server: bool,
     admin_server: bool,
 ) -> Result<(), Error> {
     let worker_id = "worker".parse().expect("Invalid worker ID");
-    let config = Arc::new(config);
 
-    // Convert to server-specific config
-    let server_config = Arc::new(server_cmd::config_from_common(&config));
+    let metadata_db = config
+        .metadata_db()
+        .await
+        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
-    // Convert to worker-specific config
-    let worker_config = worker_cmd::config_from_common(&config);
-
-    // Convert to controller-specific config
-    let controller_config = controller_cmd::config_from_common(&config);
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store =
+            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
+        let controller_config = controller_cmd::config_from_common(&config);
         let (addr, fut) = controller::service::new(
             Arc::new(controller_config),
             metadata_db.clone(),
+            dataset_store.clone(),
             meter.clone(),
             config.addrs.admin_api_addr,
         )
@@ -55,9 +65,12 @@ pub async fn run(
         } else {
             None
         };
+
+        let server_config = server_cmd::config_from_common(&config);
         let (addrs, fut) = server::service::new(
-            server_config.clone(),
+            Arc::new(server_config),
             metadata_db.clone(),
+            dataset_store.clone(),
             meter.clone(),
             flight_at,
             jsonl_at,
@@ -78,9 +91,16 @@ pub async fn run(
     };
 
     // Initialize worker
-    let worker_fut = worker::service::new(worker_config, metadata_db, meter, worker_id)
-        .await
-        .map_err(Error::WorkerInit)?;
+    let worker_config = worker_cmd::config_from_common(&config);
+    let worker_fut = worker::service::new(
+        worker_config,
+        metadata_db,
+        dataset_store.clone(),
+        meter,
+        worker_id,
+    )
+    .await
+    .map_err(Error::WorkerInit)?;
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;
@@ -95,6 +115,13 @@ pub async fn run(
 /// Errors that can occur during dev mode execution.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to connect to metadata database
+    ///
+    /// This occurs when the dev command cannot establish a connection to the
+    /// PostgreSQL metadata database.
+    #[error("Failed to connect to metadata database: {0}")]
+    MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+
     /// Failed to initialize the controller service (Admin API).
     ///
     /// This occurs during the initialization phase when attempting to bind and

@@ -342,6 +342,22 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
+        // Create shared DatasetStore instance (used by both server and worker)
+        let dataset_store = {
+            use dataset_store::{
+                DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+            };
+            let provider_configs_store =
+                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+            let dataset_manifests_store =
+                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+            DatasetStore::new(
+                temp_db.metadata_db().clone(),
+                provider_configs_store,
+                dataset_manifests_store,
+            )
+        };
+
         // Create Anvil fixture (if enabled) and capture provider config for later registration
         let (anvil, anvil_provider_config) = match self.anvil_fixture {
             Some(AnvilMode::Ipc) => {
@@ -373,18 +389,25 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
-        // Start query server
+        // Start query server (pass shared dataset_store)
         let server = DaemonServer::new(
             config.clone(),
             temp_db.metadata_db().clone(),
+            dataset_store.clone(),
             self.meter,
             true, // enable_flight
             true, // enable_jsonl
         )
         .await?;
 
-        // Start controller (Admin API)
-        let controller = DaemonController::new(config.clone(), controller_meter).await?;
+        // Start controller (Admin API) with shared dataset_store
+        let controller = DaemonController::new(
+            config.clone(),
+            temp_db.metadata_db().clone(),
+            dataset_store.clone(),
+            controller_meter,
+        )
+        .await?;
 
         // Register manifests with the Admin API (after controller is running)
         if !self.manifests_to_register.is_empty() {
@@ -477,13 +500,19 @@ impl TestCtxBuilder {
             }
         }
 
-        // Start worker using the fixture
+        // Start worker using the fixture with shared dataset_store
         let node_id: NodeId = self
             .test_name
             .parse()
             .expect("test name should be a valid WorkerNodeId");
-        let worker =
-            DaemonWorker::new(config, temp_db.metadata_db().clone(), worker_meter, node_id).await?;
+        let worker = DaemonWorker::new(
+            config,
+            temp_db.metadata_db().clone(),
+            dataset_store.clone(),
+            worker_meter,
+            node_id,
+        )
+        .await?;
 
         // Wait for Anvil service to be ready (if enabled)
         Ok(TestCtx {
@@ -510,6 +539,7 @@ pub struct TestCtx {
 
     daemon_state_dir: DaemonStateDir,
 
+    #[allow(dead_code)] // Kept alive to maintain database connection
     tempdb_fixture: MetadataDbFixture,
     daemon_server_fixture: DaemonServer,
     daemon_controller_fixture: DaemonController,
@@ -536,11 +566,6 @@ impl TestCtx {
     /// Get a reference to the daemon state directory.
     pub fn daemon_state_dir(&self) -> &DaemonStateDir {
         &self.daemon_state_dir
-    }
-
-    /// Get a reference to the metadata database.
-    pub fn metadata_db(&self) -> &metadata_db::MetadataDb {
-        self.tempdb_fixture.metadata_db()
     }
 
     /// Get a reference to the [`DaemonServer`] fixture.

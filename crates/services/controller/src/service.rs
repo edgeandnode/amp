@@ -8,9 +8,7 @@ use axum::{
     serve::{Listener as _, ListenerExt as _},
 };
 use common::{BoxError, utils::shutdown_signal};
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
@@ -28,22 +26,10 @@ use crate::{config::Config, scheduler::Scheduler};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
-    let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store =
-            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
-    };
-
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     let ctx = Ctx {

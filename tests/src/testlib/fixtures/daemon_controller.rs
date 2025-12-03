@@ -18,6 +18,8 @@ use tokio::task::JoinHandle;
 /// and cleanup by aborting the controller task when dropped.
 pub struct DaemonController {
     config: Arc<Config>,
+    metadata_db: metadata_db::MetadataDb,
+    dataset_store: dataset_store::DatasetStore,
     admin_api_addr: SocketAddr,
 
     _task: JoinHandle<BoxResult<()>>,
@@ -30,22 +32,29 @@ impl DaemonController {
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<common::config::Config>,
+        metadata_db: metadata_db::MetadataDb,
+        dataset_store: dataset_store::DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
-        // Create metadata database from common config
-        let metadata_db = config.metadata_db().await?;
-
         // Convert common config to controller config
         let admin_api_addr = config.addrs.admin_api_addr;
         let config = Arc::new(controller_config_from_common(&config));
 
-        let (admin_api_addr, controller_server) =
-            controller::service::new(config.clone(), metadata_db, meter, admin_api_addr).await?;
+        let (admin_api_addr, controller_server) = controller::service::new(
+            config.clone(),
+            metadata_db.clone(),
+            dataset_store.clone(),
+            meter,
+            admin_api_addr,
+        )
+        .await?;
 
         let controller_task = tokio::spawn(controller_server);
 
         Ok(Self {
             config,
+            metadata_db,
+            dataset_store,
             admin_api_addr,
             _task: controller_task,
         })
@@ -57,6 +66,16 @@ impl DaemonController {
     /// controller-related operations.
     pub fn config(&self) -> &Arc<Config> {
         &self.config
+    }
+
+    /// Get a reference to the metadata database.
+    pub fn metadata_db(&self) -> &metadata_db::MetadataDb {
+        &self.metadata_db
+    }
+
+    /// Get a reference to the dataset store.
+    pub fn dataset_store(&self) -> &dataset_store::DatasetStore {
+        &self.dataset_store
     }
 
     /// Get the Admin API server address.
@@ -80,8 +99,6 @@ impl Drop for DaemonController {
 /// Convert common config to controller config
 fn controller_config_from_common(config: &common::config::Config) -> Config {
     Config {
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         data_store: config.data_store.clone(),
         build_info: config.build_info.clone(),
     }

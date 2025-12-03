@@ -131,7 +131,8 @@ impl TestCtx {
         let dataset_ref: Reference = dataset.parse().unwrap();
         test_helpers::dump_internal(
             self.ctx.daemon_worker().config().clone(),
-            self.ctx.metadata_db().clone(),
+            self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().dataset_store().clone(),
             dataset_ref,
             dump::EndBlock::Absolute(end), // end_block
             max_writers,
@@ -149,7 +150,7 @@ impl TestCtx {
         test_helpers::catalog_for_dataset(
             dataset_name,
             self.ctx.daemon_server().dataset_store(),
-            self.ctx.metadata_db(),
+            self.ctx.daemon_server().metadata_db(),
         )
         .await
     }

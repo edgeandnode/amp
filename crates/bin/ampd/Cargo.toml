@@ -18,6 +18,7 @@ clap.workspace = true
 common = { path = "../../core/common" }
 console-subscriber = { version = "0.4.1", default-features = false, optional = true }
 controller = { path = "../../services/controller" }
+dataset-store = { path = "../../core/dataset-store" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 server = { path = "../../services/server" }

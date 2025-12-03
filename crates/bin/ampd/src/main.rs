@@ -99,14 +99,12 @@ async fn main_inner() -> Result<(), BoxError> {
             }
 
             let config = load_config(config_path.as_ref(), true).await?;
-            let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let result = dev_cmd::run(
                 config,
-                metadata_db,
                 metrics_meter,
                 flight_server,
                 jsonl_server,
@@ -130,22 +128,13 @@ async fn main_inner() -> Result<(), BoxError> {
             }
 
             let config = load_config(config_path.as_ref(), false).await?;
-            let metadata_db = config.metadata_db().await?;
+            let addrs = config.addrs.clone();
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let server_config = server_cmd::config_from_common(&config);
-
-            let result = server_cmd::run(
-                server_config,
-                metadata_db,
-                metrics_meter,
-                &config.addrs,
-                flight_server,
-                jsonl_server,
-            )
-            .await;
+            let result =
+                server_cmd::run(config, metrics_meter, &addrs, flight_server, jsonl_server).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
@@ -156,12 +145,11 @@ async fn main_inner() -> Result<(), BoxError> {
             let node_id = node_id.parse()?;
 
             let config = load_config(config_path.as_ref(), false).await?;
-            let metadata_db = config.metadata_db().await?;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = worker_cmd::run(config, metadata_db, metrics_meter, node_id).await;
+            let result = worker_cmd::run(config, metrics_meter, node_id).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
@@ -170,14 +158,12 @@ async fn main_inner() -> Result<(), BoxError> {
         }
         Command::Controller => {
             let config = load_config(config_path.as_ref(), false).await?;
-            let metadata_db = config.metadata_db().await?;
             let admin_api_addr = config.addrs.admin_api_addr;
 
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result =
-                controller_cmd::run(config, metadata_db, metrics_meter, admin_api_addr).await;
+            let result = controller_cmd::run(config, metrics_meter, admin_api_addr).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
