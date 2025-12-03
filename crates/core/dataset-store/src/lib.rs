@@ -79,14 +79,14 @@ impl DatasetStore {
         metadata_db: MetadataDb,
         provider_configs_store: ProviderConfigsStore,
         dataset_manifests_store: DatasetManifestsStore,
-    ) -> Arc<Self> {
-        Arc::new(Self {
+    ) -> Self {
+        Self {
             metadata_db,
             provider_configs_store,
             dataset_manifests_store,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
-        })
+        }
     }
 }
 
@@ -1067,7 +1067,7 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
 #[tracing::instrument(skip(dataset_store), err)]
 pub async fn resolve_blocks_table(
-    dataset_store: &Arc<DatasetStore>,
+    dataset_store: &DatasetStore,
     root_datasets: BTreeMap<Hash, Arc<Dataset>>,
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {
@@ -1105,7 +1105,7 @@ pub async fn resolve_blocks_table(
 
 // Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
 async fn search_dependencies_for_raw_dataset(
-    dataset_store: &Arc<DatasetStore>,
+    dataset_store: &DatasetStore,
     root_datasets: BTreeMap<Hash, Arc<Dataset>>,
     network: &str,
 ) -> Result<Arc<Dataset>, BoxError> {
@@ -1141,7 +1141,7 @@ async fn search_dependencies_for_raw_dataset(
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
 /// each dataset comes after all datasets it depends on.
 pub async fn dataset_and_dependencies(
-    store: &Arc<DatasetStore>,
+    store: &DatasetStore,
     dataset: Reference,
 ) -> Result<Vec<Reference>, BoxError> {
     let mut datasets = vec![dataset];

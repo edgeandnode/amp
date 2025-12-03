@@ -4,13 +4,14 @@
 //! instances in test environments. It handles worker lifecycle, task management, and provides
 //! convenient configuration options for worker nodes.
 
-use std::{str::FromStr as _, sync::Arc};
+use std::sync::Arc;
 
 use common::BoxError;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
+use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 
@@ -20,10 +21,11 @@ use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRun
 /// and lifecycle management. The fixture automatically handles worker lifecycle and cleanup
 /// by aborting the worker task when dropped.
 pub struct DaemonWorker {
+    config: Config,
+    dataset_store: DatasetStore,
     node_id: NodeId,
-    worker_config: worker::config::Config,
-    dataset_store: Arc<DatasetStore>,
-    _worker_task: JoinHandle<Result<(), WorkerRuntimeError>>,
+
+    _task: JoinHandle<Result<(), WorkerRuntimeError>>,
 }
 
 impl DaemonWorker {
@@ -32,10 +34,10 @@ impl DaemonWorker {
     /// Starts a Amp worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        node_id: NodeId,
         config: Arc<common::config::Config>,
         metadb: MetadataDb,
-        meter: Option<monitoring::telemetry::metrics::Meter>,
+        meter: Option<Meter>,
+        node_id: NodeId,
     ) -> Result<Self, BoxError> {
         let dataset_store = {
             let provider_configs_store =
@@ -58,10 +60,10 @@ impl DaemonWorker {
         let worker_task = tokio::spawn(worker_fut);
 
         Ok(Self {
-            node_id,
-            worker_config,
+            config: worker_config,
             dataset_store,
-            _worker_task: worker_task,
+            node_id,
+            _task: worker_task,
         })
     }
 
@@ -74,10 +76,11 @@ impl DaemonWorker {
         metadata_db: MetadataDb,
         worker_name: &str,
     ) -> Result<Self, BoxError> {
-        let worker_node_id = NodeId::from_str(worker_name)
+        let worker_node_id = worker_name
+            .parse()
             .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
 
-        Self::new(worker_node_id, config, metadata_db, None).await
+        Self::new(config, metadata_db, None, worker_node_id).await
     }
 
     /// Get the worker node ID.
@@ -90,11 +93,11 @@ impl DaemonWorker {
     /// Returns the `worker::config::Config` that can be used directly with
     /// worker-related operations like `dump_internal` and `dump_dataset`.
     pub fn config(&self) -> &Config {
-        &self.worker_config
+        &self.config
     }
 
     /// Get the dataset store used by the worker.
-    pub fn dataset_store(&self) -> &Arc<DatasetStore> {
+    pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
     }
 }
@@ -102,7 +105,7 @@ impl DaemonWorker {
 impl Drop for DaemonWorker {
     fn drop(&mut self) {
         tracing::debug!(worker_id = %self.node_id, "Aborting daemon worker task");
-        self._worker_task.abort();
+        self._task.abort();
     }
 }
 

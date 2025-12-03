@@ -67,7 +67,7 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
-    dataset_store: Arc<DatasetStore>,
+    dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
     metadata_db: MetadataDb,
@@ -113,9 +113,8 @@ impl Service {
     ) -> Result<QueryResultStream, Error> {
         let query = common::sql::parse(sql.as_ref())
             .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
-        let dataset_store = self.dataset_store.clone();
         let catalog = catalog_for_sql(
-            dataset_store.as_ref(),
+            &self.dataset_store,
             &self.metadata_db,
             &query,
             self.env.clone(),
@@ -132,7 +131,13 @@ impl Service {
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
         let result = self
-            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
+            .execute_plan(
+                catalog,
+                &self.dataset_store,
+                plan,
+                is_streaming,
+                resume_watermark,
+            )
             .await;
 
         // Record execution error
@@ -154,7 +159,7 @@ impl Service {
     pub async fn execute_plan(
         &self,
         catalog: Catalog,
-        dataset_store: Arc<DatasetStore>,
+        dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
         is_streaming: bool,
         resume_watermark: Option<ResumeWatermark>,
@@ -272,7 +277,7 @@ impl Service {
                         .map_err(|err| Error::InvalidQuery(err.to_string()))?;
                     let query = common::sql::parse(&sql_str)
                         .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
-                    let plan_ctx = planning_ctx_for_sql(self.dataset_store.as_ref(), &query)
+                    let plan_ctx = planning_ctx_for_sql(&self.dataset_store, &query)
                         .await
                         .map_err(Error::PlanningCtxForSqlError)?;
                     let is_streaming = streaming_override

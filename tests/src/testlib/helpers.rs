@@ -197,7 +197,7 @@ pub async fn check_table_consistency(table: &Arc<PhysicalTable>) -> Result<(), B
 /// This is typically used to set up known-good data for comparison testing.
 pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
-    dataset_store: &Arc<DatasetStore>,
+    dataset_store: &DatasetStore,
     metadata_db: &MetadataDb,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
@@ -375,7 +375,7 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
 /// compaction, collection, and other table lifecycle operations.
 pub async fn catalog_for_dataset(
     dataset_name: &str,
-    dataset_store: &Arc<DatasetStore>,
+    dataset_store: &DatasetStore,
     metadata_db: &MetadataDb,
 ) -> Result<Catalog, BoxError> {
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")

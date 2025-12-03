@@ -483,7 +483,7 @@ impl TestCtxBuilder {
             .parse()
             .expect("test name should be a valid WorkerNodeId");
         let worker =
-            DaemonWorker::new(node_id, config, temp_db.metadata_db().clone(), worker_meter).await?;
+            DaemonWorker::new(config, temp_db.metadata_db().clone(), worker_meter, node_id).await?;
 
         // Wait for Anvil service to be ready (if enabled)
         Ok(TestCtx {

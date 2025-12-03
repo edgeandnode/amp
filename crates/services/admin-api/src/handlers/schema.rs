@@ -268,7 +268,7 @@ pub async fn handler(
 
     // Create planning context using resolved dependencies
     let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
-        ctx.dataset_store.as_ref(),
+        &ctx.dataset_store,
         references,
         dependencies,
         functions,

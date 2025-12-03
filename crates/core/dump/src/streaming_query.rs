@@ -198,7 +198,7 @@ impl StreamingQuery {
     pub async fn spawn(
         query_env: QueryEnv,
         catalog: Catalog,
-        dataset_store: Arc<DatasetStore>,
+        dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -234,7 +234,7 @@ impl StreamingQuery {
             .iter()
             .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
             .collect();
-        let blocks_table = resolve_blocks_table(&dataset_store, src_datasets, network).await?;
+        let blocks_table = resolve_blocks_table(dataset_store, src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))

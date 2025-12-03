@@ -6,7 +6,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, BoxResult};
+use common::BoxError;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -23,8 +23,9 @@ use tokio::task::JoinHandle;
 pub struct DaemonServer {
     config: Arc<Config>,
     server_addrs: BoundAddrs,
-    dataset_store: Arc<DatasetStore>,
-    _server_task: JoinHandle<BoxResult<()>>,
+    dataset_store: DatasetStore,
+
+    _task: JoinHandle<Result<(), BoxError>>,
 }
 
 impl DaemonServer {
@@ -74,7 +75,7 @@ impl DaemonServer {
             config,
             dataset_store,
             server_addrs,
-            _server_task: server_task,
+            _task: server_task,
         })
     }
 
@@ -99,7 +100,7 @@ impl DaemonServer {
     }
 
     /// Get the dataset store used by the server.
-    pub fn dataset_store(&self) -> &Arc<DatasetStore> {
+    pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
     }
 
@@ -140,7 +141,7 @@ impl DaemonServer {
 impl Drop for DaemonServer {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon server task");
-        self._server_task.abort();
+        self._task.abort();
     }
 }
 

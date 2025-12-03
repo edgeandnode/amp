@@ -485,10 +485,14 @@ impl ReorgTestCtx {
             .config()
             .make_query_env()
             .expect("Failed to create query environment");
-        let dataset_store = test_env.daemon_server().dataset_store();
-        let catalog = catalog_for_sql(dataset_store.as_ref(), test_env.metadata_db(), &sql, env)
-            .await
-            .expect("Failed to create catalog for SQL query");
+        let catalog = catalog_for_sql(
+            test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
+            &sql,
+            env,
+        )
+        .await
+        .expect("Failed to create catalog for SQL query");
         let table = catalog
             .tables()
             .iter()
