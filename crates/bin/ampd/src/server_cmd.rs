@@ -4,18 +4,38 @@ use common::{
     BoxError,
     config::{Addrs, Config as CommonConfig},
 };
-use metadata_db::MetadataDb;
+use dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
 pub async fn run(
-    server_config: ServerConfig,
-    metadata_db: MetadataDb,
+    config: CommonConfig,
     meter: Option<Meter>,
     addrs: &Addrs,
     flight_server: bool,
     jsonl_server: bool,
 ) -> Result<(), Error> {
+    let metadata_db = config
+        .metadata_db()
+        .await
+        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
+
+    let dataset_store = {
+        let provider_configs_store =
+            ProviderConfigsStore::new(config.providers_store.prefixed_store());
+        let dataset_manifests_store =
+            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+        DatasetStore::new(
+            metadata_db.clone(),
+            provider_configs_store,
+            dataset_manifests_store,
+        )
+    };
+
+    let server_config = config_from_common(&config);
+
     if server_config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
     } else {
@@ -41,6 +61,7 @@ pub async fn run(
     let (addrs, server) = server::service::new(
         Arc::new(server_config),
         metadata_db,
+        dataset_store,
         meter,
         flight_at,
         jsonl_at,
@@ -64,6 +85,13 @@ pub async fn run(
 /// which provide Arrow Flight RPC and JSON Lines query interfaces.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to connect to metadata database
+    ///
+    /// This occurs when the server cannot establish a connection to the
+    /// PostgreSQL metadata database.
+    #[error("Failed to connect to metadata database: {0}")]
+    MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+
     /// Failed to start the query server.
     ///
     /// This occurs during the initialization phase when attempting to bind and
@@ -82,8 +110,6 @@ pub enum Error {
 /// Convert common config to server-specific config
 pub fn config_from_common(config: &CommonConfig) -> ServerConfig {
     ServerConfig {
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         server_microbatch_max_interval: config.server_microbatch_max_interval,
         keep_alive_interval: config.keep_alive_interval,
         max_mem_mb: config.max_mem_mb,

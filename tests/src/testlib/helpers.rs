@@ -17,9 +17,7 @@ use common::{
     sql,
     sql_str::SqlStr,
 };
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use dataset_store::DatasetStore;
 use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
@@ -41,6 +39,7 @@ use super::fixtures::SnapshotContext;
 pub async fn dump_internal(
     config: WorkerConfig,
     metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     dataset: Reference,
     end_block: EndBlock,
     max_writers: u16,
@@ -52,17 +51,6 @@ pub async fn dump_internal(
         .build();
     // Always use the data store from config in test scenarios
     let data_store = config.data_store.clone();
-    let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store =
-            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
-    };
 
     // Always ignore dependencies in test scenarios
     let datasets = vec![dataset];
@@ -160,12 +148,14 @@ pub async fn dump_internal(
 pub async fn dump_dataset(
     config: WorkerConfig,
     metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     dataset: Reference,
     end_block: u64,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     dump_internal(
         config,
         metadata_db,
+        dataset_store,
         dataset,
         EndBlock::Absolute(end_block), // end_block
         1,                             // max_writers (single-writer for determinism)

@@ -166,9 +166,14 @@ async fn main() {
             };
 
             // Start controller for Admin API access during dependency restoration
-            let controller = DaemonController::new(config.clone(), None)
-                .await
-                .expect("Failed to start controller for dependency restoration");
+            let controller = DaemonController::new(
+                config.clone(),
+                temp_db.metadata_db().clone(),
+                dataset_store.clone(),
+                None,
+            )
+            .await
+            .expect("Failed to start controller for dependency restoration");
 
             // Register manifest with the Admin API (after controller is running).
             let ampctl = Ampctl::new(controller.admin_api_url());
@@ -204,7 +209,7 @@ async fn main() {
             bless(
                 config,
                 &ampctl,
-                dataset_store,
+                dataset_store.clone(),
                 temp_db.metadata_db().clone(),
                 dataset_ref.clone(),
                 end_block,
@@ -319,15 +324,20 @@ async fn bless(
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
     let worker_config = worker_config_from_common(&config);
-    let physical_tables =
-        test_helpers::dump_dataset(worker_config, metadata_db, dataset.clone(), end)
-            .await
-            .map_err(|err| {
-                format!(
-                    "Failed to dump dataset '{}' to block {}: {}",
-                    dataset, end, err
-                )
-            })?;
+    let physical_tables = test_helpers::dump_dataset(
+        worker_config,
+        metadata_db,
+        dataset_store,
+        dataset.clone(),
+        end,
+    )
+    .await
+    .map_err(|err| {
+        format!(
+            "Failed to dump dataset '{}' to block {}: {}",
+            dataset, end, err
+        )
+    })?;
 
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");
@@ -357,8 +367,6 @@ fn worker_config_from_common(config: &Config) -> worker::config::Config {
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
         data_store: config.data_store.clone(),
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         worker_info: worker::info::WorkerInfo {
             version: Some("test".to_string()),
             commit_sha: None,

@@ -1,6 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
-
-use common::store::Store;
+use std::path::PathBuf;
 
 /// Server-specific configuration
 ///
@@ -8,10 +6,6 @@ use common::store::Store;
 /// for query execution and streaming.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Object store for provider configurations
-    pub providers_store: Arc<Store>,
-    /// Object store for dataset manifests
-    pub manifests_store: Arc<Store>,
     /// Maximum interval for streaming server microbatches (in blocks)
     pub server_microbatch_max_interval: u64,
     /// Keep-alive interval for streaming server (in seconds)

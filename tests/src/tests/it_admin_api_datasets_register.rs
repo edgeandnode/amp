@@ -211,10 +211,15 @@ impl TestCtx {
         name: &Name,
         version: &Version,
     ) -> bool {
-        metadata_db::datasets::get_version_tag(self.ctx.metadata_db(), namespace, name, version)
-            .await
-            .expect("failed to check if dataset exists")
-            .is_some()
+        metadata_db::datasets::get_version_tag(
+            self.ctx.daemon_controller().metadata_db(),
+            namespace,
+            name,
+            version,
+        )
+        .await
+        .expect("failed to check if dataset exists")
+        .is_some()
     }
 }
 

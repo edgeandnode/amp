@@ -7,9 +7,7 @@
 use std::sync::Arc;
 
 use common::BoxError;
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -22,6 +20,7 @@ use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRun
 /// by aborting the worker task when dropped.
 pub struct DaemonWorker {
     config: Config,
+    metadata_db: MetadataDb,
     dataset_store: DatasetStore,
     node_id: NodeId,
 
@@ -36,31 +35,26 @@ impl DaemonWorker {
     pub async fn new(
         config: Arc<common::config::Config>,
         metadb: MetadataDb,
+        dataset_store: DatasetStore,
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self, BoxError> {
-        let dataset_store = {
-            let provider_configs_store =
-                ProviderConfigsStore::new(config.providers_store.prefixed_store());
-            let dataset_manifests_store =
-                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-            DatasetStore::new(
-                metadb.clone(),
-                provider_configs_store,
-                dataset_manifests_store,
-            )
-        };
-
         // Two-phase worker initialization
         let worker_config = worker_config_from_common(&config);
-        let worker_fut =
-            worker::service::new(worker_config.clone(), metadb, meter, node_id.clone())
-                .await
-                .map_err(Box::new)?;
+        let worker_fut = worker::service::new(
+            worker_config.clone(),
+            metadb.clone(),
+            dataset_store.clone(),
+            meter,
+            node_id.clone(),
+        )
+        .await
+        .map_err(Box::new)?;
         let worker_task = tokio::spawn(worker_fut);
 
         Ok(Self {
             config: worker_config,
+            metadata_db: metadb,
             dataset_store,
             node_id,
             _task: worker_task,
@@ -74,13 +68,14 @@ impl DaemonWorker {
     pub async fn new_with_name(
         config: Arc<common::config::Config>,
         metadata_db: MetadataDb,
+        dataset_store: DatasetStore,
         worker_name: &str,
     ) -> Result<Self, BoxError> {
         let worker_node_id = worker_name
             .parse()
             .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
 
-        Self::new(config, metadata_db, None, worker_node_id).await
+        Self::new(config, metadata_db, dataset_store, None, worker_node_id).await
     }
 
     /// Get the worker node ID.
@@ -96,7 +91,12 @@ impl DaemonWorker {
         &self.config
     }
 
-    /// Get the dataset store used by the worker.
+    /// Get a reference to the metadata database.
+    pub fn metadata_db(&self) -> &MetadataDb {
+        &self.metadata_db
+    }
+
+    /// Get a reference to the dataset store.
     pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
     }
@@ -120,8 +120,6 @@ fn worker_config_from_common(config: &common::config::Config) -> Config {
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
         data_store: config.data_store.clone(),
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         worker_info: worker::info::WorkerInfo {
             version: Some(config.build_info.version.clone()),
             commit_sha: Some(config.build_info.commit_sha.clone()),

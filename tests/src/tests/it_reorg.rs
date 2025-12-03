@@ -120,12 +120,14 @@ async fn dump_finalized() {
 
     {
         let worker_config = test.ctx.daemon_worker().config().clone();
-        let metadata_db = test.ctx.metadata_db().clone();
+        let metadata_db = test.ctx.daemon_worker().metadata_db().clone();
+        let dataset_store = test.ctx.daemon_worker().dataset_store().clone();
         tokio::spawn(async move {
             let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
             test_helpers::dump_internal(
                 worker_config,
                 metadata_db,
+                dataset_store,
                 dataset_ref,
                 dump::EndBlock::None,
                 1,
@@ -447,7 +449,8 @@ impl ReorgTestCtx {
         let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
         test_helpers::dump_dataset(
             self.ctx.daemon_worker().config().clone(),
-            self.ctx.metadata_db().clone(),
+            self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().dataset_store().clone(),
             dataset_ref,
             end,
         )
@@ -487,7 +490,7 @@ impl ReorgTestCtx {
             .expect("Failed to create query environment");
         let catalog = catalog_for_sql(
             test_env.daemon_server().dataset_store(),
-            test_env.metadata_db(),
+            test_env.daemon_server().metadata_db(),
             &sql,
             env,
         )

@@ -39,10 +39,7 @@ use common::{
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
-use dataset_store::{
-    DatasetStore, GetDatasetError, manifests::DatasetManifestsStore,
-    providers::ProviderConfigsStore,
-};
+use dataset_store::{DatasetStore, GetDatasetError};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
@@ -77,20 +74,10 @@ impl Service {
     pub async fn create(
         config: Arc<Config>,
         metadata_db: MetadataDb,
+        dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, InitError> {
         let env = config.make_query_env().map_err(InitError::QueryEnv)?;
-        let dataset_store = {
-            let provider_configs_store =
-                ProviderConfigsStore::new(config.providers_store.prefixed_store());
-            let dataset_manifests_store =
-                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-            DatasetStore::new(
-                metadata_db.clone(),
-                provider_configs_store,
-                dataset_manifests_store,
-            )
-        };
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
         let metrics = meter.as_ref().map(|m| Arc::new(MetricsRegistry::new(m)));

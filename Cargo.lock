@@ -886,6 +886,7 @@ dependencies = [
  "common",
  "console-subscriber",
  "controller",
+ "dataset-store",
  "metadata-db",
  "monitoring",
  "server",

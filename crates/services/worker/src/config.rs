@@ -35,12 +35,6 @@ pub struct Config {
     /// Data store for Parquet files
     pub data_store: Arc<Store>,
 
-    /// Providers store for provider configurations
-    pub providers_store: Arc<Store>,
-
-    /// Manifests store for dataset manifests
-    pub manifests_store: Arc<Store>,
-
     /// Worker build/version information for registration
     pub worker_info: WorkerInfo,
 }

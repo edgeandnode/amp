@@ -32,7 +32,8 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     let anvil_ref = "_/anvil_rpc@0.0.0";
     test_helpers::dump_dataset(
         test_ctx.daemon_worker().config().clone(),
-        test_ctx.metadata_db().clone(),
+        test_ctx.daemon_worker().metadata_db().clone(),
+        test_ctx.daemon_worker().dataset_store().clone(),
         anvil_ref
             .parse()
             .expect("Failed to parse dataset reference"),
@@ -51,11 +52,13 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
 
     // Start continuous dump in background
     let worker_config = test_ctx.daemon_worker().config().clone();
-    let metadata_db = test_ctx.metadata_db().clone();
+    let metadata_db = test_ctx.daemon_worker().metadata_db().clone();
+    let dataset_store = test_ctx.daemon_worker().dataset_store().clone();
     let dump_handle = tokio::spawn(async move {
         test_helpers::dump_dataset(
             worker_config,
             metadata_db,
+            dataset_store,
             "_/sql_over_anvil_1@0.0.0"
                 .parse()
                 .expect("Failed to parse dataset reference"),
@@ -75,10 +78,10 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
         .expect("Failed to mine additional blocks");
 
     // Update raw dataset with new blocks
-    let worker_config = test_ctx.daemon_worker().config().clone();
     test_helpers::dump_dataset(
-        worker_config,
-        test_ctx.metadata_db().clone(),
+        test_ctx.daemon_worker().config().clone(),
+        test_ctx.daemon_worker().metadata_db().clone(),
+        test_ctx.daemon_worker().dataset_store().clone(),
         anvil_ref
             .parse()
             .expect("Failed to parse dataset reference"),

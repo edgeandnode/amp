@@ -13,6 +13,7 @@ use axum::{
 };
 use common::{BoxError, utils::shutdown_signal};
 use datafusion::error::DataFusionError;
+use dataset_store::DatasetStore;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry::metrics::Meter};
@@ -29,12 +30,14 @@ use crate::{config::Config, flight, jsonl};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
 ) -> Result<(BoundAddrs, impl Future<Output = Result<(), BoxError>>), InitError> {
     // Create the internal service instance
-    let service = flight::Service::create(config.clone(), metadata_db.clone(), meter).await?;
+    let service =
+        flight::Service::create(config.clone(), metadata_db.clone(), dataset_store, meter).await?;
 
     // Start Arrow Flight Server if address provided
     let (flight_addr, flight_fut) = match flight_at.into() {

@@ -8,10 +8,6 @@ use common::{config::BuildInfo, store::Store};
 /// for dataset management and job scheduling.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Object store for provider configurations
-    pub providers_store: Arc<Store>,
-    /// Object store for dataset manifests
-    pub manifests_store: Arc<Store>,
     /// Object store for output data
     pub data_store: Arc<Store>,
     /// Build information (passed to admin-api)

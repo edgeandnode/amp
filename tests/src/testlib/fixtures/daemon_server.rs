@@ -7,9 +7,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use common::BoxError;
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{config::Config, service::BoundAddrs};
@@ -22,8 +20,9 @@ use tokio::task::JoinHandle;
 /// handles server lifecycle and cleanup by aborting the server task when dropped.
 pub struct DaemonServer {
     config: Arc<Config>,
-    server_addrs: BoundAddrs,
+    metadata_db: MetadataDb,
     dataset_store: DatasetStore,
+    server_addrs: BoundAddrs,
 
     _task: JoinHandle<Result<(), BoxError>>,
 }
@@ -38,22 +37,11 @@ impl DaemonServer {
     pub async fn new(
         config: Arc<common::config::Config>,
         metadb: MetadataDb,
+        dataset_store: DatasetStore,
         meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
     ) -> Result<Self, BoxError> {
-        let dataset_store = {
-            let provider_configs_store =
-                ProviderConfigsStore::new(config.providers_store.prefixed_store());
-            let dataset_manifests_store =
-                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
-            DatasetStore::new(
-                metadb.clone(),
-                provider_configs_store,
-                dataset_manifests_store,
-            )
-        };
-
         let flight_at = if enable_flight {
             Some(config.addrs.flight_addr)
         } else {
@@ -66,13 +54,21 @@ impl DaemonServer {
         };
 
         let config = Arc::new(server_config_from_common(&config));
-        let (server_addrs, server) =
-            server::service::new(config.clone(), metadb, meter, flight_at, jsonl_at).await?;
+        let (server_addrs, server) = server::service::new(
+            config.clone(),
+            metadb.clone(),
+            dataset_store.clone(),
+            meter,
+            flight_at,
+            jsonl_at,
+        )
+        .await?;
 
         let server_task = tokio::spawn(server);
 
         Ok(Self {
             config,
+            metadata_db: metadb,
             dataset_store,
             server_addrs,
             _task: server_task,
@@ -86,9 +82,10 @@ impl DaemonServer {
     pub async fn new_with_all_services(
         config: Arc<common::config::Config>,
         metadata_db: MetadataDb,
+        dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
-        Self::new(config, metadata_db, meter, true, true).await
+        Self::new(config, metadata_db, dataset_store, meter, true, true).await
     }
 
     /// Get the server-specific configuration.
@@ -99,7 +96,12 @@ impl DaemonServer {
         &self.config
     }
 
-    /// Get the dataset store used by the server.
+    /// Get a reference to the metadata database.
+    pub fn metadata_db(&self) -> &MetadataDb {
+        &self.metadata_db
+    }
+
+    /// Get a reference to the dataset store.
     pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
     }
@@ -148,8 +150,6 @@ impl Drop for DaemonServer {
 /// Convert common::config::Config to server::config::Config
 fn server_config_from_common(config: &common::config::Config) -> Config {
     Config {
-        providers_store: config.providers_store.clone(),
-        manifests_store: config.manifests_store.clone(),
         server_microbatch_max_interval: config.server_microbatch_max_interval,
         keep_alive_interval: config.keep_alive_interval,
         max_mem_mb: config.max_mem_mb,
