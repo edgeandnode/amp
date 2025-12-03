@@ -2,16 +2,17 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use common::{BoxError, config::Config as CommonConfig};
 use metadata_db::MetadataDb;
+use monitoring::telemetry::metrics::Meter;
 
 use crate::{controller_cmd, server_cmd, worker_cmd};
 
 pub async fn run(
     config: CommonConfig,
     metadata_db: MetadataDb,
+    meter: Option<Meter>,
     flight_server: bool,
     jsonl_server: bool,
     admin_server: bool,
-    meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), Error> {
     let worker_id = "worker".parse().expect("Invalid worker ID");
     let config = Arc::new(config);
@@ -30,7 +31,7 @@ pub async fn run(
         let (addr, fut) = controller::service::new(
             Arc::new(controller_config),
             metadata_db.clone(),
-            meter.as_ref(),
+            meter.clone(),
             config.addrs.admin_api_addr,
         )
         .await
@@ -57,9 +58,9 @@ pub async fn run(
         let (addrs, fut) = server::service::new(
             server_config.clone(),
             metadata_db.clone(),
+            meter.clone(),
             flight_at,
             jsonl_at,
-            meter.as_ref(),
         )
         .await
         .map_err(|err| Error::ServerRun(Box::new(err)))?;
@@ -77,10 +78,9 @@ pub async fn run(
     };
 
     // Initialize worker
-    let worker_fut =
-        worker::service::new(worker_id, worker_config, metadata_db.clone(), meter.clone())
-            .await
-            .map_err(Error::WorkerInit)?;
+    let worker_fut = worker::service::new(worker_config, metadata_db, meter, worker_id)
+        .await
+        .map_err(Error::WorkerInit)?;
 
     // Wait for worker, server, or controller to complete
     tokio::select! {biased;

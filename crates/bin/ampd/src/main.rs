@@ -107,10 +107,10 @@ async fn main_inner() -> Result<(), BoxError> {
             let result = dev_cmd::run(
                 config,
                 metadata_db,
+                metrics_meter,
                 flight_server,
                 jsonl_server,
                 admin_server,
-                metrics_meter,
             )
             .await;
 
@@ -140,10 +140,10 @@ async fn main_inner() -> Result<(), BoxError> {
             let result = server_cmd::run(
                 server_config,
                 metadata_db,
+                metrics_meter,
                 &config.addrs,
                 flight_server,
                 jsonl_server,
-                metrics_meter.as_ref(),
             )
             .await;
 
@@ -161,7 +161,7 @@ async fn main_inner() -> Result<(), BoxError> {
             let (tracing_provider, metrics_provider, metrics_meter) =
                 monitoring::init(config.opentelemetry.as_ref())?;
 
-            let result = worker_cmd::run(config, metadata_db, node_id, metrics_meter).await;
+            let result = worker_cmd::run(config, metadata_db, metrics_meter, node_id).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 
@@ -177,8 +177,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 monitoring::init(config.opentelemetry.as_ref())?;
 
             let result =
-                controller_cmd::run(config, metadata_db, admin_api_addr, metrics_meter.as_ref())
-                    .await;
+                controller_cmd::run(config, metadata_db, metrics_meter, admin_api_addr).await;
 
             monitoring::deinit(metrics_provider, tracing_provider)?;
 

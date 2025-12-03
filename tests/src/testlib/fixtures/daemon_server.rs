@@ -11,6 +11,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
+use opentelemetry::metrics::Meter;
 use server::{config::Config, service::BoundAddrs};
 use tokio::task::JoinHandle;
 
@@ -36,9 +37,9 @@ impl DaemonServer {
     pub async fn new(
         config: Arc<common::config::Config>,
         metadb: MetadataDb,
+        meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
-        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         let dataset_store = {
             let provider_configs_store =
@@ -51,11 +52,6 @@ impl DaemonServer {
                 dataset_manifests_store,
             )
         };
-
-        // For tests, leak the meter to get a 'static reference
-        // This is acceptable in tests since they're short-lived
-        let meter_ref: Option<&'static opentelemetry::metrics::Meter> =
-            meter.map(|m| Box::leak(Box::new(m)) as &'static _);
 
         let flight_at = if enable_flight {
             Some(config.addrs.flight_addr)
@@ -70,7 +66,7 @@ impl DaemonServer {
 
         let config = Arc::new(server_config_from_common(&config));
         let (server_addrs, server) =
-            server::service::new(config.clone(), metadb, flight_at, jsonl_at, meter_ref).await?;
+            server::service::new(config.clone(), metadb, meter, flight_at, jsonl_at).await?;
 
         let server_task = tokio::spawn(server);
 
@@ -89,9 +85,9 @@ impl DaemonServer {
     pub async fn new_with_all_services(
         config: Arc<common::config::Config>,
         metadata_db: MetadataDb,
-        meter: Option<monitoring::telemetry::metrics::Meter>,
+        meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
-        Self::new(config, metadata_db, true, true, meter).await
+        Self::new(config, metadata_db, meter, true, true).await
     }
 
     /// Get the server-specific configuration.

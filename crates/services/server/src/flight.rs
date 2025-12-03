@@ -77,7 +77,7 @@ impl Service {
     pub async fn create(
         config: Arc<Config>,
         metadata_db: MetadataDb,
-        meter: Option<&Meter>,
+        meter: Option<Meter>,
     ) -> Result<Self, InitError> {
         let env = config.make_query_env().map_err(InitError::QueryEnv)?;
         let dataset_store = {
@@ -93,7 +93,7 @@ impl Service {
         };
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
-        let metrics = meter.map(|m| Arc::new(MetricsRegistry::new(m)));
+        let metrics = meter.as_ref().map(|m| Arc::new(MetricsRegistry::new(m)));
 
         Ok(Self {
             config,

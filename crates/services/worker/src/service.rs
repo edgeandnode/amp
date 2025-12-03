@@ -45,10 +45,10 @@ use crate::{
 /// - **Phase 2 (Runtime)**: Main event loop handling heartbeats, job notifications,
 ///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
 pub async fn new(
-    node_id: NodeId,
     config: Config,
     metadata_db: MetadataDb,
     meter: Option<Meter>,
+    node_id: NodeId,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
     // Register the worker in the Metadata DB and update the latest heartbeat timestamp.
     // Retry on failure

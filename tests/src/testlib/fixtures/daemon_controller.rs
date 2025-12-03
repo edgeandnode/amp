@@ -8,6 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use common::{BoxError, BoxResult};
 use controller::config::Config;
+use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon controller instances in tests.
@@ -28,13 +29,8 @@ impl DaemonController {
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<common::config::Config>,
-        meter: Option<monitoring::telemetry::metrics::Meter>,
+        meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
-        // For tests, leak the meter to get a 'static reference
-        // This is acceptable in tests since they're short-lived
-        let meter_ref: Option<&'static monitoring::telemetry::metrics::Meter> =
-            meter.map(|m| Box::leak(Box::new(m)) as &'static _);
-
         // Create metadata database from common config
         let metadata_db = config.metadata_db().await?;
 
@@ -43,8 +39,7 @@ impl DaemonController {
         let config = Arc::new(controller_config_from_common(&config));
 
         let (admin_api_addr, controller_server) =
-            controller::service::new(config.clone(), metadata_db, meter_ref, admin_api_addr)
-                .await?;
+            controller::service::new(config.clone(), metadata_db, meter, admin_api_addr).await?;
 
         let controller_task = tokio::spawn(controller_server);
 

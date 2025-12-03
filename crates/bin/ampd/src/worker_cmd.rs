@@ -1,18 +1,19 @@
 use common::config::Config;
 use metadata_db::MetadataDb;
+use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
 
 pub async fn run(
     config: Config,
     metadata_db: MetadataDb,
+    meter: Option<Meter>,
     node_id: NodeId,
-    meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), Error> {
     // Convert common config to worker-specific config
     let worker_config = config_from_common(&config);
 
     // Initialize the worker (setup phase)
-    let worker_fut = worker::service::new(node_id, worker_config, metadata_db, meter)
+    let worker_fut = worker::service::new(worker_config, metadata_db, meter, node_id)
         .await
         .map_err(Error::Init)?;
 
