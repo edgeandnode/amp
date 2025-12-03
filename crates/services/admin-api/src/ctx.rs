@@ -11,7 +11,7 @@ use crate::scheduler::Scheduler;
 #[derive(Clone)]
 pub struct Ctx {
     pub metadata_db: MetadataDb,
-    pub dataset_store: Arc<DatasetStore>,
+    pub dataset_store: DatasetStore,
     pub scheduler: Arc<dyn Scheduler>,
     /// Object store for output data (used by dataset restore handler)
     pub data_store: Arc<Store>,

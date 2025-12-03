@@ -19,7 +19,8 @@ use tokio::task::JoinHandle;
 pub struct DaemonController {
     config: Arc<Config>,
     admin_api_addr: SocketAddr,
-    _controller_task: JoinHandle<BoxResult<()>>,
+
+    _task: JoinHandle<BoxResult<()>>,
 }
 
 impl DaemonController {
@@ -46,7 +47,7 @@ impl DaemonController {
         Ok(Self {
             config,
             admin_api_addr,
-            _controller_task: controller_task,
+            _task: controller_task,
         })
     }
 
@@ -72,7 +73,7 @@ impl DaemonController {
 impl Drop for DaemonController {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon controller task");
-        self._controller_task.abort();
+        self._task.abort();
     }
 }
 

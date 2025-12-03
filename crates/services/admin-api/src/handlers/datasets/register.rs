@@ -184,7 +184,7 @@ pub async fn handler(
                 match dataset_kind {
                     DatasetKind::Derived => parse_and_canonicalize_derived_dataset_manifest(
                         manifest_content.get(),
-                        ctx.dataset_store.as_ref(),
+                        &ctx.dataset_store,
                     )
                     .await
                     .map_err(Error::from)?,

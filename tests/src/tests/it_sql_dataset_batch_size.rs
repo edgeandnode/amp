@@ -111,7 +111,7 @@ impl TestCtx {
     }
 
     /// Get reference to the dataset store.
-    fn dataset_store(&self) -> &Arc<DatasetStore> {
+    fn dataset_store(&self) -> &DatasetStore {
         self.ctx.daemon_server().dataset_store()
     }
 

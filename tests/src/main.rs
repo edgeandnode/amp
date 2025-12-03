@@ -249,7 +249,7 @@ async fn main() {
 async fn bless(
     config: Arc<Config>,
     ampctl: &Ampctl,
-    dataset_store: Arc<DatasetStore>,
+    dataset_store: DatasetStore,
     metadata_db: MetadataDb,
     dataset: Reference,
     end: u64,

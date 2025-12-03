@@ -49,9 +49,9 @@ pub async fn catalog_for_sql_with_deps(
     store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
     query: &Statement,
-    env: QueryEnv,
-    dependencies: BTreeMap<DepAlias, HashReference>,
-    functions: BTreeMap<FuncName, Function>,
+    env: &QueryEnv,
+    dependencies: &BTreeMap<DepAlias, HashReference>,
+    functions: &BTreeMap<FuncName, Function>,
 ) -> Result<Catalog, CatalogForSqlWithDepsError> {
     let table_refs = resolve_table_references::<DepAlias>(query)
         .map_err(CatalogForSqlWithDepsError::TableReferenceResolution)?;
@@ -63,8 +63,8 @@ pub async fn catalog_for_sql_with_deps(
         metadata_db,
         table_refs,
         func_refs,
-        &env,
-        &dependencies,
+        env,
+        dependencies,
         functions,
     )
     .await
@@ -78,7 +78,7 @@ async fn get_physical_catalog_with_deps(
     function_refs: impl IntoIterator<Item = FunctionReference<DepAliasOrSelfRef>>,
     env: &QueryEnv,
     dependencies: &BTreeMap<DepAlias, HashReference>,
-    functions: BTreeMap<FuncName, Function>,
+    functions: &BTreeMap<FuncName, Function>,
 ) -> Result<Catalog, GetPhysicalCatalogWithDepsError> {
     let logical_catalog = get_logical_catalog_with_deps_and_funcs(
         store,
@@ -125,7 +125,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
     func_refs: impl IntoIterator<Item = FunctionReference<DepAliasOrSelfRef>>,
     isolate_pool: &IsolatePool,
     dependencies: &BTreeMap<DepAlias, HashReference>,
-    functions: BTreeMap<FuncName, Function>,
+    functions: &BTreeMap<FuncName, Function>,
 ) -> Result<LogicalCatalog, GetLogicalCatalogWithDepsAndFuncsError> {
     let table_refs = table_refs.into_iter().collect::<Vec<_>>();
     let func_refs = func_refs.into_iter().collect::<Vec<_>>();

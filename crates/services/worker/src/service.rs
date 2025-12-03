@@ -224,7 +224,7 @@ pub async fn new(
 pub(crate) struct WorkerJobCtx {
     pub config: Config,
     pub metadata_db: MetadataDb,
-    pub dataset_store: Arc<DatasetStore>,
+    pub dataset_store: DatasetStore,
     pub data_store: Arc<DataStore>,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,

@@ -173,10 +173,10 @@ pub async fn dump(
                 dump_table(
                     ctx,
                     manifest,
-                    &env,
+                    env.clone(),
                     table.clone(),
                     compactor,
-                    &opts,
+                    opts.clone(),
                     microbatch_max_interval,
                     end,
                     metrics,
@@ -292,10 +292,10 @@ pub enum Error {
 pub async fn dump_table(
     ctx: Ctx,
     manifest: DerivedManifest,
-    env: &QueryEnv,
+    env: QueryEnv,
     table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
-    opts: &Arc<WriterProperties>,
+    opts: Arc<WriterProperties>,
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -354,18 +354,14 @@ pub async fn dump_table(
     }
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
-    let dataset_store = ctx.dataset_store.clone();
-    let metadata_db = ctx.metadata_db.clone();
-    let env = env.clone();
-    let opts = opts.clone();
 
     let catalog = catalog_for_sql_with_deps(
-        dataset_store.as_ref(),
-        &metadata_db,
+        &ctx.dataset_store,
+        &ctx.metadata_db,
         &query,
-        env.clone(),
-        dependencies,
-        manifest.functions.clone(),
+        &env,
+        &dependencies,
+        &manifest.functions,
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
@@ -476,7 +472,7 @@ async fn dump_sql_query(
         StreamingQuery::spawn(
             env.clone(),
             catalog.clone(),
-            ctx.dataset_store.clone(),
+            &ctx.dataset_store,
             query,
             start,
             end,

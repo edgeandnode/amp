@@ -109,12 +109,11 @@ pub async fn handler(
 
     // Validate and serialize manifest based on dataset kind
     let canonical_manifest_str = match dataset_kind {
-        DatasetKind::Derived => parse_and_canonicalize_derived_dataset_manifest(
-            &manifest_str,
-            ctx.dataset_store.as_ref(),
-        )
-        .await
-        .map_err(Error::from)?,
+        DatasetKind::Derived => {
+            parse_and_canonicalize_derived_dataset_manifest(&manifest_str, &ctx.dataset_store)
+                .await
+                .map_err(Error::from)?
+        }
         DatasetKind::EvmRpc => {
             parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&manifest_str)
                 .map_err(Error::from)?
