@@ -12,6 +12,7 @@ use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use metadata_db::MetadataDb;
+use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
@@ -27,7 +28,7 @@ use crate::{config::Config, scheduler::Scheduler};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
+    meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
     let dataset_store = {
@@ -61,7 +62,7 @@ pub async fn new(
     // Add OpenTelemetry HTTP metrics middleware if meter is provided
     if let Some(meter) = meter {
         let metrics_layer = HTTPMetricsLayerBuilder::builder()
-            .with_meter(meter.clone())
+            .with_meter(meter)
             .build()
             .map_err(|err| Error::MetricsLayer(Box::new(err)))?;
         app = app.layer(metrics_layer);

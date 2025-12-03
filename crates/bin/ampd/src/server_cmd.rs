@@ -5,15 +5,16 @@ use common::{
     config::{Addrs, Config as CommonConfig},
 };
 use metadata_db::MetadataDb;
+use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
 pub async fn run(
     server_config: ServerConfig,
     metadata_db: MetadataDb,
+    meter: Option<Meter>,
     addrs: &Addrs,
     flight_server: bool,
     jsonl_server: bool,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<(), Error> {
     if server_config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -40,9 +41,9 @@ pub async fn run(
     let (addrs, server) = server::service::new(
         Arc::new(server_config),
         metadata_db,
+        meter,
         flight_at,
         jsonl_at,
-        meter,
     )
     .await
     .map_err(|err| Error::ServerStart(Box::new(err)))?;

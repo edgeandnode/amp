@@ -2,19 +2,20 @@ use std::{net::SocketAddr, sync::Arc};
 
 use common::{BoxError, config::Config as CommonConfig};
 use metadata_db::MetadataDb;
+use monitoring::telemetry::metrics::Meter;
 
 /// Run the controller service (Admin API server)
 pub async fn run(
     config: CommonConfig,
     metadata_db: MetadataDb,
-    admin_api_addr: SocketAddr,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
+    meter: Option<Meter>,
+    at: SocketAddr,
 ) -> Result<(), Error> {
     // Convert to controller-specific config
-    let controller_config = Arc::new(config_from_common(&config));
+    let controller_config = config_from_common(&config);
 
     let (addr, server) =
-        controller::service::new(controller_config, metadata_db, meter, admin_api_addr)
+        controller::service::new(Arc::new(controller_config), metadata_db, meter, at)
             .await
             .map_err(Error::ServiceInit)?;
 

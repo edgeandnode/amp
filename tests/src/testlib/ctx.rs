@@ -373,17 +373,17 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
-        // Start amp server using the fixture (only query servers)
+        // Start query server
         let server = DaemonServer::new(
             config.clone(),
             temp_db.metadata_db().clone(),
+            self.meter,
             true, // enable_flight
             true, // enable_jsonl
-            self.meter,
         )
         .await?;
 
-        // Start controller using the fixture (Admin API)
+        // Start controller (Admin API)
         let controller = DaemonController::new(config.clone(), controller_meter).await?;
 
         // Register manifests with the Admin API (after controller is running)

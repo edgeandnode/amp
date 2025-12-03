@@ -52,7 +52,7 @@ impl DaemonWorker {
         // Two-phase worker initialization
         let worker_config = worker_config_from_common(&config);
         let worker_fut =
-            worker::service::new(node_id.clone(), worker_config.clone(), metadb, meter)
+            worker::service::new(worker_config.clone(), metadb, meter, node_id.clone())
                 .await
                 .map_err(Box::new)?;
         let worker_task = tokio::spawn(worker_fut);

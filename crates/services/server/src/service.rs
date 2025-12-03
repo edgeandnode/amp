@@ -29,9 +29,9 @@ use crate::{config::Config, flight, jsonl};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
-    meter: Option<&Meter>,
 ) -> Result<(BoundAddrs, impl Future<Output = Result<(), BoxError>>), InitError> {
     // Create the internal service instance
     let service = flight::Service::create(config.clone(), metadata_db.clone(), meter).await?;
