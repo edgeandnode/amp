@@ -372,20 +372,16 @@ where
 
 /// Get failed jobs that are ready for retry
 ///
-/// Returns failed jobs where:
-/// - retry_count < max_retries
-/// - enough time has passed since last failure based on exponential backoff
+/// Returns failed jobs where enough time has passed since last failure based on
+/// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
 ///
-/// The backoff is calculated as 2^retry_count seconds, capped at 60 seconds.
+/// The backoff is calculated as 2^retry_count seconds (unbounded exponential growth).
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_failed_jobs_ready_for_retry<'c, E>(
-    exe: E,
-    max_retries: i32,
-) -> Result<Vec<Job>, Error>
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<Job>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_failed_jobs_ready_for_retry(exe, max_retries)
+    sql::get_failed_jobs_ready_for_retry(exe)
         .await
         .map_err(Error::Database)
 }

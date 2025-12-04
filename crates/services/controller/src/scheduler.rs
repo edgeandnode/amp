@@ -54,13 +54,6 @@ use crate::config::Config;
 /// this interval. Workers that haven't sent heartbeats are considered dead or unavailable.
 const DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Maximum retry count for failed jobs
-///
-/// Jobs will be retried while retry_count < MAX_RETRY_COUNT (i.e., when retry_count is 0 or 1).
-/// This allows 2 retries (3 total attempts: initial + 2 retries).
-/// After exhausting all retries, the job remains in FAILED state with retry_count = 2.
-const MAX_RETRY_COUNT: i32 = 2;
-
 /// Concrete implementation of the `JobScheduler` trait
 ///
 /// Manages job scheduling and lifecycle operations for the controller service.
@@ -246,16 +239,15 @@ impl Scheduler {
     /// Reconcile failed jobs by retrying them with exponential backoff
     ///
     /// This method:
-    /// 1. Queries failed jobs that are ready for retry (based on retry_count and backoff time)
+    /// 1. Queries failed jobs that are ready for retry (based on exponential backoff timing)
     /// 2. Lists active workers
     /// 3. For each job: reschedules it on the same worker, and sends notification
     ///
-    /// Jobs are retried while retry_count < MAX_RETRY_COUNT with exponential backoff (2^retry_count seconds, capped at 60s).
-    /// After exhausting retries, jobs remain in FAILED state.
+    /// Jobs retry indefinitely with exponential backoff (2^retry_count seconds, unbounded).
+    /// The retry_count field increments with each retry for observability.
     pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
         let failed_jobs =
-            metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db, MAX_RETRY_COUNT)
-                .await?;
+            metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db).await?;
 
         if failed_jobs.is_empty() {
             return Ok(());

@@ -392,15 +392,11 @@ where
 
 /// Get failed jobs that are ready for retry
 ///
-/// Returns failed jobs where:
-/// - retry_count < max_retries (default 2)
-/// - enough time has passed since last failure based on exponential backoff
+/// Returns failed jobs where enough time has passed since last failure based on
+/// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
 ///
-/// The backoff is calculated as 2^retry_count seconds, capped at 60 seconds.
-pub async fn get_failed_jobs_ready_for_retry<'c, E>(
-    exe: E,
-    max_retries: i32,
-) -> Result<Vec<Job>, sqlx::Error>
+/// The backoff is calculated as 2^retry_count seconds (unbounded exponential growth).
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -415,12 +411,11 @@ where
             retry_count
         FROM jobs
         WHERE status = 'FAILED'
-          AND retry_count < $1
-          AND updated_at + INTERVAL '1 second' * LEAST(POW(2, retry_count)::integer, 60) <= timezone('UTC', now())
+          AND updated_at + INTERVAL '1 second' * POW(2, retry_count)::bigint <= timezone('UTC', now())
         ORDER BY id ASC
     "#};
 
-    sqlx::query_as(query).bind(max_retries).fetch_all(exe).await
+    sqlx::query_as(query).fetch_all(exe).await
 }
 
 /// Reschedule a failed job for retry
