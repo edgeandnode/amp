@@ -334,6 +334,7 @@ impl ParquetFileWriterOutput {
         metadata_db
             .register_file(
                 location_id,
+                &self.url,
                 file_name,
                 object_size,
                 object_e_tag,

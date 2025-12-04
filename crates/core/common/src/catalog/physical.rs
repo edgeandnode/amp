@@ -460,6 +460,7 @@ impl PhysicalTable {
             metadata_db
                 .register_file(
                     location_id,
+                    url,
                     file_name,
                     object_size,
                     object_e_tag,
