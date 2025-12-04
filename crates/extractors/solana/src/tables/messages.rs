@@ -52,6 +52,27 @@ fn schema() -> Schema {
             false,
         ),
         Field::new(
+            "address_table_lookups",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(Fields::from(vec![
+                    Field::new("account_key", DataType::Utf8, false),
+                    Field::new(
+                        "writable_indexes",
+                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+                        false,
+                    ),
+                    Field::new(
+                        "readonly_indexes",
+                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+                        false,
+                    ),
+                ])),
+                true,
+            ))),
+            true,
+        ),
+        Field::new(
             "account_keys",
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             false,
@@ -72,7 +93,8 @@ pub(crate) struct Message {
     pub(crate) num_readonly_signed_accounts: u8,
     pub(crate) num_readonly_unsigned_accounts: u8,
 
-    pub(crate) instructions: Vec<Instruction>,
+    pub(crate) instructions: Vec<super::Instruction>,
+    pub(crate) address_table_lookups: Option<Vec<AddressTableLookup>>,
 
     pub(crate) account_keys: Vec<String>,
     pub(crate) recent_block_hash: [u8; 32],
@@ -89,13 +111,23 @@ impl Message {
         let instructions = message
             .instructions
             .iter()
-            .map(|inst| Instruction {
+            .map(|inst| super::Instruction {
                 program_id_index: inst.program_id_index,
                 accounts: inst.accounts.clone(),
                 data: inst.data.clone(),
                 stack_height: inst.stack_height,
             })
             .collect();
+        let address_table_lookups = message.address_table_lookups.as_ref().map(|atls| {
+            atls.iter()
+                .cloned()
+                .map(|atl| AddressTableLookup {
+                    account_key: atl.account_key,
+                    writable_indexes: atl.writable_indexes,
+                    readonly_indexes: atl.readonly_indexes,
+                })
+                .collect()
+        });
 
         Self {
             slot,
@@ -104,6 +136,7 @@ impl Message {
             num_readonly_signed_accounts: message.header.num_readonly_signed_accounts,
             num_readonly_unsigned_accounts: message.header.num_readonly_unsigned_accounts,
             instructions,
+            address_table_lookups,
             account_keys: message.account_keys.clone(),
             recent_block_hash,
         }
@@ -111,11 +144,10 @@ impl Message {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct Instruction {
-    pub program_id_index: u8,
-    pub accounts: Vec<u8>,
-    pub data: String,
-    pub stack_height: Option<u32>,
+pub(crate) struct AddressTableLookup {
+    pub(crate) account_key: String,
+    pub(crate) writable_indexes: Vec<u8>,
+    pub(crate) readonly_indexes: Vec<u8>,
 }
 
 /// A builder for converting [Message]s into [RawTableRows].
@@ -127,13 +159,58 @@ pub(crate) struct MessageRowsBuilder {
     num_readonly_signed_accounts: UInt8Builder,
     num_readonly_unsigned_accounts: UInt8Builder,
     instructions: ListBuilder<StructBuilder>,
+    address_table_lookups: ListBuilder<StructBuilder>,
     account_keys: ListBuilder<StringBuilder>,
     recent_block_hash: Bytes32ArrayBuilder,
 }
 
 impl MessageRowsBuilder {
-    /// Creates a new [MessageRowBuilder] with enough capacity for data in `message`.
+    /// Creates a new [MessageRowsBuilder] with enough capacity to hold `count` messages.
     pub(crate) fn with_capacity(count: usize) -> Self {
+        fn instruction_builder() -> StructBuilder {
+            StructBuilder::new(
+                Fields::from(vec![
+                    Field::new("program_id_index", DataType::UInt8, false),
+                    Field::new(
+                        "accounts",
+                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+                        false,
+                    ),
+                    Field::new("data", DataType::Utf8, false),
+                    Field::new("stack_height", DataType::UInt32, true),
+                ]),
+                vec![
+                    Box::new(UInt8Builder::new()),
+                    Box::new(ListBuilder::new(UInt8Builder::new())),
+                    Box::new(StringBuilder::new()),
+                    Box::new(UInt32Builder::new()),
+                ],
+            )
+        }
+
+        fn address_table_lookup_builder() -> StructBuilder {
+            StructBuilder::new(
+                Fields::from(vec![
+                    Field::new("account_key", DataType::Utf8, false),
+                    Field::new(
+                        "writable_indexes",
+                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+                        false,
+                    ),
+                    Field::new(
+                        "readonly_indexes",
+                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+                        false,
+                    ),
+                ]),
+                vec![
+                    Box::new(StringBuilder::new()),
+                    Box::new(ListBuilder::new(UInt8Builder::new())),
+                    Box::new(ListBuilder::new(UInt8Builder::new())),
+                ],
+            )
+        }
+
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
             slot: UInt64Builder::with_capacity(count),
@@ -141,25 +218,9 @@ impl MessageRowsBuilder {
             num_required_signatures: UInt8Builder::with_capacity(count),
             num_readonly_signed_accounts: UInt8Builder::with_capacity(count),
             num_readonly_unsigned_accounts: UInt8Builder::with_capacity(count),
-            instructions: ListBuilder::with_capacity(
-                StructBuilder::new(
-                    Fields::from(vec![
-                        Field::new("program_id_index", DataType::UInt8, false),
-                        Field::new(
-                            "accounts",
-                            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-                            false,
-                        ),
-                        Field::new("data", DataType::Utf8, false),
-                        Field::new("stack_height", DataType::UInt32, true),
-                    ]),
-                    vec![
-                        Box::new(UInt8Builder::new()),
-                        Box::new(ListBuilder::new(UInt8Builder::new())),
-                        Box::new(StringBuilder::new()),
-                        Box::new(UInt32Builder::new()),
-                    ],
-                ),
+            instructions: ListBuilder::with_capacity(instruction_builder(), count),
+            address_table_lookups: ListBuilder::with_capacity(
+                address_table_lookup_builder(),
                 count,
             ),
             account_keys: ListBuilder::with_capacity(StringBuilder::new(), count),
@@ -176,6 +237,7 @@ impl MessageRowsBuilder {
             num_readonly_signed_accounts,
             num_readonly_unsigned_accounts,
             instructions,
+            address_table_lookups,
             account_keys,
             recent_block_hash,
         } = message;
@@ -217,6 +279,33 @@ impl MessageRowsBuilder {
             struct_builder.append(true);
         }
         self.instructions.append(true);
+        if let Some(atls) = address_table_lookups {
+            for atl in atls {
+                let struct_builder = self.address_table_lookups.values();
+                let account_key_builder = struct_builder
+                    .field_builder::<StringBuilder>(0)
+                    .expect("account_key builder");
+                account_key_builder.append_value(&atl.account_key);
+                let writable_indexes_builder = struct_builder
+                    .field_builder::<ListBuilder<UInt8Builder>>(1)
+                    .expect("writable_indexes builder");
+                for index in &atl.writable_indexes {
+                    writable_indexes_builder.values().append_value(*index);
+                }
+                writable_indexes_builder.append(true);
+                let readonly_indexes_builder = struct_builder
+                    .field_builder::<ListBuilder<UInt8Builder>>(2)
+                    .expect("readonly_indexes builder");
+                for index in &atl.readonly_indexes {
+                    readonly_indexes_builder.values().append_value(*index);
+                }
+                readonly_indexes_builder.append(true);
+                struct_builder.append(true);
+            }
+            self.address_table_lookups.append(true);
+        } else {
+            self.address_table_lookups.append(false);
+        }
         for key in account_keys {
             self.account_keys.values().append_value(key);
         }
@@ -234,6 +323,7 @@ impl MessageRowsBuilder {
             mut num_readonly_signed_accounts,
             mut num_readonly_unsigned_accounts,
             mut instructions,
+            mut address_table_lookups,
             mut account_keys,
             recent_block_hash,
         } = self;
@@ -246,6 +336,7 @@ impl MessageRowsBuilder {
             Arc::new(num_readonly_signed_accounts.finish()),
             Arc::new(num_readonly_unsigned_accounts.finish()),
             Arc::new(instructions.finish()),
+            Arc::new(address_table_lookups.finish()),
             Arc::new(account_keys.finish()),
             Arc::new(recent_block_hash.finish()),
         ];

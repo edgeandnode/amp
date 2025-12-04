@@ -35,6 +35,27 @@ pub(crate) fn convert_rpc_block_to_db_rows(
             return Err(err.into());
         };
 
+        let found_parsed_instruction = tx_with_meta.meta.as_ref().is_some_and(|meta| {
+            meta.inner_instructions
+                .as_ref()
+                .map(|inners| inners)
+                .is_some_and(|inners| {
+                    inners.iter().any(|inner| {
+                        inner
+                            .instructions
+                            .iter()
+                            .any(|inst| matches!(inst, crate::rpc_client::UiInstruction::Parsed(_)))
+                    })
+                })
+        });
+
+        if found_parsed_instruction {
+            let err = format!(
+                "found parsed inner instruction at slot {slot}, tx index {tx_idx}, which is not supported"
+            );
+            return Err(err.into());
+        }
+
         let tx_idx: u32 = tx_idx.try_into().expect("conversion error");
         let db_tx = transactions::Transaction::from_rpc_transaction(
             slot,
@@ -115,4 +136,12 @@ pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<RawDatasetRo
         block_headers_row,
         transactions_row,
     ]))
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Instruction {
+    pub(crate) program_id_index: u8,
+    pub(crate) accounts: Vec<u8>,
+    pub(crate) data: String,
+    pub(crate) stack_height: Option<u32>,
 }

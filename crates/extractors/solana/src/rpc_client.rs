@@ -1,10 +1,13 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-pub use solana_client::rpc_config;
+pub use solana_client::{
+    rpc_config,
+    rpc_response::{RewardType, UiReturnDataEncoding},
+};
 use solana_clock::Slot;
 pub use solana_transaction_status_client_types::{
-    EncodedTransaction, UiConfirmedBlock, UiMessage, UiRawMessage, UiTransaction,
-    UiTransactionStatusMeta,
+    EncodedTransaction, UiConfirmedBlock, UiInstruction, UiMessage, UiRawMessage, UiTransaction,
+    UiTransactionStatusMeta, UiTransactionTokenBalance,
 };
 use url::Url;
 
