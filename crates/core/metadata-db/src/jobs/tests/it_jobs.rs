@@ -876,7 +876,7 @@ async fn get_failed_jobs_handles_missing_attempts() {
 }
 
 #[tokio::test]
-async fn reschedule_for_retry_updates_status_and_worker() {
+async fn reschedule_updates_status_and_worker() {
     //* Given
     let temp_db = PgTempDB::new();
     let metadata_db =
@@ -907,7 +907,7 @@ async fn reschedule_for_retry_updates_status_and_worker() {
     .expect("Failed to insert job");
 
     //* When
-    jobs::sql::reschedule_for_retry(&metadata_db, job_id, worker_id2.clone())
+    jobs::sql::reschedule(&metadata_db, job_id, worker_id2.clone())
         .await
         .expect("Failed to reschedule job");
 

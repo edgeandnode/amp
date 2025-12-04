@@ -437,7 +437,7 @@ where
 
 /// Reschedule a failed job for retry
 ///
-/// This function:
+/// This function updates the job status to SCHEDULED and assigns it to a worker node.
 /// 1. Sets status to SCHEDULED
 /// 2. Assigns the job to the specified worker node
 /// 3. Updates the updated_at timestamp
@@ -445,7 +445,7 @@ where
 /// Note: Retry tracking is handled via the job_attempts table.
 ///
 /// Returns an error if the job doesn't exist or if the database operation fails.
-pub async fn reschedule_for_retry<'c, E>(
+pub async fn reschedule<'c, E>(
     exe: E,
     job_id: JobId,
     new_node_id: WorkerNodeId<'_>,
