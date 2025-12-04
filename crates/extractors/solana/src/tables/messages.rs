@@ -21,7 +21,7 @@ static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
     let name = TABLE_NAME.parse().expect("table name is valid");
-    Table::new(name, SCHEMA.clone(), network, vec!["slot".to_string()]).unwrap()
+    Table::new(name, SCHEMA.clone(), network, vec!["slot".to_string()])
 }
 
 /// Prefer using the pre-computed [SCHEMA].
