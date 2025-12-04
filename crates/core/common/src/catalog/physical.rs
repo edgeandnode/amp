@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
-    common::{DFSchema, stats::Precision},
+    common::{DFSchema, project_schema, stats::Precision},
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
@@ -13,7 +13,7 @@ use datafusion::{
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
-    physical_plan::{ExecutionPlan, PhysicalExpr},
+    physical_plan::{ExecutionPlan, PhysicalExpr, empty::EmptyExec},
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
@@ -751,7 +751,14 @@ impl TableProvider for TableSnapshot {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        tracing::debug!("creating scan execution plan");
+        debug!("creating scan execution plan");
+
+        if self.synced_range().is_none() {
+            // This is necessary to work around empty tables tripping the DF sanity checker
+            debug!("table has no synced data, returning empty execution plan");
+            let projected_schema = project_schema(&self.schema(), projection)?;
+            return Ok(Arc::new(EmptyExec::new(projected_schema)));
+        }
 
         let target_partitions = state.config_options().execution.target_partitions;
         let table_schema = self.physical_table.schema();
