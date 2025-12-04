@@ -1,6 +1,3 @@
 kind = "solana"
 http_url = "${SOLANA_MAINNET_HTTP_URL}"
-ws_url = "${SOLANA_MAINNET_WS_URL}"
-# Used to store .car files for this provider
-of1_car_directory = "${SOLANA_MAINNET_CAR_FILE_DIRECTORY}"
 network = "mainnet"

@@ -13,6 +13,8 @@ use common::{
 };
 use solana_clock::Slot;
 
+use crate::rpc_client::UiRawMessage;
+
 pub const TABLE_NAME: &str = "messages";
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -77,33 +79,33 @@ pub(crate) struct Message {
 }
 
 impl Message {
-    pub(crate) fn from_of_message(
-        slot: u64,
-        tx_index: u32,
-        message: solana_sdk::message::VersionedMessage,
-    ) -> Message {
+    pub(crate) fn from_rpc_message(slot: Slot, tx_index: u32, message: &UiRawMessage) -> Self {
+        let recent_block_hash: [u8; 32] = bs58::decode(&message.recent_blockhash)
+            .into_vec()
+            .expect("invalid base-58 string")
+            .try_into()
+            .expect("block hash should be 32 bytes");
+
+        let instructions = message
+            .instructions
+            .iter()
+            .map(|inst| Instruction {
+                program_id_index: inst.program_id_index,
+                accounts: inst.accounts.clone(),
+                data: inst.data.clone(),
+                stack_height: inst.stack_height,
+            })
+            .collect();
+
         Self {
             slot,
             tx_index,
-            num_required_signatures: message.header().num_required_signatures,
-            num_readonly_signed_accounts: message.header().num_readonly_signed_accounts,
-            num_readonly_unsigned_accounts: message.header().num_readonly_unsigned_accounts,
-            instructions: message
-                .instructions()
-                .iter()
-                .map(|inst| Instruction {
-                    program_id_index: inst.program_id_index,
-                    accounts: inst.accounts.clone(),
-                    data: bs58::encode(&inst.data).into_string(),
-                    stack_height: None,
-                })
-                .collect(),
-            account_keys: message
-                .static_account_keys()
-                .iter()
-                .map(|key| key.to_string())
-                .collect(),
-            recent_block_hash: message.recent_blockhash().to_bytes(),
+            num_required_signatures: message.header.num_required_signatures,
+            num_readonly_signed_accounts: message.header.num_readonly_signed_accounts,
+            num_readonly_unsigned_accounts: message.header.num_readonly_unsigned_accounts,
+            instructions,
+            account_keys: message.account_keys.clone(),
+            recent_block_hash,
         }
     }
 }

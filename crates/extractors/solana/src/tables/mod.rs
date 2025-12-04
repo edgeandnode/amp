@@ -1,6 +1,8 @@
 use common::{BoxResult, RawDatasetRows, metadata::segments::BlockRange};
 use solana_clock::Slot;
 
+use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};
+
 pub mod block_headers;
 pub mod messages;
 pub mod transactions;
@@ -13,33 +15,40 @@ pub fn all(network: &str) -> Vec<common::Table> {
     ]
 }
 
-pub(crate) fn convert_of_data_to_db_rows(
-    mut block: crate::extractor::DecodedBlock,
+pub(crate) fn convert_rpc_block_to_db_rows(
+    slot: Slot,
+    mut block: UiConfirmedBlock,
     network: &str,
 ) -> BoxResult<RawDatasetRows> {
-    let of_transactions = std::mem::take(&mut block.transactions);
-    let of_transactions_meta = std::mem::take(&mut block.transaction_metas);
+    let rpc_transactions = std::mem::take(&mut block.transactions).unwrap_or_default();
     let mut db_transactions = Vec::new();
     let mut db_messages = Vec::new();
 
-    let slot = block.slot;
+    for (tx_idx, tx_with_meta) in rpc_transactions.into_iter().enumerate() {
+        // These should be set when requesting a block.
+        let EncodedTransaction::Json(ref tx) = tx_with_meta.transaction else {
+            let err = format!("unexpected transaction encoding at slot {slot}, tx index {tx_idx}",);
+            return Err(err.into());
+        };
+        let UiMessage::Raw(ref message) = tx.message else {
+            let err = format!("unexpected message format at slot {slot}, tx index {tx_idx}",);
+            return Err(err.into());
+        };
 
-    for (tx_idx, (tx, tx_meta)) in of_transactions
-        .into_iter()
-        .zip(of_transactions_meta)
-        .enumerate()
-    {
         let tx_idx: u32 = tx_idx.try_into().expect("conversion error");
-        let tx_message = tx.message.clone();
-
-        let db_tx = transactions::Transaction::from_of_transaction(slot, tx_idx, tx, tx_meta);
+        let db_tx = transactions::Transaction::from_rpc_transaction(
+            slot,
+            tx_idx,
+            tx,
+            tx_with_meta.meta.as_ref(),
+        );
         db_transactions.push(db_tx);
 
-        let db_message = messages::Message::from_of_message(slot, tx_idx, tx_message);
+        let db_message = messages::Message::from_rpc_message(slot, tx_idx, message);
         db_messages.push(db_message);
     }
 
-    let header = block_headers::BlockHeader::from_of_block(block);
+    let header = block_headers::BlockHeader::from_rpc_block(slot, &block);
 
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.

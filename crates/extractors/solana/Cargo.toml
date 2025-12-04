@@ -26,17 +26,12 @@ solana-client = "3.0.10"
 solana-rpc-client-types = "3.0.10"
 solana-rpc-client-api = "3.0.10"
 solana-sdk = "3.0.0"
-solana-storage-proto = "3.0.10"
 solana-transaction-status-client-types = "3.0.10"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
-yellowstone-faithful-car-parser = "1.0.0"
 zstd.workspace = true
-
-# Not using the workspace version for compatibility with `solana-storage-proto`.
-prost = "0.11.9"
 
 [dev-dependencies]
 fs-err.workspace = true

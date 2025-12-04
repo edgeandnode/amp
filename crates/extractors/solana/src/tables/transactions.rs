@@ -12,6 +12,8 @@ use common::{
 };
 use solana_clock::Slot;
 
+use crate::rpc_client::{UiTransaction, UiTransactionStatusMeta};
+
 pub const TABLE_NAME: &str = "transactions";
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -62,34 +64,23 @@ pub(crate) struct Transaction {
 }
 
 impl Transaction {
-    pub(crate) fn from_of_transaction(
+    pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
-        of_tx: solana_sdk::transaction::VersionedTransaction,
-        of_tx_meta: crate::extractor::DecodedData<
-            crate::extractor::StoredTransactionStatusMeta,
-            solana_storage_proto::convert::generated::TransactionStatusMeta,
-        >,
+        rpc_tx: &UiTransaction,
+        rpc_tx_meta: Option<&UiTransactionStatusMeta>,
     ) -> Self {
-        let tx_meta = match of_tx_meta {
-            crate::extractor::DecodedData::Bincode(tx_meta) => TransactionMeta {
-                status: tx_meta.err.is_ok(),
-                fee: tx_meta.fee,
-                pre_balances: tx_meta.pre_balances,
-                post_balances: tx_meta.post_balances,
-            },
-            crate::extractor::DecodedData::Protobuf(tx_meta) => TransactionMeta {
-                status: tx_meta.err.is_some(),
-                fee: tx_meta.fee,
-                pre_balances: tx_meta.pre_balances,
-                post_balances: tx_meta.post_balances,
-            },
-        };
+        let tx_meta = rpc_tx_meta.map(|meta| TransactionMeta {
+            status: meta.err.is_none(),
+            fee: meta.fee,
+            pre_balances: meta.pre_balances.clone(),
+            post_balances: meta.post_balances.clone(),
+        });
 
         Self {
             tx_index,
-            tx_signatures: of_tx.signatures.iter().map(|s| s.to_string()).collect(),
-            tx_meta: Some(tx_meta),
+            tx_signatures: rpc_tx.signatures.clone(),
+            tx_meta,
             slot,
         }
     }

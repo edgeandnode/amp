@@ -1,11 +1,16 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use solana_client::rpc_config;
+pub use solana_client::rpc_config;
 use solana_clock::Slot;
-use solana_transaction_status_client_types::UiConfirmedBlock as SolanaConfirmedBlock;
+pub use solana_transaction_status_client_types::{
+    EncodedTransaction, UiConfirmedBlock, UiMessage, UiRawMessage, UiTransaction,
+    UiTransactionStatusMeta,
+};
 use url::Url;
 
 use crate::metrics;
+
+mod export {}
 
 /// A Solana JSON-RPC client.
 ///
@@ -61,7 +66,7 @@ impl SolanaRpcClient {
         &self,
         slot: Slot,
         config: rpc_config::RpcBlockConfig,
-    ) -> solana_rpc_client_api::client_error::Result<SolanaConfirmedBlock> {
+    ) -> solana_rpc_client_api::client_error::Result<UiConfirmedBlock> {
         let block = self
             .with_metrics("getBlock", async |c| {
                 c.get_block_with_config(slot, config).await
@@ -69,28 +74,6 @@ impl SolanaRpcClient {
             .await?;
 
         Ok(block)
-    }
-
-    /// Get the list of confirmed blocks between `start` and `end` slots.
-    ///
-    /// The range between `start` and `end` is inclusive and limited to [SOLANA_RPC_GET_BLOCKS_LIMIT]. Requesting
-    /// more than this limit will result in an error.
-    ///
-    /// If `end` is `None`, returns blocks from `start` to the most recent confirmed block.
-    ///
-    /// ### RPC Reference
-    ///
-    /// [getBlocks](https://solana.com/docs/rpc/http/getblocks)
-    pub(crate) async fn _get_blocks(
-        &self,
-        start: Slot,
-        end: Option<Slot>,
-    ) -> solana_rpc_client_api::client_error::Result<Vec<Slot>> {
-        let blocks = self
-            .with_metrics("getBlocks", async |c| c.get_blocks(start, end).await)
-            .await?;
-
-        Ok(blocks)
     }
 
     /// Use the [SolanaRpcClient] to execute a function, recording metrics if enabled.
@@ -118,7 +101,7 @@ impl SolanaRpcClient {
     }
 }
 
-/// Returns `true` if the given error indicates that the requested block is missing.
+/// Returns `true` if the given error indicates that the block is missing for the requested slot.
 ///
 /// ### Reference
 ///
@@ -127,7 +110,10 @@ pub fn is_block_missing_err(err: &solana_rpc_client_api::client_error::Error) ->
     matches!(
         err.kind(),
         solana_rpc_client_api::client_error::ErrorKind::RpcError(
-            solana_rpc_client_api::request::RpcError::RpcResponseError { code: -32009, .. },
+            solana_rpc_client_api::request::RpcError::RpcResponseError {
+                code: -32007 | -32009,
+                ..
+            },
         )
     )
 }

@@ -29,15 +29,14 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
-#[ignore = "not set up yet"]
-async fn solana_rpc_single_dump() {
+async fn solana_single_dump() {
     logging::init();
 
     // * Given
-    let dataset_ref: Reference = "_/solana_rpc@0.0.0".parse().unwrap();
-    let test_env = TestCtxBuilder::new("solana_rpc_single_dump")
+    let dataset_ref: Reference = "_/solana@0.0.0".parse().unwrap();
+    let test_env = TestCtxBuilder::new("solana_single_dump")
         .with_dataset_manifest(dataset_ref.name().to_string())
-        .with_provider_config("rpc_solana_mainnet")
+        .with_provider_config("solana_mainnet")
         .with_dataset_snapshot(dataset_ref.name().to_string())
         .build()
         .await

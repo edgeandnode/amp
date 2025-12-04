@@ -11,35 +11,23 @@
 //! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
 //! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
 
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::collections::BTreeMap;
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
 use datasets_common::manifest::TableSchema;
 use serde_with::serde_as;
-use solana_clock::Slot;
-use solana_transaction_status_client_types::UiConfirmedBlock as SolanaConfirmedBlock;
 use url::Url;
 
 mod dataset_kind;
 mod extractor;
 mod metrics;
-pub mod ring_buffer;
 mod rpc_client;
-mod subscription_task;
 pub mod tables;
 
 pub use self::{
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     extractor::SolanaExtractor,
 };
-use crate::ring_buffer::SolanaSlotRingBuffer;
-
-/// A Solana slot and its corresponding confirmed block (if available).
-pub(crate) type SolanaSlotAndBlock = (Slot, Option<SolanaConfirmedBlock>);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -87,6 +75,7 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
+// TODO: Add rate limiting.
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {
@@ -95,9 +84,6 @@ pub struct ProviderConfig {
     pub network: String,
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub http_url: Url,
-    #[serde_as(as = "serde_with::DisplayFromStr")]
-    pub ws_url: Url,
-    pub of1_car_directory: String,
 }
 
 /// Convert a Solana manifest into a logical dataset representation.
@@ -120,22 +106,12 @@ pub fn dataset(manifest_hash: datasets_common::hash::Hash, manifest: Manifest) -
 /// Create a Solana extractor based on the provided configuration.
 pub fn extractor(
     config: ProviderConfig,
-    subscription_ring_buffer: Arc<Mutex<SolanaSlotRingBuffer>>,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, Error> {
-    let of1_car_directory = PathBuf::from(&config.of1_car_directory);
-    std::fs::create_dir_all(&of1_car_directory)?;
-
     let client = match config.http_url.scheme() {
-        "http" | "https" => SolanaExtractor::new(
-            config.http_url,
-            config.network,
-            config.name,
-            of1_car_directory,
-            subscription_ring_buffer,
-            meter,
-        )
-        .map_err(Error::Client)?,
+        "http" | "https" => {
+            SolanaExtractor::new(config.http_url, config.network, config.name, meter)
+        }
         scheme => {
             let err = format!("unsupported URL scheme: {}", scheme);
             return Err(Error::Client(err.into()));
@@ -143,14 +119,6 @@ pub fn extractor(
     };
 
     Ok(client)
-}
-
-/// Run the subscription task that listens for new slots via WebSocket and places them in the ring buffer.
-pub fn run_subscription(
-    ws_url: Url,
-    subscription_ring_buffer: Arc<Mutex<SolanaSlotRingBuffer>>,
-) -> tokio::task::JoinHandle<()> {
-    subscription_task::spawn(ws_url, subscription_ring_buffer)
 }
 
 /// Automatically generate a README.md file with the schema whenever tests are executed.
