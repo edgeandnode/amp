@@ -390,10 +390,9 @@ where
 /// Reschedule a failed job for retry
 ///
 /// This function:
-/// 1. Increments the retry_count
-/// 2. Sets status to SCHEDULED
-/// 3. Assigns the job to the specified worker node
-/// 4. Updates the updated_at timestamp
+/// 1. Sets status to SCHEDULED
+/// 2. Assigns the job to the specified worker node
+/// 3. Updates the updated_at timestamp
 ///
 /// **Note:** This function does not send notifications. The caller is responsible for
 /// calling `send_job_notification` after successful rescheduling if worker notification
