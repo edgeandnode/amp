@@ -3979,9 +3979,11 @@ dependencies = [
 name = "datasets-solana-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-raw",
  "schemars 1.1.0",
  "serde_json",
  "solana-datasets",
+ "tokio",
 ]
 
 [[package]]
