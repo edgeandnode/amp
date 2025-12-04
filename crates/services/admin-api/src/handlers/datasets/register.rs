@@ -17,6 +17,7 @@ use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
 use monitoring::logging;
 use serde_json::value::RawValue;
+use solana_datasets::Manifest as SolanaManifest;
 
 use crate::{
     ctx::Ctx,
@@ -190,6 +191,10 @@ pub async fn handler(
                     .map_err(Error::from)?,
                     DatasetKind::EvmRpc => parse_and_canonicalize_raw_dataset_manifest::<
                         EvmRpcManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                    DatasetKind::Solana => parse_and_canonicalize_raw_dataset_manifest::<
+                        SolanaManifest,
                     >(manifest_content.get())
                     .map_err(Error::from)?,
                     DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<

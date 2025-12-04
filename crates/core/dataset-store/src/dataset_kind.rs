@@ -14,6 +14,7 @@ use datasets_derived::DerivedDatasetKind;
 use eth_beacon_datasets::EthBeaconDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
+use solana_datasets::SolanaDatasetKind;
 
 /// Represents the different types of datasets supported by the system.
 ///
@@ -25,6 +26,8 @@ use firehose_datasets::FirehoseDatasetKind;
 pub enum DatasetKind {
     /// Ethereum-compatible JSON-RPC dataset for direct blockchain access.
     EvmRpc,
+    /// Solana dataset for direct blockchain access.
+    Solana,
     /// Ethereum Beacon node (consensus layer) dataset.
     EthBeacon,
     /// StreamingFast Firehose dataset for high-throughput blockchain streaming.
@@ -41,7 +44,10 @@ impl DatasetKind {
     /// Raw datasets (`EvmRpc`, `Firehose`) connect directly to blockchain
     /// infrastructure, while derived datasets (`Derived`) process data from other datasets.
     pub fn is_raw(&self) -> bool {
-        matches!(self, Self::EvmRpc | Self::EthBeacon | Self::Firehose)
+        matches!(
+            self,
+            Self::EvmRpc | Self::Solana | Self::EthBeacon | Self::Firehose
+        )
     }
 
     /// Returns the string representation of this dataset kind.
@@ -51,6 +57,7 @@ impl DatasetKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::EvmRpc => EvmRpcDatasetKind.as_str(),
+            Self::Solana => SolanaDatasetKind.as_str(),
             Self::EthBeacon => EthBeaconDatasetKind.as_str(),
             Self::Firehose => FirehoseDatasetKind.as_str(),
             Self::Derived => DerivedDatasetKind.as_str(),
@@ -71,6 +78,7 @@ macro_rules! impl_from_for_kind {
 }
 
 impl_from_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
+impl_from_for_kind!(SolanaDatasetKind, DatasetKind::Solana);
 impl_from_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
 impl_from_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
 impl_from_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
@@ -94,6 +102,7 @@ macro_rules! impl_partial_eq_for_kind {
 }
 
 impl_partial_eq_for_kind!(EvmRpcDatasetKind, DatasetKind::EvmRpc);
+impl_partial_eq_for_kind!(SolanaDatasetKind, DatasetKind::Solana);
 impl_partial_eq_for_kind!(EthBeaconDatasetKind, DatasetKind::EthBeacon);
 impl_partial_eq_for_kind!(FirehoseDatasetKind, DatasetKind::Firehose);
 impl_partial_eq_for_kind!(DerivedDatasetKind, DatasetKind::Derived);
@@ -110,6 +119,7 @@ impl std::str::FromStr for DatasetKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             s if s == EvmRpcDatasetKind => Ok(Self::EvmRpc),
+            s if s == SolanaDatasetKind => Ok(Self::Solana),
             s if s == EthBeaconDatasetKind => Ok(Self::EthBeacon),
             s if s == FirehoseDatasetKind => Ok(Self::Firehose),
             s if s == DerivedDatasetKind => Ok(Self::Derived),

@@ -29,6 +29,78 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
+#[ignore = "not set up yet"]
+async fn solana_rpc_single_dump() {
+    logging::init();
+
+    // * Given
+    let dataset_ref: Reference = "_/solana_rpc@0.0.0".parse().unwrap();
+    let test_env = TestCtxBuilder::new("solana_rpc_single_dump")
+        .with_dataset_manifest(dataset_ref.name().to_string())
+        .with_provider_config("rpc_solana_mainnet")
+        .with_dataset_snapshot(dataset_ref.name().to_string())
+        .build()
+        .await
+        .expect("Failed to build test environment");
+
+    let dataset = test_env
+        .daemon_server()
+        .dataset_store()
+        .get_dataset(&dataset_ref)
+        .await
+        .expect("Failed to load dataset");
+
+    let block = dataset
+        .start_block
+        .expect("Dataset should have a start block");
+
+    // Create reference snapshot from pre-loaded snapshot data
+    let reference = {
+        let ampctl = test_env.new_ampctl();
+        let tables = test_helpers::restore_dataset_snapshot(
+            &ampctl,
+            test_env.daemon_server().dataset_store(),
+            test_env.metadata_db(),
+            &dataset_ref,
+        )
+        .await
+        .expect("Failed to restore snapshot dataset");
+
+        SnapshotContext::from_tables(test_env.daemon_server().config(), tables)
+            .await
+            .expect("Failed to create reference snapshot")
+    };
+
+    // * When
+    // Dump the dataset and create a snapshot from it
+    let dumped = {
+        let dumped_tables = test_helpers::dump_dataset(
+            test_env.daemon_server().config().clone(),
+            test_env.metadata_db().clone(),
+            dataset_ref,
+            block,
+        )
+        .await
+        .expect("Failed to dump dataset");
+
+        SnapshotContext::from_tables(test_env.daemon_server().config(), dumped_tables)
+            .await
+            .expect("Failed to create temp dump snapshot")
+    };
+
+    //* Then
+    // Validate table consistency
+    for table in dumped.physical_tables() {
+        test_helpers::check_table_consistency(table)
+            .await
+            .expect("Table consistency check failed");
+    }
+
+    // Compare snapshots
+    test_helpers::assert_solana_snapshots_eq(&dumped, &reference).await;
+}
+
+#[tokio::test]
 async fn eth_beacon_single_dump() {
     //* Given
     let test = TestCtx::setup(
