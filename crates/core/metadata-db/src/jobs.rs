@@ -12,7 +12,7 @@ mod job_id;
 mod job_status;
 pub(crate) mod sql;
 
-pub use self::{job_id::JobId, job_status::JobStatus};
+pub use self::{job_id::JobId, job_status::JobStatus, sql::JobWithRetryInfo};
 use crate::{
     ManifestHash,
     db::Executor,
@@ -375,9 +375,10 @@ where
 /// Returns failed jobs where enough time has passed since last failure based on
 /// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
 ///
-/// The backoff is calculated as 2^retry_count seconds (unbounded exponential growth).
+/// The backoff is calculated as 2^next_retry_index seconds (unbounded exponential growth).
+/// The next_retry_index is calculated from the job_attempts table.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<Job>, Error>
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<JobWithRetryInfo>, Error>
 where
     E: Executor<'c>,
 {
@@ -448,12 +449,6 @@ pub struct Job {
 
     /// Job last update timestamp
     pub updated_at: DateTime<Utc>,
-
-    /// Number of times this job has been retried
-    ///
-    /// Starts at 0 for the initial attempt. Incremented by the scheduler
-    /// when rescheduling a failed job for retry.
-    pub retry_count: i32,
 }
 
 /// In-tree integration tests

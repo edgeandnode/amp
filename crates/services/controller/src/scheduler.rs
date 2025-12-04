@@ -258,8 +258,8 @@ impl Scheduler {
     /// 2. Lists active workers
     /// 3. For each job: reschedules it on the same worker, and sends notification
     ///
-    /// Jobs retry indefinitely with exponential backoff (2^retry_count seconds, unbounded).
-    /// The retry_count field increments with each retry for observability.
+    /// Jobs retry indefinitely with exponential backoff (2^next_retry_index seconds).
+    /// Retry tracking is managed via the job_attempts table.
     pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
         let failed_jobs =
             metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db).await?;
@@ -268,14 +268,8 @@ impl Scheduler {
             return Ok(());
         }
 
-        let active_workers =
-            metadata_db::workers::list_active(&self.metadata_db, DEAD_WORKER_INTERVAL).await?;
-
-        if active_workers.is_empty() {
-            return Ok(());
-        }
-
-        for job in failed_jobs {
+        for job_with_retry in failed_jobs {
+            let job = &job_with_retry.job;
             if let Err(error) = metadata_db::jobs::reschedule_for_retry(
                 &self.metadata_db,
                 job.id,
@@ -294,8 +288,7 @@ impl Scheduler {
             let job_id: JobId = job.id.into();
 
             // Track retry attempt - best effort
-            // retry_count was incremented by reschedule_for_retry, so use the new value
-            let retry_index = job.retry_count + 1;
+            let retry_index = job_with_retry.next_retry_index;
             if let Err(error) =
                 metadata_db::job_attempts::insert_attempt(&self.metadata_db, job_id, retry_index)
                     .await
@@ -310,7 +303,7 @@ impl Scheduler {
 
             let _result = metadata_db::workers::send_job_notif(
                 &self.metadata_db,
-                job.node_id,
+                job.node_id.clone(),
                 &JobNotification::start(job_id),
             )
             .await;
