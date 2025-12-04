@@ -301,6 +301,7 @@ impl MetadataDb {
 
     /// Delete file metadata record by ID
     ///
+    /// Also deletes the corresponding footer_cache entry.
     /// Returns `true` if a file was deleted, `false` if no file was found.
     pub async fn delete_file(&self, file_id: FileId) -> Result<bool, Error> {
         files::delete(&*self.pool, file_id)
@@ -355,10 +356,12 @@ impl MetadataDb {
             .map_err(Error::Database)
     }
 
-    /// Inserts or updates the GC manifest for the given file IDs.
-    /// If a file ID already exists, it updates the expiration time.
+    /// Deletes file metadata entries and inserts them into the GC manifest.
+    ///
+    /// This eagerly removes files from file_metadata so they won't be listed,
+    /// while keeping footer_cache entries until the Collector runs.
     /// The expiration time is set to the current time plus the given duration.
-    /// If the file ID does not exist, it inserts a new row.
+    /// If the file ID already exists in gc_manifest, it updates the expiration time.
     pub async fn upsert_gc_manifest(
         &self,
         location_id: LocationId,
@@ -370,16 +373,20 @@ impl MetadataDb {
             ..Default::default()
         };
 
-        let sql = "
+        let sql = indoc::indoc! {r#"
+            WITH deleted_files AS (
+                DELETE FROM file_metadata
+                WHERE id = ANY($2)
+                RETURNING id, file_name
+            )
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
-                  , file.id
-                  , file_metadata.file_name
+                  , deleted_files.id
+                  , deleted_files.file_name
                   , CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + $3
-               FROM UNNEST ($2) AS file(id)
-         INNER JOIN file_metadata ON file_metadata.id = file.id
-        ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration;
-        ";
+            FROM deleted_files
+            ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration
+        "#};
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
@@ -410,6 +417,69 @@ impl MetadataDb {
             .fetch(&*self.pool)
             .map_err(Error::Database)
             .boxed()
+    }
+
+    /// Deletes footer cache entries for the given file IDs.
+    ///
+    /// Called by the Collector when gc_manifest entries have expired
+    /// and physical files are ready to be deleted.
+    pub async fn delete_footer_cache(
+        &self,
+        file_ids: impl Iterator<Item = &FileId>,
+    ) -> Result<(), Error> {
+        let sql = "DELETE FROM footer_cache WHERE file_id = ANY($1)";
+
+        sqlx::query(sql)
+            .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
+            .execute(&*self.pool)
+            .await
+            .map_err(Error::Database)?;
+
+        Ok(())
+    }
+
+    /// Deletes gc_manifest entries for the given file IDs.
+    ///
+    /// Called by the Collector after physical files have been deleted.
+    pub async fn delete_gc_manifest(
+        &self,
+        file_ids: impl Iterator<Item = &FileId>,
+    ) -> Result<(), Error> {
+        let sql = "DELETE FROM gc_manifest WHERE file_id = ANY($1)";
+
+        sqlx::query(sql)
+            .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
+            .execute(&*self.pool)
+            .await
+            .map_err(Error::Database)?;
+
+        Ok(())
+    }
+
+    /// Counts footer_cache entries for a location.
+    ///
+    /// This counts footer_cache entries that belong to files associated with
+    /// this location, whether they are still in file_metadata (current files)
+    /// or in gc_manifest (files pending garbage collection).
+    #[cfg(feature = "test-utils")]
+    pub async fn count_footer_cache_by_location(
+        &self,
+        location_id: LocationId,
+    ) -> Result<i64, Error> {
+        let sql = indoc::indoc! {r#"
+            SELECT COUNT(DISTINCT fc.file_id) FROM footer_cache fc
+            WHERE fc.file_id IN (
+                SELECT id FROM file_metadata WHERE location_id = $1
+                UNION
+                SELECT file_id FROM gc_manifest WHERE location_id = $1
+            )
+        "#};
+
+        sqlx::query_scalar(sql)
+            .bind(location_id)
+            .fetch_one(&*self.pool)
+            .await
+            .map_err(Error::Database)
     }
 }
 

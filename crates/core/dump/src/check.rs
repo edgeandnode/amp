@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
 use futures::TryStreamExt as _;
@@ -7,26 +7,22 @@ use object_store::ObjectMeta;
 
 /// Validates consistency between metadata database and object store for a table
 ///
-/// This function performs a comprehensive consistency check to ensure that the metadata
-/// database and object store are in sync. It detects and attempts to repair consistency
-/// issues where possible, or returns errors for corruption that requires manual intervention.
+/// This function performs a consistency check to ensure that all files registered
+/// in the metadata database exist in the object store.
 ///
 /// ## Consistency Checks Performed
 ///
-/// 1. **Orphaned Files Detection**
-///    - Verifies all files in object store are registered in metadata DB
-///    - **Action on failure**: Automatically deletes orphaned files to restore consistency
-///    - Orphaned files typically result from failed dump operations
+/// **Missing Registered Files Detection**
+/// - Verifies all metadata DB entries have corresponding files in object store
+/// - **Action on failure**: Returns [`ConsistencyError::MissingRegisteredFile`]
+/// - Indicates data corruption requiring manual intervention
 ///
-/// 2. **Missing Registered Files Detection**
-///    - Verifies all metadata DB entries have corresponding files in object store
-///    - **Action on failure**: Returns [`ConsistencyError::MissingRegisteredFile`]
-///    - Indicates data corruption requiring manual intervention
+/// ## Note on Orphaned Files
 ///
-/// ## Side Effects
-///
-/// ⚠️ **Warning**: This function has side effects - it deletes orphaned files from object store.
-/// These deletions are logged at `WARN` level before execution.
+/// Files that exist in the object store but are not registered in the metadata DB
+/// are intentionally NOT deleted by this function. These files may be pending
+/// garbage collection via the `gc_manifest` table. The garbage collector handles
+/// cleanup of such files after their expiration period.
 pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyError> {
     // See also: metadata-consistency
 
@@ -45,7 +41,7 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
     let store = table.object_store();
     let path = table.path();
 
-    let stored_files: BTreeMap<String, ObjectMeta> = store
+    let stored_files: BTreeSet<String> = store
         .list(Some(table.path()))
         .try_collect::<Vec<ObjectMeta>>()
         .await
@@ -54,29 +50,12 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             source: err,
         })?
         .into_iter()
-        .filter_map(|object| Some((object.location.filename()?.to_string(), object)))
+        .filter_map(|object| object.location.filename().map(|s| s.to_string()))
         .collect();
-
-    // TODO: Move the orphaned files deletion logic out of this check function. This side effect
-    //  should be handled somewhere else (e.g., by the garbage collector).
-    for (filename, object_meta) in &stored_files {
-        if !registered_files.contains(filename) {
-            // This file was written by a dump job, but it is not present in the metadata DB,
-            // so it is an orphaned file. Delete it.
-            tracing::warn!("Deleting orphaned file: {}", object_meta.location);
-            store.delete(&object_meta.location).await.map_err(|err| {
-                ConsistencyError::DeleteOrphanedFile {
-                    location_id,
-                    filename: filename.clone(),
-                    source: err,
-                }
-            })?;
-        }
-    }
 
     // Check for files in the metadata DB that do not exist in the store.
     for filename in registered_files {
-        if !stored_files.contains_key(&filename) {
+        if !stored_files.contains(&filename) {
             return Err(ConsistencyError::MissingRegisteredFile {
                 location_id,
                 filename,
@@ -123,31 +102,6 @@ pub enum ConsistencyError {
     #[error("Failed to list files in object store for table location {location_id}")]
     ListObjectStore {
         location_id: LocationId,
-        #[source]
-        source: object_store::Error,
-    },
-
-    /// Failed to delete orphaned file from object store
-    ///
-    /// This occurs when attempting to clean up a file that exists in object store
-    /// but is not registered in metadata DB. The file is considered orphaned
-    /// (likely from a failed dump operation) and should be deleted to restore
-    /// consistency.
-    ///
-    /// Possible causes:
-    /// - Object store connectivity issues during delete
-    /// - File already deleted by concurrent process
-    /// - Permission/authentication issues
-    /// - Object store service unavailable
-    ///
-    /// This is a critical error - orphaned files indicate incomplete operations
-    /// and should be cleaned up to prevent storage bloat.
-    #[error(
-        "Failed to delete orphaned file '{filename}' from object store for table location {location_id}"
-    )]
-    DeleteOrphanedFile {
-        location_id: LocationId,
-        filename: String,
         #[source]
         source: object_store::Error,
     },

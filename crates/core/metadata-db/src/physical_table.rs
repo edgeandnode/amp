@@ -194,12 +194,14 @@ where
 
 /// Delete a physical table location by its ID
 ///
-/// This will also delete all associated file_metadata entries due to CASCADE constraints.
+/// This will also delete all associated entries across multiple tables.
 ///
 /// # Cascade Effects
 ///
 /// Deleting a location will also delete:
-/// - All file_metadata entries associated with this location
+/// - All file_metadata entries associated with this location (CASCADE)
+/// - All gc_manifest entries for those files (CASCADE from file_metadata)
+/// - All footer_cache entries for those files (explicit delete, no FK constraint)
 #[tracing::instrument(skip(exe), err)]
 pub async fn delete_by_id<'c, E>(
     exe: E,
