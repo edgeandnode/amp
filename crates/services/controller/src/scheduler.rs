@@ -248,7 +248,7 @@ impl Scheduler {
     /// This method:
     /// 1. Queries failed jobs that are ready for retry (based on retry_count and backoff time)
     /// 2. Lists active workers
-    /// 3. For each job: picks a random worker, reschedules it, and sends notification
+    /// 3. For each job: reschedules it on the same worker, and sends notification
     ///
     /// Jobs are retried while retry_count < MAX_RETRY_COUNT with exponential backoff (2^retry_count seconds, capped at 60s).
     /// After exhausting retries, jobs remain in FAILED state.
