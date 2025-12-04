@@ -74,7 +74,7 @@ async fn solana_single_dump() {
     // Dump the dataset and create a snapshot from it
     let dumped = {
         let dumped_tables = test_helpers::dump_dataset(
-            test_env.daemon_server().config().clone(),
+            test_env.daemon_worker().config().clone(),
             test_env.metadata_db().clone(),
             dataset_ref,
             block,
