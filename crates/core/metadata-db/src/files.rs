@@ -18,11 +18,13 @@ pub type FooterBytes = Vec<u8>;
 /// Insert new file metadata record
 ///
 /// Creates a new file metadata entry. Uses ON CONFLICT DO NOTHING for idempotency.
+/// Also inserts the footer into the footer_cache table.
 #[instrument(skip(executor, footer))]
 #[expect(clippy::too_many_arguments)]
 pub async fn insert<'e, E>(
     executor: E,
     location_id: LocationId,
+    url: &Url,
     file_name: String,
     object_size: u64,
     object_e_tag: Option<String>,
@@ -34,13 +36,19 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT DO NOTHING
+        WITH inserted AS (
+            INSERT INTO file_metadata (location_id, url, file_name, object_size, object_e_tag, object_version, metadata, footer)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+        )
+        INSERT INTO footer_cache (file_id, footer)
+        SELECT id, $8 FROM inserted
     "#};
 
     sqlx::query(query)
         .bind(location_id)
+        .bind(url.as_str())
         .bind(file_name)
         .bind(object_size as i64)
         .bind(object_e_tag)
@@ -70,13 +78,12 @@ where
         SELECT fm.id,
                fm.location_id,
                fm.file_name,
-               l.url,
+               fm.url,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version,
                fm.metadata
         FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.id = $1
     "#};
 
@@ -101,13 +108,12 @@ where
         SELECT fm.id,
                fm.location_id,
                fm.file_name,
-               l.url,
+               fm.url,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version,
                fm.metadata
         FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
         WHERE location_id = $1
     "#};
 
@@ -123,7 +129,7 @@ pub async fn get_footer_bytes_by_id<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let query = "SELECT footer FROM file_metadata WHERE id = $1";
+    let query = "SELECT footer FROM footer_cache WHERE file_id = $1";
 
     sqlx::query_scalar(query).bind(id).fetch_one(executor).await
 }

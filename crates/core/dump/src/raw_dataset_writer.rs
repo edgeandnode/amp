@@ -64,6 +64,7 @@ impl RawDatasetWriter {
             parquet_meta,
             object_meta,
             footer,
+            url,
             ..
         }) = writer.write(table_rows).await?
         {
@@ -73,6 +74,7 @@ impl RawDatasetWriter {
                 parquet_meta,
                 object_meta,
                 location_id,
+                &url,
                 footer,
             )
             .await?;
@@ -89,6 +91,7 @@ impl RawDatasetWriter {
                 parquet_meta,
                 object_meta,
                 footer,
+                url,
                 ..
             }) = writer.close().await?
             {
@@ -97,6 +100,7 @@ impl RawDatasetWriter {
                     parquet_meta,
                     object_meta,
                     location_id,
+                    &url,
                     footer,
                 )
                 .await?

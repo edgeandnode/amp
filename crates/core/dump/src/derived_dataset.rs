@@ -526,6 +526,7 @@ async fn dump_sql_query(
                     parquet_meta,
                     object_meta,
                     footer,
+                    url,
                     ..
                 } = writer.close(range, vec![], Generation::default()).await?;
 
@@ -534,6 +535,7 @@ async fn dump_sql_query(
                     parquet_meta,
                     object_meta,
                     physical_table.location_id(),
+                    &url,
                     footer,
                 )
                 .await?;

@@ -7,6 +7,7 @@ use futures::{
 };
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
 use tracing::instrument;
+use url::Url;
 
 pub mod datasets;
 mod db;
@@ -211,10 +212,12 @@ impl MetadataDb {
     ///
     /// Creates a new file metadata entry with the provided information. Uses
     /// ON CONFLICT DO NOTHING to make the operation idempotent.
+    /// Also inserts the footer into the footer_cache table.
     #[expect(clippy::too_many_arguments)]
     pub async fn register_file(
         &self,
         location_id: LocationId,
+        url: &Url,
         file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,
@@ -225,6 +228,7 @@ impl MetadataDb {
         files::insert(
             &*self.pool,
             location_id,
+            url,
             file_name,
             object_size,
             object_e_tag,

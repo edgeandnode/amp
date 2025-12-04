@@ -31,6 +31,7 @@ pub async fn commit_metadata(
         ..
     }: ObjectMeta,
     location_id: LocationId,
+    url: &Url,
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
@@ -38,6 +39,7 @@ pub async fn commit_metadata(
     metadata_db
         .register_file(
             location_id,
+            url,
             file_name,
             object_size,
             object_e_tag,
@@ -156,11 +158,13 @@ impl ParquetFileWriter {
             extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
 
         let location_id = self.table.location_id();
+        let url = self.table.url().clone();
 
         Ok(ParquetFileWriterOutput {
             parquet_meta,
             object_meta,
             location_id,
+            url,
             parent_ids,
             footer,
         })
@@ -177,6 +181,7 @@ pub struct ParquetFileWriterOutput {
     pub(crate) parquet_meta: ParquetMeta,
     pub(crate) object_meta: ObjectMeta,
     pub(crate) location_id: LocationId,
+    pub(crate) url: Url,
     pub(crate) parent_ids: Vec<FileId>,
     pub(crate) footer: FooterBytes,
 }
