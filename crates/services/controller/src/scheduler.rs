@@ -172,7 +172,7 @@ impl Scheduler {
                 .map_err(ScheduleJobError::RegisterJob)?;
 
         // Notify the worker about the new job
-        // TODO: Include into the transaction
+        // TODO: Include notification in the transaction (requires refactoring to avoid circular dependency)
         metadata_db::workers::send_job_notif(
             &self.metadata_db,
             node_id,
@@ -232,6 +232,66 @@ impl Scheduler {
 
         // Commit the transaction
         tx.commit().await.map_err(StopJobError::CommitTransaction)?;
+
+        Ok(())
+    }
+
+    /// Reconcile failed jobs by retrying them with exponential backoff
+    ///
+    /// This method:
+    /// 1. Queries failed jobs that are ready for retry (based on exponential backoff timing)
+    /// 2. Lists active workers
+    /// 3. For each job: reschedules it on the same worker, and sends notification
+    ///
+    /// Jobs retry indefinitely with exponential backoff (2^next_retry_index seconds).
+    /// Retry tracking is managed via the job_attempts table.
+    pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let failed_jobs =
+            metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db).await?;
+
+        if failed_jobs.is_empty() {
+            return Ok(());
+        }
+
+        for job_with_retry in failed_jobs {
+            let job = &job_with_retry.job;
+            let job_id: JobId = job.id.into();
+            let retry_index = job_with_retry.next_retry_index;
+
+            if let Err(error) = metadata_db::jobs::reschedule(
+                &self.metadata_db,
+                job.id,
+                job.node_id.clone(),
+                retry_index,
+            )
+            .await
+            {
+                tracing::error!(
+                    %job_id,
+                    retry_index,
+                    %error,
+                    "Failed to reschedule failed job"
+                );
+                continue;
+            }
+
+            // Notify the worker about the retry
+            // TODO: Include notification in the transaction (requires refactoring to avoid circular dependency)
+            if let Err(error) = metadata_db::workers::send_job_notif(
+                &self.metadata_db,
+                job.node_id.clone(),
+                &JobNotification::start(job_id),
+            )
+            .await
+            {
+                tracing::warn!(
+                    %job_id,
+                    retry_index,
+                    %error,
+                    "Failed to notify worker about job retry"
+                );
+            }
+        }
 
         Ok(())
     }

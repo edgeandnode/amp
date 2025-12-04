@@ -12,7 +12,7 @@ mod job_id;
 mod job_status;
 pub(crate) mod sql;
 
-pub use self::{job_id::JobId, job_status::JobStatus};
+pub use self::{job_id::JobId, job_status::JobStatus, sql::JobWithRetryInfo};
 use crate::{
     ManifestHash,
     db::Executor,
@@ -29,6 +29,7 @@ use crate::{
 ///
 ///  1. Registers the job in the workers job queue
 ///  2. Locks the locations
+///  3. Inserts initial job attempt (retry_index = 0)
 ///
 /// If any of these steps fail, the transaction is rolled back.
 ///
@@ -52,6 +53,11 @@ pub async fn schedule(
 
     // Lock the locations for this job by assigning the job ID as the writer
     physical_table::assign_job_writer(&mut tx, locations, job_id).await?;
+
+    // Insert initial job attempt (retry_index = 0)
+    crate::job_attempts::sql::insert_attempt(&mut tx, job_id, 0)
+        .await
+        .map_err(Error::Database)?;
 
     tx.commit().await?;
 
@@ -368,6 +374,61 @@ where
     sql::delete_by_status(exe, statuses)
         .await
         .map_err(Error::Database)
+}
+
+/// Get failed jobs that are ready for retry
+///
+/// Returns failed jobs where enough time has passed since last failure based on
+/// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
+///
+/// The backoff is calculated as 2^next_retry_index seconds (unbounded exponential growth).
+/// The next_retry_index is calculated from the job_attempts table.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<JobWithRetryInfo>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_failed_jobs_ready_for_retry(exe)
+        .await
+        .map_err(Error::Database)
+}
+
+/// Reschedule a failed job for retry with atomically tracked attempt
+///
+/// This function performs in a single transaction:
+///  1. Updates job status to SCHEDULED
+///  2. Updates node_id (for potential worker reassignment)
+///  3. Inserts job attempt record with given retry_index
+///
+/// If any operation fails, the entire transaction is rolled back.
+///
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful rescheduling if worker notification
+/// is required.
+#[tracing::instrument(skip(db), err)]
+pub async fn reschedule(
+    db: &crate::MetadataDb,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+    new_node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+    retry_index: i32,
+) -> Result<(), Error> {
+    let job_id = job_id.into();
+    let new_node_id = new_node_id.into();
+
+    let mut tx = db.begin_txn().await?;
+
+    // Update job status to SCHEDULED and assign to worker
+    sql::reschedule(&mut tx, job_id, new_node_id)
+        .await
+        .map_err(Error::Database)?;
+
+    // Insert job attempt record
+    crate::job_attempts::sql::insert_attempt(&mut tx, job_id, retry_index)
+        .await
+        .map_err(Error::Database)?;
+
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Error type for conditional job status updates
