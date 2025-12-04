@@ -30,6 +30,25 @@ impl JobQueue {
         Self { metadata_db }
     }
 
+    /// Gets the current retry index for a job from the job_attempts table
+    ///
+    /// Returns the maximum retry_index for the job, or 0 if no attempts exist.
+    /// This is used when marking job attempts as completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
+    async fn get_current_retry_index(&self, job_id: JobId) -> Result<i32, MetadataDbError> {
+        let attempts =
+            metadata_db::job_attempts::get_attempts_for_job(&self.metadata_db, job_id).await?;
+
+        Ok(attempts
+            .iter()
+            .map(|attempt| attempt.retry_index)
+            .max()
+            .unwrap_or(0))
+    }
+
     /// Fetches all jobs with `Scheduled` or `Running` status for the given worker node.
     ///
     /// This is used during worker bootstrap to recover state after a restart.
@@ -165,6 +184,20 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_stopped(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get current retry index before marking stopped
+        let retry_index = (|| async { self.get_current_retry_index(job_id).await })
+            .retry(with_policy())
+            .when(MetadataDbError::is_connection_error)
+            .notify(|err, dur| {
+                tracing::warn!(
+                    job_id = %job_id,
+                    error = %err, error_source = logging::error_source(&err),
+                    "Connection error while getting retry index. Retrying in {:.1}s",
+                    dur.as_secs_f32()
+                );
+            })
+            .await?;
+
         (|| metadata_db::jobs::mark_stopped(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -176,7 +209,13 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
-            .await
+            .await?;
+
+        // Mark attempt as completed
+        metadata_db::job_attempts::mark_attempt_completed(&self.metadata_db, job_id, retry_index)
+            .await?;
+
+        Ok(())
     }
 
     /// Marks a job as `Completed`.
@@ -188,6 +227,20 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_completed(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get current retry index before marking completed
+        let retry_index = (|| async { self.get_current_retry_index(job_id).await })
+            .retry(with_policy())
+            .when(MetadataDbError::is_connection_error)
+            .notify(|err, dur| {
+                tracing::warn!(
+                    job_id = %job_id,
+                    error = %err, error_source = logging::error_source(&err),
+                    "Connection error while getting retry index. Retrying in {:.1}s",
+                    dur.as_secs_f32()
+                );
+            })
+            .await?;
+
         (|| metadata_db::jobs::mark_completed(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -199,7 +252,13 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
-            .await
+            .await?;
+
+        // Mark attempt as completed
+        metadata_db::job_attempts::mark_attempt_completed(&self.metadata_db, job_id, retry_index)
+            .await?;
+
+        Ok(())
     }
 
     /// Marks a job as `Failed`.
@@ -211,6 +270,20 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_failed(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get current retry index before marking failed
+        let retry_index = (|| async { self.get_current_retry_index(job_id).await })
+            .retry(with_policy())
+            .when(MetadataDbError::is_connection_error)
+            .notify(|err, dur| {
+                tracing::warn!(
+                    job_id = %job_id,
+                    error = %err, error_source = logging::error_source(&err),
+                    "Connection error while getting retry index. Retrying in {:.1}s",
+                    dur.as_secs_f32()
+                );
+            })
+            .await?;
+
         (|| metadata_db::jobs::mark_failed(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -222,7 +295,13 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
-            .await
+            .await?;
+
+        // Mark attempt as completed
+        metadata_db::job_attempts::mark_attempt_completed(&self.metadata_db, job_id, retry_index)
+            .await?;
+
+        Ok(())
     }
 }
 

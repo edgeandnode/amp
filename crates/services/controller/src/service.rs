@@ -1,4 +1,4 @@
-use std::{future::Future, net::SocketAddr, sync::Arc};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
 use axum::{
@@ -12,15 +12,21 @@ use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time::MissedTickBehavior};
 use tower_http::cors::CorsLayer;
 
 use crate::{config::Config, scheduler::Scheduler};
+
+/// Reconciliation interval for failed job retries
+///
+/// The scheduler checks for failed jobs ready for retry at this interval.
+const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Create and initialize the controller service
 ///
 /// Sets up the admin API server with the scheduler, dataset store, and metadata database.
 /// Configures health check endpoint, OpenTelemetry metrics, and CORS middleware.
+/// Spawns a background task for failed job reconciliation with exponential backoff retry.
 ///
 /// Returns the bound socket address and a future that runs the server with graceful shutdown.
 pub async fn new(
@@ -30,12 +36,12 @@ pub async fn new(
     meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
-    let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
+    let scheduler = Arc::new(Scheduler::new(config.clone(), metadata_db.clone()));
 
     let ctx = Ctx {
         metadata_db,
         dataset_store,
-        scheduler: Arc::new(scheduler),
+        scheduler: scheduler.clone(),
         data_store: config.data_store.clone(),
         build_info: config.build_info.clone(),
     };
@@ -62,12 +68,32 @@ pub async fn new(
 
     let router = app.layer(CorsLayer::permissive());
 
+    // Spawn background task for failed job reconciliation
+    let scheduler_for_reconciliation = scheduler.clone();
+    let reconciliation_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(RECONCILIATION_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            interval.tick().await;
+            if let Err(err) = scheduler_for_reconciliation.reconcile_failed_jobs().await {
+                tracing::error!(error = %err, "Failed job reconciliation");
+            }
+        }
+    });
+
     // The service future that runs the server with graceful shutdown
     let server = async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .map_err(Into::into)
+        let server_future = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal());
+
+        tokio::select! {
+            result = server_future => {
+                result.map_err(Into::into)
+            }
+            _ = reconciliation_task => {
+                Err("Reconciliation task terminated".into())
+            }
+        }
     };
     Ok((addr, server))
 }

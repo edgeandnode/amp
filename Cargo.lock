@@ -2553,6 +2553,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tower-http",
+ "tracing",
  "worker",
 ]
 

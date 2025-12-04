@@ -13,6 +13,7 @@ pub mod datasets;
 mod db;
 mod error;
 mod files;
+pub mod job_attempts;
 pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
