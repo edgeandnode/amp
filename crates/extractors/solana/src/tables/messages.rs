@@ -101,6 +101,49 @@ pub(crate) struct Message {
 }
 
 impl Message {
+    pub(crate) fn from_of1_message(
+        slot: u64,
+        tx_index: u32,
+        message: solana_sdk::message::VersionedMessage,
+    ) -> Self {
+        let instructions = message
+            .instructions()
+            .iter()
+            .map(|inst| super::Instruction {
+                program_id_index: inst.program_id_index,
+                accounts: inst.accounts.clone(),
+                data: bs58::encode(&inst.data).into_string(),
+                stack_height: None,
+            })
+            .collect();
+        let address_table_lookups = message.address_table_lookups().as_ref().map(|atls| {
+            atls.iter()
+                .cloned()
+                .map(|atl| AddressTableLookup {
+                    account_key: atl.account_key.to_string(),
+                    writable_indexes: atl.writable_indexes,
+                    readonly_indexes: atl.readonly_indexes,
+                })
+                .collect()
+        });
+
+        Self {
+            slot,
+            tx_index,
+            num_required_signatures: message.header().num_required_signatures,
+            num_readonly_signed_accounts: message.header().num_readonly_signed_accounts,
+            num_readonly_unsigned_accounts: message.header().num_readonly_unsigned_accounts,
+            instructions,
+            address_table_lookups,
+            account_keys: message
+                .static_account_keys()
+                .iter()
+                .map(|key| key.to_string())
+                .collect(),
+            recent_block_hash: message.recent_blockhash().to_bytes(),
+        }
+    }
+
     pub(crate) fn from_rpc_message(slot: Slot, tx_index: u32, message: &UiRawMessage) -> Self {
         let recent_block_hash: [u8; 32] = bs58::decode(&message.recent_blockhash)
             .into_vec()

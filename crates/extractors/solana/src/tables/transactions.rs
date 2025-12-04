@@ -11,6 +11,7 @@ use common::{
     },
     metadata::segments::BlockRange,
 };
+use serde::Deserialize;
 use solana_clock::Slot;
 
 use crate::rpc_client::{UiInstruction, UiTransaction, UiTransactionStatusMeta};
@@ -158,6 +159,119 @@ pub(crate) struct Transaction {
 }
 
 impl Transaction {
+    pub(crate) fn from_of1_transaction(
+        slot: Slot,
+        tx_index: u32,
+        of_tx: solana_sdk::transaction::VersionedTransaction,
+        of_tx_meta: crate::of1_client::DecodedData<
+            TransactionStatusMeta,
+            solana_storage_proto::convert::generated::TransactionStatusMeta,
+        >,
+    ) -> Self {
+        let tx_meta = match of_tx_meta {
+            crate::of1_client::DecodedData::Bincode(tx_meta) => tx_meta,
+            crate::of1_client::DecodedData::Protobuf(tx_meta) => {
+                let inner_instructions = tx_meta
+                    .inner_instructions
+                    .iter()
+                    .map(|inner| {
+                        let instructions = inner
+                            .instructions
+                            .iter()
+                            .cloned()
+                            .map(|inst| super::Instruction {
+                                program_id_index: inst.program_id_index as u8,
+                                accounts: inst.accounts,
+                                // TODO: unwrap
+                                data: String::from_utf8(inst.data).unwrap(),
+                                stack_height: inst.stack_height,
+                            })
+                            .collect();
+
+                        InnerInstructions {
+                            index: inner.index as u8,
+                            instructions,
+                        }
+                    })
+                    .collect();
+
+                let pre_token_balances = tx_meta
+                    .pre_token_balances
+                    .iter()
+                    .cloned()
+                    .map(TransactionTokenBalance::from)
+                    .collect();
+                let post_token_balances = tx_meta
+                    .post_token_balances
+                    .iter()
+                    .cloned()
+                    .map(TransactionTokenBalance::from)
+                    .collect();
+
+                let rewards = tx_meta
+                    .rewards
+                    .iter()
+                    .map(|reward| Reward {
+                        pubkey: reward.pubkey.clone(),
+                        lamports: reward.lamports,
+                        post_balance: reward.post_balance,
+                        reward_type: Some(reward.reward_type.into()),
+                        // TODO: unwrap
+                        commission: Some(reward.commission.parse().unwrap()),
+                    })
+                    .collect();
+
+                // TODO: unwrap
+                let loaded_addresses = LoadedAddresses {
+                    writable: tx_meta
+                        .loaded_writable_addresses
+                        .iter()
+                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
+                        .collect(),
+                    readonly: tx_meta
+                        .loaded_readonly_addresses
+                        .iter()
+                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
+                        .collect(),
+                };
+
+                // TODO: unwrap
+                let return_data =
+                    tx_meta
+                        .return_data
+                        .clone()
+                        .map(|return_data| TransactionReturnData {
+                            program_id: String::from_utf8(return_data.program_id).unwrap(),
+                            data: String::from_utf8(return_data.data).unwrap(),
+                            encoding: ReturnDataEncoding::Base64,
+                        });
+
+                TransactionStatusMeta {
+                    status: tx_meta.err.is_some(),
+                    fee: tx_meta.fee,
+                    pre_balances: tx_meta.pre_balances,
+                    post_balances: tx_meta.post_balances,
+                    inner_instructions: Some(inner_instructions),
+                    log_messages: Some(tx_meta.log_messages),
+                    pre_token_balances: Some(pre_token_balances),
+                    post_token_balances: Some(post_token_balances),
+                    rewards: Some(rewards),
+                    loaded_addresses: Some(loaded_addresses),
+                    return_data,
+                    compute_units_consumed: tx_meta.compute_units_consumed,
+                    cost_units: tx_meta.cost_units,
+                }
+            }
+        };
+
+        Self {
+            tx_index,
+            tx_signatures: of_tx.signatures.iter().map(|s| s.to_string()).collect(),
+            tx_meta: Some(tx_meta),
+            slot,
+        }
+    }
+
     pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
@@ -269,7 +383,7 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionStatusMeta {
     pub(crate) status: bool,
     pub(crate) fee: u64,
@@ -286,13 +400,13 @@ pub(crate) struct TransactionStatusMeta {
     pub(crate) cost_units: Option<u64>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct InnerInstructions {
     index: u8,
     instructions: Vec<super::Instruction>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionTokenBalance {
     account_index: u8,
     mint: String,
@@ -318,7 +432,29 @@ impl From<crate::rpc_client::UiTransactionTokenBalance> for TransactionTokenBala
     }
 }
 
-#[derive(Debug, Default, Clone)]
+impl From<solana_storage_proto::convert::generated::TokenBalance> for TransactionTokenBalance {
+    fn from(value: solana_storage_proto::convert::generated::TokenBalance) -> Self {
+        let ui_token_amount = value
+            .ui_token_amount
+            .map(|token_amount| TokenAmount {
+                ui_amount: Some(token_amount.ui_amount),
+                decimals: token_amount.decimals as u8,
+                amount: token_amount.amount,
+                ui_amount_string: token_amount.ui_amount_string,
+            })
+            .unwrap_or_default();
+
+        Self {
+            account_index: value.account_index as u8,
+            mint: value.mint,
+            ui_token_amount,
+            owner: Some(value.owner),
+            program_id: Some(value.program_id),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
 struct TokenAmount {
     ui_amount: Option<f64>,
     decimals: u8,
@@ -326,7 +462,7 @@ struct TokenAmount {
     ui_amount_string: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct Reward {
     pubkey: String,
     lamports: i64,
@@ -335,7 +471,7 @@ pub(crate) struct Reward {
     commission: Option<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 enum RewardType {
     Fee,
     Rent,
@@ -354,6 +490,18 @@ impl std::fmt::Display for RewardType {
     }
 }
 
+impl From<i32> for RewardType {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => Self::Fee,
+            1 => Self::Rent,
+            2 => Self::Staking,
+            3 => Self::Voting,
+            _ => panic!("invalid reward type value: {}", value),
+        }
+    }
+}
+
 impl From<crate::rpc_client::RewardType> for RewardType {
     fn from(value: crate::rpc_client::RewardType) -> Self {
         match value {
@@ -365,20 +513,20 @@ impl From<crate::rpc_client::RewardType> for RewardType {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct LoadedAddresses {
     writable: Vec<String>,
     readonly: Vec<String>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionReturnData {
     program_id: String,
     data: String,
     encoding: ReturnDataEncoding,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 enum ReturnDataEncoding {
     #[default]
     Base64,

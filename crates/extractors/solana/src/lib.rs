@@ -11,7 +11,7 @@
 //! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
 //! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
 use datasets_common::manifest::TableSchema;
@@ -21,6 +21,7 @@ use url::Url;
 mod dataset_kind;
 mod extractor;
 mod metrics;
+mod of1_client;
 mod rpc_client;
 pub mod tables;
 
@@ -84,6 +85,7 @@ pub struct ProviderConfig {
     pub network: String,
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub http_url: Url,
+    pub of1_car_directory: PathBuf,
 }
 
 /// Convert a Solana manifest into a logical dataset representation.
@@ -109,9 +111,13 @@ pub fn extractor(
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, Error> {
     let client = match config.http_url.scheme() {
-        "http" | "https" => {
-            SolanaExtractor::new(config.http_url, config.network, config.name, meter)
-        }
+        "http" | "https" => SolanaExtractor::new(
+            config.http_url,
+            config.network,
+            config.name,
+            config.of1_car_directory,
+            meter,
+        ),
         scheme => {
             let err = format!("unsupported URL scheme: {}", scheme);
             return Err(Error::Client(err.into()));

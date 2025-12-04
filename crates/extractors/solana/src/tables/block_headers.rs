@@ -50,6 +50,17 @@ pub(crate) struct BlockHeader {
 }
 
 impl BlockHeader {
+    pub(crate) fn from_of1_block(block: crate::of1_client::DecodedBlock) -> Self {
+        Self {
+            slot: block.slot,
+            parent_slot: block.parent_slot,
+            block_hash: block.blockhash,
+            previous_block_hash: block.prev_blockhash,
+            block_height: block.block_height,
+            block_time: Some(block.blocktime as i64),
+        }
+    }
+
     pub(crate) fn from_rpc_block(slot: Slot, block: &UiConfirmedBlock) -> Self {
         let block_hash: [u8; 32] = bs58::decode(&block.blockhash)
             .into_vec()
