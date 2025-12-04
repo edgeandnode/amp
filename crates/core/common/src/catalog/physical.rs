@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
-    common::{DFSchema, project_schema, stats::Precision},
+    common::{DFSchema, stats::Precision},
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
@@ -13,7 +13,7 @@ use datafusion::{
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
-    physical_plan::{ExecutionPlan, PhysicalExpr, empty::EmptyExec},
+    physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
@@ -750,13 +750,7 @@ impl TableProvider for TableSnapshot {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        if let Some(range) = self.synced_range() {
-            tracing::debug!("Scanning range: {range:?}");
-        } else {
-            tracing::debug!("Scanning range: <none>");
-            let projected_schema = project_schema(&self.schema(), projection)?;
-            return Ok(Arc::new(EmptyExec::new(projected_schema)));
-        }
+        tracing::debug!("creating scan execution plan");
 
         let target_partitions = state.config_options().execution.target_partitions;
         let table_schema = self.physical_table.schema();
