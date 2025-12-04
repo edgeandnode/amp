@@ -49,4 +49,4 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github__create_pending_pull_request_review,mcp__github__add_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request,Read,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
             --disallowedTools "Bash(gh api:*),Bash(gh pr comment:*)"
-            --model sonnet
+            --model opus
