@@ -165,6 +165,12 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_stopped(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get job to access retry_count before marking stopped (best-effort)
+        let job_opt = metadata_db::jobs::get_by_id(&self.metadata_db, job_id)
+            .await
+            .ok()
+            .flatten();
+
         (|| metadata_db::jobs::mark_stopped(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -176,7 +182,26 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
+            .await?;
+
+        // Mark attempt as completed (best-effort)
+        if let Some(job) = job_opt
+            && let Err(error) = metadata_db::job_attempts::mark_attempt_completed(
+                &self.metadata_db,
+                job_id,
+                job.retry_count,
+            )
             .await
+        {
+            tracing::error!(
+                %job_id,
+                retry_count = job.retry_count,
+                %error,
+                "Failed to mark job attempt as completed (stopped)"
+            );
+        }
+
+        Ok(())
     }
 
     /// Marks a job as `Completed`.
@@ -188,6 +213,12 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_completed(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get job to access retry_count before marking completed (best-effort)
+        let job_opt = metadata_db::jobs::get_by_id(&self.metadata_db, job_id)
+            .await
+            .ok()
+            .flatten();
+
         (|| metadata_db::jobs::mark_completed(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -199,7 +230,26 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
+            .await?;
+
+        // Mark attempt as completed (best-effort)
+        if let Some(job) = job_opt
+            && let Err(error) = metadata_db::job_attempts::mark_attempt_completed(
+                &self.metadata_db,
+                job_id,
+                job.retry_count,
+            )
             .await
+        {
+            tracing::error!(
+                %job_id,
+                retry_count = job.retry_count,
+                %error,
+                "Failed to mark job attempt as completed"
+            );
+        }
+
+        Ok(())
     }
 
     /// Marks a job as `Failed`.
@@ -211,6 +261,12 @@ impl JobQueue {
     ///
     /// Returns an error if the database update fails after retries.
     pub async fn mark_job_failed(&self, job_id: JobId) -> Result<(), MetadataDbError> {
+        // Get job to access retry_count before marking failed (best-effort)
+        let job_opt = metadata_db::jobs::get_by_id(&self.metadata_db, job_id)
+            .await
+            .ok()
+            .flatten();
+
         (|| metadata_db::jobs::mark_failed(&self.metadata_db, job_id))
             .retry(with_policy())
             .when(MetadataDbError::is_connection_error)
@@ -222,7 +278,26 @@ impl JobQueue {
                     dur.as_secs_f32()
                 );
             })
+            .await?;
+
+        // Mark attempt as completed (best-effort)
+        if let Some(job) = job_opt
+            && let Err(error) = metadata_db::job_attempts::mark_attempt_completed(
+                &self.metadata_db,
+                job_id,
+                job.retry_count,
+            )
             .await
+        {
+            tracing::error!(
+                %job_id,
+                retry_count = job.retry_count,
+                %error,
+                "Failed to mark job attempt as completed (failed)"
+            );
+        }
+
+        Ok(())
     }
 }
 

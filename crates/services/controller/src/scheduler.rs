@@ -171,6 +171,21 @@ impl Scheduler {
                 .map(Into::into)
                 .map_err(ScheduleJobError::RegisterJob)?;
 
+        // Track initial attempt (retry_index = 0) - best effort
+        if let Err(error) = metadata_db::job_attempts::insert_attempt(
+            &self.metadata_db,
+            job_id,
+            0, // Initial attempt has retry_index = 0
+        )
+        .await
+        {
+            tracing::error!(
+                %job_id,
+                %error,
+                "Failed to insert initial job attempt"
+            );
+        }
+
         // Notify the worker about the new job
         // TODO: Include into the transaction
         metadata_db::workers::send_job_notif(
@@ -277,6 +292,22 @@ impl Scheduler {
             }
 
             let job_id: JobId = job.id.into();
+
+            // Track retry attempt - best effort
+            // retry_count was incremented by reschedule_for_retry, so use the new value
+            let retry_index = job.retry_count + 1;
+            if let Err(error) =
+                metadata_db::job_attempts::insert_attempt(&self.metadata_db, job_id, retry_index)
+                    .await
+            {
+                tracing::error!(
+                    %job_id,
+                    retry_index,
+                    %error,
+                    "Failed to insert retry job attempt"
+                );
+            }
+
             let _result = metadata_db::workers::send_job_notif(
                 &self.metadata_db,
                 job.node_id,
