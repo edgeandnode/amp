@@ -31,10 +31,10 @@ async fn schedule_and_retrieve_job() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    // Schedule the job
-    let job_id = jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
+    // Register the job
+    let job_id = jobs::register(&metadata_db, &worker_id, &job_desc_str)
         .await
-        .expect("Failed to schedule job");
+        .expect("Failed to register job");
 
     // Get the job
     let job = jobs::get_by_id(&metadata_db, job_id)
@@ -73,9 +73,9 @@ async fn pagination_traverses_all_jobs_ordered() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
+        let job_id = jobs::register(&metadata_db, &worker_id, &job_desc_str)
             .await
-            .expect("Failed to schedule job");
+            .expect("Failed to register job");
         created_job_ids.push(job_id);
     }
 

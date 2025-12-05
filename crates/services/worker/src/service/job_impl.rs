@@ -6,10 +6,9 @@ use common::{
     BoxError,
     catalog::{JobLabels, physical::PhysicalTable},
 };
-use datasets_common::{
-    hash::Hash, reference::Reference, revision::Revision, table_name::TableName,
-};
+use datasets_common::{hash::Hash, reference::Reference, revision::Revision};
 use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
+use metadata_db::LocationId;
 use tracing::{Instrument, info_span};
 
 use crate::{
@@ -67,53 +66,53 @@ pub(super) async fn new(
         metrics,
     };
 
-    let output_locations = metadata_db::physical_table::get_by_job_id(&ctx.metadata_db, job_id)
-        .await
-        .map_err(JobInitError::FetchOutputLocations)?;
-
+    // Create dataset reference for table resolution
     let dataset_ref = Reference::new(
         dataset_namespace.clone(),
         dataset_name.clone(),
         Revision::Hash(manifest_hash.clone()),
     );
 
-    let metrics = ctx.metrics.clone();
-
-    let opts = dump::parquet_opts(&ctx.config.parquet);
-
-    let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
-    for location in output_locations {
-        let hash: Hash = location.manifest_hash.into();
-
-        let dataset = ctx
-            .dataset_store
-            .get_dataset_by_hash(&hash)
-            .await
-            .map_err(|err| JobInitError::FetchDataset {
-                hash: hash.clone(),
-                source: err,
-            })?
-            .ok_or_else(|| JobInitError::DatasetNotFound { hash: hash.clone() })?;
-
-        let mut resolved_tables = dataset.resolved_tables(dataset_ref.clone().into());
-        let Some(table) = resolved_tables.find(|t| t.name() == location.table_name) else {
-            return Err(JobInitError::TableNotFound {
-                table_name: location.table_name.into(),
-                dataset_hash: hash,
-            });
-        };
-        let physical_table = PhysicalTable::new(
-            table.clone(),
-            location.url,
-            location.id,
-            ctx.metadata_db.clone(),
-            job_labels.clone(),
-        )
-        .map_err(|err| JobInitError::CreatePhysicalTable {
-            table_name: table.name().clone(),
+    // Get the dataset to access its tables
+    let dataset = ctx
+        .dataset_store
+        .get_dataset_by_hash(&manifest_hash)
+        .await
+        .map_err(|err| JobInitError::FetchDataset {
+            hash: manifest_hash.clone(),
             source: err,
         })?
-        .into();
+        .ok_or_else(|| JobInitError::DatasetNotFound {
+            hash: manifest_hash.clone(),
+        })?;
+
+    let metrics = ctx.metrics.clone();
+    let opts = dump::parquet_opts(&ctx.config.parquet);
+
+    // Create physical tables and compactors for each table in the dataset
+    let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
+    let mut location_ids: Vec<LocationId> = vec![];
+    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+        // Try to get existing active physical table (handles retry case)
+        let physical_table: Arc<PhysicalTable> =
+            match PhysicalTable::get_active(&table, ctx.metadata_db.clone())
+                .await
+                .map_err(JobInitError::GetActivePhysicalTable)?
+            {
+                Some(pt) => pt, // Reuse existing table (retry scenario)
+                None => PhysicalTable::next_revision(
+                    // Create new table (initial attempt)
+                    &table,
+                    &ctx.data_store,
+                    ctx.metadata_db.clone(),
+                    true, // set_active
+                    &job_labels,
+                )
+                .await
+                .map_err(JobInitError::CreatePhysicalTable)?,
+            }
+            .into();
+
         let compactor = AmpCompactor::start(
             &physical_table,
             job_ctx.parquet_footer_cache.clone(),
@@ -122,8 +121,14 @@ pub(super) async fn new(
         )
         .into();
 
+        location_ids.push(physical_table.location_id());
         tables.push((physical_table, compactor));
     }
+
+    // Assign all physical tables to this job as the writer (locks them)
+    metadata_db::physical_table::assign_job_writer(&ctx.metadata_db, &location_ids, job_id)
+        .await
+        .map_err(JobInitError::AssignJobWriter)?;
 
     let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
     let fut = async move {
@@ -148,21 +153,10 @@ pub(super) async fn new(
 /// metadata and builds physical tables before starting the actual dump.
 #[derive(Debug, thiserror::Error)]
 pub enum JobInitError {
-    /// Failed to fetch output locations from metadata database
-    ///
-    /// This error occurs when querying the physical_table records associated
-    /// with a job ID fails, typically due to database connection issues or
-    /// the job not having any registered output locations.
-    #[error("Failed to fetch output locations from metadata database")]
-    FetchOutputLocations(#[source] metadata_db::Error),
-
     /// Failed to fetch dataset from dataset store
     ///
     /// This error occurs when retrieving a dataset by its manifest hash fails.
     /// The dataset store may be unavailable or the manifest may not be cached.
-    ///
-    /// Note: This wraps BoxError because dataset_store::get_by_hash currently
-    /// returns BoxError. This should be replaced with a concrete error type.
     #[error("Failed to fetch dataset with hash '{hash}'")]
     FetchDataset {
         hash: Hash,
@@ -172,34 +166,36 @@ pub enum JobInitError {
 
     /// Dataset not found in dataset store
     ///
-    /// This error occurs when a manifest hash referenced in the output locations
-    /// does not correspond to any dataset in the store. This indicates a data
-    /// inconsistency between the metadata database and the dataset store.
+    /// This error occurs when a manifest hash does not correspond to any dataset
+    /// in the store. This indicates the manifest needs to be registered or cached.
     #[error("Dataset not found: {hash}")]
     DatasetNotFound { hash: Hash },
 
-    /// Table not found in dataset
+    /// Failed to get or create active physical table
     ///
-    /// This error occurs when a table name from the output locations does not
-    /// match any table defined in the dataset manifest. This indicates a
-    /// mismatch between the job's expected outputs and the actual dataset schema.
-    #[error("Table '{table_name}' not found in dataset '{dataset_hash}'")]
-    TableNotFound {
-        table_name: TableName,
-        dataset_hash: Hash,
-    },
+    /// This error occurs when querying for an active physical table fails.
+    /// This typically happens due to database connection issues.
+    ///
+    /// Note: This wraps BoxError because PhysicalTable::get_active currently
+    /// returns BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to get active physical table")]
+    GetActivePhysicalTable(#[source] BoxError),
 
-    /// Failed to create physical table
+    /// Failed to create physical table revision
     ///
-    /// This error occurs when constructing a PhysicalTable instance fails,
-    /// typically due to invalid URL parsing or object store configuration issues.
+    /// This error occurs when creating a new physical table revision fails,
+    /// typically due to storage configuration issues, database connection problems,
+    /// or invalid URL construction.
     ///
-    /// Note: This wraps BoxError because PhysicalTable::new currently returns
-    /// BoxError. This should be replaced with a concrete error type.
-    #[error("Failed to create physical table for '{table_name}'")]
-    CreatePhysicalTable {
-        table_name: TableName,
-        #[source]
-        source: BoxError,
-    },
+    /// Note: This wraps BoxError because PhysicalTable::next_revision currently
+    /// returns BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to create physical table")]
+    CreatePhysicalTable(#[source] BoxError),
+
+    /// Failed to assign job writer
+    ///
+    /// This error occurs when assigning the job as the writer for physical
+    /// table locations fails, typically due to database connection issues.
+    #[error("Failed to assign job writer")]
+    AssignJobWriter(#[source] metadata_db::Error),
 }

@@ -248,21 +248,6 @@ where
     Ok(())
 }
 
-/// Get all locations that were written by a specific job
-pub async fn get_by_job_id<'c, E>(exe: E, job_id: JobId) -> Result<Vec<PhysicalTable>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {"
-        SELECT id, manifest_hash, dataset_namespace, dataset_name, table_name, url, active, writer
-        FROM physical_tables
-        WHERE writer = $1
-    "};
-
-    let locations = sqlx::query_as(query).bind(job_id).fetch_all(exe).await?;
-    Ok(locations)
-}
-
 /// Assign a job as the writer for multiple locations
 pub async fn assign_job_writer<'c, E>(
     exe: E,

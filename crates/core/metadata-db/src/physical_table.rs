@@ -160,20 +160,6 @@ where
     .map_err(Error::Database)
 }
 
-/// Get all physical table locations that were written by a specific job
-#[tracing::instrument(skip(exe), err)]
-pub async fn get_by_job_id<'c, E>(
-    exe: E,
-    job_id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<Vec<PhysicalTable>, Error>
-where
-    E: Executor<'c>,
-{
-    sql::get_by_job_id(exe, job_id.into())
-        .await
-        .map_err(Error::Database)
-}
-
 /// Assign a job as the writer for multiple locations
 ///
 /// This updates the `writer` field for all specified locations, establishing
