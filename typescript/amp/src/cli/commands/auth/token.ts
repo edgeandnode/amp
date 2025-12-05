@@ -31,7 +31,7 @@ export const token = Command.make("token", {
   ),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
-      const auth = yield* Auth.AuthService
+      const auth = yield* Auth.Auth
 
       const maybeAuthStorage = yield* auth.getCache()
       if (Option.isNone(maybeAuthStorage)) {
@@ -42,7 +42,7 @@ export const token = Command.make("token", {
       const authStorage = maybeAuthStorage.value
 
       const response = yield* auth.generateAccessToken({
-        storedAuth: authStorage,
+        cache: authStorage,
         exp: args.duration,
         audience: Option.getOrElse(args.audience, () => undefined),
       }).pipe(
@@ -60,19 +60,14 @@ export const token = Command.make("token", {
       )
 
       // verify the auth token against the JWKS
-      yield* auth
-        .verifySignedAccessToken(
-          Redacted.make(response.token),
-          response.iss,
-        )
-        .pipe(
-          Effect.catchTag("Amp/errors/auth/VerifySignedAccessTokenError", (error) =>
-            Console.error(`Failed to verify the signed token. JWT incorrectly formed: ${error.message}`).pipe(
-              Effect.flatMap(() =>
-                ExitCode.NonZero
-              ),
-            )),
-        )
+      yield* auth.verifySignedAccessToken(response.token, response.iss).pipe(
+        Effect.catchTag("Amp/errors/auth/VerifySignedAccessTokenError", (error) =>
+          Console.error(`Failed to verify the signed token. JWT incorrectly formed: ${error.message}`).pipe(
+            Effect.flatMap(() =>
+              ExitCode.NonZero
+            ),
+          )),
+      )
 
       const exp = response.exp
       const expDateTime = DateTime.unsafeMake(exp * 1000)
@@ -83,7 +78,7 @@ export const token = Command.make("token", {
       yield* Console.log(
         "Use this as a Authorization Bearer token in requests to query a published Amp Dataset to the Gateway",
       )
-      yield* Console.log(`    token:`, response.token)
+      yield* Console.log(`    token:`, Redacted.value(response.token))
       yield* Console.log(`    exp:`, formatted)
       return yield* ExitCode.Zero
     })
