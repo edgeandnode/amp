@@ -55,6 +55,7 @@ pub mod fixtures {
     mod ampctl;
     mod anvil;
     mod cli;
+    mod contract_artifact;
     mod daemon_config;
     mod daemon_controller;
     mod daemon_server;
@@ -70,6 +71,7 @@ pub mod fixtures {
     pub use ampctl::*;
     pub use anvil::*;
     pub use cli::*;
+    pub use contract_artifact::*;
     pub use daemon_config::*;
     pub use daemon_controller::*;
     pub use daemon_server::*;

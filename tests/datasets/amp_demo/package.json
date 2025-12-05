@@ -1,0 +1,8 @@
+{
+  "name": "amp-test-amp-demo",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@edgeandnode/amp": "workspace:*"
+  }
+}

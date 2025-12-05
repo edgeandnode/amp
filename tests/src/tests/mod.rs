@@ -6,6 +6,7 @@ mod it_client;
 mod it_dependencies;
 mod it_dump;
 mod it_functions;
+mod it_functions_eth_call;
 mod it_gen_manifest;
 mod it_joins;
 mod it_multi_table_continuous;

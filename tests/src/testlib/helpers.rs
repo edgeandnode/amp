@@ -4,6 +4,9 @@
 //! dataset extraction, data validation, and test setup tasks that are frequently
 //! needed across multiple test scenarios.
 
+pub mod forge;
+pub mod git;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
