@@ -23,11 +23,11 @@
 //! - Worker information queries
 //! - Worker status retrieval
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use common::{BoxError, Dataset, catalog::JobLabels};
-use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
+use dataset_store::DatasetKind;
+use datasets_common::{
+    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
+};
 use dump::EndBlock;
 use metadata_db::Worker;
 use worker::{
@@ -54,10 +54,10 @@ pub trait SchedulerJobs: Send + Sync {
     /// Schedule a dataset synchronization job
     async fn schedule_dataset_sync_job(
         &self,
-        dataset: Arc<Dataset>,
+        dataset_reference: HashReference,
+        dataset_kind: DatasetKind,
         end_block: EndBlock,
         max_writers: u16,
-        job_labels: JobLabels,
         worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError>;
 
@@ -140,24 +140,6 @@ pub enum ScheduleJobError {
     /// - The specified worker hasn't sent heartbeats recently (inactive)
     #[error("specified worker '{0}' not found or inactive")]
     WorkerNotAvailable(NodeId),
-
-    /// Failed to get active physical table for dataset
-    ///
-    /// This occurs when:
-    /// - Physical table lookup query fails
-    /// - Catalog metadata is corrupted or inconsistent
-    /// - Database connection fails during table lookup
-    #[error("failed to get physical table: {0}")]
-    GetPhysicalTable(#[source] BoxError),
-
-    /// Failed to create new physical table revision
-    ///
-    /// This occurs when:
-    /// - Storage location allocation fails
-    /// - Physical table creation in catalog fails
-    /// - Insufficient storage space or permissions
-    #[error("failed to create physical table: {0}")]
-    CreatePhysicalTable(#[source] BoxError),
 
     /// Failed to serialize job descriptor to JSON
     ///
