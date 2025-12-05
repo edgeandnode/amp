@@ -45,10 +45,10 @@ async fn schedule_job_and_receive_notification() {
     let mut notification_stream = std::pin::pin!(listener.into_stream::<JobNotification>());
 
     //* When
-    // Schedule the job
-    let job_id = crate::jobs::schedule(&metadata_db, &worker_id, &job_desc_str, &[])
+    // Register the job
+    let job_id = crate::jobs::register(&metadata_db, &worker_id, &job_desc_str)
         .await
-        .expect("Failed to schedule job");
+        .expect("Failed to register job");
 
     // Send notification to the worker
     workers::send_job_notif(

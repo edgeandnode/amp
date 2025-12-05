@@ -23,9 +23,8 @@
 //! - Uses PostgreSQL for metadata storage and job state tracking
 //! - Implements atomic job operations with database transactions
 //! - Selects workers randomly from active worker pool
-//! - Manages physical table locations for dataset storage
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use admin_api::scheduler::{
     DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsByDatasetError,
@@ -33,11 +32,10 @@ use admin_api::scheduler::{
     StopJobError,
 };
 use async_trait::async_trait;
-use common::{
-    Dataset,
-    catalog::{JobLabels, physical::PhysicalTable},
+use dataset_store::DatasetKind;
+use datasets_common::{
+    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
 use rand::seq::IndexedRandom as _;
@@ -45,8 +43,6 @@ use worker::{
     job::{Job, JobDescriptor, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
-
-use crate::config::Config;
 
 /// A worker is considered active if it has sent a heartbeat in this period
 ///
@@ -61,54 +57,42 @@ const DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 ///
 /// Thread-safe for sharing across async tasks via `Arc<dyn JobScheduler>`.
 pub struct Scheduler {
-    config: Arc<Config>,
     metadata_db: MetadataDb,
 }
 
 impl Scheduler {
     /// Create a new scheduler instance
-    pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Self {
-        Self {
-            config,
-            metadata_db,
-        }
+    pub fn new(metadata_db: MetadataDb) -> Self {
+        Self { metadata_db }
     }
 
     /// Schedule a dataset synchronization job
     ///
     /// Checks for existing scheduled or running jobs to avoid duplicates, selects an available
-    /// worker node (or uses the specified worker_id), creates physical table locations, and
-    /// registers the job in the metadata database.
+    /// worker node (or uses the specified worker_id), and registers the job in the metadata database.
     async fn schedule_dataset_sync_job_impl(
         &self,
-        dataset: Arc<Dataset>,
         end_block: EndBlock,
         max_writers: u16,
-        job_labels: JobLabels,
+        hash_reference: HashReference,
+        dataset_kind: DatasetKind,
         worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
         let existing_jobs =
-            metadata_db::jobs::get_by_dataset(&self.metadata_db, (&dataset.manifest_hash).into())
+            metadata_db::jobs::get_by_dataset(&self.metadata_db, hash_reference.hash())
                 .await
                 .map_err(ScheduleJobError::CheckExistingJobs)?;
         for job in existing_jobs {
-            match job.status.into() {
-                JobStatus::Scheduled | JobStatus::Running => return Ok(job.id.into()),
-                JobStatus::Completed
-                | JobStatus::Stopped
-                | JobStatus::StopRequested
-                | JobStatus::Stopping
-                | JobStatus::Failed
-                | JobStatus::Unknown => (),
-            };
+            if matches!(job.status.into(), JobStatus::Scheduled | JobStatus::Running) {
+                return Ok(job.id.into());
+            }
         }
 
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
-        // 2. Create a new location for each table.
-        // 3. Register the job in the metadata db.
-        // 4. Send a `Start` command through `worker_actions` for that job.
+        // 2. Register the job in the metadata db.
+        // 3. Send a `Start` command through `worker_actions` for that job.
         //
         // The worker node should then receive the notification and start the dump run.
 
@@ -133,43 +117,19 @@ impl Scheduler {
             }
         };
 
-        let mut locations = Vec::new();
-        for table in dataset.resolved_tables(job_labels.dataset_reference().into()) {
-            let physical_table = match PhysicalTable::get_active(&table, self.metadata_db.clone())
-                .await
-                .map_err(ScheduleJobError::GetPhysicalTable)?
-            {
-                Some(physical_table) => physical_table,
-                None => {
-                    let store = &self.config.data_store;
-                    PhysicalTable::next_revision(
-                        &table,
-                        store,
-                        self.metadata_db.clone(),
-                        true,
-                        &job_labels,
-                    )
-                    .await
-                    .map_err(ScheduleJobError::CreatePhysicalTable)?
-                }
-            };
-            locations.push(physical_table.location_id());
-        }
-
         let job_desc = serde_json::to_string(&JobDescriptor::Dump {
             end_block,
             max_writers,
-            dataset_namespace: job_labels.dataset_namespace.clone(),
-            dataset_name: job_labels.dataset_name.clone(),
-            manifest_hash: job_labels.manifest_hash.clone(),
-            dataset_kind: dataset.kind.parse().expect("Unable to parse Dataset Kind"),
+            dataset_namespace: hash_reference.namespace().clone(),
+            dataset_name: hash_reference.name().clone(),
+            manifest_hash: hash_reference.hash().clone(),
+            dataset_kind,
         })
         .map_err(ScheduleJobError::SerializeJobDescriptor)?;
-        let job_id =
-            metadata_db::jobs::schedule(&self.metadata_db, &node_id, &job_desc, &locations)
-                .await
-                .map(Into::into)
-                .map_err(ScheduleJobError::RegisterJob)?;
+        let job_id = metadata_db::jobs::register(&self.metadata_db, &node_id, &job_desc)
+            .await
+            .map(Into::into)
+            .map_err(ScheduleJobError::RegisterJob)?;
 
         // Notify the worker about the new job
         // TODO: Include notification in the transaction (requires refactoring to avoid circular dependency)
@@ -301,14 +261,20 @@ impl Scheduler {
 impl SchedulerJobs for Scheduler {
     async fn schedule_dataset_sync_job(
         &self,
-        dataset: Arc<Dataset>,
+        dataset_reference: HashReference,
+        dataset_kind: DatasetKind,
         end_block: EndBlock,
         max_writers: u16,
-        job_labels: JobLabels,
         worker_id: Option<NodeId>,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_dataset_sync_job_impl(dataset, end_block, max_writers, job_labels, worker_id)
-            .await
+        self.schedule_dataset_sync_job_impl(
+            end_block,
+            max_writers,
+            dataset_reference,
+            dataset_kind,
+            worker_id,
+        )
+        .await
     }
 
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError> {
