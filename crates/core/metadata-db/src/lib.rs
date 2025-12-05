@@ -466,12 +466,12 @@ impl MetadataDb {
     pub async fn count_footer_cache_by_location(
         &self,
         location_id: LocationId,
-    ) -> Result<i64, Error> {
-        let sql = indoc::indoc! {r#"
             SELECT COUNT(DISTINCT fc.file_id) FROM footer_cache fc
             WHERE fc.file_id IN (
                 SELECT id FROM file_metadata WHERE location_id = $1
-                UNION
+                UNION ALL
+                SELECT file_id FROM gc_manifest WHERE location_id = $1
+            )
                 SELECT file_id FROM gc_manifest WHERE location_id = $1
             )
         "#};
