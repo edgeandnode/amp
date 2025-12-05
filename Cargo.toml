@@ -44,6 +44,7 @@ license-file = "LICENSE"
 #
 # <https://github.com/alloy-rs/alloy/pull/3095>
 alloy = { git = "https://github.com/sistemd/alloy.git", branch = "sistemd/saturate-unknown-tx-gas-price", default-features = false, features = [
+    "contract",
     "dyn-abi",
     "json-abi",
     "json-rpc",
@@ -51,10 +52,12 @@ alloy = { git = "https://github.com/sistemd/alloy.git", branch = "sistemd/satura
     "provider-http",
     "provider-ipc",
     "provider-ws",
+    "reqwest-rustls-tls",
     "rpc",
     "rpc-types",
-    "reqwest-rustls-tls",
     "rpc-types-anvil",
+    "signer-local",
+    "signers",
 ] }
 anyhow = "1.0.80"
 async-stream = "0.3.6"

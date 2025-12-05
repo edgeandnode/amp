@@ -2,32 +2,36 @@
 //!
 //! This fixture provides management of Anvil (local Ethereum node) instances for testing
 //! blockchain interactions. It supports both IPC and HTTP connection modes and provides
-//! convenient methods for mining blocks, triggering reorganizations, and other blockchain
-//! operations needed for testing.
+//! convenient methods for mining blocks, triggering reorganizations, contract deployment,
+//! and contract interaction.
 
 use std::time::Duration;
 
 use alloy::{
     eips::BlockId,
+    network::{EthereumWallet, TransactionBuilder},
     node_bindings::{Anvil as AlloyAnvil, AnvilInstance},
-    primitives::BlockHash,
-    providers::{Provider, ext::AnvilApi},
-    rpc::types::anvil::ReorgOptions,
+    primitives::{Address, BlockHash, Bytes, TxHash, U256},
+    providers::{Provider, ProviderBuilder, ext::AnvilApi},
+    rpc::types::{TransactionRequest, anvil::ReorgOptions},
+    signers::local::PrivateKeySigner,
 };
-use backon::{ConstantBuilder, Retryable};
+use backon::{ConstantBuilder, Retryable as _};
 use common::{BlockNum, BoxError};
 use tempfile::NamedTempFile;
+
+use super::contract_artifact::ContractArtifact;
 
 /// Default retry interval for Anvil readiness checks.
 const ANVIL_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Information about a blockchain block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockInfo {
-    pub block_num: BlockNum,
-    pub hash: BlockHash,
-    pub parent_hash: BlockHash,
-}
+/// Anvil's default pre-funded account private key (Account #0).
+///
+/// This is the first of 10 pre-funded accounts that Anvil creates by default.
+/// Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+/// Balance: 10,000 ETH
+pub const DEFAULT_PRIVATE_KEY: &str =
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 /// Connection mode for Anvil fixture.
 #[derive(Debug)]
@@ -158,6 +162,32 @@ impl Anvil {
         "#, url = self.connection_url()}
     }
 
+    /// Get the default Anvil account's private key as a string.
+    ///
+    /// Returns the private key for Account #0 which has 10,000 ETH pre-funded.
+    pub fn default_private_key(&self) -> &'static str {
+        DEFAULT_PRIVATE_KEY
+    }
+
+    /// Create a signer for the default Anvil account.
+    ///
+    /// Returns a PrivateKeySigner that can be used to sign transactions
+    /// with the default pre-funded account.
+    pub fn default_signer(&self) -> Result<PrivateKeySigner, BoxError> {
+        DEFAULT_PRIVATE_KEY
+            .parse()
+            .map_err(|err| format!("Failed to parse default private key: {}", err).into())
+    }
+
+    /// Create a wallet containing the default signer.
+    ///
+    /// Returns an EthereumWallet that can be used with ProviderBuilder
+    /// to create a signing provider.
+    pub fn default_wallet(&self) -> Result<EthereumWallet, BoxError> {
+        let signer = self.default_signer()?;
+        Ok(EthereumWallet::from(signer))
+    }
+
     /// Mine the specified number of blocks.
     ///
     /// This instructs Anvil to mine new blocks, which is useful for advancing
@@ -277,10 +307,188 @@ impl Anvil {
         tracing::info!("Anvil service is ready");
         Ok(())
     }
+
+    /// Deploy a contract using bytecode from a Forge artifact.
+    ///
+    /// Uses the default Anvil account for deployment. Waits for the transaction
+    /// to be mined and returns the deployed contract address and transaction hash.
+    pub async fn deploy_contract(
+        &self,
+        artifact: &ContractArtifact,
+    ) -> Result<DeploymentResult, BoxError> {
+        self.deploy_contract_with_args(artifact, Bytes::new()).await
+    }
+
+    /// Deploy a contract with constructor arguments.
+    ///
+    /// The constructor_args should be ABI-encoded constructor parameters.
+    /// Uses the default Anvil account for deployment.
+    pub async fn deploy_contract_with_args(
+        &self,
+        artifact: &ContractArtifact,
+        ctor_args: Bytes,
+    ) -> Result<DeploymentResult, BoxError> {
+        tracing::debug!("Deploying contract");
+
+        // Create a signing provider with the default wallet, using the same connection type
+        let wallet = self.default_wallet()?;
+        let provider = match &self.connection {
+            AnvilConnection::Ipc { path, .. } => ProviderBuilder::new()
+                .wallet(wallet)
+                .connect_ipc(path.clone().into())
+                .await
+                .map_err(|err| {
+                    format!("Failed to connect to Anvil via IPC for deployment: {}", err)
+                })?
+                .erased(),
+            AnvilConnection::Http { port } => {
+                let url = format!("http://localhost:{}", port);
+                ProviderBuilder::new()
+                    .wallet(wallet)
+                    .connect_http(url.parse()?)
+                    .erased()
+            }
+        };
+
+        // Construct deployment bytecode (contract bytecode + constructor args)
+        let deploy_code = if ctor_args.is_empty() {
+            artifact.bytecode.clone()
+        } else {
+            let mut combined = Vec::from(artifact.bytecode.as_ref());
+            combined.extend_from_slice(&ctor_args);
+            Bytes::from(combined)
+        };
+
+        // Create deployment transaction
+        let tx = TransactionRequest::default().with_deploy_code(deploy_code);
+
+        // Send transaction and wait for receipt
+        let pending_tx = provider
+            .send_transaction(tx)
+            .await
+            .map_err(|err| format!("Failed to send deployment transaction: {}", err))?;
+
+        let tx_hash = *pending_tx.tx_hash();
+
+        let receipt = pending_tx
+            .get_receipt()
+            .await
+            .map_err(|err| format!("Failed to get deployment receipt: {}", err))?;
+
+        let address = receipt
+            .contract_address
+            .ok_or("Deployment receipt did not contain contract address")?;
+
+        tracing::info!(
+            address = %address,
+            tx_hash = %tx_hash,
+            "Contract deployed successfully"
+        );
+
+        Ok(DeploymentResult { address, tx_hash })
+    }
+
+    /// Call a contract function (read-only, no state change).
+    ///
+    /// Performs an `eth_call` to read data from a contract without
+    /// sending a transaction or spending gas. The `data` parameter should
+    /// be ABI-encoded function call data.
+    pub async fn call(&self, to: Address, data: Bytes) -> Result<Bytes, BoxError> {
+        tracing::debug!(to = %to, "Calling contract");
+
+        let tx = TransactionRequest::default().with_to(to).with_input(data);
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .map_err(|err| format!("Failed to call contract: {}", err))?;
+
+        Ok(result)
+    }
+
+    /// Send a transaction to a contract (write operation, changes state).
+    ///
+    /// Uses the default Anvil account to sign and send the transaction.
+    /// Waits for the transaction to be mined and returns the transaction hash.
+    pub async fn send_transaction(&self, to: Address, data: Bytes) -> Result<TxHash, BoxError> {
+        self.send_transaction_with_value(to, data, U256::ZERO).await
+    }
+
+    /// Send a transaction with a specific ETH value.
+    ///
+    /// Uses the default Anvil account to sign and send the transaction.
+    /// The `value` parameter specifies how much ETH to send with the transaction.
+    pub async fn send_transaction_with_value(
+        &self,
+        to: Address,
+        data: Bytes,
+        value: U256,
+    ) -> Result<TxHash, BoxError> {
+        tracing::debug!(to = %to, value = %value, "Sending transaction");
+
+        // Create a signing provider with the default wallet
+        let wallet = self.default_wallet()?;
+        let provider = match &self.connection {
+            AnvilConnection::Ipc { path, .. } => ProviderBuilder::new()
+                .wallet(wallet)
+                .connect_ipc(path.clone().into())
+                .await
+                .map_err(|err| format!("Failed to connect to Anvil via IPC: {}", err))?
+                .erased(),
+            AnvilConnection::Http { port } => {
+                let url = format!("http://localhost:{}", port);
+                ProviderBuilder::new()
+                    .wallet(wallet)
+                    .connect_http(url.parse()?)
+                    .erased()
+            }
+        };
+
+        // Create transaction
+        let tx = TransactionRequest::default()
+            .with_to(to)
+            .with_input(data)
+            .with_value(value);
+
+        // Send transaction and wait for receipt
+        let pending_tx = provider
+            .send_transaction(tx)
+            .await
+            .map_err(|err| format!("Failed to send transaction: {}", err))?;
+
+        let tx_hash = *pending_tx.tx_hash();
+
+        pending_tx
+            .get_receipt()
+            .await
+            .map_err(|err| format!("Failed to get transaction receipt: {}", err))?;
+
+        tracing::info!(tx_hash = %tx_hash, "Transaction mined successfully");
+
+        Ok(tx_hash)
+    }
 }
 
 impl Drop for Anvil {
     fn drop(&mut self) {
         tracing::debug!("Dropping Anvil fixture, Anvil instance will be terminated");
     }
+}
+
+/// Information about a blockchain block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockInfo {
+    pub block_num: BlockNum,
+    pub hash: BlockHash,
+    pub parent_hash: BlockHash,
+}
+
+/// Result of a successful contract deployment.
+#[derive(Debug, Clone)]
+pub struct DeploymentResult {
+    /// The deployed contract's address.
+    pub address: Address,
+    /// The deployment transaction hash.
+    pub tx_hash: TxHash,
 }
