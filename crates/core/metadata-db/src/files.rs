@@ -37,8 +37,8 @@ where
 {
     let query = indoc::indoc! {r#"
         WITH inserted AS (
-            INSERT INTO file_metadata (location_id, url, file_name, object_size, object_e_tag, object_version, metadata, footer)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO file_metadata (location_id, url, file_name, object_size, object_e_tag, object_version, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING
             RETURNING id
         )
@@ -135,12 +135,20 @@ where
 }
 
 /// Delete file metadata record by ID
+///
+/// Also deletes the corresponding footer_cache entry.
 #[instrument(skip(executor))]
 pub async fn delete<'e, E>(executor: E, id: FileId) -> Result<bool, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let query = "DELETE FROM file_metadata WHERE id = $1";
+    // Delete from footer_cache first (no FK constraint), then file_metadata
+    let query = indoc::indoc! {r#"
+        WITH deleted_footer AS (
+            DELETE FROM footer_cache WHERE file_id = $1
+        )
+        DELETE FROM file_metadata WHERE id = $1
+    "#};
 
     let result = sqlx::query(query).bind(id).execute(executor).await?;
     Ok(result.rows_affected() > 0)

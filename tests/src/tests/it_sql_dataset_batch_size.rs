@@ -40,29 +40,74 @@ async fn sql_dataset_input_batch_size() {
         .await;
 
     // 4. Get catalog and count files
-    let file_count = test.file_count("sql_stream_ds", "even_blocks").await;
+    let physical_file_count = test.file_count("sql_stream_ds", "even_blocks").await;
+    let file_metadata_count = test
+        .file_metadata_count("sql_stream_ds", "even_blocks")
+        .await;
 
     // 5. With batch size 1 and 4 blocks, we expect 4 files to be dumped (even if some are empty)
     // since microbatch_max_interval=1 should create one file per block even_blocks only includes
     // even block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus
     // empty files for odd blocks.
-    assert_eq!(file_count, 4);
+    assert_eq!(physical_file_count, 4);
+    assert_eq!(file_metadata_count, 4);
 
     test.spawn_compaction_and_await_completion("sql_stream_ds", "even_blocks")
         .await;
 
-    // 6. After compaction, we expect an additional file to be created, with all data in it.
-    let file_count_after = test.file_count("sql_stream_ds", "even_blocks").await;
+    // 6. After compaction:
+    // - file_metadata: only 1 entry (the compacted file) since old files are eagerly deleted
+    // - physical files: 5 (4 original + 1 compacted, waiting for garbage collection)
+    // - footer_cache: 5 (preserved for all files until garbage collection)
+    let physical_file_count_after = test.file_count("sql_stream_ds", "even_blocks").await;
+    let file_metadata_count_after = test
+        .file_metadata_count("sql_stream_ds", "even_blocks")
+        .await;
+    let footer_cache_count_after = test
+        .footer_cache_count("sql_stream_ds", "even_blocks")
+        .await;
 
-    assert_eq!(file_count_after, 5);
+    assert_eq!(
+        file_metadata_count_after, 1,
+        "file_metadata should only have compacted file"
+    );
+    assert_eq!(
+        physical_file_count_after, 5,
+        "physical files should include old + compacted"
+    );
+    assert_eq!(
+        footer_cache_count_after, physical_file_count_after,
+        "footer_cache should match physical files"
+    );
 
     test.spawn_collection_and_await_completion("sql_stream_ds", "even_blocks")
         .await;
 
-    // 7. After collection, we expect the original 4 files to be deleted,
-    // leaving only the compacted file.
-    let file_count_final = test.file_count("sql_stream_ds", "even_blocks").await;
-    assert_eq!(file_count_final, 1);
+    // 7. After collection, garbage collector deletes:
+    // - physical files (4 old ones)
+    // - footer_cache entries (4 old ones)
+    // - gc_manifest entries (4 old ones)
+    // Leaving only the compacted file everywhere.
+    let physical_file_count_final = test.file_count("sql_stream_ds", "even_blocks").await;
+    let file_metadata_count_final = test
+        .file_metadata_count("sql_stream_ds", "even_blocks")
+        .await;
+    let footer_cache_count_final = test
+        .footer_cache_count("sql_stream_ds", "even_blocks")
+        .await;
+
+    assert_eq!(
+        physical_file_count_final, 1,
+        "only compacted file should remain"
+    );
+    assert_eq!(
+        file_metadata_count_final, 1,
+        "only compacted file in metadata"
+    );
+    assert_eq!(
+        footer_cache_count_final, 1,
+        "only compacted file in footer_cache"
+    );
 
     let mut test_client = test.new_flight_client().await.unwrap();
     let (res, _batch_count) = test_client
@@ -232,5 +277,39 @@ impl TestCtx {
 
     async fn file_count(&self, dataset: &str, table: &str) -> usize {
         self.files(dataset, table).await.len()
+    }
+
+    /// Count file_metadata entries for a table (registered files)
+    async fn file_metadata_count(&self, dataset: &str, table: &str) -> usize {
+        let catalog = self.catalog_for_dataset(dataset).await.unwrap();
+        let table = catalog
+            .tables()
+            .iter()
+            .find(|t| t.table_name() == table)
+            .unwrap();
+
+        table.files().await.map(|files| files.len()).unwrap_or(0)
+    }
+
+    /// Count footer_cache entries for a table
+    ///
+    /// This counts footer_cache entries that belong to this location via either:
+    /// - file_metadata (current files)
+    /// - gc_manifest (files pending garbage collection)
+    async fn footer_cache_count(&self, dataset: &str, table: &str) -> usize {
+        let catalog = self.catalog_for_dataset(dataset).await.unwrap();
+        let table = catalog
+            .tables()
+            .iter()
+            .find(|t| t.table_name() == table)
+            .unwrap();
+
+        let location_id = table.location_id();
+        let metadata_db = self.ctx.daemon_worker().metadata_db();
+
+        metadata_db
+            .count_footer_cache_by_location(location_id)
+            .await
+            .unwrap_or(0) as usize
     }
 }

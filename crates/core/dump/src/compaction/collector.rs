@@ -104,17 +104,20 @@ impl Collector {
             );
         }
 
-        let paths_to_remove = metadata_db
-            .delete_file_ids(found_file_ids_to_paths.keys())
+        // Delete from footer_cache (file_metadata was already deleted during compaction)
+        metadata_db
+            .delete_footer_cache(found_file_ids_to_paths.keys())
             .await
-            .map_err(CollectorError::file_metadata_delete(
+            .map_err(CollectorError::footer_cache_delete(
                 found_file_ids_to_paths.keys(),
-            ))?
-            .into_iter()
-            .filter_map(|file_id| found_file_ids_to_paths.get(&file_id).cloned())
-            .collect::<BTreeSet<_>>();
+            ))?;
 
-        tracing::debug!("Metadata entries deleted: {}", paths_to_remove.len());
+        tracing::debug!(
+            "Footer cache entries deleted: {}",
+            found_file_ids_to_paths.len()
+        );
+
+        let paths_to_remove: BTreeSet<_> = found_file_ids_to_paths.values().cloned().collect();
 
         if let Some(metrics) = &self.metrics {
             metrics.inc_expired_entries_deleted(
@@ -160,6 +163,19 @@ impl Collector {
 
         tracing::debug!("Expired files deleted: {}", files_deleted);
         tracing::debug!("Expired files not found: {}", files_not_found);
+
+        // Delete from gc_manifest after physical files have been deleted
+        metadata_db
+            .delete_gc_manifest(found_file_ids_to_paths.keys())
+            .await
+            .map_err(CollectorError::gc_manifest_delete(
+                found_file_ids_to_paths.keys(),
+            ))?;
+
+        tracing::debug!(
+            "GC manifest entries deleted: {}",
+            found_file_ids_to_paths.len()
+        );
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.inc_successful_collections(table_name.to_string());

@@ -30,7 +30,7 @@ firehose-datasets = { path = "../crates/extractors/firehose" }
 fs-err.workspace = true
 futures.workspace = true
 indoc.workspace = true
-metadata-db = { path = "../crates/core/metadata-db" }
+metadata-db = { path = "../crates/core/metadata-db", features = ["test-utils"] }
 monitoring = { path = "../crates/core/monitoring" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

@@ -273,13 +273,25 @@ where
 
 /// Delete a location by its ID
 ///
-/// This will also delete all associated file_metadata entries due to CASCADE.
+/// This will also delete all associated entries:
+/// - file_metadata entries (via CASCADE on location_id FK)
+/// - gc_manifest entries (via CASCADE on file_id FK from file_metadata)
+/// - footer_cache entries (explicitly deleted since no FK constraint)
+///
 /// Returns true if the location was deleted, false if it didn't exist.
 pub async fn delete_by_id<'c, E>(exe: E, id: LocationId) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
+    // Delete footer_cache entries first (no FK constraint), then physical_tables
+    // The physical_tables delete will cascade to file_metadata and gc_manifest
     let query = indoc::indoc! {"
+        WITH file_ids AS (
+            SELECT id FROM file_metadata WHERE location_id = $1
+        ),
+        deleted_footer_cache AS (
+            DELETE FROM footer_cache WHERE file_id IN (SELECT id FROM file_ids)
+        )
         DELETE FROM physical_tables
         WHERE id = $1
     "};
