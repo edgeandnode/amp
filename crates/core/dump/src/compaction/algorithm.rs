@@ -99,10 +99,9 @@ impl CompactionAlgorithm {
             .is_exceeded(&(candidate.size + group.size));
 
         if state == FileState::Live {
-            // For live files, only compact if size limit is not exceeded.
-            // If it's the tail file, also require length limit to be exceeded
-            // (for cases where a minimum number of segments is desired before compaction).
-            *size_exceeded
+            // For live files, compact as long as size limit is not exceeded.
+            // This allows grouping many small files until they reach the target size.
+            !*size_exceeded
         } else if state == FileState::Hot {
             // For hot files, only compact if size limit is not exceeded,
             // and both files share the same generation.
