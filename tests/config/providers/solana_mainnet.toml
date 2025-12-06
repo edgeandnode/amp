@@ -1,0 +1,4 @@
+kind = "solana"
+network = "mainnet"
+of1_car_directory = "${SOLANA_OF1_CAR_DIRECTORY}"
+http_url = "${SOLANA_MAINNET_HTTP_URL}"

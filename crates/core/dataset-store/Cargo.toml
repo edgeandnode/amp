@@ -22,6 +22,7 @@ parking_lot = "0.12.4"
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
 tokio.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }

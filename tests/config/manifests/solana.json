@@ -1,0 +1,688 @@
+{
+  "kind": "solana",
+  "network": "mainnet",
+  "start_block": 175408000,
+  "finalized_blocks_only": false,
+  "tables": {
+    "block_headers": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "slot",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "parent_slot",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "previous_block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            },
+            {
+              "name": "block_height",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "block_time",
+              "type": "Int64",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
+    },
+    "messages": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "slot",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "tx_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "num_required_signatures",
+              "type": "UInt8",
+              "nullable": false
+            },
+            {
+              "name": "num_readonly_signed_accounts",
+              "type": "UInt8",
+              "nullable": false
+            },
+            {
+              "name": "num_readonly_unsigned_accounts",
+              "type": "UInt8",
+              "nullable": false
+            },
+            {
+              "name": "instructions",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "program_id_index",
+                        "data_type": "UInt8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "accounts",
+                        "data_type": {
+                          "List": {
+                            "name": "item",
+                            "data_type": "UInt8",
+                            "nullable": true,
+                            "dict_id": 0,
+                            "dict_is_ordered": false,
+                            "metadata": {}
+                          }
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "data",
+                        "data_type": "Utf8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "stack_height",
+                        "data_type": "UInt32",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": false
+            },
+            {
+              "name": "address_table_lookups",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "account_key",
+                        "data_type": "Utf8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "writable_indexes",
+                        "data_type": {
+                          "List": {
+                            "name": "item",
+                            "data_type": "UInt8",
+                            "nullable": true,
+                            "dict_id": 0,
+                            "dict_is_ordered": false,
+                            "metadata": {}
+                          }
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "readonly_indexes",
+                        "data_type": {
+                          "List": {
+                            "name": "item",
+                            "data_type": "UInt8",
+                            "nullable": true,
+                            "dict_id": 0,
+                            "dict_is_ordered": false,
+                            "metadata": {}
+                          }
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "account_keys",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "Utf8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": false
+            },
+            {
+              "name": "recent_block_hash",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
+    },
+    "transactions": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "tx_index",
+              "type": "UInt32",
+              "nullable": false
+            },
+            {
+              "name": "tx_signatures",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "Utf8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "Boolean",
+              "nullable": true
+            },
+            {
+              "name": "fee",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "pre_balances",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt64",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "post_balances",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt64",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "inner_instructions",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "index",
+                        "data_type": "UInt8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "instructions",
+                        "data_type": {
+                          "List": {
+                            "name": "item",
+                            "data_type": {
+                              "Struct": [
+                                {
+                                  "name": "program_id_index",
+                                  "data_type": "UInt8",
+                                  "nullable": false,
+                                  "dict_id": 0,
+                                  "dict_is_ordered": false,
+                                  "metadata": {}
+                                },
+                                {
+                                  "name": "accounts",
+                                  "data_type": {
+                                    "List": {
+                                      "name": "item",
+                                      "data_type": "UInt8",
+                                      "nullable": true,
+                                      "dict_id": 0,
+                                      "dict_is_ordered": false,
+                                      "metadata": {}
+                                    }
+                                  },
+                                  "nullable": false,
+                                  "dict_id": 0,
+                                  "dict_is_ordered": false,
+                                  "metadata": {}
+                                },
+                                {
+                                  "name": "data",
+                                  "data_type": "Utf8",
+                                  "nullable": false,
+                                  "dict_id": 0,
+                                  "dict_is_ordered": false,
+                                  "metadata": {}
+                                },
+                                {
+                                  "name": "stack_height",
+                                  "data_type": "UInt32",
+                                  "nullable": true,
+                                  "dict_id": 0,
+                                  "dict_is_ordered": false,
+                                  "metadata": {}
+                                }
+                              ]
+                            },
+                            "nullable": true,
+                            "dict_id": 0,
+                            "dict_is_ordered": false,
+                            "metadata": {}
+                          }
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "log_messages",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "Utf8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "pre_token_balances",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "account_index",
+                        "data_type": "UInt8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "mint",
+                        "data_type": "Utf8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "ui_token_amount",
+                        "data_type": {
+                          "Struct": [
+                            {
+                              "name": "ui_amount",
+                              "data_type": "Float64",
+                              "nullable": true,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "decimals",
+                              "data_type": "UInt8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "amount",
+                              "data_type": "Utf8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "ui_amount_string",
+                              "data_type": "Utf8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            }
+                          ]
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "owner",
+                        "data_type": "Utf8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "program_id",
+                        "data_type": "Utf8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "post_token_balances",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "account_index",
+                        "data_type": "UInt8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "mint",
+                        "data_type": "Utf8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "ui_token_amount",
+                        "data_type": {
+                          "Struct": [
+                            {
+                              "name": "ui_amount",
+                              "data_type": "Float64",
+                              "nullable": true,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "decimals",
+                              "data_type": "UInt8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "amount",
+                              "data_type": "Utf8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            },
+                            {
+                              "name": "ui_amount_string",
+                              "data_type": "Utf8",
+                              "nullable": false,
+                              "dict_id": 0,
+                              "dict_is_ordered": false,
+                              "metadata": {}
+                            }
+                          ]
+                        },
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "owner",
+                        "data_type": "Utf8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "program_id",
+                        "data_type": "Utf8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "rewards",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "pubkey",
+                        "data_type": "Utf8",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "lamports",
+                        "data_type": "Int64",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "post_balance",
+                        "data_type": "UInt64",
+                        "nullable": false,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "reward_type",
+                        "data_type": "Utf8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "commission",
+                        "data_type": "UInt8",
+                        "nullable": true,
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "loaded_addresses_writable",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "Utf8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "loaded_addresses_readonly",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "Utf8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
+            },
+            {
+              "name": "return_data_program_id",
+              "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "return_data",
+              "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "return_data_encoding",
+              "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "compute_units_consumed",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "cost_units",
+              "type": "UInt64",
+              "nullable": true
+            },
+            {
+              "name": "slot",
+              "type": "UInt64",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
+    }
+  }
+}

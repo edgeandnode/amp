@@ -108,6 +108,7 @@ jobs:
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
           BEACON_ETH_MAINNET_URL: ${{ secrets.BEACON_ETH_MAINNET_URL }}
+          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
 
   ampup-tests:
     name: Test ampup

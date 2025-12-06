@@ -1,0 +1,32 @@
+[package]
+name = "datasets-solana-gen"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+publish = false
+
+# The parent crate is always available as a build dependency
+[build-dependencies]
+solana-datasets = { path = ".." }
+
+# Manifest schema generation dependencies (schemars feature and related)
+# These dependencies are only included when the gen_schema_manifest cfg flag is enabled
+[target.'cfg(gen_schema_manifest)'.build-dependencies]
+solana-datasets = { path = "..", features = ["schemars"] }
+schemars = { workspace = true }
+serde_json = { workspace = true }
+
+# Table schema markdown generation dependencies
+# These dependencies are only included when the gen_schema_tables cfg flag is enabled
+[target.'cfg(gen_schema_tables)'.build-dependencies]
+datasets-raw = { path = "../../../core/datasets-raw", features = [
+    "gen-schema",
+] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints.rust]
+# Allow the gen_schema_manifest and gen_schema_tables cfg flags used for conditional schema generation
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(gen_schema_manifest)',
+    'cfg(gen_schema_tables)',
+] }
