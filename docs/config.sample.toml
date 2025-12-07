@@ -84,10 +84,11 @@ url = "postgres://<pg_url>"
 # metadata_concurrency = 2        # Max concurrent metadata operations (default: 2)
 # write_concurrency = 2           # Max concurrent compaction write operations (default: 2)
 # min_interval = 1.0              # Interval in seconds to run the compactor (default: 1.0)
-# cooldown_duration = 1024.0      # Base cooldown duration in seconds (default: 1024.0)
-# overflow = "1"                  # Eager compaction overflow (default: "1")
-# bytes = 0                       # Eager compaction byte threshold (default: 0)
-# rows = 0                        # Eager compaction row threshold (default: 0)
+# cooldown_duration = 1024.0      # Cooldown to wait before re-compacting a file, in seconds (default: 1024.0)
+#
+# Maximum generation for eager compaction, that is, cooldowns only apply for generations above this value.
+# Default: 0. To disable eager compaction, set to -1.
+# max_eager_generation = 0 
 
 # Garbage collector
 [writer.collector]
