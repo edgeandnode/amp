@@ -1,6 +1,6 @@
 //! Tests for LMDB state and batch store implementations.
 
-use common::arrow::{
+use arrow::{
     array::{Int32Array, RecordBatch, StringArray},
     datatypes::{DataType, Field, Schema},
 };

@@ -8,18 +8,15 @@ use std::{
     task::{Context, Poll},
 };
 
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use arrow_flight::sql::client::FlightSqlServiceClient;
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{
+    BlockNum, BlockRange, ResumeWatermark,
     cdc::CdcStreamBuilder,
     decode,
     error::{Error, ProtocolError},

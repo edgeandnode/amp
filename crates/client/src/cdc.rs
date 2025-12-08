@@ -45,15 +45,13 @@ use std::{
     sync::Arc,
 };
 
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-};
 use futures::{Stream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
+    BlockNum,
     client::{AmpClient, HasSchema},
     error::Error,
     store::{BatchStore, StateStore},

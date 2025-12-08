@@ -2,7 +2,7 @@
 
 use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
-use common::arrow::array::RecordBatch;
+use arrow::array::RecordBatch;
 use heed::{
     Database, Env, EnvOpenOptions,
     types::{Bytes, Str},

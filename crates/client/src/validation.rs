@@ -7,9 +7,11 @@
 use std::cmp::Ordering;
 
 use alloy::primitives::BlockHash;
-use common::metadata::segments::BlockRange;
 
-use crate::error::{Error, ValidationError};
+use crate::{
+    BlockRange,
+    error::{Error, ValidationError},
+};
 
 /// Validate parent hash presence and correctness.
 ///

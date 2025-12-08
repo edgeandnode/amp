@@ -1,5 +1,7 @@
 //! CDC-specific test utilities.
 
+use arrow::array::RecordBatch;
+
 use crate::{cdc::CdcEvent, transactional::TransactionId};
 
 /// Assertion helper for CDC Insert events.
@@ -25,7 +27,7 @@ pub fn assert_insert_event(event: &CdcEvent, expected_id: TransactionId, expecte
 /// Collect all batches from a delete iterator.
 pub async fn collect_delete_batches(
     mut iterator: crate::cdc::DeleteBatchIterator,
-) -> Result<Vec<(TransactionId, common::arrow::array::RecordBatch)>, crate::error::Error> {
+) -> Result<Vec<(TransactionId, RecordBatch)>, crate::error::Error> {
     let mut batches = Vec::new();
     while let Some(result) = iterator.next().await {
         batches.push(result?);

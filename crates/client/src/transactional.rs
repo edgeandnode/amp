@@ -11,16 +11,13 @@ use std::{
     task::{Context, Poll},
 };
 
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
+    BlockNum, BlockRange, ResumeWatermark,
     client::{AmpClient, HasSchema, InvalidationRange, ProtocolMessage, ProtocolStream},
     error::{Error, ReorgError},
     store::StateStore,

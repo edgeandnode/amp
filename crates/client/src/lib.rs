@@ -124,11 +124,17 @@
 //! }
 //! ```
 
+use std::{collections::BTreeMap, ops::RangeInclusive};
+
+use alloy::primitives::BlockHash;
+
 mod cdc;
 mod client;
 mod decode;
 mod error;
 pub mod store;
+#[cfg(test)]
+mod tests;
 mod transactional;
 mod validation;
 
@@ -137,7 +143,6 @@ pub use client::{
     AmpClient, BatchStream, HasSchema, InvalidationRange, Metadata, ProtocolMessage,
     ProtocolStream, RawStream, ResponseBatch, StreamBuilder,
 };
-pub use common::metadata::segments::BlockRange;
 pub use error::Error;
 #[cfg(feature = "postgres")]
 pub use store::PostgresStateStore;
@@ -146,5 +151,69 @@ pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapsho
 pub use store::{LmdbBatchStore, LmdbStateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
-#[cfg(test)]
-mod tests;
+pub type BlockNum = u64;
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct BlockRange {
+    pub numbers: RangeInclusive<BlockNum>,
+    pub network: String,
+    pub hash: BlockHash,
+    pub prev_hash: Option<BlockHash>,
+}
+
+impl BlockRange {
+    #[inline]
+    pub fn start(&self) -> BlockNum {
+        *self.numbers.start()
+    }
+
+    #[inline]
+    pub fn end(&self) -> BlockNum {
+        *self.numbers.end()
+    }
+
+    #[inline]
+    pub fn watermark(&self) -> Watermark {
+        Watermark {
+            number: self.end(),
+            hash: self.hash,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Watermark {
+    /// The segment end block
+    pub number: BlockNum,
+    /// The hash associated with the segment end block
+    pub hash: BlockHash,
+}
+
+/// Public interface for resuming a stream from a watermark.
+// TODO: unify with `Watermark` when adding support for multi-network streaming.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResumeWatermark(pub BTreeMap<String, Watermark>);
+
+impl ResumeWatermark {
+    pub fn from_ranges(ranges: &[BlockRange]) -> Self {
+        let watermark = ranges
+            .iter()
+            .map(|r| {
+                let watermark = r.watermark();
+                (r.network.clone(), watermark)
+            })
+            .collect();
+        Self(watermark)
+    }
+
+    pub fn to_watermark(
+        self,
+        network: &str,
+    ) -> Result<Watermark, Box<dyn std::error::Error + Sync + Send + 'static>> {
+        self.0
+            .into_iter()
+            .find(|(n, _)| n == network)
+            .map(|(_, w)| w)
+            .ok_or_else(|| format!("Expected resume watermark for network '{network}'").into())
+    }
+}

@@ -8,7 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use common::arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema};
 use futures::{Stream as FuturesStream, StreamExt};
 
 use crate::{

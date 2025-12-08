@@ -831,11 +831,11 @@ name = "amp-client"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "arrow",
  "arrow-flight",
  "async-stream",
  "async-trait",
  "bytes",
- "common",
  "futures",
  "heed",
  "http",
