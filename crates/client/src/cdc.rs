@@ -45,13 +45,13 @@ use std::{
     sync::Arc,
 };
 
+use alloy::primitives::BlockNumber;
 use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use async_stream::try_stream;
 use futures::{Stream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
-    BlockNum,
     client::{AmpClient, HasSchema},
     error::Error,
     store::{BatchStore, StateStore},
@@ -277,7 +277,7 @@ pub struct CdcStreamBuilder {
     sql: String,
     state_store: Box<dyn StateStore>,
     batch_store: Box<dyn BatchStore>,
-    retention: BlockNum,
+    retention: BlockNumber,
 }
 
 impl CdcStreamBuilder {
@@ -294,7 +294,7 @@ impl CdcStreamBuilder {
         sql: impl Into<String>,
         state_store: Box<dyn StateStore>,
         batch_store: Box<dyn BatchStore>,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> Self {
         Self {
             client,

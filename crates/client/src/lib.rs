@@ -126,7 +126,7 @@
 
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
-use alloy::primitives::BlockHash;
+use alloy::primitives::{BlockHash, BlockNumber};
 
 mod cdc;
 mod client;
@@ -151,11 +151,9 @@ pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapsho
 pub use store::{LmdbBatchStore, LmdbStateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
-pub type BlockNum = u64;
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct BlockRange {
-    pub numbers: RangeInclusive<BlockNum>,
+    pub numbers: RangeInclusive<BlockNumber>,
     pub network: String,
     pub hash: BlockHash,
     pub prev_hash: Option<BlockHash>,
@@ -163,12 +161,12 @@ pub struct BlockRange {
 
 impl BlockRange {
     #[inline]
-    pub fn start(&self) -> BlockNum {
+    pub fn start(&self) -> BlockNumber {
         *self.numbers.start()
     }
 
     #[inline]
-    pub fn end(&self) -> BlockNum {
+    pub fn end(&self) -> BlockNumber {
         *self.numbers.end()
     }
 
@@ -184,7 +182,7 @@ impl BlockRange {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Watermark {
     /// The segment end block
-    pub number: BlockNum,
+    pub number: BlockNumber,
     /// The hash associated with the segment end block
     pub hash: BlockHash,
 }

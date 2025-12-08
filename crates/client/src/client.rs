@@ -8,6 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy::primitives::BlockNumber;
 use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use arrow_flight::sql::client::FlightSqlServiceClient;
 use async_stream::try_stream;
@@ -16,7 +17,7 @@ use serde::Deserialize;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{
-    BlockNum, BlockRange, ResumeWatermark,
+    BlockRange, ResumeWatermark,
     cdc::CdcStreamBuilder,
     decode,
     error::{Error, ProtocolError},
@@ -197,7 +198,7 @@ impl ProtocolStream {
                     if incoming.start() < prev.end() + 1 {
                         return Some(InvalidationRange {
                             network: incoming.network.clone(),
-                            numbers: incoming.start()..=BlockNum::max(incoming.end(), prev.end()),
+                            numbers: incoming.start()..=BlockNumber::max(incoming.end(), prev.end()),
                         });
                     }
 
@@ -464,7 +465,7 @@ impl StreamBuilder {
     pub fn transactional(
         self,
         store: impl StateStore + 'static,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> TransactionalStreamBuilder {
         TransactionalStreamBuilder::new(self.client, self.sql, Box::new(store), retention)
     }
@@ -495,7 +496,7 @@ impl StreamBuilder {
         self,
         state_store: impl StateStore + 'static,
         batch_store: impl BatchStore + 'static,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> CdcStreamBuilder {
         CdcStreamBuilder::new(
             self.client,
@@ -542,7 +543,7 @@ impl IntoFuture for RawStreamBuilder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidationRange {
     pub network: String,
-    pub numbers: RangeInclusive<BlockNum>,
+    pub numbers: RangeInclusive<BlockNumber>,
 }
 
 impl InvalidationRange {

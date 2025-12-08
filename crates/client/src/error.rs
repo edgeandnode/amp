@@ -1,8 +1,7 @@
 //! Error types for the Amp client
 
+use alloy::primitives::BlockNumber;
 use arrow::error::ArrowError;
-
-use crate::BlockNum;
 
 // ============================================================================
 // Top-Level Error
@@ -161,9 +160,9 @@ pub enum ValidationError {
     )]
     NonConsecutiveBlocks {
         network: String,
-        prev_end: BlockNum,
-        incoming_start: BlockNum,
-        expected_start: BlockNum,
+        prev_end: BlockNumber,
+        incoming_start: BlockNumber,
+        expected_start: BlockNumber,
     },
 
     /// Missing prev_hash for non-genesis block (zero hash detected)
@@ -175,7 +174,7 @@ pub enum ValidationError {
     /// Zero hash is only valid for blocks starting at 0 (genesis), regardless of
     /// whether it's the first message or a reorg back to genesis.
     #[error("missing prev_hash for network '{network}' at block {block} (zero hash detected)")]
-    MissingPrevHash { network: String, block: BlockNum },
+    MissingPrevHash { network: String, block: BlockNumber },
 
     /// Invalid prev_hash for genesis block (non-zero hash detected)
     ///
@@ -236,8 +235,8 @@ pub enum ValidationError {
     #[error("gap in blocks for network '{network}': missing blocks {missing_start}..{missing_end}")]
     Gap {
         network: String,
-        missing_start: BlockNum,
-        missing_end: BlockNum,
+        missing_start: BlockNumber,
+        missing_end: BlockNumber,
     },
 }
 
