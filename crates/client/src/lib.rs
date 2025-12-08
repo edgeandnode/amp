@@ -171,47 +171,32 @@ impl BlockRange {
     }
 
     #[inline]
-    pub fn watermark(&self) -> Watermark {
-        Watermark {
+    fn network_cursor(&self) -> NetworkCursor {
+        NetworkCursor {
             number: self.end(),
             hash: self.hash,
         }
     }
 }
 
+/// Public interface for resuming a stream from a cursor.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Watermark {
-    /// The segment end block
-    pub number: BlockNumber,
-    /// The hash associated with the segment end block
-    pub hash: BlockHash,
-}
-
-/// Public interface for resuming a stream from a watermark.
-// TODO: unify with `Watermark` when adding support for multi-network streaming.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Cursor(pub BTreeMap<String, Watermark>);
+pub struct Cursor(BTreeMap<String, NetworkCursor>);
 
 impl Cursor {
     pub fn from_ranges(ranges: &[BlockRange]) -> Self {
         let watermark = ranges
             .iter()
-            .map(|r| {
-                let watermark = r.watermark();
-                (r.network.clone(), watermark)
-            })
+            .map(|r| (r.network.clone(), r.network_cursor()))
             .collect();
         Self(watermark)
     }
+}
 
-    pub fn to_watermark(
-        self,
-        network: &str,
-    ) -> Result<Watermark, Box<dyn std::error::Error + Sync + Send + 'static>> {
-        self.0
-            .into_iter()
-            .find(|(n, _)| n == network)
-            .map(|(_, w)| w)
-            .ok_or_else(|| format!("Expected resume watermark for network '{network}'").into())
-    }
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct NetworkCursor {
+    /// The segment end block
+    number: BlockNumber,
+    /// The hash associated with the segment end block
+    hash: BlockHash,
 }
