@@ -309,11 +309,31 @@ pub enum CollectorError {
         file_ids: Vec<FileId>,
     },
 
-    /// Failed to delete manifest record
+    /// Failed to delete footer cache records
     ///
-    /// This occurs when removing a file entry from the garbage collection manifest
-    /// after the file has been successfully deleted. The GC manifest tracks files
-    /// eligible for cleanup.
+    /// This occurs when removing footer cache entries from the database after
+    /// the gc_manifest entries have expired. Footer cache entries are kept until
+    /// the Collector runs to allow reads during the grace period.
+    ///
+    /// Common causes:
+    /// - Database connection lost during delete
+    /// - Transaction conflicts with concurrent operations
+    /// - Insufficient database permissions for DELETE queries
+    ///
+    /// This leaves orphaned footer cache entries. They should be cleaned up
+    /// manually or via retry.
+    #[error("failed to delete footer cache for files {file_ids:?}: {err}")]
+    FooterCacheDelete {
+        #[source]
+        err: metadata_db::Error,
+        file_ids: Vec<FileId>,
+    },
+
+    /// Failed to delete gc_manifest records
+    ///
+    /// This occurs when removing entries from the garbage collection manifest
+    /// after the files have been successfully deleted from storage. The GC manifest
+    /// tracks files eligible for cleanup.
     ///
     /// Common causes:
     /// - Database connection lost during delete
@@ -321,13 +341,13 @@ pub enum CollectorError {
     /// - Record already deleted by another process
     /// - Insufficient database permissions
     ///
-    /// This leaves a stale entry in the GC manifest. The entry should be cleaned
+    /// This leaves stale entries in the GC manifest. They should be cleaned
     /// up to prevent repeated deletion attempts.
-    #[error("failed to delete file {file_id} from gc manifest: {err}")]
-    ManifestDelete {
+    #[error("failed to delete from gc manifest for files {file_ids:?}: {err}")]
+    GcManifestDelete {
         #[source]
         err: metadata_db::Error,
-        file_id: FileId,
+        file_ids: Vec<FileId>,
     },
 
     /// Failed to parse URL for file
@@ -408,8 +428,22 @@ impl CollectorError {
         }
     }
 
-    pub fn gc_manifest_delete(file_id: FileId) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| Self::ManifestDelete { err, file_id }
+    pub fn footer_cache_delete<'a>(
+        file_ids: impl Iterator<Item = &'a FileId>,
+    ) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| Self::FooterCacheDelete {
+            err,
+            file_ids: file_ids.cloned().collect(),
+        }
+    }
+
+    pub fn gc_manifest_delete<'a>(
+        file_ids: impl Iterator<Item = &'a FileId>,
+    ) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| Self::GcManifestDelete {
+            err,
+            file_ids: file_ids.cloned().collect(),
+        }
     }
 
     pub fn parse_error(file_id: FileId) -> impl FnOnce(url::ParseError) -> Self {

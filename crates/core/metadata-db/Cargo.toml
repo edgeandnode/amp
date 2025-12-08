@@ -9,6 +9,8 @@ license-file.workspace = true
 default = []
 # Temporary database support for testing environments
 temp-db = ["pgtemp"]
+# Test utilities for downstream crates
+test-utils = []
 
 [dependencies]
 backon.workspace = true
