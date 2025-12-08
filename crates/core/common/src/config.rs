@@ -154,6 +154,7 @@ pub struct CompactionAlgorithmConfig {
     pub max_eager_generation: i64,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
