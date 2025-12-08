@@ -18,7 +18,7 @@ use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
-    BlockRange, ResumeWatermark,
+    BlockRange, Cursor,
     client::{AmpClient, HasSchema, InvalidationRange, ProtocolMessage, ProtocolStream},
     error::{Error, ReorgError},
     store::StateStore,
@@ -606,8 +606,8 @@ impl IntoFuture for TransactionalStreamBuilder {
             TransactionalStream::create(
                 self.store,
                 self.retention,
-                |resume: Option<ResumeWatermark>| async move {
-                    self.client.request(&self.sql, resume.as_ref(), true).await
+                |cursor: Option<Cursor>| async move {
+                    self.client.request(&self.sql, cursor.as_ref(), true).await
                 },
             )
             .await
@@ -689,14 +689,14 @@ impl TransactionalStream {
     /// # Arguments
     /// - `store`: State store for persistence
     /// - `retention`: Retention window in blocks
-    /// - `connect`: Async function that produces a raw stream, given an optional resume watermark
+    /// - `connect`: Async function that produces a raw stream, given an optional resume cursor
     pub(crate) async fn create<F, Fut>(
         store: Box<dyn StateStore>,
         retention: BlockNumber,
         connect: F,
     ) -> Result<Self, Error>
     where
-        F: FnOnce(Option<ResumeWatermark>) -> Fut,
+        F: FnOnce(Option<Cursor>) -> Fut,
         Fut: Future<Output = Result<crate::client::RawStream, Error>>,
     {
         let actor = StateActor::new(store, retention).await?;
@@ -714,9 +714,9 @@ impl TransactionalStream {
             .as_ref()
             .map(|(_, ranges)| ranges.clone())
             .unwrap_or_default();
-        let resume = watermark.map(|(_, ranges)| ResumeWatermark::from_ranges(&ranges));
+        let cursor = watermark.map(|(_, ranges)| Cursor::from_ranges(&ranges));
 
-        let raw = connect(resume).await?;
+        let raw = connect(cursor).await?;
         let schema = raw.schema();
         let mut protocol = ProtocolStream::new(raw.boxed(), previous, schema.clone());
 

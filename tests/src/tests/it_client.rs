@@ -1,7 +1,7 @@
 use std::ops::RangeInclusive;
 
 use alloy::primitives::BlockHash;
-use amp_client::{AmpClient, ResumeWatermark};
+use amp_client::{AmpClient, Cursor};
 use common::{
     BlockNum,
     arrow::array::{FixedSizeBinaryArray, UInt64Array},
@@ -75,7 +75,7 @@ async fn query_with_reorg_stream_returns_correct_control_messages() {
 }
 
 #[tokio::test]
-async fn stream_with_resume_watermark_returns_incremental_blocks() {
+async fn stream_with_resume_cursor_returns_incremental_blocks() {
     let test = TestCtx::setup("client_stream_resume", "anvil_rpc").await;
     let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
     let mut client = test.new_amp_client().await;
@@ -88,7 +88,7 @@ async fn stream_with_resume_watermark_returns_incremental_blocks() {
 
     test.mine(1).await;
     test.dump("_/anvil_rpc@0.0.0", 2).await;
-    let stream2 = stream_blocks(&mut client, query, 2, Some(&stream1.watermark)).await;
+    let stream2 = stream_blocks(&mut client, query, 2, Some(&stream1.cursor)).await;
     // stream blocks [2]
     assert_eq!(
         stream2.records,
@@ -100,7 +100,7 @@ async fn stream_with_resume_watermark_returns_incremental_blocks() {
     test.dump("_/anvil_rpc@0.0.0", 3).await;
     test.dump("_/anvil_rpc@0.0.0", 3).await;
     test.dump("_/anvil_rpc@0.0.0", 3).await;
-    let stream3 = stream_blocks(&mut client, query, 3, Some(&stream2.watermark)).await;
+    let stream3 = stream_blocks(&mut client, query, 3, Some(&stream2.cursor)).await;
     // stream blocks [1', 2', 3]
     assert_eq!(
         stream3.records,
@@ -210,27 +210,24 @@ impl From<BlockInfo> for BlockRow {
 
 // Helper types and functions
 
-/// Stream records with resumption watermark.
+/// Stream records with resumption cursor.
 #[derive(Debug)]
 struct Records {
     records: Vec<BlockRow>,
-    watermark: ResumeWatermark,
+    cursor: Cursor,
 }
 
-/// Stream blocks from client with optional resumption watermark.
+/// Stream blocks from client with optional resumption cursor.
 async fn stream_blocks(
     client: &mut AmpClient,
     query: &str,
     latest_block: BlockNum,
-    resume_watermark: Option<&ResumeWatermark>,
+    resume_cursor: Option<&Cursor>,
 ) -> Records {
-    tracing::debug!(
-        "Stream blocks with resume watermark: {:?}",
-        resume_watermark
-    );
+    tracing::debug!("Stream blocks with resume cursor: {:?}", resume_cursor);
 
     let mut stream = client
-        .request(query, resume_watermark, true)
+        .request(query, resume_cursor, true)
         .await
         .expect("Failed to create client query stream");
     let mut records: Vec<BlockRow> = Default::default();
@@ -265,9 +262,9 @@ async fn stream_blocks(
         }
 
         let end_block = batch.metadata.ranges[0].end();
-        let watermark = ResumeWatermark::from_ranges(&batch.metadata.ranges);
+        let cursor = Cursor::from_ranges(&batch.metadata.ranges);
         if end_block == latest_block {
-            return Records { records, watermark };
+            return Records { records, cursor };
         }
     }
 

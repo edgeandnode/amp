@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{
-    BlockRange, ResumeWatermark,
+    BlockRange, Cursor,
     cdc::CdcStreamBuilder,
     decode,
     error::{Error, ProtocolError},
@@ -374,17 +374,17 @@ impl AmpClient {
     ///
     /// # Arguments
     /// - `sql`: SQL query string
-    /// - `watermark`: Optional watermark for resuming a stream
+    /// - `cursor`: Optional cursor for resuming a stream
     /// - `streaming`: Whether to enable streaming mode
     pub async fn request<S: ToString>(
         &mut self,
         sql: S,
-        watermark: Option<&ResumeWatermark>,
+        cursor: Option<&Cursor>,
         streaming: bool,
     ) -> Result<RawStream, Error> {
         self.client.set_header(
             "amp-resume",
-            watermark
+            cursor
                 .map(|value| serde_json::to_string(value).unwrap())
                 .unwrap_or_default(),
         );
