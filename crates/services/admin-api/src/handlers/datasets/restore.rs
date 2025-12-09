@@ -3,13 +3,10 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::{
-    JobLabels,
-    physical::{PhysicalTable, RestoreLatestRevisionError},
-};
+use common::catalog::physical::{PhysicalTable, RestoreLatestRevisionError};
 use datasets_common::{
-    name::Name, namespace::Namespace, reference::Reference, revision::Revision,
-    table_name::TableName,
+    hash_reference::HashReference, name::Name, namespace::Namespace, reference::Reference,
+    revision::Revision, table_name::TableName,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
 use monitoring::logging;
@@ -96,11 +93,11 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
-    let job_labels = JobLabels {
-        dataset_namespace: reference.namespace().clone(),
-        dataset_name: reference.name().clone(),
-        manifest_hash: dataset.manifest_hash().clone(),
-    };
+    let dataset_reference = HashReference::new(
+        reference.namespace().clone(),
+        reference.name().clone(),
+        dataset.manifest_hash().clone(),
+    );
 
     let mut all_tasks: FuturesUnordered<JoinHandle<Result<RestoredTableInfo, Error>>> =
         FuturesUnordered::new();
@@ -111,7 +108,7 @@ pub async fn handler(
 
         let data_store = ctx.data_store.clone();
         let metadata_db = ctx.metadata_db.clone();
-        let job_labels = job_labels.clone();
+        let dataset_reference_clone = dataset_reference.clone();
         let reference_clone = reference.clone();
 
         let task = tokio::spawn(async move {
@@ -119,7 +116,7 @@ pub async fn handler(
                 &table,
                 data_store,
                 metadata_db,
-                &job_labels,
+                &dataset_reference_clone,
             )
             .await
             .map_err(|err| {

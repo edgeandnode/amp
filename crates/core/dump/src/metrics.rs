@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use common::{BlockNum, catalog::JobLabels};
+use common::BlockNum;
+use datasets_common::hash_reference::HashReference;
 use monitoring::telemetry;
 
 /// The recommended interval at which to export metrics when running the `dump` command.
@@ -59,14 +60,14 @@ pub struct MetricsRegistry {
     pub successful_collections: telemetry::metrics::Counter,
     pub failed_collections: telemetry::metrics::Counter,
 
-    pub job_labels: JobLabels,
+    pub dataset_reference: HashReference,
 }
 
 impl MetricsRegistry {
-    pub fn new(meter: &telemetry::metrics::Meter, job_labels: JobLabels) -> Self {
+    pub fn new(meter: &telemetry::metrics::Meter, dataset_reference: HashReference) -> Self {
         Self {
             meter: meter.clone(),
-            job_labels,
+            dataset_reference,
             rows_ingested: telemetry::metrics::Counter::new(
                 meter,
                 "rows_ingested_total",
@@ -176,15 +177,15 @@ impl MetricsRegistry {
         vec![
             telemetry::metrics::KeyValue::new(
                 "dataset_name",
-                self.job_labels.dataset_name.to_string(),
+                self.dataset_reference.name().as_str().to_string(),
             ),
             telemetry::metrics::KeyValue::new(
                 "dataset_namespace",
-                self.job_labels.dataset_namespace.to_string(),
+                self.dataset_reference.namespace().as_str().to_string(),
             ),
             telemetry::metrics::KeyValue::new(
                 "manifest_hash",
-                self.job_labels.manifest_hash.to_string(),
+                self.dataset_reference.hash().as_str().to_string(),
             ),
         ]
     }

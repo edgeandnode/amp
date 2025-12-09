@@ -2,11 +2,10 @@
 
 use std::{future::Future, sync::Arc};
 
-use common::{
-    BoxError,
-    catalog::{JobLabels, physical::PhysicalTable},
+use common::{BoxError, catalog::physical::PhysicalTable};
+use datasets_common::{
+    hash::Hash, hash_reference::HashReference, reference::Reference, revision::Revision,
 };
-use datasets_common::{hash::Hash, reference::Reference, revision::Revision};
 use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
 use metadata_db::LocationId;
 use tracing::{Instrument, info_span};
@@ -44,17 +43,17 @@ pub(super) async fn new(
             ),
         };
 
-    // Create job-specific metrics from job descriptor
-    let job_labels = JobLabels {
-        dataset_namespace: dataset_namespace.clone(),
-        dataset_name: dataset_name.clone(),
-        manifest_hash: manifest_hash.clone(),
-    };
+    // Create hash reference for metrics and table operations
+    let hash_reference = HashReference::new(
+        dataset_namespace.clone(),
+        dataset_name.clone(),
+        manifest_hash.clone(),
+    );
 
     let metrics = job_ctx
         .meter
         .as_ref()
-        .map(|m| Arc::new(MetricsRegistry::new(m, job_labels.clone())));
+        .map(|m| Arc::new(MetricsRegistry::new(m, hash_reference.clone())));
 
     // Create Ctx instance for job execution
     let ctx = Ctx {
@@ -106,7 +105,7 @@ pub(super) async fn new(
                     &ctx.data_store,
                     ctx.metadata_db.clone(),
                     true, // set_active
-                    &job_labels,
+                    &hash_reference,
                 )
                 .await
                 .map_err(JobInitError::CreatePhysicalTable)?,
