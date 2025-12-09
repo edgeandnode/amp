@@ -33,6 +33,7 @@ use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry::metrics::Meter};
 use parking_lot::RwLock;
 use rand::seq::SliceRandom as _;
+use solana_datasets::{Manifest as SolanaManifest, ProviderConfig as SolanaProviderConfig};
 use tracing::instrument;
 use url::Url;
 
@@ -722,6 +723,12 @@ impl DatasetStore {
                     .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
                 evm_rpc_datasets::dataset(hash.clone(), manifest)
             }
+            DatasetKind::Solana => {
+                let manifest = manifest_content
+                    .try_into_manifest::<SolanaManifest>()
+                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
+                solana_datasets::dataset(hash.clone(), manifest)
+            }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
                     .try_into_manifest::<EthBeaconManifest>()
@@ -879,6 +886,20 @@ impl DatasetStore {
                         source: err,
                     })?
             }
+            DatasetKind::Solana => {
+                let config = config
+                    .try_into_config::<SolanaProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: provider_name.to_string(),
+                        source: err,
+                    })?;
+                solana_datasets::extractor(config, meter)
+                    .map(BlockStreamClient::Solana)
+                    .map_err(|err| GetClientError::SolanaExtractorError {
+                        name: provider_name.to_string(),
+                        source: err,
+                    })?
+            }
             DatasetKind::EthBeacon => {
                 let config = config
                     .try_into_config::<EthBeaconProviderConfig>()
@@ -903,7 +924,7 @@ impl DatasetStore {
                         source: err,
                     })?
             }
-            _ => {
+            DatasetKind::Derived => {
                 unreachable!("non-raw dataset kinds are filtered out earlier");
             }
         };

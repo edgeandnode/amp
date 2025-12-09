@@ -114,6 +114,24 @@ where
             };
             serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
+        dataset_store::DatasetKind::Solana => {
+            let tables = solana_datasets::tables::all(&network)
+                .iter()
+                .map(|table| {
+                    let schema = table_schema_from_logical_table(table);
+                    let manifest_table = solana_datasets::Table::new(schema, network.clone());
+                    (table.name().to_string(), manifest_table)
+                })
+                .collect();
+            let manifest = solana_datasets::Manifest {
+                kind: kind.as_str().parse().expect("kind is valid"),
+                network: network.clone(),
+                start_block: start_block.unwrap_or(0),
+                finalized_blocks_only,
+                tables,
+            };
+            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
+        }
         dataset_store::DatasetKind::EthBeacon => {
             let tables = eth_beacon_datasets::all_tables(network.clone())
                 .iter()

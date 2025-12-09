@@ -1,0 +1,196 @@
+use std::path::Path;
+
+use common::BoxResult;
+use futures::StreamExt;
+use solana_clock::Slot;
+use tokio::io::AsyncWriteExt;
+pub use yellowstone_faithful_car_parser as of1_car_parser;
+
+const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
+
+/// Downloads the Old Faithful CAR file for the given epoch into the specified output directory.
+pub(crate) async fn download_of1_car_file(
+    epoch: solana_clock::Epoch,
+    output_dir: &Path,
+) -> Result<(), FileDownloadError> {
+    let filename = of1_car_filename(epoch);
+    let car_file_url = format!("{OLD_FAITHFUL_ARCHIVE_URL}/{epoch}/{filename}");
+    tracing::debug!(%car_file_url, "downloading Old Faithful CAR file");
+
+    let car_file_path = output_dir.join(filename);
+    let mut file = tokio::fs::File::create(&car_file_path).await?;
+
+    let response = reqwest::get(&car_file_url).await?;
+    let status = response.status();
+    if !status.is_success() {
+        tracing::warn!(
+            %status,
+            "failed to download Old Faithful CAR file"
+        );
+        return Err(FileDownloadError::Http(status.as_u16()));
+    }
+
+    // Stream the file content since these files can be extremely large.
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await.transpose()? {
+        file.write_all(&chunk).await?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FileDownloadError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("HTTP error with status code: {0}")]
+    Http(u16),
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+}
+
+/// Read an entire block worth of nodes from the given node reader and decode them into
+/// a [DecodedBlock].
+///
+/// Inspired by the Old Faithful CAR parser example:
+/// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
+pub(crate) async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
+    node_reader: &mut of1_car_parser::node::NodeReader<R>,
+    prev_blockhash: [u8; 32],
+) -> BoxResult<Option<DecodedBlock>> {
+    // TODO: Could this be executed while downloading the block? As in, read from a stream and
+    // attempt to decode until successful.
+
+    // Once we reach `Node::Block`, the node map will contain all of the nodes needed to reassemble
+    // that block.
+    let mut nodes = of1_car_parser::node::Nodes::read_until_block(node_reader).await?;
+
+    let block = match nodes.nodes.pop() {
+        Some((_, of1_car_parser::node::Node::Block(block))) => block,
+        None | Some((_, of1_car_parser::node::Node::Epoch(_))) => return Ok(None),
+        Some((cid, node)) => {
+            let err = format!(
+                "unexpected node while reading block: kind={:?}, cid={}",
+                node.kind(),
+                cid
+            );
+            return Err(err.into());
+        }
+    };
+
+    let mut transactions = Vec::new();
+    let mut transactions_meta = Vec::new();
+
+    for entry_cid in &block.entries {
+        let Some(of1_car_parser::node::Node::Entry(entry)) = nodes.nodes.get(entry_cid) else {
+            let err = format!("expected entry node for cid {entry_cid}");
+            return Err(err.into());
+        };
+        for tx_cid in &entry.transactions {
+            let Some(of1_car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
+                let err = format!("expected transaction node for cid {tx_cid}");
+                return Err(err.into());
+            };
+
+            let tx_df = nodes.reassemble_dataframes(&tx.data).unwrap();
+            let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata).unwrap();
+
+            let tx = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())
+                .map(|(tx, _)| tx)?;
+            let tx_meta = decode_bincode_protobuf(&tx_meta_df)?;
+
+            transactions.push(tx);
+            transactions_meta.push(tx_meta);
+        }
+    }
+
+    let last_entry_cid = block.entries.last().expect("at least one entry");
+    let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
+    let of1_car_parser::node::Node::Entry(last_entry) = last_entry_node else {
+        let err = format!("expected entry node for cid {last_entry_cid}");
+        return Err(err.into());
+    };
+
+    let blockhash: [u8; 32] = last_entry
+        .hash
+        .clone()
+        .try_into()
+        .expect("blockhash is 32 bytes");
+
+    let block = DecodedBlock {
+        slot: block.slot,
+        parent_slot: block.meta.parent_slot,
+        blockhash,
+        prev_blockhash,
+        block_height: block.meta.block_height,
+        blocktime: block.meta.blocktime,
+        transactions,
+        transaction_metas: transactions_meta,
+        // TODO: Work with rewards?
+        #[allow(dead_code)]
+        block_rewards: Vec::new(),
+    };
+
+    Ok(Some(block))
+}
+
+pub(crate) struct DecodedBlock {
+    pub(crate) slot: Slot,
+    pub(crate) parent_slot: Slot,
+
+    pub(crate) blockhash: [u8; 32],
+    pub(crate) prev_blockhash: [u8; 32],
+
+    pub(crate) block_height: Option<u64>,
+    pub(crate) blocktime: u64,
+
+    pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
+    pub(crate) transaction_metas: Vec<
+        DecodedData<
+            crate::tables::transactions::TransactionStatusMeta,
+            solana_storage_proto::convert::generated::TransactionStatusMeta,
+        >,
+    >,
+
+    #[allow(dead_code)]
+    pub(crate) block_rewards: Vec<
+        DecodedData<
+            Vec<crate::tables::transactions::Reward>,
+            solana_storage_proto::convert::generated::Rewards,
+        >,
+    >,
+}
+
+pub(crate) enum DecodedData<B, P> {
+    Bincode(B),
+    Protobuf(P),
+}
+
+pub(crate) fn decode_bincode_protobuf<B, P>(bytes: &[u8]) -> BoxResult<DecodedData<B, P>>
+where
+    B: serde::de::DeserializeOwned,
+    P: prost::Message + Default,
+{
+    let output = match bincode::serde::decode_from_slice::<B, _>(bytes, bincode::config::standard())
+    {
+        Ok((bincode_data, _)) => DecodedData::Bincode(bincode_data),
+        Err(bincode_err) => match P::decode(bytes) {
+            Ok(protobuf_data) => DecodedData::Protobuf(protobuf_data),
+            Err(protobuf_err) => {
+                let err = format!(
+                    "decode failed: bincode error: {bincode_err}, protobuf error: {protobuf_err}"
+                );
+                return Err(err.into());
+            }
+        },
+    };
+
+    Ok(output)
+}
+
+/// Generates the Old Faithful epoch CAR filename for the given epoch.
+///
+/// Reference: <https://docs.old-faithful.net/references/of1-files>.
+pub(crate) fn of1_car_filename(epoch: solana_clock::Epoch) -> String {
+    format!("epoch-{}.car", epoch)
+}

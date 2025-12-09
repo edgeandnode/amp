@@ -477,6 +477,16 @@ pub enum GetClientError {
         source: evm_rpc_datasets::Error,
     },
 
+    /// Failed to create a Solana extractor.
+    ///
+    /// This occurs during initialization of the Solana extractor, which may fail due to
+    /// invalid URLs, connection issues, or authentication failures.
+    #[error("Failed to create Solana extractor for dataset '{name}': {source}")]
+    SolanaExtractorError {
+        name: String,
+        source: solana_datasets::Error,
+    },
+
     /// Failed to create a Firehose client.
     ///
     /// This occurs during initialization of the Firehose client, which may fail due to
