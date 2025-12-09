@@ -15,9 +15,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{
-    hash::Hash, manifest::Manifest as CommonManifest, name::Name, namespace::Namespace,
-    partial_reference::PartialReference, reference::Reference, revision::Revision,
-    version::Version,
+    hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest, name::Name,
+    namespace::Namespace, partial_reference::PartialReference, reference::Reference,
+    revision::Revision, version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -52,10 +52,10 @@ pub use self::{
     dataset_kind::{DatasetKind, UnsupportedKindError},
     error::{
         DeleteManifestError, DeleteVersionTagError, EthCallForDatasetError, GetAllDatasetsError,
-        GetClientError, GetDatasetByHashError, GetDatasetError, GetDerivedManifestError,
-        GetManifestError, IsManifestLinkedError, LinkManifestError, ListAllDatasetsError,
-        ListAllManifestsError, ListDatasetsUsingManifestError, ListOrphanedManifestsError,
-        ListVersionTagsError, RegisterManifestError, ResolveRevisionError, SetVersionTagError,
+        GetClientError, GetDatasetError, GetDerivedManifestError, GetManifestError,
+        IsManifestLinkedError, LinkManifestError, ListAllDatasetsError, ListAllManifestsError,
+        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
+        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
         UnlinkDatasetManifestsError,
     },
     manifests::{ManifestParseError, StoreError},
@@ -495,33 +495,52 @@ impl DatasetStore {
         Ok(hash)
     }
 
-    /// Resolves a revision to a manifest hash for a given dataset.
+    /// Resolves a reference to a hash reference by resolving its revision to a manifest hash.
     ///
-    /// This is the primary resolution method used by Admin API handlers to convert
-    /// revision references (version tags, hashes, or special tags) into concrete manifest hashes.
+    /// This is the primary resolution method used to convert revision references
+    /// (version tags, hashes, or special tags) into concrete hash references.
     ///
     /// For more specific use cases, consider using the dedicated methods:
-    /// - `resolve_version_hash` for semantic versions
     /// - `resolve_latest_version_hash` for the "latest" tag
     /// - `resolve_dev_version_hash` for the "dev" tag
-    pub async fn resolve_dataset_revision(
+    /// - `resolve_version_hash` for semantic versions
+    ///
+    /// Returns `None` if the dataset or revision cannot be found.
+    pub async fn resolve_revision(
         &self,
-        namespace: &Namespace,
-        name: &Name,
-        revision: &Revision,
-    ) -> Result<Option<Hash>, ResolveRevisionError> {
-        match revision {
+        reference: impl AsRef<Reference>,
+    ) -> Result<Option<HashReference>, ResolveRevisionError> {
+        let reference = reference.as_ref();
+
+        let Some(hash) = (match reference.revision() {
+            Revision::Latest => {
+                self.resolve_latest_version_hash(reference.namespace(), reference.name())
+                    .await?
+            }
+            Revision::Dev => {
+                self.resolve_dev_version_hash(reference.namespace(), reference.name())
+                    .await?
+            }
+            Revision::Version(version) => {
+                self.resolve_version_hash(reference.namespace(), reference.name(), version)
+                    .await?
+            }
             Revision::Hash(hash) => {
                 // Hash is already concrete, just verify it exists in manifest storage
                 let path = metadata_db::manifests::get_path(&self.metadata_db, hash)
                     .await
                     .map_err(ResolveRevisionError)?;
-                Ok(path.map(|_| hash.clone()))
+                path.map(|_| hash.clone())
             }
-            Revision::Version(version) => self.resolve_version_hash(namespace, name, version).await,
-            Revision::Latest => self.resolve_latest_version_hash(namespace, name).await,
-            Revision::Dev => self.resolve_dev_version_hash(namespace, name).await,
-        }
+        }) else {
+            return Ok(None);
+        };
+
+        Ok(Some(HashReference::new(
+            reference.namespace().clone(),
+            reference.name().clone(),
+            hash,
+        )))
     }
 
     /// List all version tags for a dataset
@@ -610,80 +629,41 @@ impl DatasetStore {
 
 // Dataset loading API
 impl DatasetStore {
-    /// Retrieves a dataset by reference, with in-memory caching.
+    /// Retrieves a dataset by hash reference, with in-memory caching.
     ///
-    /// This method resolves the dataset's manifest hash from the namespace+name+version tuple
-    /// and delegates to `get_by_hash` for loading and caching:
-    ///
-    /// 1. Validate the dataset name and resolves the version (uses latest if not provided)
-    /// 2. Resolve the manifest hash for the namespace+name+version tuple
-    /// 3. Delegate to `get_by_hash` which handles caching and loading
-    ///
-    /// Returns `None` if the dataset cannot be found in the metadata database or manifest store.
-    pub async fn get_dataset(
-        &self,
-        reference: impl AsRef<Reference>,
-    ) -> Result<Arc<Dataset>, GetDatasetError> {
-        let reference = reference.as_ref();
-        let namespace = reference.namespace();
-        let name = reference.name();
-        let revision = reference.revision();
-
-        let manifest_hash = match self
-            .resolve_dataset_revision(namespace, name, revision)
-            .await
-        {
-            Ok(Some(hash)) => hash,
-            Ok(None) => return Err(GetDatasetError::DatasetNotFound(reference.clone())),
-            Err(err) => {
-                return Err(GetDatasetError::ResolveRevision {
-                    reference: reference.clone(),
-                    source: err,
-                });
-            }
-        };
-
-        match self.get_dataset_by_hash(&manifest_hash).await {
-            Ok(Some(dataset)) => {
-                tracing::debug!(
-                    dataset_namespace = %namespace,
-                    dataset_name = %name,
-                    dataset_version = %revision,
-                    "Dataset loaded successfully"
-                );
-                Ok(dataset)
-            }
-            Ok(None) => Err(GetDatasetError::DatasetNotFound(reference.clone())),
-            Err(err) => Err(GetDatasetError::LoadDatasetByHash {
-                reference: reference.clone(),
-                source: err,
-            }),
-        }
-    }
-
-    /// Loads a dataset by its manifest hash, with in-memory caching.
-    ///
-    /// This retrieves the manifest content from the object store using the hash,
-    /// parses it to determine the dataset kind, and creates the appropriate dataset instance:
+    /// This method accepts a `HashReference` (a reference that has already been resolved
+    /// to a concrete manifest hash) and loads the dataset:
     ///
     /// 1. Check the in-memory cache using the manifest hash as the key
     /// 2. On cache miss, retrieve the manifest path from metadata DB using the hash
     /// 3. Retrieve the manifest content from the manifest store using the path
     /// 4. Parse the common manifest structure to identify the dataset kind
-    /// 5. Parse the kind-specific manifest (EvmRpc, EthBeacon, Firehose, or Derived)
-    /// 6. Create the typed dataset instance, cache it, and return
+    /// 5. Parse the kind-specific manifest and create the typed dataset instance
+    /// 6. Cache the dataset and return
     ///
-    /// Returns `None` if the manifest cannot be found in the store, or an error if parsing or
-    /// [`Dataset`] instance creation fails.
+    /// To resolve a `Reference` (which may contain symbolic revisions like "latest" or "dev")
+    /// into a `HashReference`, use `resolve_revision()` first.
+    ///
+    /// Returns `None` if the dataset cannot be found in the manifest store.
     #[instrument(skip(self), err)]
-    pub async fn get_dataset_by_hash(
+    pub async fn get_dataset(
         &self,
-        hash: &Hash,
-    ) -> Result<Option<Arc<Dataset>>, GetDatasetByHashError> {
+        reference: &HashReference,
+    ) -> Result<Arc<Dataset>, GetDatasetError> {
+        let namespace = reference.namespace();
+        let name = reference.name();
+        let hash = reference.hash();
+
         // Check cache using manifest hash as the key
         if let Some(dataset) = self.dataset_cache.read().get(hash).cloned() {
             tracing::trace!(manifest_hash = %hash, "Cache hit, returning cached dataset");
-            return Ok(Some(dataset));
+            tracing::debug!(
+                dataset_namespace = %namespace,
+                dataset_name = %name,
+                manifest_hash = %hash,
+                "Dataset loaded successfully"
+            );
+            return Ok(dataset);
         }
 
         tracing::debug!(manifest_hash = %hash, "Cache miss, loading from store");
@@ -691,55 +671,87 @@ impl DatasetStore {
         // Get the manifest path from metadata database
         let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, hash)
             .await
-            .map_err(GetDatasetByHashError::QueryManifestPath)?
-            .map(ManifestPath::from)
+            .map_err(|source| GetDatasetError::QueryManifestPath {
+                reference: reference.clone(),
+                source,
+            })?
+            .map(Into::into)
         else {
-            return Ok(None);
+            return Err(GetDatasetError::DatasetNotFound(reference.clone()));
         };
 
         // Load the manifest content using the path
-        let Some(manifest_content) = self
-            .dataset_manifests_store
-            .get(path)
-            .await
-            .map_err(GetDatasetByHashError::LoadManifestContent)?
+        let Some(manifest_content) =
+            self.dataset_manifests_store
+                .get(path)
+                .await
+                .map_err(|source| GetDatasetError::LoadManifestContent {
+                    reference: reference.clone(),
+                    source,
+                })?
         else {
-            return Ok(None);
+            return Err(GetDatasetError::DatasetNotFound(reference.clone()));
         };
 
         let manifest = manifest_content
             .try_into_manifest::<CommonManifest>()
-            .map_err(GetDatasetByHashError::ParseManifestForKind)?;
+            .map_err(|source| GetDatasetError::ParseManifestForKind {
+                reference: reference.clone(),
+                source,
+            })?;
 
         let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
-            GetDatasetByHashError::UnsupportedKind(err.kind)
+            GetDatasetError::UnsupportedKind {
+                reference: reference.clone(),
+                kind: err.kind,
+            }
         })?;
 
         let dataset = match kind {
             DatasetKind::EvmRpc => {
                 let manifest = manifest_content
                     .try_into_manifest::<EvmRpcManifest>()
-                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind,
+                        source,
+                    })?;
                 evm_rpc_datasets::dataset(hash.clone(), manifest)
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
                     .try_into_manifest::<EthBeaconManifest>()
-                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind,
+                        source,
+                    })?;
                 eth_beacon_datasets::dataset(hash.clone(), manifest)
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
                     .try_into_manifest::<FirehoseManifest>()
-                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind,
+                        source,
+                    })?;
                 firehose_datasets::evm::dataset(hash.clone(), manifest)
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content
                     .try_into_manifest::<DerivedManifest>()
-                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
-                datasets_derived::dataset(hash.clone(), manifest)
-                    .map_err(GetDatasetByHashError::CreateDerivedDataset)?
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind,
+                        source,
+                    })?;
+                datasets_derived::dataset(hash.clone(), manifest).map_err(|source| {
+                    GetDatasetError::CreateDerivedDataset {
+                        reference: reference.clone(),
+                        source,
+                    }
+                })?
             }
         };
 
@@ -751,11 +763,13 @@ impl DatasetStore {
             .insert(hash.clone(), dataset.clone());
 
         tracing::debug!(
+            dataset_namespace = %namespace,
+            dataset_name = %name,
             manifest_hash = %hash,
-            "Dataset loaded (and cached) successfully"
+            "Dataset loaded successfully"
         );
 
-        Ok(Some(dataset))
+        Ok(dataset)
     }
 
     #[tracing::instrument(skip(self), err)]
@@ -1035,22 +1049,18 @@ impl DatasetStore {
 
 // Implement DatasetAccess trait for DatasetStore
 impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
-    async fn resolve_dataset_reference(
+    async fn resolve_revision(
         &self,
         reference: impl AsRef<Reference> + Send,
-    ) -> Result<Option<Hash>, BoxError> {
-        let reference = reference.as_ref();
-        self.resolve_dataset_revision(
-            reference.namespace(),
-            reference.name(),
-            reference.revision(),
-        )
-        .await
-        .map_err(Into::into)
+    ) -> Result<Option<HashReference>, BoxError> {
+        let reference_value = reference.as_ref();
+        self.resolve_revision(reference_value)
+            .await
+            .map_err(Into::into)
     }
 
-    async fn get_dataset_by_hash(&self, hash: &Hash) -> Result<Option<Arc<Dataset>>, BoxError> {
-        self.get_dataset_by_hash(hash).await.map_err(Into::into)
+    async fn get_dataset(&self, reference: &HashReference) -> Result<Arc<Dataset>, BoxError> {
+        self.get_dataset(reference).await.map_err(Into::into)
     }
 
     async fn eth_call_for_dataset(
@@ -1130,7 +1140,14 @@ async fn search_dependencies_for_raw_dataset(
 
         // Enqueue dependencies for exploration
         for dep in dataset.dependencies.values() {
-            let dataset = dataset_store.get_dataset(dep.to_reference()).await?;
+            // Resolve the reference to a hash reference first
+            let hash_ref = dataset_store
+                .resolve_revision(dep.to_reference())
+                .await?
+                .ok_or_else(|| {
+                    BoxError::from(format!("dependency '{}' not found", dep.to_reference()))
+                })?;
+            let dataset = dataset_store.get_dataset(&hash_ref).await?;
             queue.push_back(dataset);
         }
     }
@@ -1147,7 +1164,12 @@ pub async fn dataset_and_dependencies(
     let mut datasets = vec![dataset];
     let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
     while let Some(dataset_ref) = datasets.pop() {
-        let dataset = store.get_dataset(&dataset_ref).await?;
+        // Resolve the reference to a hash reference first
+        let hash_ref = store
+            .resolve_revision(&dataset_ref)
+            .await?
+            .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
+        let dataset = store.get_dataset(&hash_ref).await?;
 
         if dataset.kind != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);

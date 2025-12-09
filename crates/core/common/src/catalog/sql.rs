@@ -60,16 +60,16 @@
 //! - **Lazy UDF loading**: All functions implement lazy UDF loading for optimal performance
 //! - **No raw dataset overlap**: Raw dataset dumps don't use these planning functions
 //! - **Two-phase resolution**: Functions without deps use a two-phase pattern:
-//!   1. **Resolution phase**: `Reference` → `resolve_dataset_reference()` → `Hash`
-//!   2. **Retrieval phase**: `Hash` → `get_dataset_by_hash()` → `Dataset`
+//!   1. **Resolution phase**: `Reference` → `resolve_revision()` → `HashReference`
+//!   2. **Retrieval phase**: `HashReference` → `get_dataset()` → `Dataset`
 //! - **Pre-resolved deps**: Functions with deps receive `HashReference` and skip phase 1
 
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
-    func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, hash_reference::HashReference,
-    partial_reference::PartialReference, reference::Reference,
+    func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, partial_reference::PartialReference,
+    reference::Reference,
 };
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -218,26 +218,18 @@ pub async fn planning_ctx_for_sql(
                 // Schema is already parsed as PartialReference, convert to Reference
                 let reference: Reference = schema.as_ref().clone().into();
 
-                // Resolve reference to hash
-                let hash = store
-                    .resolve_dataset_reference(&reference)
+                // Resolve reference to hash reference
+                let hash_ref = store
+                    .resolve_revision(&reference)
                     .await
-                    .map_err(|err| PlanningCtxForSqlError::ResolveHash {
+                    .map_err(|err| PlanningCtxForSqlError::ResolveDatasetReference {
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| {
-                        tracing::error!(
-                            reference = %reference,
-                            "Dataset not found"
-                        );
-                        PlanningCtxForSqlError::UnknownDatasetReference {
-                            reference: reference.clone(),
-                        }
+                    .ok_or_else(|| PlanningCtxForSqlError::ResolveDatasetReference {
+                        reference: reference.clone(),
+                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
-
-                // Create HashReference from resolved FQN and hash
-                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
                 // Convert table_ref to use String schema for internal data structures
                 let table_ref_string =
@@ -245,24 +237,20 @@ pub async fn planning_ctx_for_sql(
 
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
-                    .entry(hash.clone())
+                    .entry(hash_ref.hash().clone())
                     .or_default()
                     .entry(table_ref_string.clone())
                 else {
                     continue;
                 };
 
-                // Load dataset by hash (cached by store)
-                let dataset = store
-                    .get_dataset_by_hash(&hash)
-                    .await
-                    .map_err(|err| PlanningCtxForSqlError::GetDataset {
+                // Load dataset by hash reference (cached by store)
+                let dataset = store.get_dataset(&hash_ref).await.map_err(|err| {
+                    PlanningCtxForSqlError::LoadDataset {
                         reference: hash_ref.clone(),
                         source: err,
-                    })?
-                    .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
-                        reference: hash_ref.clone(),
-                    })?;
+                    }
+                })?;
 
                 // Find table in dataset
                 let dataset_table = dataset
@@ -295,39 +283,36 @@ pub async fn planning_ctx_for_sql(
                 // Schema is already parsed as PartialReference, convert to Reference
                 let reference: Reference = schema.as_ref().clone().into();
 
-                // Resolve reference to hash
-                let hash = store
-                    .resolve_dataset_reference(&reference)
+                // Resolve reference to hash reference
+                let hash_ref = store
+                    .resolve_revision(&reference)
                     .await
-                    .map_err(|err| PlanningCtxForSqlError::ResolveHash {
+                    .map_err(|err| PlanningCtxForSqlError::ResolveDatasetReference {
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| PlanningCtxForSqlError::UnknownDatasetReference {
+                    .ok_or_else(|| PlanningCtxForSqlError::ResolveDatasetReference {
                         reference: reference.clone(),
+                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
 
-                // Create HashReference from resolved FQN and hash
-                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
-
-                // Load dataset by hash (cached by store)
-                let dataset = store
-                    .get_dataset_by_hash(&hash)
-                    .await
-                    .map_err(|err| PlanningCtxForSqlError::GetDataset {
+                // Load dataset by hash reference (cached by store)
+                let dataset = store.get_dataset(&hash_ref).await.map_err(|err| {
+                    PlanningCtxForSqlError::LoadDataset {
                         reference: hash_ref.clone(),
                         source: err,
-                    })?
-                    .ok_or_else(|| PlanningCtxForSqlError::DatasetNotFound {
-                        reference: hash_ref.clone(),
-                    })?;
+                    }
+                })?;
 
                 // Convert func_ref to use String schema for internal data structures
                 let func_ref_string =
                     FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
 
                 // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
-                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref_string)
+                let Entry::Vacant(entry) = udfs
+                    .entry(hash_ref.hash().clone())
+                    .or_default()
+                    .entry(func_ref_string)
                 else {
                     continue;
                 };
@@ -447,26 +432,18 @@ async fn get_logical_catalog(
                 // Schema is already parsed as PartialReference, convert to Reference
                 let reference: Reference = schema.as_ref().clone().into();
 
-                // Resolve reference to hash
-                let hash = store
-                    .resolve_dataset_reference(&reference)
+                // Resolve reference to hash reference
+                let hash_ref = store
+                    .resolve_revision(&reference)
                     .await
-                    .map_err(|err| GetLogicalCatalogError::ResolveHash {
+                    .map_err(|err| GetLogicalCatalogError::ResolveDatasetReference {
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| {
-                        tracing::error!(
-                            reference = %reference,
-                            "Dataset not found"
-                        );
-                        GetLogicalCatalogError::UnknownDatasetReference {
-                            reference: reference.clone(),
-                        }
+                    .ok_or_else(|| GetLogicalCatalogError::ResolveDatasetReference {
+                        reference: reference.clone(),
+                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
-
-                // Create HashReference from resolved FQN and hash
-                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
 
                 // Convert table_ref to use String schema for internal data structures
                 let table_ref_string =
@@ -474,24 +451,20 @@ async fn get_logical_catalog(
 
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
-                    .entry(hash.clone())
+                    .entry(hash_ref.hash().clone())
                     .or_default()
                     .entry(table_ref_string.clone())
                 else {
                     continue;
                 };
 
-                // Load dataset by hash (cached by store)
-                let dataset = store
-                    .get_dataset_by_hash(&hash)
-                    .await
-                    .map_err(|err| GetLogicalCatalogError::GetDataset {
+                // Load dataset by hash reference (cached by store)
+                let dataset = store.get_dataset(&hash_ref).await.map_err(|err| {
+                    GetLogicalCatalogError::LoadDataset {
                         reference: hash_ref.clone(),
                         source: err,
-                    })?
-                    .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
-                        reference: hash_ref.clone(),
-                    })?;
+                    }
+                })?;
 
                 // Find table in dataset
                 let dataset_table = dataset
@@ -524,39 +497,36 @@ async fn get_logical_catalog(
                 // Schema is already parsed as PartialReference, convert to Reference
                 let reference: Reference = schema.as_ref().clone().into();
 
-                // Resolve reference to hash
-                let hash = store
-                    .resolve_dataset_reference(&reference)
+                // Resolve reference to hash reference
+                let hash_ref = store
+                    .resolve_revision(&reference)
                     .await
-                    .map_err(|err| GetLogicalCatalogError::ResolveHash {
+                    .map_err(|err| GetLogicalCatalogError::ResolveDatasetReference {
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| GetLogicalCatalogError::UnknownDatasetReference {
+                    .ok_or_else(|| GetLogicalCatalogError::ResolveDatasetReference {
                         reference: reference.clone(),
+                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
 
-                // Create HashReference from resolved FQN and hash
-                let hash_ref = HashReference::from((reference.into_fqn(), hash.clone()));
-
-                // Load dataset by hash (cached by store)
-                let dataset = store
-                    .get_dataset_by_hash(&hash)
-                    .await
-                    .map_err(|err| GetLogicalCatalogError::GetDataset {
+                // Load dataset by hash reference (cached by store)
+                let dataset = store.get_dataset(&hash_ref).await.map_err(|err| {
+                    GetLogicalCatalogError::LoadDataset {
                         reference: hash_ref.clone(),
                         source: err,
-                    })?
-                    .ok_or_else(|| GetLogicalCatalogError::DatasetNotFound {
-                        reference: hash_ref.clone(),
-                    })?;
+                    }
+                })?;
 
                 // Convert func_ref to use String schema for internal data structures
                 let func_ref_string =
                     FunctionReference::qualified(schema.to_string(), function.as_ref().clone());
 
                 // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
-                let Entry::Vacant(entry) = udfs.entry(hash).or_default().entry(func_ref_string)
+                let Entry::Vacant(entry) = udfs
+                    .entry(hash_ref.hash().clone())
+                    .or_default()
+                    .entry(func_ref_string)
                 else {
                     continue;
                 };

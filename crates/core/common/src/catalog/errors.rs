@@ -72,50 +72,32 @@ pub enum PlanningCtxForSqlError {
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
 
-    /// Failed to resolve dataset reference to a hash.
+    /// Failed to resolve dataset reference to a hash reference.
     ///
     /// This occurs when the dataset store cannot resolve a reference to its
-    /// corresponding content hash, typically due to:
+    /// corresponding content hash. Common causes include:
+    /// - Dataset does not exist in the store
+    /// - Version tag not found
     /// - Storage backend errors
     /// - Invalid reference format
-    #[error("Failed to resolve dataset reference '{reference}' to hash")]
-    ResolveHash {
+    /// - Database connection issues
+    #[error("Failed to resolve dataset reference '{reference}'")]
+    ResolveDatasetReference {
         reference: Reference,
         #[source]
         source: BoxError,
     },
 
-    /// Unknown dataset reference during resolution.
+    /// Failed to load dataset from the dataset store.
     ///
-    /// This occurs when the dataset store successfully processed the reference
-    /// but no matching dataset exists:
-    /// - Dataset does not exist in the store
-    /// - Version not found
-    #[error("Unknown dataset reference '{reference}'")]
-    UnknownDatasetReference { reference: Reference },
-
-    /// Dataset not found after hash resolution.
-    ///
-    /// This occurs when a dataset reference was successfully resolved to a content hash,
-    /// but the dataset with that hash does not exist in the store:
-    /// - Dataset manifest was deleted after reference resolution
-    /// - Race condition between resolution and retrieval
-    /// - Dataset store inconsistency (hash exists in metadata but not in storage)
-    ///
-    /// This error is returned after successful hash resolution when attempting to
-    /// load the dataset by its resolved hash.
-    #[error("Dataset '{reference}' not found")]
-    DatasetNotFound { reference: HashReference },
-
-    /// Failed to retrieve a dataset from the dataset store.
-    ///
-    /// This occurs when loading a dataset definition fails:
+    /// This occurs when loading a dataset definition fails. Common causes include:
     /// - Dataset does not exist in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset
-    #[error("Failed to retrieve dataset '{reference}'")]
-    GetDataset {
+    /// - Manifest file not found in object store
+    #[error("Failed to load dataset '{reference}'")]
+    LoadDataset {
         reference: HashReference,
         #[source]
         source: BoxError,
@@ -209,50 +191,32 @@ pub enum GetLogicalCatalogError {
     #[error("Unqualified table '{table_ref}', all tables must be qualified with a dataset")]
     UnqualifiedTable { table_ref: String },
 
-    /// Failed to resolve dataset reference to a hash.
+    /// Failed to resolve dataset reference to a hash reference.
     ///
     /// This occurs when the dataset store cannot resolve a reference to its
-    /// corresponding content hash, typically due to:
+    /// corresponding content hash. Common causes include:
+    /// - Dataset does not exist in the store
+    /// - Version tag not found
     /// - Storage backend errors
     /// - Invalid reference format
-    #[error("Failed to resolve dataset reference '{reference}' to hash")]
-    ResolveHash {
+    /// - Database connection issues
+    #[error("Failed to resolve dataset reference '{reference}'")]
+    ResolveDatasetReference {
         reference: Reference,
         #[source]
         source: BoxError,
     },
 
-    /// Unknown dataset reference during resolution.
+    /// Failed to load dataset from the dataset store.
     ///
-    /// This occurs when the dataset store successfully processed the reference
-    /// but no matching dataset exists:
-    /// - Dataset does not exist in the store
-    /// - Version not found
-    #[error("Unknown dataset reference '{reference}'")]
-    UnknownDatasetReference { reference: Reference },
-
-    /// Dataset not found after hash resolution.
-    ///
-    /// This occurs when a dataset reference was successfully resolved to a content hash,
-    /// but the dataset with that hash does not exist in the store:
-    /// - Dataset manifest was deleted after reference resolution
-    /// - Race condition between resolution and retrieval
-    /// - Dataset store inconsistency (hash exists in metadata but not in storage)
-    ///
-    /// This error is returned after successful hash resolution when attempting to
-    /// load the dataset by its resolved hash.
-    #[error("Dataset '{reference}' not found")]
-    DatasetNotFound { reference: HashReference },
-
-    /// Failed to retrieve a dataset from the dataset store.
-    ///
-    /// This occurs when loading a dataset definition fails:
+    /// This occurs when loading a dataset definition fails. Common causes include:
     /// - Dataset does not exist in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset
-    #[error("Failed to retrieve dataset '{reference}'")]
-    GetDataset {
+    /// - Manifest file not found in object store
+    #[error("Failed to load dataset '{reference}'")]
+    LoadDataset {
         reference: HashReference,
         #[source]
         source: BoxError,

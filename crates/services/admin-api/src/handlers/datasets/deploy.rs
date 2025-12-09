@@ -9,10 +9,7 @@ use axum::{
     http::StatusCode,
 };
 use dataset_store::DatasetKind;
-use datasets_common::{
-    hash_reference::HashReference, name::Name, namespace::Namespace, reference::Reference,
-    revision::Revision,
-};
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use monitoring::logging;
 use worker::{job::JobId, node_id::NodeId};
 
@@ -84,8 +81,8 @@ pub async fn handler(
     State(ctx): State<Ctx>,
     json: Result<Json<DeployRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<DeployResponse>), ErrorResponse> {
-    let (namespace, name, revision) = match path {
-        Ok(Path((namespace, name, revision))) => (namespace, name, revision),
+    let reference = match path {
+        Ok(Path((namespace, name, revision))) => Reference::new(namespace, name, revision),
         Err(err) => {
             tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid path parameters");
             return Err(Error::InvalidPath(err).into());
@@ -105,28 +102,35 @@ pub async fn handler(
     };
 
     tracing::debug!(
-        namespace=%namespace,
-        name=%name,
-        revision=%revision,
+        dataset_reference = %reference,
         end_block=%end_block,
         parallelism=%parallelism,
         worker_id=?worker_id,
         "deploying dataset"
     );
 
-    // Load the full dataset object using the resolved version
-    let reference = Reference::new(namespace, name, revision);
+    let namespace = reference.namespace().clone();
+    let name = reference.name().clone();
+    let revision = reference.revision().clone();
+
+    // Resolve reference to hash reference
+    let reference = ctx
+        .dataset_store
+        .resolve_revision(&reference)
+        .await
+        .map_err(Error::ResolveRevision)?
+        .ok_or_else(|| Error::NotFound {
+            namespace: namespace.clone(),
+            name: name.clone(),
+            revision: revision.clone(),
+        })?;
+
+    // Load the full dataset object using the resolved hash reference
     let dataset = ctx
         .dataset_store
         .get_dataset(&reference)
         .await
         .map_err(Error::GetDataset)?;
-
-    let dataset_reference = HashReference::new(
-        reference.namespace().clone(),
-        reference.name().clone(),
-        dataset.manifest_hash().clone(),
-    );
 
     // Parse dataset kind (must always succeed - panic if DB is in bad state)
     let dataset_kind: DatasetKind = dataset
@@ -138,7 +142,7 @@ pub async fn handler(
     let job_id = ctx
         .scheduler
         .schedule_dataset_sync_job(
-            dataset_reference.clone(),
+            reference.clone(),
             dataset_kind,
             end_block.into(),
             parallelism,
@@ -147,7 +151,7 @@ pub async fn handler(
         .await
         .map_err(|err| {
             tracing::error!(
-                %dataset_reference,
+                dataset_reference = %reference,
                 error = %err,
                 error_source = logging::error_source(&err),
                 "failed to schedule dataset deployment"

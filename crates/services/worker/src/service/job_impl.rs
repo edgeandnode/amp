@@ -3,9 +3,7 @@
 use std::{future::Future, sync::Arc};
 
 use common::{BoxError, catalog::physical::PhysicalTable};
-use datasets_common::{
-    hash::Hash, hash_reference::HashReference, reference::Reference, revision::Revision,
-};
+use datasets_common::{hash::Hash, hash_reference::HashReference};
 use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
 use metadata_db::LocationId;
 use tracing::{Instrument, info_span};
@@ -65,24 +63,21 @@ pub(super) async fn new(
         metrics,
     };
 
-    // Create dataset reference for table resolution
-    let dataset_ref = Reference::new(
+    let hash_ref = HashReference::new(
         dataset_namespace.clone(),
         dataset_name.clone(),
-        Revision::Hash(manifest_hash.clone()),
+        manifest_hash.clone(),
     );
+    let dataset_ref = hash_ref.to_reference();
 
     // Get the dataset to access its tables
     let dataset = ctx
         .dataset_store
-        .get_dataset_by_hash(&manifest_hash)
+        .get_dataset(&hash_ref)
         .await
         .map_err(|err| JobInitError::FetchDataset {
             hash: manifest_hash.clone(),
             source: err,
-        })?
-        .ok_or_else(|| JobInitError::DatasetNotFound {
-            hash: manifest_hash.clone(),
         })?;
 
     let metrics = ctx.metrics.clone();
@@ -154,21 +149,17 @@ pub(super) async fn new(
 pub enum JobInitError {
     /// Failed to fetch dataset from dataset store
     ///
-    /// This error occurs when retrieving a dataset by its manifest hash fails.
-    /// The dataset store may be unavailable or the manifest may not be cached.
+    /// This error occurs when retrieving a dataset by its hash reference fails.
+    /// Common causes include:
+    /// - Dataset store unavailable or unreachable
+    /// - Manifest not cached or registered in the store
+    /// - Dataset does not exist for the given hash reference
     #[error("Failed to fetch dataset with hash '{hash}'")]
     FetchDataset {
         hash: Hash,
         #[source]
-        source: dataset_store::GetDatasetByHashError,
+        source: dataset_store::GetDatasetError,
     },
-
-    /// Dataset not found in dataset store
-    ///
-    /// This error occurs when a manifest hash does not correspond to any dataset
-    /// in the store. This indicates the manifest needs to be registered or cached.
-    #[error("Dataset not found: {hash}")]
-    DatasetNotFound { hash: Hash },
 
     /// Failed to get or create active physical table
     ///

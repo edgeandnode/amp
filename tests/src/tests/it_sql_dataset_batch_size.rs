@@ -24,9 +24,15 @@ async fn sql_dataset_input_batch_size() {
     let eth_rpc_ref: Reference = "_/eth_rpc@latest"
         .parse()
         .expect("should be valid reference");
+    let hash_ref = test
+        .dataset_store()
+        .resolve_revision(&eth_rpc_ref)
+        .await
+        .expect("Failed to resolve dataset reference")
+        .expect("Dataset not found");
     let start = test
         .dataset_store()
-        .get_dataset(eth_rpc_ref)
+        .get_dataset(&hash_ref)
         .await
         .unwrap()
         .start_block

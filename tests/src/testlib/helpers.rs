@@ -18,7 +18,7 @@ use common::{
     sql_str::SqlStr,
 };
 use dataset_store::DatasetStore;
-use datasets_common::{hash_reference::HashReference, reference::Reference, table_name::TableName};
+use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
 use worker::config::Config as WorkerConfig;
@@ -57,13 +57,14 @@ pub async fn dump_internal(
 
     let mut physical_datasets = vec![];
     for dataset_ref in datasets {
-        let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+        // Resolve reference to hash reference
+        let hash_reference = dataset_store
+            .resolve_revision(&dataset_ref)
+            .await?
+            .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
 
-        let hash_reference = HashReference::new(
-            dataset_ref.namespace().clone(),
-            dataset_ref.name().clone(),
-            dataset.manifest_hash().clone(),
-        );
+        // Get dataset using hash reference
+        let dataset = dataset_store.get_dataset(&hash_reference).await?;
 
         // Parse dataset kind
         let kind: dataset_store::DatasetKind = dataset.kind.parse()?;
@@ -201,7 +202,11 @@ pub async fn restore_dataset_snapshot(
     );
 
     // 2. Load the dataset to get ResolvedTables
-    let dataset = dataset_store.get_dataset(dataset_ref).await?;
+    let hash_ref = dataset_store
+        .resolve_revision(dataset_ref)
+        .await?
+        .ok_or_else(|| format!("dataset '{}' not found", dataset_ref))?;
+    let dataset = dataset_store.get_dataset(&hash_ref).await?;
 
     // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
@@ -371,7 +376,11 @@ pub async fn catalog_for_dataset(
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")
         .parse()
         .expect("should be valid reference");
-    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+    let hash_ref = dataset_store
+        .resolve_revision(&dataset_ref)
+        .await?
+        .ok_or_else(|| format!("dataset '{}' not found", dataset_ref))?;
+    let dataset = dataset_store.get_dataset(&hash_ref).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in dataset.resolved_tables(dataset_ref.into()) {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
