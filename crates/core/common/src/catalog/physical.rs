@@ -31,7 +31,7 @@ use crate::{
     metadata::{
         FileMetadata, amp_metadata_from_parquet_file,
         parquet::ParquetMeta,
-        segments::{Chain, Segment, canonical_chain, missing_ranges},
+        segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
     },
     sql::TableReference,
     store::Store,
@@ -76,8 +76,8 @@ impl Catalog {
             let snapshot = table.snapshot(false, dummy_cache).await?;
             let synced_range = snapshot.synced_range();
             match (earliest, &synced_range) {
-                (None, Some(range)) => earliest = Some(*range.start()),
-                _ => earliest = earliest.min(synced_range.map(|s| *s.start())),
+                (None, Some(range)) => earliest = Some(range.start()),
+                _ => earliest = earliest.min(synced_range.map(|range| range.start())),
             }
         }
         Ok(earliest)
@@ -140,14 +140,18 @@ impl TableSnapshot {
         &self.physical_table
     }
 
-    /// Return the block range to use for query execution over this table. This is defined as the
-    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
-    /// returned if no block range has been synced.
-    pub fn synced_range(&self) -> Option<RangeInclusive<BlockNum>> {
+    /// Return the block range to use for query execution over this table. None is returned if no
+    /// block range has been synced.
+    pub fn synced_range(&self) -> Option<BlockRange> {
         let segments = &self.canonical_segments;
-        let start = segments.iter().map(|s| s.range.start()).min()?;
-        let end = segments.iter().map(|s| s.range.end()).max()?;
-        Some(start..=end)
+        let start = segments.iter().min_by_key(|s| s.range.start())?;
+        let end = segments.iter().max_by_key(|s| s.range.end())?;
+        Some(BlockRange {
+            network: start.range.network.clone(),
+            numbers: start.range.start()..=end.range.end(),
+            hash: end.range.hash,
+            prev_hash: start.range.prev_hash,
+        })
     }
 
     pub fn canonical_segments(&self) -> &[Segment] {
