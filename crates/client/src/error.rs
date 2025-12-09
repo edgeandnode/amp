@@ -1,6 +1,7 @@
 //! Error types for the Amp client
 
-use common::BlockNum;
+use alloy::primitives::BlockNumber;
+use arrow::error::ArrowError;
 
 // ============================================================================
 // Top-Level Error
@@ -68,7 +69,7 @@ pub enum Error {
     /// - Schema mismatches
     /// - Invalid Arrow IPC format
     #[error("Arrow error: {0}")]
-    Arrow(#[source] common::arrow::error::ArrowError),
+    Arrow(#[source] ArrowError),
 
     /// JSON deserialization error
     ///
@@ -108,7 +109,7 @@ pub enum ProtocolError {
     /// - Incompatible Arrow schema version
     /// - Invalid flatbuffer encoding
     #[error("invalid schema in FlightInfo")]
-    InvalidSchema(#[source] common::arrow::error::ArrowError),
+    InvalidSchema(#[source] ArrowError),
 }
 
 // ============================================================================
@@ -159,9 +160,9 @@ pub enum ValidationError {
     )]
     NonConsecutiveBlocks {
         network: String,
-        prev_end: BlockNum,
-        incoming_start: BlockNum,
-        expected_start: BlockNum,
+        prev_end: BlockNumber,
+        incoming_start: BlockNumber,
+        expected_start: BlockNumber,
     },
 
     /// Missing prev_hash for non-genesis block (zero hash detected)
@@ -173,7 +174,7 @@ pub enum ValidationError {
     /// Zero hash is only valid for blocks starting at 0 (genesis), regardless of
     /// whether it's the first message or a reorg back to genesis.
     #[error("missing prev_hash for network '{network}' at block {block} (zero hash detected)")]
-    MissingPrevHash { network: String, block: BlockNum },
+    MissingPrevHash { network: String, block: BlockNumber },
 
     /// Invalid prev_hash for genesis block (non-zero hash detected)
     ///
@@ -234,8 +235,8 @@ pub enum ValidationError {
     #[error("gap in blocks for network '{network}': missing blocks {missing_start}..{missing_end}")]
     Gap {
         network: String,
-        missing_start: BlockNum,
-        missing_end: BlockNum,
+        missing_start: BlockNumber,
+        missing_end: BlockNumber,
     },
 }
 
@@ -286,7 +287,7 @@ pub enum SerializationError {
     /// - Invalid schema
     /// - Memory allocation failures
     #[error("failed to create batch writer: {0}")]
-    WriterCreation(#[source] common::arrow::error::ArrowError),
+    WriterCreation(#[source] ArrowError),
 
     /// Failed to write batch to Arrow IPC format
     ///
@@ -294,7 +295,7 @@ pub enum SerializationError {
     /// - Memory allocation failures
     /// - Schema incompatibilities
     #[error("failed to write batch: {0}")]
-    BatchWrite(#[source] common::arrow::error::ArrowError),
+    BatchWrite(#[source] ArrowError),
 
     /// Failed to finalize Arrow IPC writer
     ///
@@ -302,7 +303,7 @@ pub enum SerializationError {
     /// - I/O errors
     /// - Incomplete writes
     #[error("failed to finish batch writer: {0}")]
-    WriterFinish(#[source] common::arrow::error::ArrowError),
+    WriterFinish(#[source] ArrowError),
 
     /// Failed to create Arrow IPC reader for batch deserialization
     ///
@@ -310,7 +311,7 @@ pub enum SerializationError {
     /// - Corrupted IPC data
     /// - Invalid Arrow format
     #[error("failed to create batch reader: {0}")]
-    ReaderCreation(#[source] common::arrow::error::ArrowError),
+    ReaderCreation(#[source] ArrowError),
 
     /// Empty batch stream encountered
     ///
@@ -325,7 +326,7 @@ pub enum SerializationError {
     /// - Corrupted data
     /// - Schema mismatches
     #[error("failed to read batch: {0}")]
-    BatchRead(#[source] common::arrow::error::ArrowError),
+    BatchRead(#[source] ArrowError),
 }
 
 // ============================================================================

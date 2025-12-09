@@ -11,11 +11,11 @@ postgres = ["sqlx", "uuid"]
 
 [dependencies]
 alloy.workspace = true
+arrow.workspace = true
 arrow-flight.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
-common = { path = "../core/common" }
 futures.workspace = true
 http.workspace = true
 serde.workspace = true

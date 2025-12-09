@@ -8,18 +8,16 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy::primitives::BlockNumber;
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use arrow_flight::sql::client::FlightSqlServiceClient;
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{
+    BlockRange, Cursor,
     cdc::CdcStreamBuilder,
     decode,
     error::{Error, ProtocolError},
@@ -200,7 +198,7 @@ impl ProtocolStream {
                     if incoming.start() < prev.end() + 1 {
                         return Some(InvalidationRange {
                             network: incoming.network.clone(),
-                            numbers: incoming.start()..=BlockNum::max(incoming.end(), prev.end()),
+                            numbers: incoming.start()..=BlockNumber::max(incoming.end(), prev.end()),
                         });
                     }
 
@@ -376,17 +374,17 @@ impl AmpClient {
     ///
     /// # Arguments
     /// - `sql`: SQL query string
-    /// - `watermark`: Optional watermark for resuming a stream
+    /// - `cursor`: Optional cursor for resuming a stream
     /// - `streaming`: Whether to enable streaming mode
     pub async fn request<S: ToString>(
         &mut self,
         sql: S,
-        watermark: Option<&ResumeWatermark>,
+        cursor: Option<&Cursor>,
         streaming: bool,
     ) -> Result<RawStream, Error> {
         self.client.set_header(
             "amp-resume",
-            watermark
+            cursor
                 .map(|value| serde_json::to_string(value).unwrap())
                 .unwrap_or_default(),
         );
@@ -467,7 +465,7 @@ impl StreamBuilder {
     pub fn transactional(
         self,
         store: impl StateStore + 'static,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> TransactionalStreamBuilder {
         TransactionalStreamBuilder::new(self.client, self.sql, Box::new(store), retention)
     }
@@ -498,7 +496,7 @@ impl StreamBuilder {
         self,
         state_store: impl StateStore + 'static,
         batch_store: impl BatchStore + 'static,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> CdcStreamBuilder {
         CdcStreamBuilder::new(
             self.client,
@@ -545,7 +543,7 @@ impl IntoFuture for RawStreamBuilder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidationRange {
     pub network: String,
-    pub numbers: RangeInclusive<BlockNum>,
+    pub numbers: RangeInclusive<BlockNumber>,
 }
 
 impl InvalidationRange {

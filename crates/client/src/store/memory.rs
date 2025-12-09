@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
-use common::arrow::array::RecordBatch;
+use arrow::array::RecordBatch;
 
 use super::{BatchStore, StateSnapshot, StateStore};
 use crate::{
