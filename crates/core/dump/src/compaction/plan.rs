@@ -44,7 +44,6 @@ pub struct CompactionFile {
     pub range: BlockRange,
     pub sendable_stream: SendableRecordBatchStream,
     pub size: SegmentSize,
-    pub is_tail: bool,
 }
 
 impl CompactionFile {
@@ -52,7 +51,6 @@ impl CompactionFile {
         reader_factory: Arc<AmpReaderFactory>,
         partition_index: usize,
         segment: &Segment,
-        is_tail: bool,
     ) -> CompactionResult<Self> {
         let file_id = segment.id;
         let range = segment.range.clone();
@@ -85,7 +83,6 @@ impl CompactionFile {
             range,
             size,
             sendable_stream,
-            is_tail,
         };
 
         Ok(compaction_item)
@@ -119,8 +116,6 @@ pub struct CompactionPlan<'a> {
     table: Arc<PhysicalTable>,
     /// The current group of files being built for compaction.
     current_group: CompactionGroup,
-    /// The file currently being added to the current group.
-    current_file: Option<CompactionFile>,
     /// The next candidate file to consider adding to the current group.
     current_candidate: Option<CompactionFile>,
     /// Indicates whether the stream has been fully processed.
@@ -151,8 +146,7 @@ impl<'a> CompactionPlan<'a> {
             .enumerate()
             .map(move |(partition_index, segment)| {
                 let reader_factory = Arc::clone(&reader_factory);
-                let is_tail = partition_index == size - 1;
-                CompactionFile::try_new(reader_factory, partition_index, segment, is_tail)
+                CompactionFile::try_new(reader_factory, partition_index, segment)
                     .map_err(CompactorError::from)
             })
             .buffered(opts.compactor.metadata_concurrency)
@@ -165,7 +159,6 @@ impl<'a> CompactionPlan<'a> {
             metrics: metrics.as_ref().map(Arc::clone),
             table: Arc::clone(table.physical_table()),
             current_group,
-            current_file: None,
             current_candidate: None,
             done: false,
             group_count: 0,
@@ -188,20 +181,18 @@ impl<'a> Stream for CompactionPlan<'a> {
                 // If we're done processing files, return None.
                 if this.done {
                     break None;
-                // If we have a current file, add it to the current group and continue.
-                } else if let Some(current_file) = this.current_file.take() {
-                    this.current_group.push(current_file);
                 // If we have a current candidate, check if it can be added to the current group.
                 } else if let Some(candidate) = this.current_candidate.take() {
                     // If it can, update the current file and continue.
                     if algorithm.predicate(&this.current_group, &candidate) {
-                        this.current_file = Some(candidate);
+                        this.current_group.push(candidate);
                     // If it can't, and the current group is empty or has a single file,
                     // start a new group with the candidate as the current file.
                     } else if this.current_group.is_empty_or_singleton() {
-                        this.current_file = Some(candidate);
                         this.current_group =
                             CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table);
+                        // Requeue the candidate so the predicate is re-evaluated against the fresh group.
+                        this.current_candidate = Some(candidate);
                     // If it can't, and the current group has multiple files,
                     // yield the current group and start a new group with the
                     // candidate as the current file.

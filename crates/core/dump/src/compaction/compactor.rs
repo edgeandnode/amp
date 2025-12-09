@@ -61,9 +61,9 @@ impl Debug for Compactor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Compactor {{ table: {}, algorithm: {} }}",
+            "Compactor {{ table: {}, algorithm: {:?} }}",
             self.table.table_ref(),
-            self.opts.compactor.algorithm.kind()
+            self.opts.compactor.algorithm,
         )
     }
 }

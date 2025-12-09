@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    ops::{Deref, Not},
+    ops::Not,
     time::Duration,
 };
 
@@ -23,9 +23,8 @@ use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
 /// - `target_partition_size`: The upper bound for segment size limits.
 ///   Files exceeding this limit will not be compacted together. This
 ///   value must be non-unbounded.
-/// - `eager_compaction_limit`: The lower bound for segment size limits. This
-///   value can be unbounded, indicating no lower limit for compaction.
-#[derive(Clone, Copy)]
+/// - `max_eager_generation`: Segments up to this generation will not be subject to cooldowns.
+#[derive(Clone, Copy, Debug)]
 pub struct CompactionAlgorithm {
     /// The amount of time a file must wait before it can be
     /// compacted with files of different generations.
@@ -33,126 +32,63 @@ pub struct CompactionAlgorithm {
     /// The upper bound for segment size limits. Files exceeding this limit
     /// will not be compacted together. This value must be non-unbounded.
     pub target_partition_size: SegmentSizeLimit,
-    pub eager_compaction_limit: SegmentSizeLimit,
+
+    /// Segments up to this generation will not be subject to cooldowns
+    pub max_eager_generation: Option<Generation>,
 }
 
 impl CompactionAlgorithm {
-    pub fn kind(&self) -> &'static str {
-        if self.eager_compaction_limit.0 >= self.target_partition_size.0 {
-            return "Strict Eager Compaction";
-        }
-
-        let unbounded_lower = self.eager_compaction_limit.is_unbounded();
-
-        if unbounded_lower && self.cooldown_duration.is_zero() {
-            "Strict Generationally-Tiered Compaction"
-        } else if unbounded_lower {
-            "Relaxed Generationally-Tiered Compaction"
-        } else {
-            "Hybrid Compaction"
-        }
-    }
-
-    fn is_live(&self, segment: &SegmentSize) -> TestResult {
-        self.eager_compaction_limit.is_live(segment)
+    fn is_live(&self, segment: &SegmentSize) -> bool {
+        Some(segment.generation) <= self.max_eager_generation
     }
 
     fn is_hot(&self, segment: &SegmentSize) -> TestResult {
         Cooldown::new(self.cooldown_duration).is_hot(segment.created_at)
     }
 
-    /// Determines the state of a file based on its size and age.
-    /// - `Live`: The file is within the lower bound limits, if any.
-    /// - `Hot`: The file has exceeded lower bound limits (if any)
-    ///   but is still within its cooldown period.
-    /// - `Cold`: The file has exceeded lower bound limits and is outside
-    ///   its cooldown period.
+    /// Determines the state of a file:
+    /// - `Live`: Cooldown does not apply to this file, it can be compacted immediately.
+    /// - `Hot`: The file is still within its cooldown period.
+    /// - `Cold`: The file is outside its cooldown period.
     fn file_state(&self, segment: &SegmentSize) -> FileState {
         let is_live = self.is_live(segment);
 
-        if *is_live {
+        if is_live {
             return FileState::Live;
         }
 
         let is_hot = self.is_hot(segment);
 
         match is_hot {
-            TestResult::Skipped => FileState::Hot,
+            // If there is no cooldown, file is always cold.
+            TestResult::Skipped => FileState::Cold,
             TestResult::Activated(true) => FileState::Hot,
             TestResult::Activated(false) => FileState::Cold,
         }
     }
 
-    /// Predicate function to determine if two files can be compacted together.
+    /// Predicate function to determine if:
+    /// - When a group is empty, if the candidate can start a new group.
+    /// - When a group is started, if the candidate can be added to it.
     ///
-    /// Returns `true` if the candidate file can be compacted with the group,
-    /// `false` otherwise. The decision is based on the combined size of the
-    /// files, their states (Live, Hot, Cold), and their generations.
+    /// The current algorithm is:
+    /// - If the file is `Hot`, it cannot start a new group.
+    /// - If a group has been started, it will accept files up to the target size, regardless of file state.
     pub fn predicate(&self, group: &CompactionGroup, candidate: &CompactionFile) -> bool {
-        let state = self
-            .file_state(&group.size)
-            .max(self.file_state(&candidate.size));
+        if group.is_empty() && self.file_state(&candidate.size) == FileState::Hot {
+            return false;
+        }
 
         // Check if combining sizes exceeds upper bound.
-        let (size_exceeded, _, _) = self
+        let size_exceeded = self
             .target_partition_size
             .is_exceeded(&(candidate.size + group.size));
 
-        if state == FileState::Live {
-            // For live files, only compact if size limit is not exceeded.
-            // If it's the tail file, also require length limit to be exceeded
-            // (for cases where a minimum number of segments is desired before compaction).
-            *size_exceeded
-        } else if state == FileState::Hot {
-            // For hot files, only compact if size limit is not exceeded,
-            // and both files share the same generation.
-            group.size.generation == candidate.size.generation && !*size_exceeded
-        } else {
-            // For cold files, compact regardless of generation,
-            // as long as size limit is not exceeded.
-            !*size_exceeded
-        }
-    }
-}
+        match size_exceeded {
+            TestResult::Activated(exceeded) => !exceeded,
 
-impl Debug for CompactionAlgorithm {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(self.kind())
-            .field("base_duration", &self.cooldown_duration)
-            .field("upper_bound", &self.target_partition_size)
-            .field("lower_bound", &self.eager_compaction_limit)
-            .finish()
-    }
-}
-
-impl Display for CompactionAlgorithm {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let kind = self.kind().trim_end_matches(" Compaction");
-        match kind {
-            "Eager" => write!(
-                f,
-                "{{ kind: {}, upper_bound: {} }}",
-                kind, self.target_partition_size
-            ),
-            "Exponential" => write!(
-                f,
-                "{{ kind: {}, upper_bound: {} }}",
-                kind, self.target_partition_size
-            ),
-            "Relaxed Exponential" => write!(
-                f,
-                "{{ kind: {}, base_duration: {:?}, upper_bound: {} }}",
-                kind, self.cooldown_duration, self.target_partition_size
-            ),
-            "Hybrid" => write!(
-                f,
-                "{{ kind: {}, base_duration: {:?}, upper_bound: {}, lower_bound: {} }}",
-                kind,
-                self.cooldown_duration,
-                self.target_partition_size,
-                self.eager_compaction_limit
-            ),
-            _ => unreachable!("Unexpected compaction algorithm kind"),
+            // If all limits are zero, assume compaction is disabled.
+            TestResult::Skipped => false,
         }
     }
 }
@@ -162,9 +98,14 @@ impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
         CompactionAlgorithm {
             cooldown_duration: config.compactor.algorithm.cooldown_duration.clone().into(),
             target_partition_size: SegmentSizeLimit::from(&config.target_size),
-            eager_compaction_limit: SegmentSizeLimit::from(
-                &config.compactor.algorithm.eager_compaction_limit,
-            ),
+            max_eager_generation: {
+                let generation = config.compactor.algorithm.max_eager_generation;
+                if generation < 0 {
+                    None
+                } else {
+                    Some(Generation::from(generation as u64))
+                }
+            },
         }
     }
 }
@@ -215,49 +156,6 @@ pub enum FileState {
     Live,
     Hot,
     Cold,
-}
-
-impl Ord for FileState {
-    /// Defines a partial ordering for `FileState`:
-    /// - `Cold` is greater than both `Live` and `Hot`.
-    /// - `Hot` is greater than `Live` but less than `Cold`.
-    /// - `Live` is less than both `Hot` and `Cold`.
-    /// - States of the same type are considered equal.
-    ///
-    /// This ordering is used to determine the strictest state
-    /// when comparing two files, where `Cold` is the strictest
-    /// and `Live` is the least strict.
-    ///
-    /// # Examples
-    /// ```
-    /// use dump::compaction::algorithm::FileState;
-    /// assert!(FileState::Cold > FileState::Hot);
-    /// assert!(FileState::Cold > FileState::Live);
-    /// assert!(FileState::Hot > FileState::Live);
-    /// assert!(FileState::Hot < FileState::Cold);
-    /// assert!(FileState::Live < FileState::Hot);
-    /// assert!(FileState::Live < FileState::Cold);
-    /// assert_eq!(FileState::Cold, FileState::Cold);
-    /// assert_eq!(FileState::Hot, FileState::Hot);
-    /// assert_eq!(FileState::Live, FileState::Live);
-    /// ```
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (FileState::Cold, FileState::Cold)
-            | (FileState::Live, FileState::Live)
-            | (FileState::Hot, FileState::Hot) => std::cmp::Ordering::Equal,
-            (FileState::Cold, _) => std::cmp::Ordering::Greater,
-            (_, FileState::Cold) => std::cmp::Ordering::Less,
-            (FileState::Hot, _) => std::cmp::Ordering::Greater,
-            (_, FileState::Hot) => std::cmp::Ordering::Less,
-        }
-    }
-}
-
-impl PartialOrd for FileState {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 /// Represents configurable size limits for file compaction operations.
@@ -332,11 +230,8 @@ impl SegmentSizeLimit {
     /// - `segment`: [`SegmentSize`] - The segment to check against the limits
     ///
     /// ## Returns
-    /// [`SizeCheckResult`] - A tuple of three [`TestResult`] values:
-    /// 1. Combined result for blocks, bytes, and rows dimensions
-    /// 2. Result for the length (file count) dimension
-    /// 3. Result for the generation dimension
-    pub fn is_exceeded(&self, segment: &SegmentSize) -> SizeCheckResult {
+    /// [`TestResult`] for combined `or` result of blocks, bytes, and rows limits
+    pub fn is_exceeded(&self, segment: &SegmentSize) -> TestResult {
         let blocks_ge: TestResult = self
             .0
             .blocks
@@ -361,32 +256,7 @@ impl SegmentSizeLimit {
             .then_some(segment.rows.ge(&self.1.soft_limit(self.0.rows)))
             .into();
 
-        let generation_ge: TestResult = self
-            .0
-            .generation
-            .is_compacted()
-            .then_some(segment.generation.ge(&self.1.soft_limit(self.0.generation)))
-            .into();
-
-        let length_ge: TestResult = self
-            .0
-            .length
-            .ne(&0)
-            .then_some(segment.length.ge(&self.1.soft_limit(self.0.length)))
-            .into();
-
-        (blocks_ge.or(bytes_ge).or(rows_ge), length_ge, generation_ge)
-    }
-
-    pub fn is_live(&self, segment: &SegmentSize) -> TestResult {
-        let (size_exceeded, length_exceeded, generation_exceeded) =
-            Self::is_exceeded(self, segment);
-        // A segment is considered live if it does not exceed size limits,
-        // length limits, and generation limits (if any are set).
-        size_exceeded
-            .or(length_exceeded)
-            .or(generation_exceeded)
-            .not()
+        blocks_ge.or(bytes_ge).or(rows_ge)
     }
 }
 
@@ -420,14 +290,6 @@ impl<'a> From<&'a SizeLimitConfig> for SegmentSizeLimit {
         )
     }
 }
-
-/// The result of checking if a segment exceeds size limits.
-///
-/// This is a tuple of three [`TestResult`] values:
-/// 1. Combined result for blocks, bytes, and rows dimensions
-/// 2. Result for the length (file count) dimension
-/// 3. Result for the generation dimension
-pub type SizeCheckResult = (TestResult, TestResult, TestResult);
 
 /// Three-valued logic to represent boolean tests that may be skipped.
 ///
@@ -500,17 +362,6 @@ impl TestResult {
             (TestResult::Activated(a), TestResult::Activated(b)) => TestResult::Activated(a || b),
             (TestResult::Skipped, b) => b,
             (a, TestResult::Skipped) => a,
-        }
-    }
-}
-
-impl Deref for TestResult {
-    type Target = bool;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            TestResult::Activated(a) => a,
-            TestResult::Skipped => &false,
         }
     }
 }
@@ -635,13 +486,5 @@ mod tests {
         assert_eq!(A(true).not(), A(false));
         assert_eq!(A(false).not(), A(true));
         assert_eq!(S.not(), S);
-    }
-
-    #[test]
-    fn test_result_deref() {
-        use super::TestResult::{Activated as A, Skipped as S};
-        assert!(*A(true));
-        assert!(!*A(false));
-        assert!(!*S);
     }
 }

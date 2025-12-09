@@ -147,20 +147,19 @@ impl Default for CompactorConfig {
 pub struct CompactionAlgorithmConfig {
     /// Base cooldown duration in seconds (default: 1024.0)
     pub cooldown_duration: ConfigDuration<1024>,
-    /// Eager compaction limits (flattened fields: overflow, bytes, rows)
-    #[serde(
-        flatten,
-        default = "SizeLimitConfig::default_eager_limit",
-        deserialize_with = "SizeLimitConfig::deserialize_eager_limit"
-    )]
-    pub eager_compaction_limit: SizeLimitConfig,
+    /// Maximum generation for eager compaction, that is, cooldowns only apply
+    /// for generations above this value.
+    ///
+    /// Default: 0. To disable eager compaction, set to -1.
+    pub max_eager_generation: i64,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
             cooldown_duration: ConfigDuration::default(),
-            eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
+            max_eager_generation: 0,
         }
     }
 }
@@ -200,31 +199,6 @@ struct SizeLimitHelper {
 }
 
 impl SizeLimitConfig {
-    fn default_eager_limit() -> Self {
-        Self {
-            bytes: 0,
-            blocks: 0,
-            ..Default::default()
-        }
-    }
-
-    fn deserialize_eager_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let helper = SizeLimitHelper::deserialize(deserializer)?;
-
-        let mut this = Self::default_eager_limit();
-
-        helper
-            .overflow
-            .inspect(|overflow| this.overflow = *overflow);
-        helper.bytes.inspect(|bytes| this.bytes = *bytes);
-        helper.rows.inspect(|rows| this.rows = *rows);
-
-        Ok(this)
-    }
-
     fn default_upper_limit() -> Self {
         Self {
             ..Default::default()
