@@ -497,4 +497,4 @@
   query: SELECT block_num FROM eth_rpc.blocks WHERE eth_rpc.blocks.block_num > 90000000000;
   results: |
     []
-  recordBatchCount: 1
+  recordBatchCount: 2 # extra batch for app_metadata to signal completion

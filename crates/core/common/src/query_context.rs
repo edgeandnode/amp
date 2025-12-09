@@ -1,5 +1,4 @@
 use std::{
-    ops::RangeInclusive,
     path::PathBuf,
     sync::{Arc, LazyLock},
 };
@@ -37,12 +36,13 @@ use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, CachedParquetData, ParquetFooterCache, arrow, block_range_intersection,
+    BlockNum, BoxError, CachedParquetData, ParquetFooterCache, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
+    metadata::segments::BlockRange,
     plan_visitors::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,
@@ -343,19 +343,36 @@ impl QueryContext {
             .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }
 
-    /// Get the blocks that have been synced for all tables in the plan.
+    /// Return the block range that is synced for all tables referenced by the given plan.
+    /// The returned range spans the minimum start block to the minimum end block.
     #[instrument(skip_all, err)]
-    pub async fn synced_blocks_for_plan(
-        &self,
-        plan: &LogicalPlan,
-    ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let mut range: Option<RangeInclusive<BlockNum>> = None;
+    pub async fn common_range(&self, plan: &LogicalPlan) -> Result<Option<BlockRange>, BoxError> {
+        let mut range: Option<BlockRange> = None;
         for df_table_ref in extract_table_references_from_plan(plan)? {
             let table_ref: TableReference<String> = df_table_ref.try_into()?;
-            range = match (range, self.get_synced_range_for_table(&table_ref)?) {
-                (None, range) | (range, None) => range,
-                (Some(a), Some(b)) => block_range_intersection(a, b),
+            let Some(table_range) = self.get_table(&table_ref)?.synced_range() else {
+                return Ok(None);
             };
+
+            range = Some(match range {
+                None => table_range,
+                Some(mut r) => {
+                    assert_eq!(r.network, table_range.network);
+                    if table_range.start() < r.start() {
+                        r.numbers = table_range.start()..=r.end();
+                        r.prev_hash = table_range.prev_hash;
+                    }
+                    if table_range.end() < r.end() {
+                        r.numbers = r.start()..=table_range.end();
+                        r.hash = table_range.hash;
+                    }
+
+                    // TODO: there is a consistency error when the block numbers are equal but the
+                    // hashes are not equal.
+
+                    r
+                }
+            });
         }
         Ok(range)
     }
@@ -363,17 +380,7 @@ impl QueryContext {
     /// Get the most recent block that has been synced for all tables in the plan.
     #[instrument(skip_all, err)]
     pub async fn max_end_block(&self, plan: &LogicalPlan) -> Result<Option<BlockNum>, BoxError> {
-        let range = self.synced_blocks_for_plan(plan).await?;
-        Ok(range.map(|r| *r.end()))
-    }
-
-    /// Helper method to get ranges for a specific table.
-    fn get_synced_range_for_table(
-        &self,
-        table: &TableReference,
-    ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let table_snapshot = self.get_table(table)?;
-        Ok(table_snapshot.synced_range())
+        self.common_range(plan).await.map(|r| r.map(|r| r.end()))
     }
 }
 
