@@ -17,7 +17,7 @@ use common::{
     sql,
     sql_str::SqlStr,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{DatasetKind, DatasetStore};
 use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
@@ -27,111 +27,79 @@ use super::fixtures::SnapshotContext;
 
 /// Internal dump orchestration function for tests.
 ///
-/// This function orchestrates the full extraction pipeline, including dataset
-/// dependency resolution, physical table setup, and calling the extraction
-/// functions. This provides test access to the internal dump functionality
-/// used by the worker-based extraction system.
+/// This function orchestrates the full extraction pipeline for a single dataset,
+/// including physical table setup and calling the extraction functions. This
+/// provides test access to the internal dump functionality used by the
+/// worker-based extraction system.
 ///
-/// **Note**: This is an internal function with full control over all parameters.
 /// Most test code should use the simpler `dump_dataset` function instead.
 /// This function is only exposed for advanced test scenarios that need
-/// fine-grained control over dump behavior.
+/// fine-grained control over dump parameters (end_block type, max_writers,
+/// microbatch interval).
 pub async fn dump_internal(
     config: WorkerConfig,
     metadata_db: MetadataDb,
     dataset_store: DatasetStore,
-    dataset: Reference,
+    dataset_ref: Reference,
     end_block: EndBlock,
     max_writers: u16,
     microbatch_max_interval_override: Option<u64>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    let hash_reference = dataset_store
+        .resolve_revision(&dataset_ref)
+        .await?
+        .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
+
+    // Get dataset using hash reference
+    let dataset = dataset_store.get_dataset(&hash_reference).await?;
+
+    // Parse dataset kind
+    let kind: DatasetKind = dataset.kind.parse()?;
+
+    let mut tables = Vec::with_capacity(dataset.tables.len());
+
+    let data_store = config.data_store.clone();
     let opts = dump::parquet_opts(&config.parquet);
     let cache = ParquetFooterCache::builder(opts.cache_size_mb)
         .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
         .build();
-    // Always use the data store from config in test scenarios
-    let data_store = config.data_store.clone();
-
-    // Always ignore dependencies in test scenarios
-    let datasets = vec![dataset];
-
-    let mut physical_datasets = vec![];
-    for dataset_ref in datasets {
-        // Resolve reference to hash reference
-        let hash_reference = dataset_store
-            .resolve_revision(&dataset_ref)
-            .await?
-            .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
-
-        // Get dataset using hash reference
-        let dataset = dataset_store.get_dataset(&hash_reference).await?;
-
-        // Parse dataset kind
-        let kind: dataset_store::DatasetKind = dataset.kind.parse()?;
-        if !kind.is_raw() {
-            let table_names: Vec<String> = dataset
-                .tables
-                .iter()
-                .map(|t| t.name().to_string())
-                .collect();
-            tracing::info!(
-                "Table dump order for dataset {}: {:?}",
-                dataset_ref,
-                table_names
-            );
+    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+        let db = metadata_db.clone();
+        // Always reuse existing physical tables in test scenarios (fresh = false)
+        let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+            Some(physical_table) => physical_table,
+            None => {
+                PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference).await?
+            }
         }
-
-        // No metrics in test scenarios
-        let metrics = None;
-
-        let mut tables = Vec::with_capacity(dataset.tables.len());
-
-        for table in dataset.resolved_tables(dataset_ref.clone().into()) {
-            let db = metadata_db.clone();
-            // Always reuse existing physical tables in test scenarios (fresh = false)
-            let physical_table =
-                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
-                    Some(physical_table) => physical_table,
-                    None => {
-                        PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference)
-                            .await?
-                    }
-                }
-                .into();
-            let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
-            tables.push((physical_table, compactor));
-        }
-        physical_datasets.push((kind, tables, metrics));
+        .into();
+        let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
+        tables.push((physical_table, compactor));
     }
 
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
-    let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets
-        .iter()
-        .flat_map(|(_, tables, _)| tables.iter().map(|(t, _)| t))
-        .cloned()
-        .collect();
+    let all_tables: Vec<Arc<PhysicalTable>> = tables.iter().map(|(t, _)| t).cloned().collect();
 
-    for (kind, tables, metrics) in &physical_datasets {
-        let ctx = dump::Ctx {
-            config: config.dump_config(),
-            metadata_db: metadata_db.clone(),
-            dataset_store: dataset_store.clone(),
-            data_store: data_store.clone(),
-            notification_multiplexer: notification_multiplexer.clone(),
-            metrics: metrics.clone(),
-        };
+    let ctx = dump::Ctx {
+        config: config.dump_config(),
+        metadata_db: metadata_db.clone(),
+        dataset_store: dataset_store.clone(),
+        data_store: data_store.clone(),
+        notification_multiplexer: notification_multiplexer.clone(),
+        metrics: None,
+    };
 
-        dump::dump_tables(
-            ctx,
-            *kind,
-            tables,
-            max_writers,
-            microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-            end_block,
-        )
-        .await?
-    }
+    dump::dump_tables(
+        ctx,
+        &hash_reference,
+        kind,
+        &tables,
+        max_writers,
+        microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
+        end_block,
+    )
+    .await?;
 
     Ok(all_tables)
 }
