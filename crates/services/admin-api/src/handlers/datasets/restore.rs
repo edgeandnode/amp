@@ -5,8 +5,8 @@ use axum::{
 };
 use common::catalog::physical::{PhysicalTable, RestoreLatestRevisionError};
 use datasets_common::{
-    hash_reference::HashReference, name::Name, namespace::Namespace, reference::Reference,
-    revision::Revision, table_name::TableName,
+    name::Name, namespace::Namespace, reference::Reference, revision::Revision,
+    table_name::TableName,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
 use monitoring::logging;
@@ -84,20 +84,30 @@ pub async fn handler(
         }
     };
 
-    tracing::debug!(dataset_reference=%reference, "restoring dataset physical tables");
+    tracing::debug!(dataset_reference = %reference, "restoring dataset physical tables");
 
-    // Load the full dataset object using the resolved version
+    let namespace = reference.namespace().clone();
+    let name = reference.name().clone();
+    let revision = reference.revision().clone();
+
+    // Resolve reference to hash reference
+    let hash_reference = ctx
+        .dataset_store
+        .resolve_revision(&reference)
+        .await
+        .map_err(Error::ResolveRevision)?
+        .ok_or_else(|| Error::NotFound {
+            namespace: namespace.clone(),
+            name: name.clone(),
+            revision: revision.clone(),
+        })?;
+
+    // Load the full dataset object using the resolved hash reference
     let dataset = ctx
         .dataset_store
-        .get_dataset(&reference)
+        .get_dataset(&hash_reference)
         .await
         .map_err(Error::GetDataset)?;
-
-    let dataset_reference = HashReference::new(
-        reference.namespace().clone(),
-        reference.name().clone(),
-        dataset.manifest_hash().clone(),
-    );
 
     let mut all_tasks: FuturesUnordered<JoinHandle<Result<RestoredTableInfo, Error>>> =
         FuturesUnordered::new();
@@ -108,8 +118,7 @@ pub async fn handler(
 
         let data_store = ctx.data_store.clone();
         let metadata_db = ctx.metadata_db.clone();
-        let dataset_reference_clone = dataset_reference.clone();
-        let reference_clone = reference.clone();
+        let dataset_reference_clone = hash_reference.clone();
 
         let task = tokio::spawn(async move {
             let physical_table = PhysicalTable::restore_latest_revision(
@@ -136,7 +145,7 @@ pub async fn handler(
             })?;
 
             tracing::info!(
-                datset_reference=%reference_clone,
+                dataset_reference=%dataset_reference_clone,
                 table_name = %table.name(),
                 location_id = %physical_table.location_id(),
                 url = %physical_table.url(),
@@ -166,7 +175,7 @@ pub async fn handler(
     }
 
     tracing::info!(
-        dataset_reference = %reference,
+        dataset_reference = %hash_reference,
         tables_restored = restored_tables.len(),
         "dataset restoration complete"
     );
@@ -210,6 +219,28 @@ pub enum Error {
     /// - Path parameter parsing fails
     #[error("Invalid path parameters: {0}")]
     InvalidPath(#[source] PathRejection),
+
+    /// Dataset or revision not found
+    ///
+    /// This occurs when:
+    /// - The specified dataset name doesn't exist in the namespace
+    /// - The specified revision doesn't exist for this dataset
+    /// - The revision resolves to a manifest that doesn't exist
+    #[error("Dataset '{namespace}/{name}' at revision '{revision}' not found")]
+    NotFound {
+        namespace: Namespace,
+        name: Name,
+        revision: Revision,
+    },
+
+    /// Dataset store operation error when resolving revision
+    ///
+    /// This occurs when:
+    /// - Failed to resolve revision to manifest hash
+    /// - Database connection issues
+    /// - Internal database errors
+    #[error("Failed to resolve revision: {0}")]
+    ResolveRevision(#[source] dataset_store::ResolveRevisionError),
 
     /// Dataset store operation error when loading dataset
     ///
@@ -257,6 +288,8 @@ impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidPath(_) => "INVALID_PATH",
+            Error::NotFound { .. } => "DATASET_NOT_FOUND",
+            Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::RestoreTable { .. } => "RESTORE_TABLE_ERROR",
             Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
@@ -267,6 +300,8 @@ impl IntoErrorResponse for Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Error::InvalidPath(_) => StatusCode::BAD_REQUEST,
+            Error::NotFound { .. } => StatusCode::NOT_FOUND,
+            Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::RestoreTable { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TableNotFound { .. } => StatusCode::NOT_FOUND,

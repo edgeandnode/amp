@@ -98,10 +98,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
-    catalog::{
-        dataset_access::DatasetAccess,
-        physical::{Catalog, PhysicalTable},
-    },
+    catalog::physical::{Catalog, PhysicalTable},
     metadata::{Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
@@ -332,9 +329,9 @@ pub async fn dump_table(
         let reference = dep_reference.to_reference();
 
         // Resolve reference to its manifest hash
-        let hash = ctx
+        let hash_reference = ctx
             .dataset_store
-            .resolve_dataset_reference(&reference)
+            .resolve_revision(&reference)
             .await
             .map_err(|err| {
                 format!(
@@ -349,8 +346,7 @@ pub async fn dump_table(
                 )
             })?;
 
-        let fqn = reference.into_fqn();
-        dependencies.insert(alias.clone(), (fqn, hash).into());
+        dependencies.insert(alias.clone(), hash_reference);
     }
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();

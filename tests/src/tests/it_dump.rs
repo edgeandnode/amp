@@ -254,11 +254,20 @@ impl TestCtx {
 
     /// Get the start block from the dataset.
     async fn get_dataset_start_block(&self) -> u64 {
+        let hash_ref = self
+            .ctx
+            .daemon_server()
+            .dataset_store()
+            .resolve_revision(&self.dataset_ref)
+            .await
+            .expect("Failed to resolve dataset reference")
+            .expect("Dataset not found");
+
         let dataset = self
             .ctx
             .daemon_server()
             .dataset_store()
-            .get_dataset(&self.dataset_ref)
+            .get_dataset(&hash_ref)
             .await
             .expect("Failed to load dataset");
 

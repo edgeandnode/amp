@@ -16,6 +16,7 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
+use dataset_store::GetDatasetError;
 use datasets_common::{
     deps::{
         alias::{DepAlias, DepAliasOrSelfRef},
@@ -279,17 +280,33 @@ pub async fn handler(
         PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
             Error::UnqualifiedTable(err)
         }
-        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
-            Error::DatasetNotFound(err)
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { source, .. } => {
+            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
+            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
+            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
+            // (and other error types) map to Error::GetDataset for HTTP 500.
+            if source
+                .downcast_ref::<GetDatasetError>()
+                .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
+            {
+                Error::DatasetNotFound(err)
+            } else {
+                Error::GetDataset(err)
+            }
         }
-        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
-            Error::DatasetNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
-            Error::GetDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
-            Error::GetDataset(err)
+        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { source, .. } => {
+            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
+            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
+            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
+            // (and other error types) map to Error::GetDataset for HTTP 500.
+            if source
+                .downcast_ref::<GetDatasetError>()
+                .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
+            {
+                Error::DatasetNotFound(err)
+            } else {
+                Error::GetDataset(err)
+            }
         }
         PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
             Error::EthCallUdfCreation(err)

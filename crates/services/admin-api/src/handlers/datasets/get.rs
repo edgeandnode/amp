@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use monitoring::logging;
 
 use crate::{
@@ -64,25 +64,24 @@ pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<(Namespace, Name, Revision)>, PathRejection>,
 ) -> Result<Json<DatasetInfo>, ErrorResponse> {
-    let (namespace, name, revision) = match path {
-        Ok(Path((namespace, name, revision))) => (namespace, name, revision),
+    let reference = match path {
+        Ok(Path((namespace, name, revision))) => Reference::new(namespace, name, revision),
         Err(err) => {
             tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid path parameters");
             return Err(Error::InvalidPath(err).into());
         }
     };
 
-    tracing::debug!(
-        namespace=%namespace,
-        name=%name,
-        revision=%revision,
-        "retrieving dataset information"
-    );
+    tracing::debug!(dataset_reference = %reference, "retrieving dataset information");
+
+    let namespace = reference.namespace().clone();
+    let name = reference.name().clone();
+    let revision = reference.revision().clone();
 
     // Resolve the revision to a manifest hash
-    let manifest_hash = ctx
+    let reference = ctx
         .dataset_store
-        .resolve_dataset_revision(&namespace, &name, &revision)
+        .resolve_revision(&reference)
         .await
         .map_err(Error::ResolveRevision)?
         .ok_or_else(|| Error::NotFound {
@@ -94,7 +93,7 @@ pub async fn handler(
     // Load manifest content
     let manifest_content = ctx
         .dataset_store
-        .get_manifest(&manifest_hash)
+        .get_manifest(reference.hash())
         .await
         .map_err(|err| match err {
             dataset_store::GetManifestError::MetadataDbQueryPath(_) => Error::GetManifestPath(err),
@@ -115,7 +114,7 @@ pub async fn handler(
         namespace,
         name,
         revision,
-        manifest_hash: manifest_hash.to_string(),
+        manifest_hash: reference.hash().to_string(),
         kind: manifest.kind,
     }))
 }

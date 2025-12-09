@@ -81,13 +81,9 @@ pub async fn handler(
     };
 
     // Resolve dataset revision to manifest hash
-    let manifest_hash = ctx
+    let reference = ctx
         .dataset_store
-        .resolve_dataset_revision(
-            reference.namespace(),
-            reference.name(),
-            reference.revision(),
-        )
+        .resolve_revision(&reference)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -105,12 +101,11 @@ pub async fn handler(
     // Fetch all jobs from metadata database filtered by dataset
     let jobs = ctx
         .scheduler
-        .list_jobs_by_dataset(reference.namespace(), reference.name(), &manifest_hash)
+        .list_jobs_by_dataset(reference.namespace(), reference.name(), reference.hash())
         .await
         .map_err(|err| {
             tracing::error!(
                 dataset_reference = %reference,
-                manifest_hash = %manifest_hash,
                 error = %err,
                 error_source = logging::error_source(&err),
                 "failed to list jobs for dataset"

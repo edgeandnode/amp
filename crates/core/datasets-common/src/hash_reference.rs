@@ -203,6 +203,13 @@ impl PartialEq<HashReference> for Reference {
     }
 }
 
+// AsRef implementation for ergonomic API usage
+impl AsRef<HashReference> for HashReference {
+    fn as_ref(&self) -> &HashReference {
+        self
+    }
+}
+
 /// Errors that can occur when parsing a hash reference string.
 ///
 /// This error type is used when parsing strings in the format `namespace/name@hash`

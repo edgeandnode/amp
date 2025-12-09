@@ -319,23 +319,23 @@ pub async fn validate(
         // Convert DepReference to Reference for resolution
         let reference = dep_reference.to_reference();
 
-        // Resolve reference to its manifest hash
+        // Resolve reference to its manifest hash reference
         // This handles all revision types (Version, Hash)
-        let hash = store
-            .resolve_dataset_reference(&reference)
+        let reference = store
+            .resolve_revision(&reference)
             .await
             .map_err(|err| ManifestValidationError::DependencyResolution {
                 alias: alias.to_string(),
                 reference: reference.to_string(),
                 source: err,
             })?
-            .ok_or_else(|| ManifestValidationError::DependencyNotFound {
+            .ok_or_else(|| ManifestValidationError::DependencyResolution {
                 alias: alias.to_string(),
                 reference: reference.to_string(),
+                source: format!("Dependency '{}' not found", reference).into(),
             })?;
 
-        let fqn = reference.into_fqn();
-        dependencies.insert(alias.clone(), (fqn, hash).into());
+        dependencies.insert(alias.clone(), reference);
     }
 
     // Step 2: Parse all SQL queries and extract references
@@ -397,12 +397,6 @@ pub async fn validate(
     .map_err(|err| match &err {
         PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
             ManifestValidationError::UnqualifiedTable(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef { .. } => {
-            ManifestValidationError::DatasetNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction { .. } => {
-            ManifestValidationError::DatasetNotFound(err)
         }
         PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
             ManifestValidationError::GetDataset(err)
@@ -495,11 +489,12 @@ pub enum ManifestValidationError {
         source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
     },
 
-    /// Dependency declared in manifest but not found in store
-    #[error("Dependency '{alias}' ({reference}) not found in dataset store")]
-    DependencyNotFound { alias: String, reference: String },
-
     /// Failed to resolve dependency reference to hash
+    ///
+    /// This occurs when resolving a dependency reference fails:
+    /// - Invalid reference format
+    /// - Dependency not found in the dataset store
+    /// - Storage backend errors when reading the dependency
     #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
     DependencyResolution {
         alias: String,

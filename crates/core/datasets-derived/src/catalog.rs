@@ -170,20 +170,12 @@ async fn get_logical_catalog_with_deps_and_funcs(
                 };
 
                 // Load dataset by hash (cached by store)
-                let dataset = store
-                    .get_dataset_by_hash(hash_ref.hash())
-                    .await
-                    .map_err(
-                        |err| GetLogicalCatalogWithDepsAndFuncsError::GetDatasetForTableRef {
-                            reference: hash_ref.clone(),
-                            source: err,
-                        },
-                    )?
-                    .ok_or_else(|| {
-                        GetLogicalCatalogWithDepsAndFuncsError::DatasetNotFoundForTableRef {
-                            reference: hash_ref.clone(),
-                        }
-                    })?;
+                let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+                    GetLogicalCatalogWithDepsAndFuncsError::GetDatasetForTableRef {
+                        reference: hash_ref.clone(),
+                        source: err,
+                    }
+                })?;
 
                 // Find table in dataset
                 let dataset_table = dataset
@@ -227,20 +219,12 @@ async fn get_logical_catalog_with_deps_and_funcs(
                         })?;
 
                         // Load dataset by hash (cached by store)
-                        let dataset = store
-                            .get_dataset_by_hash(hash_ref.hash())
-                            .await
-                            .map_err(|err| {
-                                GetLogicalCatalogWithDepsAndFuncsError::GetDatasetForFunction {
-                                    reference: hash_ref.clone(),
-                                    source: err,
-                                }
-                            })?
-                            .ok_or_else(|| {
-                                GetLogicalCatalogWithDepsAndFuncsError::DatasetNotFoundForFunction {
-                                    reference: hash_ref.clone(),
-                                }
-                            })?;
+                        let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+                            GetLogicalCatalogWithDepsAndFuncsError::GetDatasetForFunction {
+                                reference: hash_ref.clone(),
+                                source: err,
+                            }
+                        })?;
 
                         // Convert func_ref to use String schema for internal data structures
                         let func_ref_string = FunctionReference::qualified(
@@ -435,22 +419,13 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
                     };
 
                     // Load dataset by hash (cached by store)
-                    let dataset = store
-                        .get_dataset_by_hash(hash_ref.hash())
-                        .await
-                        .map_err(|err| {
-                            PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef {
-                                table_name: table_name.clone(),
-                                reference: hash_ref.clone(),
-                                source: err,
-                            }
-                        })?
-                        .ok_or_else(|| {
-                            PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForTableRef {
-                                table_name: table_name.clone(),
-                                reference: hash_ref.clone(),
-                            }
-                        })?;
+                    let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+                        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef {
+                            table_name: table_name.clone(),
+                            reference: hash_ref.clone(),
+                            source: err,
+                        }
+                    })?;
 
                     // Find table in dataset
                     let dataset_table = dataset
@@ -498,22 +473,13 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
                             })?;
 
                             // Load dataset by hash (cached by store)
-                            let dataset = store
-                                .get_dataset_by_hash(hash_ref.hash())
-                                .await
-                                .map_err(|err| {
-                                    PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction {
-                                        table_name: table_name.clone(),
-                                        reference: hash_ref.clone(),
-                                        source: err,
-                                    }
-                                })?
-                                .ok_or_else(|| {
-                                    PlanningCtxForSqlTablesWithDepsError::DatasetNotFoundForFunction {
-                                        table_name: table_name.clone(),
-                                        reference: hash_ref.clone(),
-                                    }
-                                })?;
+                            let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+                                PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction {
+                                    table_name: table_name.clone(),
+                                    reference: hash_ref.clone(),
+                                    source: err,
+                                }
+                            })?;
 
                             // Skip if function reference is already resolved (optimization to avoid redundant UDF creation)
                             let Entry::Vacant(entry) = udfs
@@ -637,19 +603,10 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         table_ref: String,
     },
 
-    /// Dataset reference could not be found when loading dataset for table reference.
-    ///
-    /// This occurs when loading a dataset referenced in a table reference fails
-    /// because the dataset does not exist in the store.
-    #[error("In table '{table_name}': Dataset reference '{reference}' not found")]
-    DatasetNotFoundForTableRef {
-        table_name: TableName,
-        reference: HashReference,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for table reference.
     ///
     /// This occurs when loading a dataset definition fails:
+    /// - Dataset not found in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset
@@ -685,19 +642,10 @@ pub enum PlanningCtxForSqlTablesWithDepsError {
         alias: DepAlias,
     },
 
-    /// Dataset reference could not be found when loading dataset for function.
-    ///
-    /// This occurs when loading a dataset referenced in a function name fails
-    /// because the dataset does not exist in the store.
-    #[error("In table '{table_name}': Dataset reference '{reference}' not found for function")]
-    DatasetNotFoundForFunction {
-        table_name: TableName,
-        reference: HashReference,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for function.
     ///
     /// This occurs when loading a dataset definition for a function fails:
+    /// - Dataset not found in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset
@@ -850,16 +798,10 @@ pub enum GetLogicalCatalogWithDepsAndFuncsError {
     )]
     DependencyAliasNotFoundForTableRef { alias: DepAlias },
 
-    /// Dataset reference could not be found when loading dataset for table reference.
-    ///
-    /// This occurs when loading a dataset referenced in a table reference fails
-    /// because the dataset does not exist in the store.
-    #[error("Dataset reference '{reference}' not found for table reference")]
-    DatasetNotFoundForTableRef { reference: HashReference },
-
     /// Failed to retrieve dataset from store when loading dataset for table reference.
     ///
     /// This occurs when loading a dataset definition fails:
+    /// - Dataset not found in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset
@@ -879,16 +821,10 @@ pub enum GetLogicalCatalogWithDepsAndFuncsError {
     )]
     DependencyAliasNotFoundForFunctionRef { alias: DepAlias },
 
-    /// Dataset reference could not be found when loading dataset for function.
-    ///
-    /// This occurs when loading a dataset referenced in a function name fails
-    /// because the dataset does not exist in the store.
-    #[error("Dataset reference '{reference}' not found for function reference")]
-    DatasetNotFoundForFunction { reference: HashReference },
-
     /// Failed to retrieve dataset from store when loading dataset for function.
     ///
     /// This occurs when loading a dataset definition for a function fails:
+    /// - Dataset not found in the store
     /// - Dataset manifest is invalid or corrupted
     /// - Unsupported dataset kind
     /// - Storage backend errors when reading the dataset

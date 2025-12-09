@@ -68,8 +68,8 @@ pub async fn handler(
     };
 
     tracing::debug!(
-        namespace=%namespace,
-        name=%name,
+        dataset_namespace = %namespace,
+        dataset_name = %name,
         "listing dataset versions"
     );
 
@@ -100,16 +100,16 @@ pub async fn handler(
         })
         .collect();
 
-    // Get latest tag (should match highest version if exists)
+    // Get latest tag (should match the highest version if exists)
     let latest_version = versions.first().map(|v| v.version.clone());
 
     // Get dev tag hash
     let dev_hash = ctx
         .dataset_store
-        .resolve_dataset_revision(&namespace, &name, &datasets_common::revision::Revision::Dev)
+        .resolve_dev_version_hash(&namespace, &name)
         .await
         .map_err(Error::ResolveRevision)?
-        .map(|h| h.into_inner());
+        .map(|hash| hash.into_inner());
 
     Ok(Json(VersionsResponse {
         namespace,
