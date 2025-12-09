@@ -3,7 +3,7 @@
 use std::{future::Future, sync::Arc};
 
 use common::{BoxError, catalog::physical::PhysicalTable};
-use datasets_common::{hash::Hash, hash_reference::HashReference};
+use datasets_common::hash_reference::HashReference;
 use dump::{Ctx, compaction::AmpCompactor, metrics::MetricsRegistry};
 use metadata_db::LocationId;
 use tracing::{Instrument, info_span};
@@ -22,36 +22,24 @@ pub(super) async fn new(
     job_id: JobId,
     job_desc: JobDescriptor,
 ) -> Result<impl Future<Output = Result<(), BoxError>>, JobInitError> {
-    let (end_block, max_writers, dataset_namespace, dataset_name, manifest_hash, dataset_kind) =
-        match job_desc {
-            JobDescriptor::Dump {
-                end_block,
-                max_writers,
-                dataset_namespace,
-                dataset_name,
-                manifest_hash,
-                dataset_kind,
-            } => (
-                end_block,
-                max_writers,
-                dataset_namespace,
-                dataset_name,
-                manifest_hash,
-                dataset_kind,
-            ),
-        };
-
-    // Create hash reference for metrics and table operations
-    let hash_reference = HashReference::new(
-        dataset_namespace.clone(),
-        dataset_name.clone(),
-        manifest_hash.clone(),
-    );
+    let (end_block, max_writers, reference, dataset_kind) = match job_desc {
+        JobDescriptor::Dump {
+            end_block,
+            max_writers,
+            dataset_namespace,
+            dataset_name,
+            manifest_hash,
+            dataset_kind,
+        } => {
+            let hash_reference = HashReference::new(dataset_namespace, dataset_name, manifest_hash);
+            (end_block, max_writers, hash_reference, dataset_kind)
+        }
+    };
 
     let metrics = job_ctx
         .meter
         .as_ref()
-        .map(|m| Arc::new(MetricsRegistry::new(m, hash_reference.clone())));
+        .map(|m| Arc::new(MetricsRegistry::new(m, reference.clone())));
 
     // Create Ctx instance for job execution
     let ctx = Ctx {
@@ -63,20 +51,13 @@ pub(super) async fn new(
         metrics,
     };
 
-    let hash_ref = HashReference::new(
-        dataset_namespace.clone(),
-        dataset_name.clone(),
-        manifest_hash.clone(),
-    );
-    let dataset_ref = hash_ref.to_reference();
-
     // Get the dataset to access its tables
     let dataset = ctx
         .dataset_store
-        .get_dataset(&hash_ref)
+        .get_dataset(&reference)
         .await
         .map_err(|err| JobInitError::FetchDataset {
-            hash: manifest_hash.clone(),
+            reference: reference.clone(),
             source: err,
         })?;
 
@@ -86,7 +67,7 @@ pub(super) async fn new(
     // Create physical tables and compactors for each table in the dataset
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     let mut location_ids: Vec<LocationId> = vec![];
-    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+    for table in dataset.resolved_tables(reference.to_reference().into()) {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> =
             match PhysicalTable::get_active(&table, ctx.metadata_db.clone())
@@ -100,7 +81,7 @@ pub(super) async fn new(
                     &ctx.data_store,
                     ctx.metadata_db.clone(),
                     true, // set_active
-                    &hash_reference,
+                    &reference,
                 )
                 .await
                 .map_err(JobInitError::CreatePhysicalTable)?,
@@ -128,13 +109,14 @@ pub(super) async fn new(
     let fut = async move {
         dump::dump_tables(
             ctx,
+            &reference,
             dataset_kind,
             &tables,
             max_writers,
             microbatch_max_interval,
             end_block,
         )
-        .instrument(info_span!("dump_job", %job_id, dataset = %dataset_ref.short_display()))
+        .instrument(info_span!("dump_job", %job_id, dataset = %reference.short_display()))
         .await
         .map_err(|err| err.into())
     };
@@ -154,9 +136,9 @@ pub enum JobInitError {
     /// - Dataset store unavailable or unreachable
     /// - Manifest not cached or registered in the store
     /// - Dataset does not exist for the given hash reference
-    #[error("Failed to fetch dataset with hash '{hash}'")]
+    #[error("Failed to fetch dataset {reference}")]
     FetchDataset {
-        hash: Hash,
+        reference: HashReference,
         #[source]
         source: dataset_store::GetDatasetError,
     },

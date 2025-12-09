@@ -8,6 +8,7 @@ use common::{
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
+use datasets_common::hash_reference::HashReference;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
 mod block_ranges;
@@ -36,6 +37,7 @@ use crate::{
 /// Dumps a set of tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
     ctx: Ctx,
+    dataset: &HashReference,
     kind: DatasetKind,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
@@ -49,7 +51,7 @@ pub async fn dump_tables(
             .map_err(Error::RawDatasetDump)?;
     } else {
         // Derived datasets
-        derived_dataset::dump(ctx, tables, microbatch_max_interval, end)
+        derived_dataset::dump(ctx, dataset, tables, microbatch_max_interval, end)
             .await
             .map_err(Error::DerivedDatasetDump)?;
     }

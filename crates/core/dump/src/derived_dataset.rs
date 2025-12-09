@@ -123,12 +123,18 @@ use crate::{
 /// Dumps a set of derived dataset tables. All tables must belong to the same dataset.
 pub async fn dump(
     ctx: Ctx,
+    dataset: &HashReference,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     microbatch_max_interval: u64,
     end: EndBlock,
 ) -> Result<(), Error> {
-    let opts = crate::parquet_opts(&ctx.config.parquet);
-    let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
+    // Resolve manifest once using the provided hash reference
+    let manifest = ctx
+        .dataset_store
+        .get_derived_manifest(dataset.hash())
+        .await
+        .map(Arc::new)
+        .map_err(Error::GetDerivedManifest)?;
 
     // Pre-check all tables for consistency before spawning tasks
     for (table, _) in tables {
@@ -143,6 +149,8 @@ pub async fn dump(
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
+    let opts = crate::parquet_opts(&ctx.config.parquet);
+    let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
     for (table, compactor) in tables {
         let ctx = ctx.clone();
         let env = env.clone();
@@ -150,26 +158,15 @@ pub async fn dump(
         let compactor = Arc::clone(compactor);
         let opts = opts.clone();
         let metrics = ctx.metrics.clone();
+        let manifest = manifest.clone();
 
         join_set.spawn(
             async move {
-                let dataset = table.table().dataset();
                 let table_name = table.table_name().to_string();
-                let manifest = ctx
-                    .dataset_store
-                    .get_derived_manifest(dataset.manifest_hash())
-                    .await
-                    .map_err(|err| -> BoxError {
-                        Error::GetDerivedManifest {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                        .into()
-                    })?;
 
                 dump_table(
                     ctx,
-                    manifest,
+                    &manifest,
                     env.clone(),
                     table.clone(),
                     compactor,
@@ -245,12 +242,8 @@ pub enum Error {
     /// - Corrupted manifest data
     ///
     /// The manifest is required to determine table definitions and SQL queries.
-    #[error("Failed to get derived manifest for table '{table_name}'")]
-    GetDerivedManifest {
-        table_name: String,
-        #[source]
-        source: dataset_store::GetDerivedManifestError,
-    },
+    #[error("Failed to get derived manifest")]
+    GetDerivedManifest(#[source] dataset_store::GetDerivedManifestError),
 
     /// Failed to dump individual table
     ///
@@ -286,9 +279,9 @@ pub enum Error {
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(table = %table.table_name()), err)]
 #[expect(clippy::too_many_arguments)]
-pub async fn dump_table(
+async fn dump_table(
     ctx: Ctx,
-    manifest: DerivedManifest,
+    manifest: &DerivedManifest,
     env: QueryEnv,
     table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
