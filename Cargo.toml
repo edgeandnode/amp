@@ -46,6 +46,7 @@ license-file = "LICENSE"
 #
 # <https://github.com/alloy-rs/alloy/pull/3095>
 alloy = { git = "https://github.com/sistemd/alloy.git", branch = "sistemd/saturate-unknown-tx-gas-price", default-features = false, features = [
+    "contract",
     "dyn-abi",
     "json-abi",
     "json-rpc",
@@ -53,10 +54,12 @@ alloy = { git = "https://github.com/sistemd/alloy.git", branch = "sistemd/satura
     "provider-http",
     "provider-ipc",
     "provider-ws",
+    "reqwest-rustls-tls",
     "rpc",
     "rpc-types",
-    "reqwest-rustls-tls",
     "rpc-types-anvil",
+    "signer-local",
+    "signers",
 ] }
 anyhow = "1.0.80"
 async-stream = "0.3.6"
@@ -127,6 +130,7 @@ uuid = { version = "1.11.0", features = ["v7"] }
 zstd = "0.13.3"
 
 # Datafusion and Arrow crates
+arrow = "56"
 arrow-flight = { version = "56", features = ["flight-sql-experimental"] }
 datafusion = { version = "50", features = ["serde"] }
 datafusion-tracing = { version = "50" }

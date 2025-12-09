@@ -18,7 +18,7 @@ use datafusion::{
         },
         datatypes::{DataType, Field, Fields},
     },
-    common::{internal_err, plan_err},
+    common::{internal_err, plan_err, utils::quote_identifier},
     error::DataFusionError,
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
@@ -54,9 +54,13 @@ impl std::hash::Hash for EthCall {
 }
 
 impl EthCall {
-    pub fn new(dataset_name: &str, client: alloy::providers::RootProvider<AnyNetwork>) -> Self {
+    pub fn new(catalog_schema: &str, client: alloy::providers::RootProvider<AnyNetwork>) -> Self {
+        // Create UDF name with quoted schema to match how DataFusion's query planner
+        // resolves qualified function references (e.g., "_/anvil_rpc@0.0.0".eth_call)
+        let name = format!("{}.eth_call", quote_identifier(catalog_schema));
+
         EthCall {
-            name: format!("{dataset_name}.eth_call"),
+            name,
             client,
             signature: Signature {
                 type_signature: TypeSignature::Exact(vec![

@@ -11,16 +11,14 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy::primitives::BlockNumber;
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 use async_stream::try_stream;
-use common::{
-    BlockNum,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    metadata::segments::{BlockRange, ResumeWatermark},
-};
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use tokio::sync::Mutex;
 
 use crate::{
+    BlockRange, Cursor,
     client::{AmpClient, HasSchema, InvalidationRange, ProtocolMessage, ProtocolStream},
     error::{Error, ReorgError},
     store::StateStore,
@@ -198,7 +196,7 @@ pub(crate) struct StateContainer {
     /// Persistent state store
     store: Box<dyn StateStore>,
     /// Retention window in blocks
-    retention: BlockNum,
+    retention: BlockNumber,
     /// Next transaction id to be assigned
     next: TransactionId,
     /// Buffer of watermarks and undo events (oldest to newest)
@@ -240,7 +238,7 @@ fn find_recovery_point(
     }
 
     // Build reorg points map: network -> first invalid block
-    let points: HashMap<String, BlockNum> = invalidation
+    let points: HashMap<String, BlockNumber> = invalidation
         .iter()
         .map(|inv| (inv.network.clone(), *inv.numbers.start()))
         .collect();
@@ -279,13 +277,13 @@ fn find_recovery_point(
 /// - `None` if no pruning needed
 fn find_pruning_point(
     buffer: &VecDeque<(TransactionId, Vec<BlockRange>)>,
-    retention: BlockNum,
+    retention: BlockNumber,
 ) -> Option<TransactionId> {
     // Get latest ranges from buffer
     let (_, ranges) = buffer.back()?;
 
     // Calculate cutoff block for each network
-    let cutoffs: HashMap<String, BlockNum> = ranges
+    let cutoffs: HashMap<String, BlockNumber> = ranges
         .iter()
         .map(|range| {
             let cutoff = range.start().saturating_sub(retention);
@@ -329,7 +327,7 @@ impl StateContainer {
     /// * `retention` - How many blocks to keep in buffer
     pub(crate) async fn new(
         store: Box<dyn StateStore>,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> Result<Self, Error> {
         let state = store.load().await?;
 
@@ -366,7 +364,7 @@ impl StateActor {
     /// Create a new state actor with the given store and retention window.
     pub(crate) async fn new(
         store: Box<dyn StateStore>,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> Result<Self, Error> {
         let state = StateContainer::new(store, retention).await?;
 
@@ -573,7 +571,7 @@ pub struct TransactionalStreamBuilder {
     client: AmpClient,
     sql: String,
     store: Box<dyn StateStore>,
-    retention: BlockNum,
+    retention: BlockNumber,
 }
 
 impl TransactionalStreamBuilder {
@@ -588,7 +586,7 @@ impl TransactionalStreamBuilder {
         client: AmpClient,
         sql: impl Into<String>,
         store: Box<dyn StateStore>,
-        retention: BlockNum,
+        retention: BlockNumber,
     ) -> Self {
         Self {
             client,
@@ -608,8 +606,8 @@ impl IntoFuture for TransactionalStreamBuilder {
             TransactionalStream::create(
                 self.store,
                 self.retention,
-                |resume: Option<ResumeWatermark>| async move {
-                    self.client.request(&self.sql, resume.as_ref(), true).await
+                |cursor: Option<Cursor>| async move {
+                    self.client.request(&self.sql, cursor.as_ref(), true).await
                 },
             )
             .await
@@ -691,14 +689,14 @@ impl TransactionalStream {
     /// # Arguments
     /// - `store`: State store for persistence
     /// - `retention`: Retention window in blocks
-    /// - `connect`: Async function that produces a raw stream, given an optional resume watermark
+    /// - `connect`: Async function that produces a raw stream, given an optional resume cursor
     pub(crate) async fn create<F, Fut>(
         store: Box<dyn StateStore>,
-        retention: BlockNum,
+        retention: BlockNumber,
         connect: F,
     ) -> Result<Self, Error>
     where
-        F: FnOnce(Option<ResumeWatermark>) -> Fut,
+        F: FnOnce(Option<Cursor>) -> Fut,
         Fut: Future<Output = Result<crate::client::RawStream, Error>>,
     {
         let actor = StateActor::new(store, retention).await?;
@@ -716,9 +714,9 @@ impl TransactionalStream {
             .as_ref()
             .map(|(_, ranges)| ranges.clone())
             .unwrap_or_default();
-        let resume = watermark.map(|(_, ranges)| ResumeWatermark::from_ranges(&ranges));
+        let cursor = watermark.map(|(_, ranges)| Cursor::from_ranges(&ranges));
 
-        let raw = connect(resume).await?;
+        let raw = connect(cursor).await?;
         let schema = raw.schema();
         let mut protocol = ProtocolStream::new(raw.boxed(), previous, schema.clone());
 

@@ -3,15 +3,15 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::primitives::BlockHash;
-use common::{
-    arrow::{
-        array::RecordBatch,
-        datatypes::{DataType, Field, Schema},
-    },
-    metadata::segments::BlockRange,
+use arrow::{
+    array::RecordBatch,
+    datatypes::{DataType, Field, Schema},
 };
 
-use crate::client::{Metadata, ResponseBatch};
+use crate::{
+    BlockRange,
+    client::{Metadata, ResponseBatch},
+};
 
 /// Trait for converting various types into network ranges.
 pub trait IntoRanges {
@@ -305,7 +305,7 @@ pub fn watermark_multi_with_epochs(ranges: Vec<(&str, RangeInclusive<u64>, u8)>)
 
 /// Create a mock RecordBatch with a single row and label column.
 fn create_mock_batch(label: Option<&str>) -> RecordBatch {
-    use common::arrow::array::StringArray;
+    use arrow::array::StringArray;
 
     let schema = Arc::new(Schema::new(vec![Field::new(
         "label",

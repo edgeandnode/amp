@@ -6,8 +6,10 @@
 
 use common::BoxError;
 use datasets_common::{hash::Hash, reference::Reference};
+use dump::EndBlock;
 use serde_json::value::RawValue;
 use url::Url;
+use worker::node_id::NodeId;
 
 /// ampctl fixture for registering dataset manifests and provider configurations.
 ///
@@ -170,6 +172,38 @@ impl Ampctl {
             .restore(dataset_ref)
             .await
             .map(|response| response.tables)
+            .map_err(Into::into)
+    }
+
+    /// Deploy a dataset by scheduling a dump job.
+    ///
+    /// Takes a dataset reference string (namespace/name@version) and optional parameters,
+    /// then schedules a dump job to extract and process the dataset.
+    pub async fn dataset_deploy(
+        &self,
+        dataset_ref: &str,
+        end_block: Option<u64>,
+        parallelism: Option<u16>,
+        worker_id: Option<NodeId>,
+    ) -> Result<worker::job::JobId, BoxError> {
+        let reference: Reference = dataset_ref.parse().map_err(|err| {
+            format!(
+                "Failed to parse dataset reference '{}': {}",
+                dataset_ref, err
+            )
+        })?;
+
+        let end_block_param = end_block.map(EndBlock::Absolute);
+
+        self.client
+            .datasets()
+            .deploy(
+                &reference,
+                end_block_param,
+                parallelism.unwrap_or(1),
+                worker_id,
+            )
+            .await
             .map_err(Into::into)
     }
 }

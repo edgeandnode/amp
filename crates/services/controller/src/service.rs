@@ -36,7 +36,7 @@ pub async fn new(
     meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
-    let scheduler = Arc::new(Scheduler::new(config.clone(), metadata_db.clone()));
+    let scheduler = Arc::new(Scheduler::new(metadata_db.clone()));
 
     let ctx = Ctx {
         metadata_db,

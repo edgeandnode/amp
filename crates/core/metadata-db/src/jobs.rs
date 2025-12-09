@@ -17,52 +17,9 @@ use crate::{
     ManifestHash,
     db::Executor,
     error::Error,
-    physical_table::{self, LocationId},
+    job_attempts,
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
-
-/// Schedules a job on the given worker
-///
-/// The job will only be scheduled if the locations are successfully locked.
-///
-/// This function performs in a single transaction:
-///
-///  1. Registers the job in the workers job queue
-///  2. Locks the locations
-///  3. Inserts initial job attempt (retry_index = 0)
-///
-/// If any of these steps fail, the transaction is rolled back.
-///
-/// **Note:** This function does not send notifications. The caller is responsible for
-/// calling `send_job_notification` after successful job scheduling if worker notification
-/// is required.
-// TODO: Move to Admin API layer (scheduler)
-#[tracing::instrument(skip(db), err)]
-pub async fn schedule(
-    db: &crate::MetadataDb,
-    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
-    job_desc: &str,
-    locations: &[LocationId],
-) -> Result<JobId, Error> {
-    // Use a transaction, such that the job will only be scheduled if the locations are
-    // successfully locked.
-    let mut tx = db.begin_txn().await?;
-
-    // Register the job in the workers job queue
-    let job_id = register(&mut tx, node_id.into(), job_desc).await?;
-
-    // Lock the locations for this job by assigning the job ID as the writer
-    physical_table::assign_job_writer(&mut tx, locations, job_id).await?;
-
-    // Insert initial job attempt (retry_index = 0)
-    crate::job_attempts::sql::insert_attempt(&mut tx, job_id, 0)
-        .await
-        .map_err(Error::Database)?;
-
-    tx.commit().await?;
-
-    Ok(job_id)
-}
 
 /// Register a job in the queue with the default status (Scheduled)
 ///
@@ -244,12 +201,12 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_by_dataset<'c, E>(
     exe: E,
-    manifest_hash: ManifestHash<'_>,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<Vec<Job>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_jobs_by_dataset(exe, manifest_hash)
+    sql::get_jobs_by_dataset(exe, manifest_hash.into())
         .await
         .map_err(Error::Database)
 }
@@ -423,7 +380,7 @@ pub async fn reschedule(
         .map_err(Error::Database)?;
 
     // Insert job attempt record
-    crate::job_attempts::sql::insert_attempt(&mut tx, job_id, retry_index)
+    job_attempts::sql::insert_attempt(&mut tx, job_id, retry_index)
         .await
         .map_err(Error::Database)?;
 

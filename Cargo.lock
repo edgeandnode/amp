@@ -199,6 +199,8 @@ dependencies = [
  "alloy-rpc-client",
  "alloy-rpc-types",
  "alloy-serde",
+ "alloy-signer",
+ "alloy-signer-local",
  "alloy-transport",
  "alloy-transport-http",
  "alloy-transport-ipc",
@@ -880,11 +882,11 @@ name = "amp-client"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "arrow",
  "arrow-flight",
  "async-stream",
  "async-trait",
  "bytes",
- "common",
  "futures",
  "heed",
  "http 1.4.0",

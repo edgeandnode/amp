@@ -124,11 +124,17 @@
 //! }
 //! ```
 
+use std::{collections::BTreeMap, ops::RangeInclusive};
+
+use alloy::primitives::{BlockHash, BlockNumber};
+
 mod cdc;
 mod client;
 mod decode;
 mod error;
 pub mod store;
+#[cfg(test)]
+mod tests;
 mod transactional;
 mod validation;
 
@@ -137,7 +143,6 @@ pub use client::{
     AmpClient, BatchStream, HasSchema, InvalidationRange, Metadata, ProtocolMessage,
     ProtocolStream, RawStream, ResponseBatch, StreamBuilder,
 };
-pub use common::metadata::segments::BlockRange;
 pub use error::Error;
 #[cfg(feature = "postgres")]
 pub use store::PostgresStateStore;
@@ -146,5 +151,52 @@ pub use store::{BatchStore, InMemoryBatchStore, InMemoryStateStore, StateSnapsho
 pub use store::{LmdbBatchStore, LmdbStateStore};
 pub use transactional::{Cause, CommitHandle, TransactionEvent, TransactionalStream};
 
-#[cfg(test)]
-mod tests;
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct BlockRange {
+    pub numbers: RangeInclusive<BlockNumber>,
+    pub network: String,
+    pub hash: BlockHash,
+    pub prev_hash: Option<BlockHash>,
+}
+
+impl BlockRange {
+    #[inline]
+    pub fn start(&self) -> BlockNumber {
+        *self.numbers.start()
+    }
+
+    #[inline]
+    pub fn end(&self) -> BlockNumber {
+        *self.numbers.end()
+    }
+
+    #[inline]
+    fn network_cursor(&self) -> NetworkCursor {
+        NetworkCursor {
+            number: self.end(),
+            hash: self.hash,
+        }
+    }
+}
+
+/// Public interface for resuming a stream from a cursor.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Cursor(BTreeMap<String, NetworkCursor>);
+
+impl Cursor {
+    pub fn from_ranges(ranges: &[BlockRange]) -> Self {
+        let watermark = ranges
+            .iter()
+            .map(|r| (r.network.clone(), r.network_cursor()))
+            .collect();
+        Self(watermark)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct NetworkCursor {
+    /// The segment end block
+    number: BlockNumber,
+    /// The hash associated with the segment end block
+    hash: BlockHash,
+}

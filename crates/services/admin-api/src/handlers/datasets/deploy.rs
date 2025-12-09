@@ -8,8 +8,11 @@ use axum::{
     },
     http::StatusCode,
 };
-use common::catalog::JobLabels;
-use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use dataset_store::DatasetKind;
+use datasets_common::{
+    hash_reference::HashReference, name::Name, namespace::Namespace, reference::Reference,
+    revision::Revision,
+};
 use monitoring::logging;
 use worker::{job::JobId, node_id::NodeId};
 
@@ -119,27 +122,34 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
-    let job_labels = JobLabels {
-        dataset_namespace: reference.namespace().clone(),
-        dataset_name: reference.name().clone(),
-        manifest_hash: dataset.manifest_hash().clone(),
-    };
+    let dataset_reference = HashReference::new(
+        reference.namespace().clone(),
+        reference.name().clone(),
+        dataset.manifest_hash().clone(),
+    );
+
+    // Parse dataset kind (must always succeed - panic if DB is in bad state)
+    let dataset_kind: DatasetKind = dataset
+        .kind
+        .parse()
+        .expect("dataset kind in database must be valid");
 
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
         .schedule_dataset_sync_job(
-            dataset,
+            dataset_reference.clone(),
+            dataset_kind,
             end_block.into(),
             parallelism,
-            job_labels,
             worker_id,
         )
         .await
         .map_err(|err| {
             tracing::error!(
-                dataset_reference=%reference,
-                error = %err, error_source = logging::error_source(&err),
+                %dataset_reference,
+                error = %err,
+                error_source = logging::error_source(&err),
                 "failed to schedule dataset deployment"
             );
             Error::Scheduler(err)

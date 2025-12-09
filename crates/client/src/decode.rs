@@ -5,14 +5,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use arrow_flight::FlightData;
-use common::arrow::{
+use arrow::{
     array::{ArrayRef, RecordBatch},
     buffer::Buffer,
     datatypes::SchemaRef,
     error::ArrowError,
     ipc::{self, MessageHeader, MetadataVersion, reader},
 };
+use arrow_flight::FlightData;
 use futures::{Stream, ready};
 
 use crate::{client::ResponseBatch, error::Error};

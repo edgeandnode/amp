@@ -4,21 +4,21 @@
 //! dataset extraction, data validation, and test setup tasks that are frequently
 //! needed across multiple test scenarios.
 
+pub mod forge;
+pub mod git;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
     BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache,
     arrow::array::RecordBatch,
-    catalog::{
-        JobLabels,
-        physical::{Catalog, PhysicalTable},
-    },
+    catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
     sql,
     sql_str::SqlStr,
 };
 use dataset_store::DatasetStore;
-use datasets_common::{reference::Reference, table_name::TableName};
+use datasets_common::{hash_reference::HashReference, reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};
 use worker::config::Config as WorkerConfig;
@@ -59,11 +59,11 @@ pub async fn dump_internal(
     for dataset_ref in datasets {
         let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
-        let job_labels = JobLabels {
-            dataset_namespace: dataset_ref.namespace().clone(),
-            dataset_name: dataset_ref.name().clone(),
-            manifest_hash: dataset.manifest_hash().clone(),
-        };
+        let hash_reference = HashReference::new(
+            dataset_ref.namespace().clone(),
+            dataset_ref.name().clone(),
+            dataset.manifest_hash().clone(),
+        );
 
         // Parse dataset kind
         let kind: dataset_store::DatasetKind = dataset.kind.parse()?;
@@ -88,15 +88,15 @@ pub async fn dump_internal(
         for table in dataset.resolved_tables(dataset_ref.clone().into()) {
             let db = metadata_db.clone();
             // Always reuse existing physical tables in test scenarios (fresh = false)
-            let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone())
-                .await?
-            {
-                Some(physical_table) => physical_table,
-                None => {
-                    PhysicalTable::next_revision(&table, &data_store, db, true, &job_labels).await?
+            let physical_table =
+                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+                    Some(physical_table) => physical_table,
+                    None => {
+                        PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference)
+                            .await?
+                    }
                 }
-            }
-            .into();
+                .into();
             let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
             tables.push((physical_table, compactor));
         }

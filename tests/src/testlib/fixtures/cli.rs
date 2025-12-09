@@ -94,25 +94,22 @@ impl AmpCli {
 
     /// Deploy a dataset version using amp deploy command.
     ///
-    /// Runs `pnpm amp deploy` with an optional dataset reference (namespace/name@revision),
-    /// optional end block, and optional parallelism level. If no reference is provided,
-    /// the command uses the dataset from the config file with a "dev" tag.
-    /// Optionally accepts a config file parameter.
+    /// Runs `pnpm amp deploy` with an optional dataset reference (namespace/name@revision)
+    /// and optional end block. If no reference is provided, the command uses the dataset
+    /// from the config file with a "dev" tag. Optionally accepts a config file parameter.
     #[tracing::instrument(skip_all, err)]
     pub async fn deploy(
         &self,
         path: &Path,
         reference: Option<&str>,
         end_block: Option<u64>,
-        parallelism: Option<u64>,
         config: Option<&str>,
     ) -> Result<(), BoxError> {
         tracing::debug!(
-            "Running 'amp deploy' in `{}` with reference: {:?}, end block: {:?}, parallelism: {:?}, config: {:?}",
+            "Running 'amp deploy' in `{}` with reference: {:?}, end block: {:?}, config: {:?}",
             path.to_string_lossy(),
             reference,
             end_block,
-            parallelism,
             config
         );
 
@@ -130,14 +127,6 @@ impl AmpCli {
             args.push("--end-block");
             end_block_str = end.to_string();
             args.push(&end_block_str);
-        }
-
-        // Add optional parallelism
-        let parallelism_str;
-        if let Some(jobs) = parallelism {
-            args.push("--parallelism");
-            parallelism_str = jobs.to_string();
-            args.push(&parallelism_str);
         }
 
         // Add optional config

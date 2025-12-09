@@ -9,7 +9,7 @@ mod lmdb;
 
 use std::{collections::VecDeque, ops::RangeInclusive};
 
-use common::{arrow::array::RecordBatch, metadata::segments::BlockRange};
+use arrow::array::RecordBatch;
 #[cfg(feature = "lmdb")]
 pub use lmdb::{LmdbBatchStore, LmdbStateStore, open_lmdb_env, open_lmdb_env_with_options};
 pub use memory::{InMemoryBatchStore, InMemoryStateStore};
@@ -18,6 +18,7 @@ pub use postgres::PostgresStateStore;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    BlockRange,
     error::{Error, SerializationError},
     transactional::{Commit, TransactionId},
 };
@@ -191,7 +192,7 @@ pub trait BatchStore: Send + Sync {
 /// store.put(id, &bytes)?;
 /// ```
 pub fn serialize_batch(batch: &RecordBatch) -> Result<Vec<u8>, Error> {
-    use common::arrow::ipc::writer::StreamWriter;
+    use arrow::ipc::writer::StreamWriter;
 
     let mut buf = Vec::new();
     let mut writer = StreamWriter::try_new(&mut buf, &batch.schema())
@@ -215,7 +216,7 @@ pub fn serialize_batch(batch: &RecordBatch) -> Result<Vec<u8>, Error> {
 /// let batch = deserialize_batch(&bytes)?;
 /// ```
 pub fn deserialize_batch(bytes: &[u8]) -> Result<RecordBatch, Error> {
-    use common::arrow::ipc::reader::StreamReader;
+    use arrow::ipc::reader::StreamReader;
 
     let mut reader = StreamReader::try_new(bytes, None)
         .map_err(|err| Error::Serialization(SerializationError::ReaderCreation(err)))?;
