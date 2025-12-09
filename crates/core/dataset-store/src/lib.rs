@@ -722,7 +722,11 @@ impl DatasetStore {
             DatasetKind::Solana => {
                 let manifest = manifest_content
                     .try_into_manifest::<SolanaManifest>()
-                    .map_err(|err| GetDatasetByHashError::ParseManifest { kind, source: err })?;
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind,
+                        source,
+                    })?;
                 solana_datasets::dataset(hash.clone(), manifest)
             }
             DatasetKind::EthBeacon => {
