@@ -215,6 +215,7 @@ mod tests {
         let start = 0;
         let end = 100;
 
+        // Stream the entire range as historical blocks.
         let historical = async_stream::stream! {
             for slot in start..=end {
                 yield Ok(of1_client::DecodedBlock::empty(slot));
@@ -236,5 +237,52 @@ mod tests {
             assert_eq!(rows.block_num(), expected_block);
             expected_block += 1;
         }
+
+        assert_eq!(expected_block, end + 1);
+    }
+
+    #[tokio::test]
+    async fn historical_to_json_rpc_transition() {
+        let solana_rpc_provider_url: Url = std::env::var("SOLANA_MAINNET_HTTP_URL")
+            .expect("missing environment variable")
+            .parse()
+            .expect("invalid URL");
+
+        let extractor = SolanaExtractor::new(
+            solana_rpc_provider_url,
+            String::new(),
+            String::new(),
+            PathBuf::new(),
+            None,
+        );
+
+        let start = 0;
+        let historical_end = 50;
+        let end = historical_end + 20;
+
+        // Stream part of the range as historical blocks.
+        let historical = async_stream::stream! {
+            for slot in start..=historical_end {
+                yield Ok(of1_client::DecodedBlock::empty(slot));
+            }
+        };
+
+        let block_stream = extractor.block_stream_impl(
+            start,
+            end,
+            historical,
+            rpc_client::rpc_config::RpcBlockConfig::default(),
+        );
+
+        futures::pin_mut!(block_stream);
+
+        let mut expected_block = start;
+
+        while let Some(rows) = block_stream.next().await.transpose().unwrap() {
+            assert_eq!(rows.block_num(), expected_block);
+            expected_block += 1;
+        }
+
+        assert_eq!(expected_block, end + 1);
     }
 }

@@ -131,7 +131,7 @@ async fn download_of1_car_file(
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FileDownloadError {
+enum FileDownloadError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("HTTP error with status code: {0}")]
@@ -145,7 +145,7 @@ pub(crate) enum FileDownloadError {
 ///
 /// Inspired by the Old Faithful CAR parser example:
 /// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
-pub(crate) async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
+async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     node_reader: &mut of1_car_parser::node::NodeReader<R>,
     prev_blockhash: [u8; 32],
 ) -> BoxResult<Option<DecodedBlock>> {
@@ -183,12 +183,12 @@ pub(crate) async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
                 return Err(err.into());
             };
 
-            let tx_df = nodes.reassemble_dataframes(&tx.data).unwrap();
-            let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata).unwrap();
+            let tx_df = nodes.reassemble_dataframes(&tx.data)?;
+            let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
 
             let tx = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())
                 .map(|(tx, _)| tx)?;
-            let tx_meta = decode_bincode_protobuf(&tx_meta_df)?;
+            let tx_meta = prost::Message::decode(&tx_meta_df[..])?;
 
             transactions.push(tx);
             transactions_meta.push(tx_meta);
@@ -237,53 +237,16 @@ pub(crate) struct DecodedBlock {
     pub(crate) blocktime: u64,
 
     pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas: Vec<
-        DecodedData<
-            crate::tables::transactions::TransactionStatusMeta,
-            solana_storage_proto::convert::generated::TransactionStatusMeta,
-        >,
-    >,
+    pub(crate) transaction_metas:
+        Vec<solana_storage_proto::convert::generated::TransactionStatusMeta>,
 
     #[allow(dead_code)]
-    pub(crate) block_rewards: Vec<
-        DecodedData<
-            Vec<crate::tables::transactions::Reward>,
-            solana_storage_proto::convert::generated::Rewards,
-        >,
-    >,
-}
-
-#[derive(Debug)]
-pub(crate) enum DecodedData<B, P> {
-    Bincode(B),
-    Protobuf(P),
-}
-
-pub(crate) fn decode_bincode_protobuf<B, P>(bytes: &[u8]) -> BoxResult<DecodedData<B, P>>
-where
-    B: serde::de::DeserializeOwned,
-    P: prost::Message + Default,
-{
-    let output = match bincode::serde::decode_from_slice::<B, _>(bytes, bincode::config::standard())
-    {
-        Ok((bincode_data, _)) => DecodedData::Bincode(bincode_data),
-        Err(bincode_err) => match P::decode(bytes) {
-            Ok(protobuf_data) => DecodedData::Protobuf(protobuf_data),
-            Err(protobuf_err) => {
-                let err = format!(
-                    "decode failed: bincode error: {bincode_err}, protobuf error: {protobuf_err}"
-                );
-                return Err(err.into());
-            }
-        },
-    };
-
-    Ok(output)
+    pub(crate) block_rewards: Vec<solana_storage_proto::convert::generated::Rewards>,
 }
 
 /// Generates the Old Faithful epoch CAR filename for the given epoch.
 ///
 /// Reference: <https://docs.old-faithful.net/references/of1-files>.
-pub(crate) fn of1_car_filename(epoch: solana_clock::Epoch) -> String {
+fn of1_car_filename(epoch: solana_clock::Epoch) -> String {
     format!("epoch-{}.car", epoch)
 }
