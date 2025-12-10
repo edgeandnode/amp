@@ -31,7 +31,7 @@ use futures::{
     Stream, StreamExt, TryFutureExt, TryStreamExt,
     stream::{self, BoxStream},
 };
-use metadata_db::FileId;
+use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     WriterProperties,
@@ -107,6 +107,8 @@ impl CompactionFile {
 /// and the stream terminates. Any groups that have already been yielded will still be
 /// available to the consumer of the stream to process.
 pub struct CompactionPlan<'a> {
+    /// The metadata database for committing compaction results.
+    metadata_db: MetadataDb,
     /// Stream of files to be considered for compaction.
     files: BoxStream<'a, CompactionResult<CompactionFile>>,
     /// Compaction properties configuring the compaction algorithm
@@ -132,8 +134,9 @@ pub struct CompactionPlan<'a> {
 impl<'a> CompactionPlan<'a> {
     #[tracing::instrument(skip_all)]
     pub fn from_snapshot(
-        table: &'a TableSnapshot,
+        metadata_db: MetadataDb,
         opts: Arc<WriterProperties>,
+        table: &'a TableSnapshot,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> CompactionResult<Option<Self>> {
         let chain = table.canonical_segments();
@@ -157,13 +160,19 @@ impl<'a> CompactionPlan<'a> {
             })
             .buffered(opts.compactor.metadata_concurrency)
             .boxed();
-        let current_group = CompactionGroup::new_empty(&opts, metrics, table.physical_table());
+        let current_group = CompactionGroup::new_empty(
+            metadata_db.clone(),
+            opts.clone(),
+            table.physical_table().clone(),
+            metrics.clone(),
+        );
 
         Ok(Some(Self {
             files,
             opts,
-            metrics: metrics.as_ref().map(Arc::clone),
-            table: Arc::clone(table.physical_table()),
+            metrics: metrics.as_ref().cloned(),
+            table: table.physical_table().clone(),
+            metadata_db,
             current_group,
             current_file: None,
             current_candidate: None,
@@ -200,8 +209,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                     // start a new group with the candidate as the current file.
                     } else if this.current_group.is_empty_or_singleton() {
                         this.current_file = Some(candidate);
-                        this.current_group =
-                            CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table);
+                        this.current_group = CompactionGroup::new_empty(
+                            this.metadata_db.clone(),
+                            this.opts.clone(),
+                            this.table.clone(),
+                            this.metrics.clone(),
+                        );
                     // If it can't, and the current group has multiple files,
                     // yield the current group and start a new group with the
                     // candidate as the current file.
@@ -209,7 +222,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                         this.current_candidate = Some(candidate);
                         let group = std::mem::replace(
                             &mut this.current_group,
-                            CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table),
+                            CompactionGroup::new_empty(
+                                this.metadata_db.clone(),
+                                this.opts.clone(),
+                                this.table.clone(),
+                                this.metrics.clone(),
+                            ),
                         );
                         this.group_count += 1;
                         tracing::info!(
@@ -244,7 +262,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                         None => {
                             let group = std::mem::replace(
                                 &mut this.current_group,
-                                CompactionGroup::new_empty(&this.opts, &this.metrics, &this.table),
+                                CompactionGroup::new_empty(
+                                    this.metadata_db.clone(),
+                                    this.opts.clone(),
+                                    this.table.clone(),
+                                    this.metrics.clone(),
+                                ),
                             );
                             this.done = true;
                             this.group_count += 1;

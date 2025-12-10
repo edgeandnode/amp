@@ -66,14 +66,23 @@ pub async fn dump_internal(
     for table in dataset.resolved_tables(dataset_ref.clone().into()) {
         let db = metadata_db.clone();
         // Always reuse existing physical tables in test scenarios (fresh = false)
-        let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
-            Some(physical_table) => physical_table,
-            None => {
-                PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference).await?
+        let physical_table: Arc<PhysicalTable> =
+            match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+                Some(physical_table) => physical_table,
+                None => {
+                    PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference)
+                        .await?
+                }
             }
-        }
+            .into();
+        let compactor = AmpCompactor::start(
+            metadata_db.clone(),
+            cache.clone(),
+            opts.clone(),
+            physical_table.clone(),
+            None,
+        )
         .into();
-        let compactor = AmpCompactor::start(&physical_table, cache.clone(), &opts, None).into();
         tables.push((physical_table, compactor));
     }
 

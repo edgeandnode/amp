@@ -51,10 +51,11 @@ impl<'a> From<&'a ParquetConfig> for CompactorProperties {
 
 #[derive(Clone)]
 pub struct Compactor {
-    pub(super) table: Arc<PhysicalTable>,
-    pub(super) cache: ParquetFooterCache,
-    pub(super) opts: Arc<WriterProperties>,
-    pub(super) metrics: Option<Arc<MetricsRegistry>>,
+    metadata_db: MetadataDb,
+    table: Arc<PhysicalTable>,
+    cache: ParquetFooterCache,
+    props: Arc<WriterProperties>,
+    metrics: Option<Arc<MetricsRegistry>>,
 }
 
 impl Debug for Compactor {
@@ -63,7 +64,7 @@ impl Debug for Compactor {
             f,
             "Compactor {{ table: {}, algorithm: {} }}",
             self.table.table_ref(),
-            self.opts.compactor.algorithm.kind()
+            self.props.compactor.algorithm.kind()
         )
     }
 }
@@ -73,7 +74,7 @@ impl Display for Compactor {
         write!(
             f,
             "Compactor {{ opts: {:?}, table: {} }}",
-            self.opts,
+            self.props,
             self.table.table_ref()
         )
     }
@@ -81,22 +82,24 @@ impl Display for Compactor {
 
 impl Compactor {
     pub fn new(
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
         cache: ParquetFooterCache,
-        opts: &Arc<WriterProperties>,
-        metrics: &Option<Arc<MetricsRegistry>>,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
+        metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         Compactor {
-            table: Arc::clone(table),
-            cache: cache.clone(),
-            opts: Arc::clone(opts),
-            metrics: metrics.clone(),
+            metadata_db,
+            table,
+            cache,
+            props,
+            metrics,
         }
     }
 
     #[tracing::instrument(skip_all, fields(table = self.table.table_ref_compact()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
-        if !self.opts.compactor.active.load(Ordering::SeqCst) {
+        if !self.props.compactor.active.load(Ordering::SeqCst) {
             return Ok(self);
         }
 
@@ -105,25 +108,29 @@ impl Compactor {
             .snapshot(false, self.cache.clone())
             .await
             .map_err(CompactorError::chain_error)?;
-        let opts = Arc::clone(&self.opts);
+        let props = self.props.clone();
         let table_name = self.table.table_name();
 
-        let mut comapction_futures_stream =
-            if let Some(plan) = CompactionPlan::from_snapshot(&snapshot, opts, &self.metrics)? {
-                let groups = plan.collect::<Vec<_>>().await;
-                tracing::trace!(
-                    table = %table_name,
-                    group_count = groups.len(),
-                    "Compaction Groups: {:?}",
-                    groups
-                );
+        let mut comapction_futures_stream = if let Some(plan) = CompactionPlan::from_snapshot(
+            self.metadata_db.clone(),
+            props,
+            &snapshot,
+            &self.metrics,
+        )? {
+            let groups = plan.collect::<Vec<_>>().await;
+            tracing::trace!(
+                table = %table_name,
+                group_count = groups.len(),
+                "Compaction Groups: {:?}",
+                groups
+            );
 
-                stream::iter(groups)
-                    .map(|group| group.compact())
-                    .buffered(self.opts.compactor.write_concurrency)
-            } else {
-                return Ok(self);
-            };
+            stream::iter(groups)
+                .map(|group| group.compact())
+                .buffered(self.props.compactor.write_concurrency)
+        } else {
+            return Ok(self);
+        };
 
         while let Some(res) = comapction_futures_stream.next().await {
             match res {
@@ -156,11 +163,12 @@ impl Compactor {
 }
 
 pub struct CompactionGroup {
-    pub opts: Arc<WriterProperties>,
-    pub metrics: Option<Arc<MetricsRegistry>>,
-    pub size: SegmentSize,
-    pub streams: Vec<CompactionFile>,
-    pub table: Arc<PhysicalTable>,
+    metadata_db: MetadataDb,
+    props: Arc<WriterProperties>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    pub(super) size: SegmentSize,
+    streams: Vec<CompactionFile>,
+    table: Arc<PhysicalTable>,
 }
 
 impl Debug for CompactionGroup {
@@ -176,16 +184,18 @@ impl Debug for CompactionGroup {
 
 impl CompactionGroup {
     pub fn new_empty(
-        opts: &Arc<WriterProperties>,
-        metrics: &Option<Arc<MetricsRegistry>>,
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
+        metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         CompactionGroup {
-            opts: Arc::clone(opts),
-            metrics: metrics.clone(),
+            metadata_db,
+            props,
+            metrics,
             size: SegmentSize::default(),
             streams: Vec::new(),
-            table: Arc::clone(table),
+            table,
         }
     }
 
@@ -225,11 +235,11 @@ impl CompactionGroup {
 
         let mut writer = ParquetFileWriter::new(
             Arc::clone(&self.table),
-            &self.opts,
+            &self.props,
             range.start(),
-            self.opts.max_row_group_bytes,
+            self.props.max_row_group_bytes,
         )
-        .map_err(CompactorError::create_writer_error(&self.opts))?;
+        .map_err(CompactorError::create_writer_error(&self.props))?;
 
         let mut parent_ids = Vec::with_capacity(self.streams.len());
         for mut file in self.streams {
@@ -251,8 +261,8 @@ impl CompactionGroup {
     pub async fn compact(self) -> CompactionResult<BlockNum> {
         let start = *self.range().start();
         let start_time = std::time::Instant::now();
-        let metadata_db = self.table.metadata_db().clone();
-        let duration = self.opts.collector.file_lock_duration;
+        let metadata_db = self.metadata_db.clone();
+        let duration = self.props.collector.file_lock_duration;
 
         // Calculate input metrics before compaction
         let input_file_count = self.streams.len() as u64;
