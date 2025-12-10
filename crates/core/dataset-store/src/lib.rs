@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     num::NonZeroU32,
     str::FromStr,
     sync::Arc,
@@ -7,7 +7,6 @@ use std::{
 
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset,
-    catalog::physical::PhysicalTable,
     evm::{self, udfs::EthCall},
 };
 use datafusion::{
@@ -16,8 +15,7 @@ use datafusion::{
 };
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest, name::Name,
-    namespace::Namespace, partial_reference::PartialReference, reference::Reference,
-    revision::Revision, version::Version,
+    namespace::Namespace, reference::Reference, revision::Revision, version::Version,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -1097,87 +1095,6 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
             .await
             .map_err(Into::into)
     }
-}
-
-/// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
-#[tracing::instrument(skip(dataset_store), err)]
-pub async fn resolve_blocks_table(
-    dataset_store: &DatasetStore,
-    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
-    network: &str,
-) -> Result<PhysicalTable, BoxError> {
-    let dataset =
-        search_dependencies_for_raw_dataset(dataset_store, root_datasets, network).await?;
-
-    // TODO: Have a dataset name here that is not made up.
-    let dataset_name = Name::try_from("blocks_table".to_string())?;
-    let manifest_hash = dataset.manifest_hash().clone();
-    let reference = PartialReference::new(
-        None,
-        dataset_name,
-        Some(Revision::Hash(manifest_hash.clone())),
-    );
-    let table = Arc::new(dataset)
-        .resolved_tables(reference)
-        .find(|t| t.name() == "blocks")
-        .ok_or_else(|| {
-            BoxError::from(format!(
-                "dataset '{}' does not have a 'blocks' table",
-                manifest_hash
-            ))
-        })?;
-
-    PhysicalTable::get_active(&table, dataset_store.metadata_db.clone())
-        .await?
-        .ok_or_else(|| {
-            BoxError::from(format!(
-                "table '{}.{}' has not been synced",
-                manifest_hash,
-                table.name()
-            ))
-        })
-}
-
-// Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
-async fn search_dependencies_for_raw_dataset(
-    dataset_store: &DatasetStore,
-    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
-    network: &str,
-) -> Result<Arc<Dataset>, BoxError> {
-    let mut queue: VecDeque<Arc<Dataset>> = root_datasets.values().cloned().collect();
-    let mut visited = BTreeSet::new();
-
-    while let Some(dataset) = queue.pop_front() {
-        let hash = dataset.manifest_hash().clone();
-
-        // Skip duplicates
-        if !visited.insert(hash) {
-            continue;
-        }
-
-        if dataset.kind != DerivedDatasetKind
-            && let Some(dataset_network) = dataset.network.as_ref()
-            && dataset_network == network
-        {
-            // Found matching dataset
-            return Ok(dataset);
-        }
-
-        // Enqueue dependencies for exploration
-        for dep in dataset.dependencies.values() {
-            // Resolve the reference to a hash reference first
-            let hash_ref = dataset_store
-                .resolve_revision(dep.to_reference())
-                .await?
-                .ok_or_else(|| {
-                    BoxError::from(format!("dependency '{}' not found", dep.to_reference()))
-                })?;
-            let dataset = dataset_store.get_dataset(&hash_ref).await?;
-            queue.push_back(dataset);
-        }
-    }
-
-    Err(format!("no raw dataset found for network '{network}'",).into())
 }
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that

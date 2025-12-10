@@ -1,11 +1,15 @@
 pub mod message_stream_with_block_complete;
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
-    SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
+    QueryContext, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -15,10 +19,14 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use dataset_store::{DatasetStore, resolve_blocks_table};
+use dataset_store::DatasetStore;
+use datasets_common::{
+    hash::Hash, name::Name, partial_reference::PartialReference, revision::Revision,
+};
+use datasets_derived::DerivedDatasetKind;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
-use metadata_db::{LocationId, NotificationMultiplexerHandle};
+use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
 use tokio::{
     sync::{mpsc, watch},
     time::MissedTickBehavior,
@@ -196,6 +204,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     #[expect(clippy::too_many_arguments)]
     pub async fn spawn(
+        metadata_db: MetadataDb,
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
@@ -234,7 +243,8 @@ impl StreamingQuery {
             .iter()
             .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
             .collect();
-        let blocks_table = resolve_blocks_table(dataset_store, src_datasets, network).await?;
+        let blocks_table =
+            resolve_blocks_table(metadata_db, dataset_store, src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
@@ -674,6 +684,88 @@ pub fn keep_alive_stream<'a>(
             }
         }
     })
+}
+
+/// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
+#[tracing::instrument(skip(dataset_store), err)]
+async fn resolve_blocks_table(
+    metadata_db: MetadataDb,
+    dataset_store: &DatasetStore,
+    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
+    network: &str,
+) -> Result<PhysicalTable, BoxError> {
+    let dataset =
+        search_dependencies_for_raw_dataset(dataset_store, root_datasets, network).await?;
+
+    // TODO: Have a dataset name here that is not made up.
+    let dataset_name = Name::try_from("blocks_table".to_string())?;
+    let manifest_hash = dataset.manifest_hash().clone();
+    let reference = PartialReference::new(
+        None,
+        dataset_name,
+        Some(Revision::Hash(manifest_hash.clone())),
+    );
+    let table = Arc::new(dataset)
+        .resolved_tables(reference)
+        .find(|t| t.name() == "blocks")
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "dataset '{}' does not have a 'blocks' table",
+                manifest_hash
+            ))
+        })?;
+
+    PhysicalTable::get_active(&table, metadata_db)
+        .await?
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "table '{}.{}' has not been synced",
+                manifest_hash,
+                table.name()
+            ))
+        })
+}
+
+// Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
+async fn search_dependencies_for_raw_dataset(
+    dataset_store: &DatasetStore,
+    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
+    network: &str,
+) -> Result<Arc<Dataset>, BoxError> {
+    let mut queue: VecDeque<Arc<Dataset>> = root_datasets.values().cloned().collect();
+    let mut visited = BTreeSet::new();
+
+    while let Some(dataset) = queue.pop_front() {
+        let hash = dataset.manifest_hash().clone();
+
+        // Skip duplicates
+        if !visited.insert(hash) {
+            continue;
+        }
+
+        if dataset.kind != DerivedDatasetKind
+            && let Some(dataset_network) = dataset.network.as_ref()
+            && dataset_network == network
+        {
+            // Found matching dataset
+            return Ok(dataset);
+        }
+
+        // Enqueue dependencies for exploration
+        for dep in dataset.dependencies.values() {
+            // Resolve the reference to a hash reference first
+            let hash_ref = dataset_store
+                .resolve_revision(dep.to_reference())
+                .await?
+                .ok_or_else(|| {
+                    BoxError::from(format!("dependency '{}' not found", dep.to_reference()))
+                })?;
+            let dataset = dataset_store.get_dataset(&hash_ref).await?;
+            queue.push_back(dataset);
+        }
+    }
+
+    Err(format!("no raw dataset found for network '{network}'",).into())
 }
 
 #[cfg(test)]

@@ -459,6 +459,7 @@ async fn dump_sql_query(
     let keep_alive_interval = ctx.config.keep_alive_interval;
     let mut stream = {
         StreamingQuery::spawn(
+            ctx.metadata_db.clone(),
             env.clone(),
             catalog.clone(),
             &ctx.dataset_store,
