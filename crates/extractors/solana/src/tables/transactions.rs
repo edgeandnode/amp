@@ -182,8 +182,7 @@ impl Transaction {
                             .map(|inst| super::Instruction {
                                 program_id_index: inst.program_id_index as u8,
                                 accounts: inst.accounts,
-                                // TODO: unwrap
-                                data: String::from_utf8(inst.data).unwrap(),
+                                data: String::from_utf8(inst.data).expect("invalid utf-8"),
                                 stack_height: inst.stack_height,
                             })
                             .collect();
@@ -216,33 +215,33 @@ impl Transaction {
                         lamports: reward.lamports,
                         post_balance: reward.post_balance,
                         reward_type: Some(reward.reward_type.into()),
-                        // TODO: unwrap
-                        commission: Some(reward.commission.parse().unwrap()),
+                        commission: Some(
+                            reward.commission.parse().expect("commision parsing error"),
+                        ),
                     })
                     .collect();
 
-                // TODO: unwrap
                 let loaded_addresses = LoadedAddresses {
                     writable: tx_meta
                         .loaded_writable_addresses
                         .iter()
-                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
+                        .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
                         .collect(),
                     readonly: tx_meta
                         .loaded_readonly_addresses
                         .iter()
-                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
+                        .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
                         .collect(),
                 };
 
-                // TODO: unwrap
                 let return_data =
                     tx_meta
                         .return_data
                         .clone()
                         .map(|return_data| TransactionReturnData {
-                            program_id: String::from_utf8(return_data.program_id).unwrap(),
-                            data: String::from_utf8(return_data.data).unwrap(),
+                            program_id: String::from_utf8(return_data.program_id)
+                                .expect("invalid utf-8"),
+                            data: String::from_utf8(return_data.data).expect("invalid utf-8"),
                             encoding: ReturnDataEncoding::Base64,
                         });
 

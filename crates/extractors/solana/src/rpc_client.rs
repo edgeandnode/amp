@@ -13,8 +13,6 @@ use url::Url;
 
 use crate::metrics;
 
-mod export {}
-
 /// A Solana JSON-RPC client.
 ///
 /// If provided with a [meter](monitoring::telemetry::metrics::Meter), the client will record

@@ -1,21 +1,112 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use common::BoxResult;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use solana_clock::Slot;
 use tokio::io::AsyncWriteExt;
 pub use yellowstone_faithful_car_parser as of1_car_parser;
 
+use crate::rpc_client;
+
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
 
+pub(crate) fn stream(
+    start: solana_clock::Slot,
+    end: solana_clock::Slot,
+    of1_car_directory: PathBuf,
+    solana_rpc_client: rpc_client::SolanaRpcClient,
+    get_block_config: rpc_client::rpc_config::RpcBlockConfig,
+) -> impl Stream<Item = BoxResult<DecodedBlock>> {
+    async_stream::stream! {
+        let mut epoch = start / solana_clock::DEFAULT_SLOTS_PER_EPOCH;
+
+        // Pre-fetch the initial previous block hash via JSON-RPC so that we don't have to
+        // (potentially) read multiple Old Faithful CAR files to find it.
+        let mut prev_blockhash = if start == 0 {
+            [0u8; 32]
+        } else {
+            let mut parent_slot = start - 1;
+            loop {
+                let resp = solana_rpc_client
+                    .get_block(parent_slot, get_block_config)
+                    .await;
+
+                match resp {
+                    // Found the parent block, extract its blockhash.
+                    Ok(block) => {
+                        break bs58::decode(block.blockhash)
+                            .into_vec()?
+                            .try_into()
+                            .expect("blockhash is 32 bytes");
+                    }
+                    // Parent block is missing, try the previous slot.
+                    Err(e) if rpc_client::is_block_missing_err(&e) => {
+                        if parent_slot == 0 {
+                            break [0u8; 32];
+                        } else {
+                            parent_slot -= 1;
+                            continue;
+                        }
+                    }
+                    // Some other error occurred.
+                    Err(e) => {
+                        yield Err(e.into());
+                        return;
+                    }
+                }
+            }
+        };
+
+        // Download historical data via Old Faithful archive CAR files.
+        'epochs: loop {
+            tracing::debug!(epoch, "processing Old Faithful epoch CAR file");
+            let epoch_car_file_path = of1_car_directory.join(of1_car_filename(epoch));
+
+            if !std::fs::exists(&epoch_car_file_path)? {
+                // This can take a while.
+                if let Err(e) = download_of1_car_file(epoch, &of1_car_directory).await {
+                    if let FileDownloadError::Http(404) = e {
+                        // No more epoch CAR files available.
+                        break 'epochs;
+                    } else {
+                        yield Err(e.into());
+                        return;
+                    }
+                };
+            }
+
+            let buf_reader = tokio::fs::File::open(&epoch_car_file_path).await.map(tokio::io::BufReader::new)?;
+            let mut node_reader = of1_car_parser::node::NodeReader::new(buf_reader);
+
+            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await? {
+                prev_blockhash = block.blockhash;
+
+                if block.slot < start {
+                    // Skip blocks before the start of the requested range.
+                    continue;
+                }
+
+                if block.slot > end {
+                    // Reached the end of the requested range.
+                    return;
+                }
+
+                yield Ok(block);
+            }
+
+            epoch += 1;
+        }
+    }
+}
+
 /// Downloads the Old Faithful CAR file for the given epoch into the specified output directory.
-pub(crate) async fn download_of1_car_file(
+async fn download_of1_car_file(
     epoch: solana_clock::Epoch,
     output_dir: &Path,
 ) -> Result<(), FileDownloadError> {
     let filename = of1_car_filename(epoch);
     let car_file_url = format!("{OLD_FAITHFUL_ARCHIVE_URL}/{epoch}/{filename}");
-    tracing::debug!(%car_file_url, "downloading Old Faithful CAR file");
+    tracing::info!(%car_file_url, "downloading Old Faithful CAR file");
 
     let car_file_path = output_dir.join(filename);
     let mut file = tokio::fs::File::create(&car_file_path).await?;
@@ -23,7 +114,7 @@ pub(crate) async fn download_of1_car_file(
     let response = reqwest::get(&car_file_url).await?;
     let status = response.status();
     if !status.is_success() {
-        tracing::warn!(
+        tracing::debug!(
             %status,
             "failed to download Old Faithful CAR file"
         );
@@ -134,6 +225,7 @@ pub(crate) async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     Ok(Some(block))
 }
 
+#[derive(Debug, Default)]
 pub(crate) struct DecodedBlock {
     pub(crate) slot: Slot,
     pub(crate) parent_slot: Slot,
@@ -161,6 +253,7 @@ pub(crate) struct DecodedBlock {
     >,
 }
 
+#[derive(Debug)]
 pub(crate) enum DecodedData<B, P> {
     Bincode(B),
     Protobuf(P),
