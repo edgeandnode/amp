@@ -211,6 +211,7 @@ impl Service {
             };
 
             let query = StreamingQuery::spawn(
+                self.metadata_db.clone(),
                 self.env.clone(),
                 catalog,
                 dataset_store,
