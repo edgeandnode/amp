@@ -89,9 +89,10 @@ pub(super) async fn new(
             .into();
 
         let compactor = AmpCompactor::start(
-            &physical_table,
+            ctx.metadata_db.clone(),
             job_ctx.parquet_footer_cache.clone(),
-            &opts,
+            opts.clone(),
+            physical_table.clone(),
             metrics.clone(),
         )
         .into();

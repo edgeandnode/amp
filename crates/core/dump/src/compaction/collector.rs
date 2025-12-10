@@ -7,7 +7,7 @@ use std::{
 
 use common::{catalog::physical::PhysicalTable, config::ParquetConfig};
 use futures::{StreamExt, TryStreamExt, stream};
-use metadata_db::{FileId, GcManifestRow};
+use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, path::Path};
 
 use crate::{
@@ -34,9 +34,10 @@ impl<'a> From<&'a ParquetConfig> for CollectorProperties {
 }
 #[derive(Clone)]
 pub struct Collector {
-    pub(super) table: Arc<PhysicalTable>,
-    pub(super) opts: Arc<WriterProperties>,
-    pub(super) metrics: Option<Arc<MetricsRegistry>>,
+    metadata_db: MetadataDb,
+    table: Arc<PhysicalTable>,
+    props: Arc<WriterProperties>,
+    metrics: Option<Arc<MetricsRegistry>>,
 }
 
 impl Debug for Collector {
@@ -51,14 +52,16 @@ impl Debug for Collector {
 
 impl Collector {
     pub fn new(
-        table: &Arc<PhysicalTable>,
-        opts: &Arc<WriterProperties>,
-        metrics: &Option<Arc<MetricsRegistry>>,
+        metadata_db: MetadataDb,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
+        metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         Collector {
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-            metrics: metrics.clone(),
+            table,
+            props,
+            metrics,
+            metadata_db,
         }
     }
 
@@ -66,11 +69,10 @@ impl Collector {
     pub(super) async fn collect(self) -> CollectionResult<Self> {
         let table_name: Arc<str> = Arc::from(self.table.table_name().as_str());
 
-        let metadata_db = self.table.metadata_db();
-
         let location_id = self.table.location_id();
 
-        let found_file_ids_to_paths: BTreeMap<FileId, Path> = metadata_db
+        let found_file_ids_to_paths: BTreeMap<FileId, Path> = self
+            .metadata_db
             .stream_expired_files(location_id)
             .map_err(CollectorError::file_stream_error)
             .map(|manifest_row| {
@@ -104,7 +106,8 @@ impl Collector {
             );
         }
 
-        let paths_to_remove = metadata_db
+        let paths_to_remove = self
+            .metadata_db
             .delete_file_ids(found_file_ids_to_paths.keys())
             .await
             .map_err(CollectorError::file_metadata_delete(
@@ -175,7 +178,7 @@ impl Display for Collector {
             f,
             "Garbage Collector {{ table: {}, opts: {:?} }}",
             self.table.table_ref(),
-            self.opts
+            self.props
         )
     }
 }

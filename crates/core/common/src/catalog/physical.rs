@@ -594,10 +594,6 @@ impl PhysicalTable {
         self.table.network()
     }
 
-    pub fn metadata_db(&self) -> &MetadataDb {
-        &self.metadata_db
-    }
-
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         Arc::clone(&self.object_store)
     }

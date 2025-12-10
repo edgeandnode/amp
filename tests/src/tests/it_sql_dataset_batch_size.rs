@@ -181,7 +181,8 @@ impl TestCtx {
         opts_mut.compactor.algorithm.cooldown_duration = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(100, 0, 0, 0, Generation::default(), 10);
         let cache = self.cache.clone();
-        let mut task = AmpCompactor::start(table, cache, &opts, None);
+        let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
+        let mut task = AmpCompactor::start(metadata_db, cache, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
@@ -208,7 +209,8 @@ impl TestCtx {
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, 0, Generation::default(), 1.5);
         let cache = self.cache.clone();
-        let mut task = AmpCompactor::start(table, cache, &opts, None);
+        let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
+        let mut task = AmpCompactor::start(metadata_db, cache, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;

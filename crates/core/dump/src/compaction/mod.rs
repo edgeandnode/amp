@@ -16,6 +16,7 @@ use common::{ParquetFooterCache, Timestamp, catalog::physical::PhysicalTable};
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;
+use metadata_db::MetadataDb;
 use parking_lot::RwLock;
 use tokio::task::{JoinError, JoinHandle};
 
@@ -87,15 +88,20 @@ pub struct AmpCollectorInnerTask {
 
 impl AmpCollectorInnerTask {
     pub fn new(
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
         cache: ParquetFooterCache,
-        props: &Arc<WriterProperties>,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let compactor = Compactor::new(table, cache, props, &metrics);
-        let collector = Collector::new(table, props, &metrics);
-        let props = Arc::clone(props);
-        let table = Arc::clone(table);
+        let compactor = Compactor::new(
+            metadata_db.clone(),
+            cache.clone(),
+            props.clone(),
+            table.clone(),
+            metrics.clone(),
+        );
+        let collector = Collector::new(metadata_db, props.clone(), table.clone(), metrics.clone());
         let previous_collection = Timestamp::now();
         let previous_compaction = Timestamp::now();
 
@@ -111,12 +117,13 @@ impl AmpCollectorInnerTask {
     }
 
     fn start(
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
         cache: ParquetFooterCache,
-        props: &Arc<WriterProperties>,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> JoinHandle<Result<Self, AmpCompactorTaskError>> {
-        let task = AmpCollectorInnerTask::new(table, cache, props, metrics);
+        let task = AmpCollectorInnerTask::new(metadata_db, cache, props, table, metrics);
         tokio::spawn(futures::future::ok(task))
     }
 
@@ -248,12 +255,13 @@ impl AmpCompactorTask {
     }
 
     pub fn start(
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
         cache: ParquetFooterCache,
-        props: &Arc<WriterProperties>,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let inner = AmpCollectorInnerTask::start(table, cache, props, metrics.clone());
+        let inner = AmpCollectorInnerTask::start(metadata_db, cache, props, table, metrics);
         Self::new(inner)
     }
 
@@ -274,12 +282,13 @@ impl AmpCompactorTask {
 
 impl AmpCompactor {
     pub fn start(
-        table: &Arc<PhysicalTable>,
+        metadata_db: MetadataDb,
         cache: ParquetFooterCache,
-        opts: &Arc<WriterProperties>,
+        props: Arc<WriterProperties>,
+        table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
-        let task = AmpCompactorTask::start(table, cache, opts, metrics).into();
+        let task = AmpCompactorTask::start(metadata_db, cache, props, table, metrics).into();
         Self { task }
     }
 
