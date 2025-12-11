@@ -74,17 +74,17 @@ pub(super) async fn new(
                 .await
                 .map_err(JobInitError::GetActivePhysicalTable)?
             {
-                Some(pt) => pt, // Reuse existing table (retry scenario)
-                None => PhysicalTable::next_revision(
-                    // Create new table (initial attempt)
-                    &table,
-                    &ctx.data_store,
+                // Reuse existing table (retry scenario)
+                Some(pt) => pt,
+                // Create new table (initial attempt)
+                None => common::catalog::physical::register_new_table_revision(
                     ctx.metadata_db.clone(),
-                    true, // set_active
-                    &reference,
+                    &ctx.data_store,
+                    reference.clone(),
+                    table,
                 )
                 .await
-                .map_err(JobInitError::CreatePhysicalTable)?,
+                .map_err(JobInitError::RegisterNewPhysicalTable)?,
             }
             .into();
 
@@ -154,16 +154,13 @@ pub enum JobInitError {
     #[error("Failed to get active physical table")]
     GetActivePhysicalTable(#[source] BoxError),
 
-    /// Failed to create physical table revision
+    /// Failed to register physical table revision
     ///
-    /// This error occurs when creating a new physical table revision fails,
+    /// This error occurs when registering a new physical table revision fails,
     /// typically due to storage configuration issues, database connection problems,
     /// or invalid URL construction.
-    ///
-    /// Note: This wraps BoxError because PhysicalTable::next_revision currently
-    /// returns BoxError. This should be replaced with a concrete error type.
-    #[error("Failed to create physical table")]
-    CreatePhysicalTable(#[source] BoxError),
+    #[error("Failed to register new physical table")]
+    RegisterNewPhysicalTable(#[source] common::catalog::physical::RegisterNewTableRevisionError),
 
     /// Failed to assign job writer
     ///

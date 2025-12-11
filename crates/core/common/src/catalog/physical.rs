@@ -17,11 +17,13 @@ use datafusion::{
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
-use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
+use datasets_common::{
+    hash::Hash, hash_reference::HashReference, name::Name, table_name::TableName,
+};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -175,6 +177,150 @@ impl TableSnapshot {
     }
 }
 
+/// Registers a new physical table revision with a unique UUIDv7-based location path.
+///
+/// Establishes a new storage location (revision) for a table at `<dataset_name>/<table>/<UUIDv7>/`
+/// and registers it in the metadata database. Each revision is uniquely identified by a time-ordered
+/// UUIDv7, allowing multiple revisions of the same table to coexist.
+///
+/// # Idempotency
+///
+/// If a location with the same URL already exists, the function returns the existing location ID
+/// without creating a duplicate.
+///
+/// # Active Status
+///
+/// The new revision is atomically marked as active while deactivating all other revisions for this
+/// table. Only active revisions are used for query execution.
+#[tracing::instrument(skip_all, fields(table = %table), err)]
+pub async fn register_new_table_revision(
+    metadata_db: MetadataDb,
+    data_store: &Store,
+    dataset: HashReference,
+    table: ResolvedTable,
+) -> Result<PhysicalTable, RegisterNewTableRevisionError> {
+    let url = make_table_url(data_store, dataset.name(), table.name());
+
+    let mut tx = metadata_db
+        .begin_txn()
+        .await
+        .map_err(RegisterNewTableRevisionError::TransactionBegin)?;
+
+    let location_id = metadata_db::physical_table::register(
+        &mut tx,
+        dataset.namespace(),
+        dataset.name(),
+        dataset.hash(),
+        table.name(),
+        &url,
+        false,
+    )
+    .await
+    .map_err(RegisterNewTableRevisionError::RegisterPhysicalTable)?;
+
+    metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, dataset.hash(), table.name())
+        .await
+        .map_err(RegisterNewTableRevisionError::MarkInactive)?;
+
+    metadata_db::physical_table::mark_active_by_id(
+        &mut tx,
+        location_id,
+        dataset.hash(),
+        table.name(),
+    )
+    .await
+    .map_err(RegisterNewTableRevisionError::MarkActive)?;
+
+    tx.commit()
+        .await
+        .map_err(RegisterNewTableRevisionError::TransactionCommit)?;
+
+    tracing::info!("Registered new revision at: {}", url);
+
+    // SAFETY: URL was constructed and validated during table creation
+    let path = Path::from_url_path(url.path()).expect("URL path should be valid");
+
+    let object_store = data_store.object_store();
+    Ok(PhysicalTable {
+        table,
+        url,
+        path,
+        location_id,
+        metadata_db,
+        object_store,
+        dataset,
+    })
+}
+
+/// Errors that occur when registering a new revision for a physical table
+///
+/// This error type is used by `register_new_table_revision()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RegisterNewTableRevisionError {
+    /// Failed to begin transaction
+    ///
+    /// This error occurs when the database connection fails to start a transaction,
+    /// typically due to connection issues, database unavailability, or permission problems.
+    ///
+    /// Possible causes:
+    /// - Database connection lost or not established
+    /// - Insufficient database permissions to create transactions
+    /// - Database server overloaded or unavailable
+    /// - Connection pool exhausted
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to register physical table location in metadata database
+    ///
+    /// This occurs when the metadata database rejects the registration of the new
+    /// physical table location. Registration is idempotent - if the URL already exists,
+    /// the existing location ID is returned.
+    ///
+    /// Possible causes:
+    /// - Database constraint violation (e.g., invalid foreign key references)
+    /// - Database connection lost during operation
+    /// - Insufficient permissions to insert into physical_tables table
+    #[error("Failed to register physical table in metadata database")]
+    RegisterPhysicalTable(#[source] metadata_db::Error),
+
+    /// Failed to mark existing active revisions as inactive
+    ///
+    /// This occurs when attempting to deactivate all currently active revisions for
+    /// the table before activating the new revision.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during update operation
+    /// - Database constraint violation during status update
+    /// - Concurrent modification conflict
+    #[error("Failed to mark existing physical tables as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+
+    /// Failed to mark new physical table revision as active
+    ///
+    /// This occurs when attempting to activate the newly created revision after
+    /// successfully deactivating existing revisions.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during update operation
+    /// - Database constraint violation during status update
+    /// - Concurrent modification conflict
+    #[error("Failed to mark new physical table as active")]
+    MarkActive(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    ///
+    /// Possible causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations (serialization failure)
+    /// - Database constraint violation detected at commit time
+    /// - Database running out of disk space or resources
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+}
+
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
     /// Logical table representation.
@@ -193,7 +339,7 @@ pub struct PhysicalTable {
     object_store: Arc<dyn ObjectStore>,
 
     /// Dataset reference with hash for observability and management.
-    dataset_reference: HashReference,
+    dataset: HashReference,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -220,72 +366,8 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store,
-            dataset_reference,
+            dataset: dataset_reference,
         })
-    }
-
-    /// Create a new physical table with the given dataset name, table, URL, and object store.
-    /// This is used for creating a new location (revision) for a new or existing table in
-    /// the metadata database.
-    #[tracing::instrument(skip_all, fields(table = %table, active = %set_active), err)]
-    pub async fn next_revision(
-        table: &ResolvedTable,
-        data_store: &Store,
-        metadata_db: MetadataDb,
-        set_active: bool,
-        dataset_reference: &HashReference,
-    ) -> Result<Self, BoxError> {
-        let path = make_location_path(dataset_reference, table.name());
-        let raw_url = data_store.url().join(&path)?;
-
-        // SAFETY: URL comes from data_store.url().join() which produces valid URLs
-        let url = PhyTableUrl::new_unchecked(raw_url);
-
-        let location_id = metadata_db::physical_table::register(
-            &metadata_db,
-            dataset_reference.namespace(),
-            dataset_reference.name(),
-            dataset_reference.hash(),
-            table.name(),
-            &url,
-            false,
-        )
-        .await?;
-
-        if set_active {
-            let mut tx = metadata_db.begin_txn().await?;
-            metadata_db::physical_table::mark_inactive_by_table_id(
-                &mut tx,
-                dataset_reference.hash(),
-                table.name(),
-            )
-            .await?;
-            metadata_db::physical_table::mark_active_by_id(
-                &mut tx,
-                location_id,
-                dataset_reference.hash(),
-                table.name(),
-            )
-            .await?;
-            tx.commit().await?;
-        }
-
-        let path = Path::from_url_path(url.path()).unwrap();
-
-        let object_store = data_store.object_store();
-        let physical_table = Self {
-            table: table.clone(),
-            url,
-            path,
-            location_id,
-            metadata_db,
-            object_store,
-            dataset_reference: dataset_reference.clone(),
-        };
-
-        info!("Created new revision at {}", physical_table.path);
-
-        Ok(physical_table)
     }
 
     /// Attempts to restore the latest revision of a table from the data store.
@@ -359,7 +441,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store,
-            dataset_reference: HashReference::new(
+            dataset: HashReference::new(
                 physical_table.dataset_namespace.into(),
                 physical_table.dataset_name.into(),
                 physical_table.manifest_hash.into(),
@@ -512,7 +594,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             object_store: Arc::clone(&object_store),
-            dataset_reference: dataset_reference.clone(),
+            dataset: dataset_reference.clone(),
         };
 
         Ok(physical_table)
@@ -544,7 +626,7 @@ impl PhysicalTable {
     }
 
     pub fn dataset_reference(&self) -> &HashReference {
-        &self.dataset_reference
+        &self.dataset
     }
 }
 
@@ -828,20 +910,6 @@ impl TableProvider for TableSnapshot {
     }
 }
 
-// We use the dataset reference for a more human-readable path hierarchy in object storage.
-//
-// The path format is: `<dataset>/<table>/<UUIDv7>/`
-pub fn make_location_path(dataset_reference: &HashReference, table: &TableName) -> String {
-    let mut path = location_prefix(dataset_reference, table);
-
-    // Add UUIDv7
-    let uuid = uuid::Uuid::now_v7();
-    path.push_str(&uuid.to_string());
-    path.push('/');
-
-    path
-}
-
 pub fn location_prefix(dataset_reference: &HashReference, table: &TableName) -> String {
     let mut prefix = String::new();
 
@@ -984,6 +1052,23 @@ pub enum RestoreLatestRevisionError {
     /// which can include registration, transaction, or file processing errors.
     #[error("Failed to restore latest revision")]
     RestoreLatest(#[source] RestoreLatestError),
+}
+
+/// Constructs a unique table URL for a new revision.
+///
+/// The URL follows the structure: `<store_url>/<dataset_name>/<table>/<UUIDv7>/`
+///
+/// Where:
+/// - `store_url`: Object store root URL from `data_store` (e.g., `s3://bucket`, `file:///data`)
+/// - `dataset_name`: Dataset name without namespace
+/// - `table`: Table name
+/// - `UUIDv7`: Time-ordered unique identifier
+fn make_table_url(data_store: &Store, dataset_name: &Name, table_name: &TableName) -> PhyTableUrl {
+    let path = format!("{}/{}/{}/", dataset_name, table_name, Uuid::now_v7());
+    // SAFETY: Path components (Name, TableName, Uuid) contain only URL-safe characters
+    let raw_url = data_store.url().join(&path).expect("path is URL-safe");
+    // SAFETY: URL comes from data_store.url().join() which produces valid URLs
+    PhyTableUrl::new_unchecked(raw_url)
 }
 
 /// Physical table URL _new-type_ wrapper
