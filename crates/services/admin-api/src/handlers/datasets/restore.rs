@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::physical::{PhysicalTable, RestoreLatestRevisionError};
+use common::catalog::physical::RestoreLatestRevisionError;
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
@@ -86,10 +86,6 @@ pub async fn handler(
 
     tracing::debug!(dataset_reference = %reference, "restoring dataset physical tables");
 
-    let namespace = reference.namespace().clone();
-    let name = reference.name().clone();
-    let revision = reference.revision().clone();
-
     // Resolve reference to hash reference
     let hash_reference = ctx
         .dataset_store
@@ -97,9 +93,9 @@ pub async fn handler(
         .await
         .map_err(Error::ResolveRevision)?
         .ok_or_else(|| Error::NotFound {
-            namespace: namespace.clone(),
-            name: name.clone(),
-            revision: revision.clone(),
+            namespace: reference.namespace().clone(),
+            name: reference.name().clone(),
+            revision: reference.revision().clone(),
         })?;
 
     // Load the full dataset object using the resolved hash reference
@@ -116,16 +112,19 @@ pub async fn handler(
     for table in dataset.resolved_tables(reference.clone().into()) {
         tracing::debug!(dataset_reference=%reference, table_name=%table.name(), "restoring table");
 
-        let data_store = ctx.data_store.clone();
         let metadata_db = ctx.metadata_db.clone();
-        let dataset_reference_clone = hash_reference.clone();
+        let object_store = ctx.data_store.prefixed_store();
+        let base_url = ctx.data_store.url().clone();
+        let reference = hash_reference.clone();
+        let table = table.clone();
 
         let task = tokio::spawn(async move {
-            let physical_table = PhysicalTable::restore_latest_revision(
-                &table,
-                data_store,
+            let physical_table = common::catalog::physical::restore_table_latest_revision(
                 metadata_db,
-                &dataset_reference_clone,
+                object_store,
+                &base_url,
+                reference.clone(),
+                table.clone(),
             )
             .await
             .map_err(|err| {
@@ -145,7 +144,7 @@ pub async fn handler(
             })?;
 
             tracing::info!(
-                dataset_reference=%dataset_reference_clone,
+                dataset_reference=%reference,
                 table_name = %table.name(),
                 location_id = %physical_table.location_id(),
                 url = %physical_table.url(),
