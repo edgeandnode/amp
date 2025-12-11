@@ -70,8 +70,13 @@ pub async fn dump_internal(
             match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                 Some(physical_table) => physical_table,
                 None => {
-                    PhysicalTable::next_revision(&table, &data_store, db, true, &hash_reference)
-                        .await?
+                    common::catalog::physical::register_new_table_revision(
+                        db,
+                        &data_store,
+                        hash_reference.clone(),
+                        table,
+                    )
+                    .await?
                 }
             }
             .into();
