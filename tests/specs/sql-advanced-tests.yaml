@@ -198,3 +198,12 @@
     [
       {"blocks_with_many_txs": 1}
     ]
+
+- name: nested_scan
+  query: |
+    SELECT
+      (SELECT COUNT(DISTINCT block_num) FROM eth_rpc.blocks) as total_blocks
+  results: |
+    [
+      {"total_blocks": 1}
+    ]
