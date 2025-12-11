@@ -180,8 +180,8 @@ pub struct PhysicalTable {
     /// Logical table representation.
     table: ResolvedTable,
 
-    /// Absolute URL to the data location, path section of the URL and the corresponding object store.
-    url: Url,
+    /// Base directory URL containing all parquet files for this table.
+    url: PhyTableUrl,
     /// Path to the data location in the object store.
     path: Path,
 
@@ -201,14 +201,17 @@ impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
         table: ResolvedTable,
-        url: Url,
+        raw_url: Url,
         location_id: LocationId,
         metadata_db: MetadataDb,
         dataset_reference: HashReference,
     ) -> Result<Self, BoxError> {
-        let path = Path::from_url_path(url.path()).unwrap();
-        let object_store_url = url.clone().try_into()?;
+        let path = Path::from_url_path(raw_url.path()).unwrap();
+        let object_store_url = raw_url.clone().try_into()?;
         let (object_store, _) = crate::store::object_store(&object_store_url)?;
+
+        // SAFETY: URL is validated by caller
+        let url = PhyTableUrl::new_unchecked(raw_url);
 
         Ok(Self {
             table,
@@ -232,18 +235,19 @@ impl PhysicalTable {
         set_active: bool,
         dataset_reference: &HashReference,
     ) -> Result<Self, BoxError> {
-        let manifest_hash = dataset_reference.hash();
-        let table_name = table.name();
+        let path = make_location_path(dataset_reference, table.name());
+        let raw_url = data_store.url().join(&path)?;
 
-        let path = make_location_path(dataset_reference, table_name);
-        let url = data_store.url().join(&path)?;
+        // SAFETY: URL comes from data_store.url().join() which produces valid URLs
+        let url = PhyTableUrl::new_unchecked(raw_url);
+
         let location_id = metadata_db::physical_table::register(
             &metadata_db,
             dataset_reference.namespace(),
             dataset_reference.name(),
-            manifest_hash,
-            table_name,
-            url.as_str(),
+            dataset_reference.hash(),
+            table.name(),
+            &url,
             false,
         )
         .await?;
@@ -252,15 +256,15 @@ impl PhysicalTable {
             let mut tx = metadata_db.begin_txn().await?;
             metadata_db::physical_table::mark_inactive_by_table_id(
                 &mut tx,
-                manifest_hash,
-                table_name,
+                dataset_reference.hash(),
+                table.name(),
             )
             .await?;
             metadata_db::physical_table::mark_active_by_id(
                 &mut tx,
                 location_id,
-                manifest_hash,
-                table_name,
+                dataset_reference.hash(),
+                table.name(),
             )
             .await?;
             tx.commit().await?;
@@ -338,11 +342,14 @@ impl PhysicalTable {
             return Ok(None);
         };
 
-        let url = physical_table.url;
+        let table_url = physical_table.url;
         let location_id = physical_table.id;
+
+        // Convert TableUrl to PhyTableUrl
+        let url: PhyTableUrl = table_url.into();
         let path = Path::from_url_path(url.path()).unwrap();
 
-        let object_store_url = url.clone().try_into()?;
+        let object_store_url = url.inner().clone().try_into()?;
         let (object_store, _) = crate::store::object_store(&object_store_url)?;
 
         Ok(Some(Self {
@@ -400,18 +407,21 @@ impl PhysicalTable {
         manifest_hash: &Hash,
         table_name: &TableName,
         path: &Path,
-        url: &Url,
+        raw_url: &Url,
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
         dataset_reference: &HashReference,
     ) -> Result<Self, RestoreError> {
+        // SAFETY: The URL is validated by the caller and comes from the restore operation
+        let url = PhyTableUrl::new_unchecked(raw_url.clone());
+
         let location_id = metadata_db::physical_table::register(
             &metadata_db,
             dataset_reference.namespace(),
             dataset_reference.name(),
             manifest_hash,
             table_name,
-            url.as_str(),
+            &url,
             false,
         )
         .await
@@ -483,7 +493,7 @@ impl PhysicalTable {
             metadata_db
                 .register_file(
                     location_id,
-                    url,
+                    url.inner(),
                     file_name,
                     object_size,
                     object_e_tag,
@@ -497,7 +507,7 @@ impl PhysicalTable {
 
         let physical_table = Self {
             table: table.clone(),
-            url: url.clone(),
+            url,
             path: path.clone(),
             location_id,
             metadata_db,
@@ -549,7 +559,7 @@ impl PhysicalTable {
     }
 
     pub fn url(&self) -> &Url {
-        &self.url
+        self.url.inner()
     }
 
     pub fn path(&self) -> &Path {
@@ -722,7 +732,7 @@ impl PhysicalTable {
 
 impl PhysicalTable {
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
-        Ok(ListingTableUrl::try_new(self.url.clone(), None)?.object_store())
+        Ok(ListingTableUrl::try_new(self.url.inner().clone(), None)?.object_store())
     }
 
     fn output_ordering(&self) -> DataFusionResult<Vec<LexOrdering>> {
@@ -974,4 +984,102 @@ pub enum RestoreLatestRevisionError {
     /// which can include registration, transaction, or file processing errors.
     #[error("Failed to restore latest revision")]
     RestoreLatest(#[source] RestoreLatestError),
+}
+
+/// Physical table URL _new-type_ wrapper
+///
+/// Represents a base directory URL in the object store containing all parquet files for a table.
+/// Individual file URLs are constructed by appending the filename to this base URL.
+///
+/// ## URL Format
+///
+/// `<store_url>/<dataset_name>/<table>/<uuid_v7>/`
+///
+/// Where:
+/// - `store_url`: The object store root URL (e.g., `s3://bucket`, `file:///data`)
+/// - `dataset_name`: Dataset name (without namespace)
+/// - `table`: Table name
+/// - `uuid_v7`: Unique identifier for this table revision/location
+///
+/// ## Example
+///
+/// ```text
+/// s3://my-bucket/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PhyTableUrl(Url);
+
+impl PhyTableUrl {
+    /// Create a new [`PhyTableUrl`] from a [`url::Url`] without validation
+    ///
+    /// # Safety
+    /// The caller must ensure the provided URL is a valid object store URL.
+    pub fn new_unchecked(url: Url) -> Self {
+        Self(url)
+    }
+
+    /// Get the URL as a string slice
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Get the path portion of the URL
+    pub fn path(&self) -> &str {
+        self.0.path()
+    }
+
+    /// Get a reference to the inner [`url::Url`]
+    pub fn inner(&self) -> &Url {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for PhyTableUrl {
+    type Err = PhyTableUrlParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let url = s.parse().map_err(|err| PhyTableUrlParseError {
+            url: s.to_string(),
+            source: err,
+        })?;
+        Ok(PhyTableUrl(url))
+    }
+}
+
+impl std::fmt::Display for PhyTableUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
+    }
+}
+
+impl From<PhyTableUrl> for metadata_db::physical_table::TableUrlOwned {
+    fn from(value: PhyTableUrl) -> Self {
+        // SAFETY: PhyTableUrl is validated at construction via FromStr, ensuring invariants are upheld.
+        metadata_db::physical_table::TableUrl::from_owned_unchecked(value.as_str().to_owned())
+    }
+}
+
+impl<'a> From<&'a PhyTableUrl> for metadata_db::physical_table::TableUrl<'a> {
+    fn from(value: &'a PhyTableUrl) -> Self {
+        // SAFETY: PhyTableUrl is validated at construction via FromStr, ensuring invariants are upheld.
+        metadata_db::physical_table::TableUrl::from_ref_unchecked(value.as_str())
+    }
+}
+
+impl From<metadata_db::physical_table::TableUrlOwned> for PhyTableUrl {
+    fn from(value: metadata_db::physical_table::TableUrlOwned) -> Self {
+        value
+            .as_str()
+            .parse()
+            .expect("database URL should be valid")
+    }
+}
+
+/// Error type for PhyTableUrl parsing
+#[derive(Debug, thiserror::Error)]
+#[error("invalid object store URL '{url}'")]
+pub struct PhyTableUrlParseError {
+    url: String,
+    #[source]
+    source: url::ParseError,
 }

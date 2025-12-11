@@ -3,16 +3,16 @@
 //! This module provides a type-safe API for managing physical table locations in the metadata database.
 //! Physical tables represent actual storage locations (e.g., Parquet files) for dataset tables.
 
-use url::Url;
-
 pub mod events;
 mod location_id;
 mod name;
 pub(crate) mod sql;
+mod url;
 
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
     name::{Name as TableName, NameOwned as TableNameOwned},
+    url::{Url as TableUrl, UrlOwned as TableUrlOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
@@ -33,7 +33,7 @@ pub async fn register<'c, E>(
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-    url: &str,
+    url: impl Into<TableUrl<'_>> + std::fmt::Debug,
     active: bool,
 ) -> Result<LocationId, Error>
 where
@@ -45,7 +45,7 @@ where
         dataset_name.into(),
         manifest_hash.into(),
         table_name.into(),
-        url,
+        url.into(),
         active,
     )
     .await
@@ -85,11 +85,16 @@ where
 /// If multiple locations exist with the same URL (which shouldn't happen in normal operation),
 /// this returns the first match found.
 #[tracing::instrument(skip(exe), err)]
-pub async fn url_to_id<'c, E>(exe: E, url: &str) -> Result<Option<LocationId>, Error>
+pub async fn url_to_id<'c, E>(
+    exe: E,
+    url: impl Into<TableUrl<'_>> + std::fmt::Debug,
+) -> Result<Option<LocationId>, Error>
 where
     E: Executor<'c>,
 {
-    sql::url_to_id(exe, url).await.map_err(Error::Database)
+    sql::url_to_id(exe, url.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// Get the currently active physical table location for a given table
@@ -267,8 +272,7 @@ pub struct PhysicalTable {
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
     /// Full URL to the storage location
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
+    pub url: TableUrlOwned,
     /// Whether this location is currently active for queries
     pub active: bool,
     /// Writer job ID (if one exists)
@@ -291,7 +295,7 @@ impl LocationWithDetails {
     }
 
     /// Get the storage URL for this location
-    pub fn url(&self) -> &Url {
+    pub fn url(&self) -> &TableUrlOwned {
         &self.table.url
     }
 
