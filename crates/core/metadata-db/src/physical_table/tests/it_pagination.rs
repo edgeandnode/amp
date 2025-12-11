@@ -1,14 +1,13 @@
 //! Pagination tests for location listing
 
 use pgtemp::PgTempDB;
-use url::Url;
 
 use crate::{
     DatasetName, DatasetNamespace,
     db::Connection,
     manifests::ManifestHash,
     physical_table,
-    physical_table::{LocationId, TableName},
+    physical_table::{LocationId, TableName, TableUrl},
 };
 
 #[tokio::test]
@@ -28,7 +27,10 @@ async fn list_locations_first_page_when_empty() {
         .expect("Failed to list locations");
 
     //* Then
-    assert!(locations.is_empty());
+    assert!(
+        locations.is_empty(),
+        "list should return empty result when no locations exist"
+    );
 }
 
 #[tokio::test]
@@ -51,19 +53,10 @@ async fn list_locations_first_page_respects_limit() {
     // Create 5 locations with unique table names to avoid unique constraint violation
     for i in 0..5 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_{}", i));
-        let url =
-            Url::parse(&format!("s3://bucket/file{}.parquet", i)).expect("Failed to parse URL");
-        physical_table::register(
-            &mut conn,
-            namespace.clone(),
-            name.clone(),
-            hash.clone(),
-            &table_name,
-            url.as_str(),
-            true,
-        )
-        .await
-        .expect("Failed to insert location");
+        let url = TableUrl::from_owned_unchecked(format!("s3://bucket/file{}.parquet", i));
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, url, true)
+            .await
+            .expect("Failed to insert location");
 
         // Small delay to ensure different timestamps
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -75,12 +68,28 @@ async fn list_locations_first_page_respects_limit() {
         .expect("Failed to list locations");
 
     //* Then
-    assert_eq!(locations.len(), 3);
-    assert!(locations[0].id > locations[1].id);
-    assert!(locations[1].id > locations[2].id);
+    assert_eq!(
+        locations.len(),
+        3,
+        "list should respect limit and return 3 locations"
+    );
+    assert!(
+        locations[0].id > locations[1].id,
+        "list should return locations in descending ID order (newest first)"
+    );
+    assert!(
+        locations[1].id > locations[2].id,
+        "list should maintain descending ID order throughout page"
+    );
     for location in &locations {
-        assert!(location.table_name.starts_with("test_table_"));
-        assert!(location.active);
+        assert!(
+            location.table_name.starts_with("test_table_"),
+            "list should return locations with correct table_name prefix"
+        );
+        assert!(
+            location.active,
+            "list should return locations with persisted active status"
+        );
     }
 }
 
@@ -105,19 +114,11 @@ async fn list_locations_next_page_uses_cursor() {
     let mut all_location_ids = Vec::new();
     for i in 0..10 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_page_{}", i));
-        let url =
-            Url::parse(&format!("s3://bucket/page{}.parquet", i)).expect("Failed to parse URL");
-        let location_id = physical_table::register(
-            &mut conn,
-            namespace.clone(),
-            name.clone(),
-            hash.clone(),
-            &table_name,
-            url.as_str(),
-            true,
-        )
-        .await
-        .expect("Failed to insert location");
+        let url = TableUrl::from_owned_unchecked(format!("s3://bucket/page{}.parquet", i));
+        let location_id =
+            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, url, true)
+                .await
+                .expect("Failed to insert location");
         all_location_ids.push(location_id);
 
         // Small delay to ensure different timestamps
@@ -139,15 +140,31 @@ async fn list_locations_next_page_uses_cursor() {
         .expect("Failed to list second page");
 
     //* Then
-    assert_eq!(second_page.len(), 3);
+    assert_eq!(
+        second_page.len(),
+        3,
+        "list should respect limit for subsequent pages"
+    );
     // Verify no overlap with first page
     let first_page_ids: Vec<_> = first_page.iter().map(|l| l.id).collect();
     for location in &second_page {
-        assert!(!first_page_ids.contains(&location.id));
+        assert!(
+            !first_page_ids.contains(&location.id),
+            "list should not return locations from previous page (no overlap)"
+        );
     }
     // Verify ordering
-    assert!(second_page[0].id > second_page[1].id);
-    assert!(second_page[1].id > second_page[2].id);
+    assert!(
+        second_page[0].id > second_page[1].id,
+        "list should maintain descending ID order on second page"
+    );
+    assert!(
+        second_page[1].id > second_page[2].id,
+        "list should maintain descending ID order throughout second page"
+    );
     // Verify cursor worked correctly
-    assert!(cursor > second_page[0].id);
+    assert!(
+        cursor > second_page[0].id,
+        "list should use cursor to exclude locations with ID >= cursor"
+    );
 }

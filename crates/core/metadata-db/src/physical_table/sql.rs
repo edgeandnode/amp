@@ -6,11 +6,11 @@
 //! `Executor` trait and converts errors to `metadata_db::Error`.
 
 use sqlx::{Executor, Postgres, types::JsonValue};
-use url::Url;
 
 use super::{
     LocationId, LocationWithDetails, PhysicalTable,
     name::{Name, NameOwned},
+    url::{Url, UrlOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, JobStatus,
@@ -27,7 +27,7 @@ pub async fn insert<'c, E>(
     dataset_name: DatasetName<'_>,
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
-    url: &str,
+    url: Url<'_>,
     active: bool,
 ) -> Result<LocationId, sqlx::Error>
 where
@@ -64,7 +64,7 @@ where
 }
 
 /// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_id<'c, E>(exe: E, url: &str) -> Result<Option<LocationId>, sqlx::Error>
+pub async fn url_to_id<'c, E>(exe: E, url: Url<'_>) -> Result<Option<LocationId>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -114,8 +114,7 @@ where
         id: LocationId,
         manifest_hash: ManifestHashOwned,
         table_name: NameOwned,
-        #[sqlx(try_from = "&'a str")]
-        url: Url,
+        url: UrlOwned,
         active: bool,
         dataset_namespace: DatasetNamespaceOwned,
         dataset_name: DatasetNameOwned,
