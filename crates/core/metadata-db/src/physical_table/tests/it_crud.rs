@@ -8,7 +8,7 @@ use crate::{
     db::Connection,
     jobs::{self, JobId},
     manifests::ManifestHash,
-    physical_table::{self, LocationId, TableId, TableName},
+    physical_table::{self, LocationId, TableName},
     workers,
 };
 
@@ -32,19 +32,20 @@ async fn insert_creates_location_and_returns_id() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash,
-        table: TableName::from_ref_unchecked("test_table"),
-    };
-    let bucket = Some("test-bucket");
-    let path = "/test/path/file.parquet";
+    let table_name = TableName::from_ref_unchecked("test_table");
     let url =
         Url::parse("s3://test-bucket/test/path/file.parquet").expect("Failed to parse test URL");
     let active = true;
 
     //* When
     let location_id = physical_table::register(
-        &mut conn, table, namespace, name, bucket, path, &url, active,
+        &mut conn,
+        namespace,
+        name,
+        hash,
+        &table_name,
+        url.as_str(),
+        active,
     )
     .await
     .expect("Failed to insert location");
@@ -53,17 +54,10 @@ async fn insert_creates_location_and_returns_id() {
     assert!(*location_id > 0);
 
     // Verify the location was created correctly
-    let (
-        row_location_id,
-        row_manifest_hash,
-        row_table_name,
-        row_bucket,
-        row_path,
-        row_url,
-        row_active,
-    ) = get_location_by_id(&mut conn, location_id)
-        .await
-        .expect("Failed to fetch inserted location");
+    let (row_location_id, row_manifest_hash, row_table_name, row_url, row_active) =
+        get_location_by_id(&mut conn, location_id)
+            .await
+            .expect("Failed to fetch inserted location");
 
     assert_eq!(row_location_id, location_id);
     assert_eq!(
@@ -71,8 +65,6 @@ async fn insert_creates_location_and_returns_id() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     );
     assert_eq!(row_table_name, "test_table");
-    assert_eq!(row_bucket, Some("test-bucket".to_string()));
-    assert_eq!(row_path, "/test/path/file.parquet");
     assert_eq!(row_url, url.as_str());
     assert!(row_active);
 }
@@ -94,22 +86,18 @@ async fn insert_on_conflict_returns_existing_id() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("test_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
     let url = Url::parse("s3://test-bucket/unique-file.parquet")
         .expect("Failed to parse unique file URL");
 
     // Insert first location
     let first_id = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        Some("bucket1"),
-        "/path1",
-        &url,
+        hash.clone(),
+        &table_name,
+        url.as_str(),
         true,
     )
     .await
@@ -118,12 +106,11 @@ async fn insert_on_conflict_returns_existing_id() {
     //* When - Try to insert with same URL but different data
     let second_id = physical_table::register(
         &mut conn,
-        table,
         namespace,
         name,
-        Some("bucket2"),
-        "/path2",
-        &url,
+        hash,
+        &table_name,
+        url.as_str(),
         false,
     )
     .await
@@ -150,27 +137,23 @@ async fn url_to_location_id_finds_existing_location() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash,
-        table: TableName::from_ref_unchecked("test_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
     let url = Url::parse("s3://test-bucket/find-me.parquet").expect("Failed to parse find-me URL");
 
     let expected_id = physical_table::register(
         &mut conn,
-        table,
         namespace,
         name,
-        None,
-        "/find-me.parquet",
-        &url,
+        hash,
+        &table_name,
+        url.as_str(),
         false,
     )
     .await
     .expect("Failed to insert location");
 
     //* When
-    let found_id = physical_table::url_to_id(&mut conn, &url)
+    let found_id = physical_table::url_to_id(&mut conn, url.as_str())
         .await
         .expect("Failed to search for location");
 
@@ -193,7 +176,7 @@ async fn url_to_location_id_returns_none_when_not_found() {
         .expect("Failed to parse nonexistent URL");
 
     //* When
-    let found_id = physical_table::url_to_id(&mut conn, &url)
+    let found_id = physical_table::url_to_id(&mut conn, url.as_str())
         .await
         .expect("Failed to search for location");
 
@@ -218,29 +201,19 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("test_table"),
-    };
-    let table2 = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("test_table2"),
-    };
-    let other_table = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("other_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
+    let table2_name = TableName::from_ref_unchecked("test_table2");
+    let other_table_name = TableName::from_ref_unchecked("other_table");
 
     // Create active location for target table
     let url1 = Url::parse("s3://bucket/active1.parquet").expect("Failed to parse active1 URL");
     let active_id1 = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/active1.parquet",
-        &url1,
+        hash.clone(),
+        &table_name,
+        url1.as_str(),
         true,
     )
     .await
@@ -250,12 +223,11 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url2 = Url::parse("s3://bucket/active2.parquet").expect("Failed to parse active2 URL");
     let active_id2 = physical_table::register(
         &mut conn,
-        table2.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/active2.parquet",
-        &url2,
+        hash.clone(),
+        &table2_name,
+        url2.as_str(),
         true,
     )
     .await
@@ -265,12 +237,11 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let url3 = Url::parse("s3://bucket/inactive.parquet").expect("Failed to parse inactive URL");
     physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/inactive.parquet",
-        &url3,
+        hash.clone(),
+        &table_name,
+        url3.as_str(),
         false,
     )
     .await
@@ -281,22 +252,22 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
         Url::parse("s3://bucket/other-table.parquet").expect("Failed to parse other-table URL");
     physical_table::register(
         &mut conn,
-        other_table,
         namespace.clone(),
         name.clone(),
-        None,
-        "/other-table.parquet",
-        &url4,
+        hash.clone(),
+        &other_table_name,
+        url4.as_str(),
         true,
     )
     .await
     .expect("Failed to insert location for other table");
 
     //* When - Get locations for first table
-    let active_location1 = physical_table::get_active_physical_table(&mut conn, table)
-        .await
-        .expect("Failed to get active locations for table 1");
-    let active_location2 = physical_table::get_active_physical_table(&mut conn, table2)
+    let active_location1 =
+        physical_table::get_active_physical_table(&mut conn, hash.clone(), &table_name)
+            .await
+            .expect("Failed to get active locations for table 1");
+    let active_location2 = physical_table::get_active_physical_table(&mut conn, hash, &table2_name)
         .await
         .expect("Failed to get active locations for table 2");
 
@@ -333,29 +304,19 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("test_table"),
-    };
-    let table2 = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("test_table2"),
-    };
-    let other_table = TableId {
-        manifest_hash: hash.clone(),
-        table: TableName::from_ref_unchecked("other_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
+    let table2_name = TableName::from_ref_unchecked("test_table2");
+    let other_table_name = TableName::from_ref_unchecked("other_table");
 
     // Create active location for first target table
     let url1 = Url::parse("s3://bucket/target1.parquet").expect("Failed to parse target1 URL");
     let target_id1 = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/target1.parquet",
-        &url1,
+        hash.clone(),
+        &table_name,
+        url1.as_str(),
         true,
     )
     .await
@@ -365,12 +326,11 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     let url2 = Url::parse("s3://bucket/target2.parquet").expect("Failed to parse target2 URL");
     let target_id2 = physical_table::register(
         &mut conn,
-        table2,
         namespace.clone(),
         name.clone(),
-        None,
-        "/target2.parquet",
-        &url2,
+        hash.clone(),
+        &table2_name,
+        url2.as_str(),
         true,
     )
     .await
@@ -381,12 +341,11 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         .expect("Failed to parse already-inactive URL");
     let inactive_id = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/already-inactive.parquet",
-        &url3,
+        hash.clone(),
+        &table_name,
+        url3.as_str(),
         false,
     )
     .await
@@ -396,19 +355,18 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     let url4 = Url::parse("s3://bucket/other.parquet").expect("Failed to parse other URL");
     let other_id = physical_table::register(
         &mut conn,
-        other_table,
         namespace.clone(),
         name.clone(),
-        None,
-        "/other.parquet",
-        &url4,
+        hash.clone(),
+        &other_table_name,
+        url4.as_str(),
         true,
     )
     .await
     .expect("Failed to insert other table location");
 
     //* When - Mark only the first table inactive
-    physical_table::mark_inactive_by_table_id(&mut conn, table)
+    physical_table::mark_inactive_by_table_id(&mut conn, hash.clone(), &table_name)
         .await
         .expect("Failed to mark locations inactive");
 
@@ -450,21 +408,17 @@ async fn mark_active_by_id_activates_specific_location() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash,
-        table: TableName::from_ref_unchecked("test_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
 
     let url1 =
         Url::parse("s3://bucket/to-activate.parquet").expect("Failed to parse to-activate URL");
     let target_id = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/to-activate.parquet",
-        &url1,
+        hash.clone(),
+        &table_name,
+        url1.as_str(),
         false,
     )
     .await
@@ -474,19 +428,18 @@ async fn mark_active_by_id_activates_specific_location() {
         Url::parse("s3://bucket/stay-inactive.parquet").expect("Failed to parse stay-inactive URL");
     let other_id = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace,
         name,
-        None,
-        "/stay-inactive.parquet",
-        &url2,
+        hash.clone(),
+        &table_name,
+        url2.as_str(),
         false,
     )
     .await
     .expect("Failed to insert other location");
 
     //* When
-    physical_table::mark_active_by_id(&mut conn, table, target_id)
+    physical_table::mark_active_by_id(&mut conn, target_id, hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -533,21 +486,17 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         .await
         .expect("Failed to register job");
 
-    let table = TableId {
-        manifest_hash: hash,
-        table: TableName::from_ref_unchecked("output_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("output_table");
 
     // Create locations to assign
     let url1 = Url::parse("s3://bucket/assign1.parquet").expect("Failed to parse assign1 URL");
     let location_id1 = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/assign1.parquet",
-        &url1,
+        hash.clone(),
+        &table_name,
+        url1.as_str(),
         false,
     )
     .await
@@ -556,12 +505,11 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url2 = Url::parse("s3://bucket/assign2.parquet").expect("Failed to parse assign2 URL");
     let location_id2 = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/assign2.parquet",
-        &url2,
+        hash.clone(),
+        &table_name,
+        url2.as_str(),
         false,
     )
     .await
@@ -570,12 +518,11 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let url3 = Url::parse("s3://bucket/assign3.parquet").expect("Failed to parse assign3 URL");
     let location_id3 = physical_table::register(
         &mut conn,
-        table.clone(),
         namespace.clone(),
         name.clone(),
-        None,
-        "/assign3.parquet",
-        &url3,
+        hash.clone(),
+        &table_name,
+        url3.as_str(),
         false,
     )
     .await
@@ -586,12 +533,11 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         Url::parse("s3://bucket/not-assigned.parquet").expect("Failed to parse not-assigned URL");
     let unassigned_id = physical_table::register(
         &mut conn,
-        table,
         namespace,
         name,
-        None,
-        "/not-assigned.parquet",
-        &url4,
+        hash,
+        &table_name,
+        url4.as_str(),
         false,
     )
     .await
@@ -643,20 +589,16 @@ async fn get_by_id_returns_existing_location() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let table = TableId {
-        manifest_hash: hash,
-        table: TableName::from_ref_unchecked("test_table"),
-    };
+    let table_name = TableName::from_ref_unchecked("test_table");
     let url = Url::parse("s3://bucket/get-by-id.parquet").expect("Failed to parse URL");
 
     let inserted_id = physical_table::register(
         &mut conn,
-        table,
         namespace,
         name,
-        Some("bucket"),
-        "/get-by-id.parquet",
-        &url,
+        hash,
+        &table_name,
+        url.as_str(),
         true,
     )
     .await
@@ -707,22 +649,12 @@ async fn get_by_id_returns_none_for_nonexistent_location() {
 async fn get_location_by_id<'c, E>(
     exe: E,
     location_id: LocationId,
-) -> Result<
-    (
-        LocationId,
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        bool,
-    ),
-    sqlx::Error,
->
+) -> Result<(LocationId, String, String, String, bool), sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query = "SELECT id, manifest_hash, table_name, bucket, path, url, active FROM physical_tables WHERE id = $1";
+    let query =
+        "SELECT id, manifest_hash, table_name, url, active FROM physical_tables WHERE id = $1";
     sqlx::query_as(query).bind(location_id).fetch_one(exe).await
 }
 

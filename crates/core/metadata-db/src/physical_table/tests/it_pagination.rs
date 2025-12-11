@@ -8,7 +8,7 @@ use crate::{
     db::Connection,
     manifests::ManifestHash,
     physical_table,
-    physical_table::{LocationId, TableId, TableName},
+    physical_table::{LocationId, TableName},
 };
 
 #[tokio::test]
@@ -51,17 +51,15 @@ async fn list_locations_first_page_respects_limit() {
     // Create 5 locations with unique table names to avoid unique constraint violation
     for i in 0..5 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_{}", i));
-        let table = TableId::new(hash.clone(), &table_name);
         let url =
             Url::parse(&format!("s3://bucket/file{}.parquet", i)).expect("Failed to parse URL");
         physical_table::register(
             &mut conn,
-            table,
             namespace.clone(),
             name.clone(),
-            None,
-            &format!("/file{}.parquet", i),
-            &url,
+            hash.clone(),
+            &table_name,
+            url.as_str(),
             true,
         )
         .await
@@ -107,17 +105,15 @@ async fn list_locations_next_page_uses_cursor() {
     let mut all_location_ids = Vec::new();
     for i in 0..10 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_page_{}", i));
-        let table = TableId::new(hash.clone(), &table_name);
         let url =
             Url::parse(&format!("s3://bucket/page{}.parquet", i)).expect("Failed to parse URL");
         let location_id = physical_table::register(
             &mut conn,
-            table,
             namespace.clone(),
             name.clone(),
-            None,
-            &format!("/page{}.parquet", i),
-            &url,
+            hash.clone(),
+            &table_name,
+            url.as_str(),
             true,
         )
         .await

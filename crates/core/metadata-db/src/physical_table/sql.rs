@@ -21,16 +21,13 @@ use crate::{
 };
 
 /// Insert a physical table location into the database and return its ID (idempotent operation)
-#[expect(clippy::too_many_arguments)]
 pub async fn insert<'c, E>(
     exe: E,
-    manifest_hash: ManifestHash<'_>,
-    table_name: Name<'_>,
     dataset_namespace: DatasetNamespace<'_>,
     dataset_name: DatasetName<'_>,
-    bucket: Option<&str>,
-    path: &str,
-    url: &Url,
+    manifest_hash: ManifestHash<'_>,
+    table_name: Name<'_>,
+    url: &str,
     active: bool,
 ) -> Result<LocationId, sqlx::Error>
 where
@@ -38,8 +35,8 @@ where
 {
     // Upsert with RETURNING id - the no-op update ensures RETURNING works for both insert and conflict cases
     let query = indoc::indoc! {"
-        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, bucket, path, url, active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, url, active)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (url) DO UPDATE SET manifest_hash = EXCLUDED.manifest_hash
         RETURNING id
     "};
@@ -49,9 +46,7 @@ where
         .bind(table_name)
         .bind(dataset_namespace)
         .bind(dataset_name)
-        .bind(bucket)
-        .bind(path)
-        .bind(url.as_str())
+        .bind(url)
         .bind(active)
         .fetch_one(exe)
         .await?;
@@ -69,14 +64,14 @@ where
 }
 
 /// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, sqlx::Error>
+pub async fn url_to_id<'c, E>(exe: E, url: &str) -> Result<Option<LocationId>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = "SELECT id FROM physical_tables WHERE url = $1 LIMIT 1";
 
     let id: Option<LocationId> = sqlx::query_scalar(query)
-        .bind(url.as_str())
+        .bind(url)
         .fetch_optional(exe)
         .await?;
     Ok(id)
