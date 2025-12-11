@@ -339,69 +339,6 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
     }
 }
 
-/// Assert that two Solana snapshots are equal, comparing both block ranges and row data. The
-/// key difference between this function and [assert_snapshots_eq] is that Solana tables have
-/// "slot" as the primary block identifier, rather than "block_num". For more details, see the
-/// documentation of [solana_rpc_datasets::client].
-///
-/// This function performs a comprehensive comparison between two snapshots:
-/// 1. Validates that both snapshots cover the same block ranges
-/// 2. Compares the actual row data across all tables
-///
-/// The comparison orders data by block_num for consistent results and
-/// uses Apache Arrow RecordBatch for efficient data comparison.
-///
-/// Panics if the snapshots differ in any way.
-pub async fn assert_solana_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext) {
-    // First check that block ranges match
-    assert_snapshot_block_ranges_eq(left, right).await;
-
-    // Then compare row data for each table
-    for table in left.physical_tables() {
-        // NOTE: We order by "slot" here instead of "block_num".
-        let sql_string = format!(
-            "select * from {} order by slot",
-            table.table_ref().to_quoted_string()
-        );
-
-        // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
-        // for empty or invalid SQL. The format! macro ensures non-empty output.
-        let sql_str = SqlStr::new_unchecked(sql_string);
-        let query = sql::parse(sql_str).expect("Failed to parse SQL query");
-
-        let left_rows: RecordBatch = left
-            .query_context()
-            .execute_and_concat(
-                left.query_context()
-                    .plan_sql(query.clone())
-                    .await
-                    .expect("Failed to plan SQL query for left snapshot"),
-            )
-            .await
-            .expect("Failed to execute query for left snapshot");
-
-        let right_rows: RecordBatch = right
-            .query_context()
-            .execute_and_concat(
-                right
-                    .query_context()
-                    .plan_sql(query.clone())
-                    .await
-                    .expect("Failed to plan SQL query for right snapshot"),
-            )
-            .await
-            .expect("Failed to execute query for right snapshot");
-
-        // Use arrow's built-in equality comparison
-        assert_eq!(
-            left_rows,
-            right_rows,
-            "Data mismatch in table {}: snapshots contain different row data",
-            table.table_ref()
-        );
-    }
-}
-
 /// Create a catalog from a dataset for table operations and queries.
 ///
 /// This function loads a dataset definition and creates a Catalog containing

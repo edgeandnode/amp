@@ -29,32 +29,6 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
-#[ignore = "only set up for JSON-RPC, not for Old Faithful"]
-async fn solana_single_dump() {
-    logging::init();
-
-    // Given
-    let test = TestCtx::setup("solana_single_dump", "_/solana@0.0.0", "solana_mainnet").await;
-
-    let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
-
-    // When
-    let dumped = test.dump_and_create_snapshot(block).await;
-
-    // Then
-    // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
-            .await
-            .expect("Table consistency check failed");
-    }
-
-    // Compare snapshots
-    test_helpers::assert_solana_snapshots_eq(&dumped, &reference).await;
-}
-
-#[tokio::test]
 async fn eth_beacon_single_dump() {
     //* Given
     let test = TestCtx::setup(

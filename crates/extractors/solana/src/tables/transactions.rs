@@ -163,106 +163,9 @@ impl Transaction {
         slot: Slot,
         tx_index: u32,
         of_tx: solana_sdk::transaction::VersionedTransaction,
-        of_tx_meta: crate::of1_client::DecodedData<
-            TransactionStatusMeta,
-            solana_storage_proto::convert::generated::TransactionStatusMeta,
-        >,
+        of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta,
     ) -> Self {
-        let tx_meta = match of_tx_meta {
-            crate::of1_client::DecodedData::Bincode(tx_meta) => tx_meta,
-            crate::of1_client::DecodedData::Protobuf(tx_meta) => {
-                let inner_instructions = tx_meta
-                    .inner_instructions
-                    .iter()
-                    .map(|inner| {
-                        let instructions = inner
-                            .instructions
-                            .iter()
-                            .cloned()
-                            .map(|inst| super::Instruction {
-                                program_id_index: inst.program_id_index as u8,
-                                accounts: inst.accounts,
-                                // TODO: unwrap
-                                data: String::from_utf8(inst.data).unwrap(),
-                                stack_height: inst.stack_height,
-                            })
-                            .collect();
-
-                        InnerInstructions {
-                            index: inner.index as u8,
-                            instructions,
-                        }
-                    })
-                    .collect();
-
-                let pre_token_balances = tx_meta
-                    .pre_token_balances
-                    .iter()
-                    .cloned()
-                    .map(TransactionTokenBalance::from)
-                    .collect();
-                let post_token_balances = tx_meta
-                    .post_token_balances
-                    .iter()
-                    .cloned()
-                    .map(TransactionTokenBalance::from)
-                    .collect();
-
-                let rewards = tx_meta
-                    .rewards
-                    .iter()
-                    .map(|reward| Reward {
-                        pubkey: reward.pubkey.clone(),
-                        lamports: reward.lamports,
-                        post_balance: reward.post_balance,
-                        reward_type: Some(reward.reward_type.into()),
-                        // TODO: unwrap
-                        commission: Some(reward.commission.parse().unwrap()),
-                    })
-                    .collect();
-
-                // TODO: unwrap
-                let loaded_addresses = LoadedAddresses {
-                    writable: tx_meta
-                        .loaded_writable_addresses
-                        .iter()
-                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
-                        .collect(),
-                    readonly: tx_meta
-                        .loaded_readonly_addresses
-                        .iter()
-                        .map(|addr| String::from_utf8(addr.clone()).unwrap())
-                        .collect(),
-                };
-
-                // TODO: unwrap
-                let return_data =
-                    tx_meta
-                        .return_data
-                        .clone()
-                        .map(|return_data| TransactionReturnData {
-                            program_id: String::from_utf8(return_data.program_id).unwrap(),
-                            data: String::from_utf8(return_data.data).unwrap(),
-                            encoding: ReturnDataEncoding::Base64,
-                        });
-
-                TransactionStatusMeta {
-                    status: tx_meta.err.is_some(),
-                    fee: tx_meta.fee,
-                    pre_balances: tx_meta.pre_balances,
-                    post_balances: tx_meta.post_balances,
-                    inner_instructions: Some(inner_instructions),
-                    log_messages: Some(tx_meta.log_messages),
-                    pre_token_balances: Some(pre_token_balances),
-                    post_token_balances: Some(post_token_balances),
-                    rewards: Some(rewards),
-                    loaded_addresses: Some(loaded_addresses),
-                    return_data,
-                    compute_units_consumed: tx_meta.compute_units_consumed,
-                    cost_units: tx_meta.cost_units,
-                }
-            }
-        };
+        let tx_meta = TransactionStatusMeta::from(of_tx_meta);
 
         Self {
             tx_index,
@@ -398,6 +301,98 @@ pub(crate) struct TransactionStatusMeta {
     pub(crate) return_data: Option<TransactionReturnData>,
     pub(crate) compute_units_consumed: Option<u64>,
     pub(crate) cost_units: Option<u64>,
+}
+
+impl From<solana_storage_proto::convert::generated::TransactionStatusMeta>
+    for TransactionStatusMeta
+{
+    fn from(of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta) -> Self {
+        let inner_instructions = of_tx_meta
+            .inner_instructions
+            .iter()
+            .map(|inner| {
+                let instructions = inner
+                    .instructions
+                    .iter()
+                    .cloned()
+                    .map(|inst| super::Instruction {
+                        program_id_index: inst.program_id_index as u8,
+                        accounts: inst.accounts,
+                        data: String::from_utf8(inst.data).expect("invalid utf-8"),
+                        stack_height: inst.stack_height,
+                    })
+                    .collect();
+
+                InnerInstructions {
+                    index: inner.index as u8,
+                    instructions,
+                }
+            })
+            .collect();
+
+        let pre_token_balances = of_tx_meta
+            .pre_token_balances
+            .iter()
+            .cloned()
+            .map(TransactionTokenBalance::from)
+            .collect();
+        let post_token_balances = of_tx_meta
+            .post_token_balances
+            .iter()
+            .cloned()
+            .map(TransactionTokenBalance::from)
+            .collect();
+
+        let rewards = of_tx_meta
+            .rewards
+            .iter()
+            .map(|reward| Reward {
+                pubkey: reward.pubkey.clone(),
+                lamports: reward.lamports,
+                post_balance: reward.post_balance,
+                reward_type: Some(reward.reward_type.into()),
+                commission: Some(reward.commission.parse().expect("commission parsing error")),
+            })
+            .collect();
+
+        let loaded_addresses = LoadedAddresses {
+            writable: of_tx_meta
+                .loaded_writable_addresses
+                .iter()
+                .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
+                .collect(),
+            readonly: of_tx_meta
+                .loaded_readonly_addresses
+                .iter()
+                .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
+                .collect(),
+        };
+
+        let return_data = of_tx_meta
+            .return_data
+            .clone()
+            .map(|return_data| TransactionReturnData {
+                program_id: String::from_utf8(return_data.program_id).expect("invalid utf-8"),
+                data: String::from_utf8(return_data.data).expect("invalid utf-8"),
+                encoding: ReturnDataEncoding::Base64,
+            });
+
+        TransactionStatusMeta {
+            status: of_tx_meta.err.is_some(),
+            fee: of_tx_meta.fee,
+            pre_balances: of_tx_meta.pre_balances,
+            post_balances: of_tx_meta.post_balances,
+            inner_instructions: Some(inner_instructions),
+            log_messages: Some(of_tx_meta.log_messages),
+            pre_token_balances: Some(pre_token_balances),
+            post_token_balances: Some(post_token_balances),
+            rewards: Some(rewards),
+            loaded_addresses: Some(loaded_addresses),
+            return_data,
+            compute_units_consumed: of_tx_meta.compute_units_consumed,
+            cost_units: of_tx_meta.cost_units,
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
