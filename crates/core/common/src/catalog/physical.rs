@@ -17,9 +17,9 @@ use datafusion::{
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use metadata_db::{LocationId, MetadataDb, physical_table::TableId};
+use metadata_db::{LocationId, MetadataDb};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::{debug, info, warn};
 use url::Url;
@@ -232,28 +232,37 @@ impl PhysicalTable {
         set_active: bool,
         dataset_reference: &HashReference,
     ) -> Result<Self, BoxError> {
-        let manifest_hash = table.dataset().manifest_hash();
-        let table_id = TableId::new(manifest_hash, table.name());
+        let manifest_hash = dataset_reference.hash();
+        let table_name = table.name();
 
-        let path = make_location_path(dataset_reference, table.name());
+        let path = make_location_path(dataset_reference, table_name);
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db::physical_table::register(
             &metadata_db,
-            table_id.clone(),
             dataset_reference.namespace(),
             dataset_reference.name(),
-            data_store.bucket(),
-            &path,
-            &url,
+            manifest_hash,
+            table_name,
+            url.as_str(),
             false,
         )
         .await?;
 
         if set_active {
             let mut tx = metadata_db.begin_txn().await?;
-            metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone())
-                .await?;
-            metadata_db::physical_table::mark_active_by_id(&mut tx, table_id, location_id).await?;
+            metadata_db::physical_table::mark_inactive_by_table_id(
+                &mut tx,
+                manifest_hash,
+                table_name,
+            )
+            .await?;
+            metadata_db::physical_table::mark_active_by_id(
+                &mut tx,
+                location_id,
+                manifest_hash,
+                table_name,
+            )
+            .await?;
             tx.commit().await?;
         }
 
@@ -283,10 +292,10 @@ impl PhysicalTable {
         metadata_db: MetadataDb,
         dataset_reference: &HashReference,
     ) -> Result<Option<Self>, RestoreLatestRevisionError> {
-        let manifest_hash = table.dataset().manifest_hash();
-        let table_id = TableId::new(manifest_hash, table.name());
+        let manifest_hash = dataset_reference.hash();
+        let table_name = table.name();
 
-        let prefix = location_prefix(dataset_reference, table.name());
+        let prefix = location_prefix(dataset_reference, table_name);
         let url = data_store
             .url()
             .join(&prefix)
@@ -301,7 +310,8 @@ impl PhysicalTable {
         Self::restore_latest(
             revisions,
             table,
-            &table_id,
+            manifest_hash,
+            table_name,
             Arc::clone(&data_store),
             metadata_db.clone(),
             dataset_reference,
@@ -316,10 +326,14 @@ impl PhysicalTable {
         metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
         let manifest_hash = table.dataset().manifest_hash();
-        let table_id = TableId::new(manifest_hash, table.name());
+        let table_name = table.name();
 
-        let Some(physical_table) =
-            metadata_db::physical_table::get_active_physical_table(&metadata_db, table_id).await?
+        let Some(physical_table) = metadata_db::physical_table::get_active_physical_table(
+            &metadata_db,
+            manifest_hash,
+            table_name,
+        )
+        .await?
         else {
             return Ok(None);
         };
@@ -352,18 +366,19 @@ impl PhysicalTable {
     ///
     /// Revisions are expected to be sorted in ascending order by their revision uuid.
     async fn restore_latest(
-        revisions: BTreeMap<String, (Path, Url, String)>,
+        revisions: BTreeMap<String, (Path, Url)>,
         table: &ResolvedTable,
-        table_id: &TableId<'_>,
+        manifest_hash: &Hash,
+        table_name: &TableName,
         data_store: Arc<Store>,
         metadata_db: MetadataDb,
         dataset_reference: &HashReference,
     ) -> Result<Option<Self>, RestoreLatestError> {
-        if let Some((path, url, prefix)) = revisions.values().last() {
+        if let Some((path, url)) = revisions.values().last() {
             Self::restore(
                 table,
-                table_id,
-                prefix,
+                manifest_hash,
+                table_name,
                 path,
                 url,
                 data_store,
@@ -382,8 +397,8 @@ impl PhysicalTable {
     #[expect(clippy::too_many_arguments)]
     async fn restore(
         table: &ResolvedTable,
-        table_id: &TableId<'_>,
-        prefix: &str,
+        manifest_hash: &Hash,
+        table_name: &TableName,
         path: &Path,
         url: &Url,
         data_store: Arc<Store>,
@@ -392,12 +407,11 @@ impl PhysicalTable {
     ) -> Result<Self, RestoreError> {
         let location_id = metadata_db::physical_table::register(
             &metadata_db,
-            table_id.clone(),
             dataset_reference.namespace(),
             dataset_reference.name(),
-            data_store.bucket(),
-            prefix,
-            url,
+            manifest_hash,
+            table_name,
+            url.as_str(),
             false,
         )
         .await
@@ -407,12 +421,17 @@ impl PhysicalTable {
             .begin_txn()
             .await
             .map_err(RestoreError::TransactionBegin)?;
-        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, table_id.clone())
+        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, manifest_hash, table_name)
             .await
             .map_err(RestoreError::MarkInactive)?;
-        metadata_db::physical_table::mark_active_by_id(&mut tx, table_id.clone(), location_id)
-            .await
-            .map_err(RestoreError::MarkActive)?;
+        metadata_db::physical_table::mark_active_by_id(
+            &mut tx,
+            location_id,
+            manifest_hash,
+            table_name,
+        )
+        .await
+        .map_err(RestoreError::MarkActive)?;
         tx.commit().await.map_err(RestoreError::TransactionCommit)?;
 
         let object_store = data_store.object_store();
@@ -735,12 +754,12 @@ impl TableProvider for TableSnapshot {
         self
     }
 
-    fn table_type(&self) -> TableType {
-        TableType::Base
-    }
-
     fn schema(&self) -> SchemaRef {
         self.physical_table.schema()
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
     }
 
     #[tracing::instrument(skip_all, err, fields(table = %self.physical_table.table_ref(), files = %self.canonical_segments.len()))]
@@ -831,7 +850,7 @@ pub async fn list_revisions(
     store: &Store,
     prefix: &str,
     path: &Path,
-) -> Result<BTreeMap<String, (Path, Url, String)>, ListRevisionsError> {
+) -> Result<BTreeMap<String, (Path, Url)>, ListRevisionsError> {
     let object_store = store.object_store();
     Ok(object_store
         .list_with_delimiter(Some(path))
@@ -847,7 +866,7 @@ pub async fn list_revisions(
             let full_prefix = format!("{prefix}{revision}/");
             let full_url = store.url().join(&full_prefix).ok()?;
             let full_path = Path::from_url_path(full_url.path()).ok()?;
-            Some((revision, (full_path, full_url, full_prefix)))
+            Some((revision, (full_path, full_url)))
         })
         .collect())
 }

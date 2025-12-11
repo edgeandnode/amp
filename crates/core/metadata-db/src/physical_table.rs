@@ -26,16 +26,14 @@ use crate::{
 ///
 /// This operation is idempotent - if a location with the same URL already exists,
 /// its manifest_hash will be updated and the existing location ID will be returned.
-#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
-    table_id: TableId<'_>,
     dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    bucket: Option<&str>,
-    path: &str,
-    url: &Url,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+    url: &str,
     active: bool,
 ) -> Result<LocationId, Error>
 where
@@ -43,12 +41,10 @@ where
 {
     sql::insert(
         exe,
-        table_id.manifest_hash,
-        table_id.table,
         dataset_namespace.into(),
         dataset_name.into(),
-        bucket,
-        path,
+        manifest_hash.into(),
+        table_name.into(),
         url,
         active,
     )
@@ -89,7 +85,7 @@ where
 /// If multiple locations exist with the same URL (which shouldn't happen in normal operation),
 /// this returns the first match found.
 #[tracing::instrument(skip(exe), err)]
-pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, Error>
+pub async fn url_to_id<'c, E>(exe: E, url: &str) -> Result<Option<LocationId>, Error>
 where
     E: Executor<'c>,
 {
@@ -103,12 +99,13 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_active_physical_table<'c, E>(
     exe: E,
-    table_id: TableId<'_>,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
 ) -> Result<Option<PhysicalTable>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_active_physical_table(exe, table_id.manifest_hash, table_id.table)
+    sql::get_active_physical_table(exe, manifest_hash.into(), table_name.into())
         .await
         .map_err(Error::Database)
 }
@@ -123,11 +120,15 @@ where
 /// This operation should typically be performed within a transaction along with
 /// `mark_active_by_id()` to ensure atomicity when switching active locations.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_inactive_by_table_id<'c, E>(exe: E, table_id: TableId<'_>) -> Result<(), Error>
+pub async fn mark_inactive_by_table_id<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
-    sql::mark_inactive_by_table_id(exe, table_id.manifest_hash, table_id.table)
+    sql::mark_inactive_by_table_id(exe, manifest_hash.into(), table_name.into())
         .await
         .map_err(Error::Database)
 }
@@ -144,16 +145,17 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_active_by_id<'c, E>(
     exe: E,
-    table_id: TableId<'_>,
     location_id: impl Into<LocationId> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
     sql::mark_active_by_id(
         exe,
-        table_id.manifest_hash,
-        table_id.table,
+        manifest_hash.into(),
+        table_name.into(),
         location_id.into(),
     )
     .await
@@ -248,27 +250,6 @@ where
     events::notify(exe, location_id.into())
         .await
         .map_err(|err| Error::Database(err.0))
-}
-
-/// Logical tables are identified by the tuple: `(manifest_hash, table)`. For each logical table, there
-/// is at most one active physical_table entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TableId<'a> {
-    pub manifest_hash: ManifestHash<'a>,
-    pub table: TableName<'a>,
-}
-
-impl<'a> TableId<'a> {
-    /// Create a new TableId with flexible parameter types
-    pub fn new(
-        manifest_hash: impl Into<ManifestHash<'a>>,
-        table: impl Into<TableName<'a>>,
-    ) -> Self {
-        Self {
-            manifest_hash: manifest_hash.into(),
-            table: table.into(),
-        }
-    }
 }
 
 /// Basic location information from the database
