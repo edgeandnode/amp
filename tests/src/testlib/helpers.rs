@@ -72,7 +72,8 @@ pub async fn dump_internal(
                 None => {
                     common::catalog::physical::register_new_table_revision(
                         db,
-                        &data_store,
+                        data_store.prefixed_store(),
+                        data_store.url(),
                         hash_reference.clone(),
                         table,
                     )

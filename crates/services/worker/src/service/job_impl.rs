@@ -79,7 +79,8 @@ pub(super) async fn new(
                 // Create new table (initial attempt)
                 None => common::catalog::physical::register_new_table_revision(
                     ctx.metadata_db.clone(),
-                    &ctx.data_store,
+                    ctx.data_store.prefixed_store(),
+                    ctx.data_store.url(),
                     reference.clone(),
                     table,
                 )
