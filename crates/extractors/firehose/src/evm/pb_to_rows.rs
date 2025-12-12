@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use alloy::primitives::U256;
 use common::{
     BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
     evm::tables::{
@@ -108,10 +109,7 @@ pub fn protobufs_to_rows(
             nonce: tx.nonce,
 
             gas_limit: tx.gas_limit,
-            value: tx
-                .value
-                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.value", b))
-                .transpose()?,
+            value: tx.value.map(pb_bigint_to_string),
             input: tx.input,
 
             v: tx.v,
@@ -377,4 +375,15 @@ fn non_negative_pb_bigint_to_evm_currency(
 
     let unsigned = u128::from_be_bytes(bytes16);
     Ok(unsigned as i128)
+}
+
+fn pb_bigint_to_string(bytes: pbethereum::BigInt) -> String {
+    // Convert big-endian bytes to U256, then to decimal string
+    if bytes.bytes.is_empty() {
+        return "0".to_string();
+    }
+
+    // U256::from_be_slice handles arbitrary length up to 32 bytes
+    let value = U256::from_be_slice(&bytes.bytes);
+    value.to_string()
 }

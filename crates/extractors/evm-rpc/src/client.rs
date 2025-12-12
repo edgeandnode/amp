@@ -759,7 +759,7 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("gas_price", e.into()))?,
         gas_limit: tx.gas_limit(),
-        value: i128::try_from(tx.value()).map_err(|e| ToRowError::Overflow("value", e.into()))?,
+        value: tx.value().to_string(),
         input: tx.input().to_vec(),
         v: if sig.v() { vec![1] } else { vec![] },
         r: sig.r().to_be_bytes_vec(),
