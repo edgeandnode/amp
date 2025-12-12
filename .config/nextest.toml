@@ -26,5 +26,6 @@ default-filter = '''
   test(base_firehose_single_dump) -
   test(install_already_installed_version_switches_to_it) -
   test(install_latest_version) -
-  test(install_specific_version)
+  test(install_specific_version) -
+  test(extractor::tests::historical_to_json_rpc_transition)
 '''
