@@ -2,7 +2,9 @@
 members = [
     "crates/arrow-to-postgres",
     "crates/auth/http",
+    "crates/admin-client",
     "crates/bin/ampctl",
+    "crates/bin/ampcc",
     "crates/bin/ampd",
     "crates/bin/ampsync",
     "crates/bin/ampup",

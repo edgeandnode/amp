@@ -1419,7 +1419,7 @@ pub struct DatasetsResponse {
 }
 
 /// Summary information for a single dataset.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DatasetSummary {
     pub namespace: Namespace,
     pub name: Name,
