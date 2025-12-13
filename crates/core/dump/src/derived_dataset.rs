@@ -274,6 +274,17 @@ pub enum Error {
     /// the beginning.
     #[error("Parallel table dump tasks failed")]
     ParallelTasksFailed(#[source] BoxError),
+
+    /// Start block before dependencies
+    ///
+    /// This occurs when the start block of the derived dataset is before the earliest block of the dependencies.
+    #[error(
+        "derived dataset start_block ({dataset_start_block}) is before dependency's earliest available block ({dependency_earliest_block})"
+    )]
+    StartBlockBeforeDependencies {
+        dataset_start_block: BlockNum,
+        dependency_earliest_block: BlockNum,
+    },
 }
 
 /// Dumps a derived dataset table
@@ -354,6 +365,7 @@ async fn dump_table(
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
+    let manifest_start_block = manifest.start_block;
 
     join_set.spawn(
         async move {
@@ -362,11 +374,23 @@ async fn dump_table(
                 return Err(format!("syncing table {table_name} is not supported: {err}",).into());
             }
 
-            let Some(start) = catalog.earliest_block().await? else {
+            let Some(dependency_earliest_block) = catalog.earliest_block().await? else {
                 // If the dependencies have synced nothing, we have nothing to do.
                 tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
                 return Ok::<(), BoxError>(());
             };
+
+            // If derived dataset has a start_block, validate it
+            if let Some(dataset_start_block) = &manifest_start_block
+                && dataset_start_block < &dependency_earliest_block
+            {
+                return Err(Error::StartBlockBeforeDependencies {
+                    dataset_start_block: *dataset_start_block,
+                    dependency_earliest_block,
+                }
+                .into());
+            }
+            let start = manifest_start_block.unwrap_or(dependency_earliest_block);
 
             let resolved = end
                 .resolve(start, async {

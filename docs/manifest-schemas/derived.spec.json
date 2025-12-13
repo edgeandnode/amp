@@ -30,6 +30,13 @@
       "description": "Dataset kind, must be `manifest`",
       "const": "manifest"
     },
+    "start_block": {
+      "description": "Dataset start block. Derived dataset tables will only be computed from this block onwards.",
+      "type": "integer",
+      "format": "uint64",
+      "default": 0,
+      "minimum": 0
+    },
     "tables": {
       "description": "Table definitions mapped by table name",
       "type": "object",
