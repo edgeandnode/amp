@@ -1,14 +1,21 @@
 //! UI rendering for the Amp CC TUI.
 
+use std::sync::LazyLock;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
 use crate::app::{App, DataSource, InputMode};
+
+/// Lazily initialized syntax highlighting resources.
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Main draw function.
 pub fn draw(f: &mut Frame, app: &App) {
@@ -19,7 +26,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             Constraint::Min(0),    // Main content
             Constraint::Length(1), // Footer (status bar)
         ])
-        .split(f.size());
+        .split(f.area());
 
     draw_header(f, app, chunks[0]);
     draw_main(f, app, chunks[1]);
@@ -157,23 +164,59 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
+/// Highlight JSON with syntax coloring using syntect.
+/// Returns a vector of Lines with colored spans.
+fn highlight_json(json_str: &str) -> Vec<Line<'static>> {
+    let syntax = SYNTAX_SET
+        .find_syntax_by_extension("json")
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+    let theme = &THEME_SET.themes["base16-ocean.dark"];
+    let mut highlighter = HighlightLines::new(syntax, theme);
+
+    let mut lines = Vec::new();
+    for line in json_str.lines() {
+        match highlighter.highlight_line(line, &SYNTAX_SET) {
+            Ok(ranges) => {
+                let spans: Vec<Span<'static>> = ranges
+                    .into_iter()
+                    .map(|(style, text)| {
+                        // Convert syntect style to ratatui style
+                        let ratatui_style = syntect_tui::translate_style(style).unwrap_or_default();
+                        Span::styled(text.to_string(), ratatui_style)
+                    })
+                    .collect();
+                lines.push(Line::from(spans));
+            }
+            Err(_) => {
+                // Fallback to plain text on error
+                lines.push(Line::from(line.to_string()));
+            }
+        }
+    }
+    lines
+}
+
 /// Draw the content pane with manifest.
 fn draw_content(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default().title("Manifest").borders(Borders::ALL);
 
-    let content = if app.loading {
-        "Loading...".to_string()
+    let text = if app.loading {
+        Paragraph::new("Loading...").block(block)
     } else if let Some(error) = &app.error_message {
-        format!("Error: {}", error)
+        Paragraph::new(format!("Error: {}", error))
+            .block(block)
+            .style(Style::default().fg(Color::Red))
     } else if let Some(manifest) = &app.current_manifest {
-        serde_json::to_string_pretty(manifest).unwrap_or_else(|_| "Invalid JSON".to_string())
+        let json_str =
+            serde_json::to_string_pretty(manifest).unwrap_or_else(|_| "Invalid JSON".to_string());
+        let highlighted = highlight_json(&json_str);
+        Paragraph::new(highlighted).block(block)
     } else {
-        "Select a dataset to view manifest...".to_string()
+        Paragraph::new("Select a dataset to view manifest...")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray))
     };
 
-    let text = Paragraph::new(content)
-        .block(block)
-        .wrap(Wrap { trim: true });
     f.render_widget(text, area);
 }
 
