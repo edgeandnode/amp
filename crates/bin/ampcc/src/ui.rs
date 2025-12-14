@@ -1,11 +1,11 @@
 //! UI rendering for the Amp CC TUI.
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::app::{App, DataSource, InputMode};
@@ -177,14 +177,10 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(text, area);
 }
 
-/// Draw the footer with help text.
+/// Draw the footer with help text and loading indicator (right-aligned).
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let mode_str = match app.input_mode {
-        InputMode::Normal => "Normal",
-        InputMode::Search => "Search",
-    };
-
-    let text = if matches!(app.input_mode, InputMode::Search) {
+    // Build the left side (help text)
+    let left_text = if matches!(app.input_mode, InputMode::Search) {
         format!(
             "Search: {}_ (Enter to confirm, Esc to cancel)",
             app.search_query
@@ -195,13 +191,59 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             DataSource::Registry => "[1]Local [2]Registry",
         };
         format!(
-            "Mode: {} | {} | '/' search | 'r' refresh | Enter expand | 'j/k' nav | 'q' quit",
-            mode_str, source_hint
+            "{} | '/' search | 'r' refresh | Enter expand | 'j/k' nav | 'q' quit",
+            source_hint
         )
     };
 
-    let paragraph = Paragraph::new(text).style(Style::default().fg(Color::Gray));
-    f.render_widget(paragraph, area);
+    // Build the right side (loading indicator)
+    let right_spans: Vec<Span> = if app.loading {
+        let mut spans = Vec::new();
+        if let Some(msg) = &app.loading_message {
+            spans.push(Span::styled(
+                format!("{} ", msg),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        spans.push(Span::styled(
+            format!("{}", app.spinner_char()),
+            Style::default().fg(Color::Yellow),
+        ));
+        spans
+    } else {
+        vec![]
+    };
+
+    // Calculate widths for layout
+    let right_width = if app.loading {
+        let msg_len = app
+            .loading_message
+            .as_ref()
+            .map(|m| m.len() + 1)
+            .unwrap_or(0);
+        (msg_len + 1) as u16 // message + space + spinner char
+    } else {
+        0
+    };
+
+    // Split area into left (flexible) and right (fixed width for spinner)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),                                // Left side (help text)
+            Constraint::Length(right_width.saturating_add(1)), // Right side (spinner + padding)
+        ])
+        .split(area);
+
+    // Render left side
+    let left_paragraph = Paragraph::new(left_text).style(Style::default().fg(Color::Gray));
+    f.render_widget(left_paragraph, chunks[0]);
+
+    // Render right side (loading indicator)
+    if app.loading {
+        let right_paragraph = Paragraph::new(Line::from(right_spans));
+        f.render_widget(right_paragraph, chunks[1]);
+    }
 }
 
 /// Truncate a URL to a maximum length.

@@ -6,9 +6,9 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
 
 mod app;
@@ -65,19 +65,25 @@ async fn run_app<B: ratatui::backend::Backend>(
     let tick_rate = std::time::Duration::from_millis(100);
 
     // Initial manifest fetch
+    app.start_loading("Loading manifest...");
     spawn_fetch_manifest(app, tx.clone());
 
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
+
+        // Tick spinner animation
+        app.tick_spinner();
 
         // Handle async updates
         if let Ok(event) = rx.try_recv() {
             match event {
                 AppEvent::ManifestLoaded(manifest) => {
                     app.current_manifest = manifest;
+                    app.stop_loading();
                 }
                 AppEvent::Error(msg) => {
                     app.error_message = Some(msg);
+                    app.stop_loading();
                 }
             }
         }
@@ -93,17 +99,21 @@ async fn run_app<B: ratatui::backend::Backend>(
                             // Source switching
                             KeyCode::Char('1') => {
                                 let tx = tx.clone();
+                                app.start_loading("Switching source...");
                                 if let Err(e) = app.switch_source(DataSource::Local).await {
                                     let _ = tx.send(AppEvent::Error(e.to_string())).await;
                                 } else {
+                                    app.start_loading("Loading manifest...");
                                     spawn_fetch_manifest(app, tx);
                                 }
                             }
                             KeyCode::Char('2') => {
                                 let tx = tx.clone();
+                                app.start_loading("Switching source...");
                                 if let Err(e) = app.switch_source(DataSource::Registry).await {
                                     let _ = tx.send(AppEvent::Error(e.to_string())).await;
                                 } else {
+                                    app.start_loading("Loading manifest...");
                                     spawn_fetch_manifest(app, tx);
                                 }
                             }
@@ -116,9 +126,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                             // Refresh
                             KeyCode::Char('r') => {
                                 let tx = tx.clone();
+                                app.start_loading("Refreshing...");
                                 if let Err(e) = app.fetch_datasets().await {
                                     let _ = tx.send(AppEvent::Error(e.to_string())).await;
                                 } else {
+                                    app.start_loading("Loading manifest...");
                                     spawn_fetch_manifest(app, tx);
                                 }
                             }
@@ -126,19 +138,23 @@ async fn run_app<B: ratatui::backend::Backend>(
                             // Navigation
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.select_next();
+                                app.start_loading("Loading manifest...");
                                 spawn_fetch_manifest(app, tx.clone());
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
                                 app.select_previous();
+                                app.start_loading("Loading manifest...");
                                 spawn_fetch_manifest(app, tx.clone());
                             }
 
                             // Expand/collapse
                             KeyCode::Enter => {
                                 let tx = tx.clone();
+                                app.start_loading("Expanding...");
                                 if let Err(e) = app.toggle_expand().await {
                                     let _ = tx.send(AppEvent::Error(e.to_string())).await;
                                 }
+                                app.stop_loading();
                             }
 
                             _ => {}
@@ -147,6 +163,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                     InputMode::Search => match key.code {
                         KeyCode::Enter => {
                             app.input_mode = InputMode::Normal;
+                            app.start_loading("Loading manifest...");
                             spawn_fetch_manifest(app, tx.clone());
                         }
                         KeyCode::Esc => {

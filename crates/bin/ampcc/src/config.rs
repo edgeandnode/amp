@@ -41,8 +41,8 @@ impl Config {
             figment = figment.merge(Toml::file(config_path));
         }
 
-        // Env vars override: AMP_C2_LOCAL_QUERY_URL, etc.
-        figment = figment.merge(Env::prefixed("AMP_C2_"));
+        // Env vars override: AMP_CC_LOCAL_QUERY_URL, etc.
+        figment = figment.merge(Env::prefixed("AMP_CC_"));
 
         figment.extract().context("failed to load configuration")
     }

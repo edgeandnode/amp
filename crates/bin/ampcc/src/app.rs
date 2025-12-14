@@ -114,6 +114,10 @@ pub struct App {
     // Loading state
     pub loading: bool,
     pub error_message: Option<String>,
+
+    // Spinner animation state
+    pub spinner_frame: usize,
+    pub loading_message: Option<String>,
 }
 
 impl App {
@@ -145,12 +149,42 @@ impl App {
             current_manifest: None,
             loading: false,
             error_message: None,
+            spinner_frame: 0,
+            loading_message: None,
         })
     }
+
+    /// Spinner frames for loading animation (braille pattern).
+    pub const SPINNER_FRAMES: &'static [char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
     /// Quit the application.
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+
+    /// Advance the spinner animation frame.
+    pub fn tick_spinner(&mut self) {
+        if self.loading {
+            self.spinner_frame = (self.spinner_frame + 1) % Self::SPINNER_FRAMES.len();
+        }
+    }
+
+    /// Get the current spinner character.
+    pub fn spinner_char(&self) -> char {
+        Self::SPINNER_FRAMES[self.spinner_frame % Self::SPINNER_FRAMES.len()]
+    }
+
+    /// Start loading with a message.
+    pub fn start_loading(&mut self, message: &str) {
+        self.loading = true;
+        self.loading_message = Some(message.to_string());
+        self.error_message = None;
+    }
+
+    /// Stop loading.
+    pub fn stop_loading(&mut self) {
+        self.loading = false;
+        self.loading_message = None;
     }
 
     /// Get the current source URL for display.
