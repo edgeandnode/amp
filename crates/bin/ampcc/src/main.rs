@@ -208,8 +208,9 @@ fn spawn_fetch_manifest(app: &App, tx: mpsc::Sender<AppEvent>) {
                                 let _ = tx.send(AppEvent::ManifestLoaded(manifest)).await;
                             }
                             Err(e) => {
-                                eprintln!("Failed to fetch manifest: {}", e);
-                                let _ = tx.send(AppEvent::ManifestLoaded(None)).await;
+                                let _ = tx
+                                    .send(AppEvent::Error(format!("Failed to fetch: {}", e)))
+                                    .await;
                             }
                         }
                     }
@@ -227,8 +228,9 @@ fn spawn_fetch_manifest(app: &App, tx: mpsc::Sender<AppEvent>) {
                         let _ = tx.send(AppEvent::ManifestLoaded(Some(manifest))).await;
                     }
                     Err(e) => {
-                        eprintln!("Failed to fetch manifest: {}", e);
-                        let _ = tx.send(AppEvent::ManifestLoaded(None)).await;
+                        let _ = tx
+                            .send(AppEvent::Error(format!("Failed to fetch: {}", e)))
+                            .await;
                     }
                 }
             });

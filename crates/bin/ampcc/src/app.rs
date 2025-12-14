@@ -197,15 +197,14 @@ impl App {
 
     /// Fetch datasets from the current source.
     pub async fn fetch_datasets(&mut self) -> Result<()> {
-        self.loading = true;
-        self.error_message = None;
+        self.start_loading("Fetching datasets...");
 
         let result = match self.current_source {
             DataSource::Local => self.fetch_local_datasets().await,
             DataSource::Registry => self.fetch_registry_datasets().await,
         };
 
-        self.loading = false;
+        self.stop_loading();
 
         match result {
             Ok(datasets) => {

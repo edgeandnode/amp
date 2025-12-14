@@ -239,8 +239,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         )
     };
 
-    // Build the right side (loading indicator)
-    let right_spans: Vec<Span> = if app.loading {
+    // Build the right side (loading indicator or error message)
+    let (right_spans, right_width): (Vec<Span>, u16) = if app.loading {
+        // Show loading spinner
         let mut spans = Vec::new();
         if let Some(msg) = &app.loading_message {
             spans.push(Span::styled(
@@ -252,21 +253,27 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             format!("{}", app.spinner_char()),
             Style::default().fg(Color::Yellow),
         ));
-        spans
-    } else {
-        vec![]
-    };
-
-    // Calculate widths for layout
-    let right_width = if app.loading {
         let msg_len = app
             .loading_message
             .as_ref()
             .map(|m| m.len() + 1)
             .unwrap_or(0);
-        (msg_len + 1) as u16 // message + space + spinner char
+        (spans, (msg_len + 2) as u16)
+    } else if let Some(error) = &app.error_message {
+        // Show error message in red
+        let display_error = if error.len() > 50 {
+            format!("{}...", &error[..47])
+        } else {
+            error.clone()
+        };
+        let spans = vec![Span::styled(
+            format!("⚠ {}", display_error),
+            Style::default().fg(Color::Red),
+        )];
+        let width = (display_error.len() + 3) as u16; // icon + space + message
+        (spans, width)
     } else {
-        0
+        (vec![], 0)
     };
 
     // Split area into left (flexible) and right (fixed width for spinner)
@@ -282,8 +289,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let left_paragraph = Paragraph::new(left_text).style(Style::default().fg(Color::Gray));
     f.render_widget(left_paragraph, chunks[0]);
 
-    // Render right side (loading indicator)
-    if app.loading {
+    // Render right side (loading indicator or error)
+    if !right_spans.is_empty() {
         let right_paragraph = Paragraph::new(Line::from(right_spans));
         f.render_widget(right_paragraph, chunks[1]);
     }
