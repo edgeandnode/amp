@@ -11,7 +11,7 @@ use ratatui::{
 };
 use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
-use crate::app::{App, DataSource, InputMode};
+use crate::app::{App, DataSource, InputMode, InspectResult};
 
 /// Lazily initialized syntax highlighting resources.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -196,8 +196,23 @@ fn highlight_json(json_str: &str) -> Vec<Line<'static>> {
     lines
 }
 
-/// Draw the content pane with manifest.
+/// Draw the content pane with manifest and inspect.
 fn draw_content(f: &mut Frame, app: &App, area: Rect) {
+    // Split content vertically: Manifest (60%) | Inspect (40%)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(60), // Manifest
+            Constraint::Percentage(40), // Inspect
+        ])
+        .split(area);
+
+    draw_manifest(f, app, chunks[0]);
+    draw_inspect(f, app, chunks[1]);
+}
+
+/// Draw the manifest pane.
+fn draw_manifest(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default().title("Manifest").borders(Borders::ALL);
 
     let text = if app.loading {
@@ -218,6 +233,71 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
     };
 
     f.render_widget(text, area);
+}
+
+/// Draw the inspect pane with schema information.
+fn draw_inspect(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default().title("Schema").borders(Borders::ALL);
+
+    let content = if app.loading {
+        Paragraph::new("Loading...").block(block)
+    } else if let Some(inspect) = &app.current_inspect {
+        let lines = format_inspect_result(inspect);
+        Paragraph::new(lines).block(block)
+    } else if app.current_manifest.is_some() {
+        Paragraph::new("No schema information available")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray))
+    } else {
+        Paragraph::new("Select a dataset to view schema...")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray))
+    };
+
+    f.render_widget(content, area);
+}
+
+/// Format inspect result into styled lines.
+fn format_inspect_result(inspect: &InspectResult) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    for table in &inspect.tables {
+        // Table header
+        lines.push(Line::from(vec![
+            Span::styled(
+                table.name.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({} columns)", table.columns.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        // Columns
+        for col in &table.columns {
+            let nullable_str = if col.nullable { "" } else { " NOT NULL" };
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:<24}", col.name),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!("{:<20}", col.arrow_type),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(nullable_str.to_string(), Style::default().fg(Color::Red)),
+            ]));
+        }
+
+        // Empty line between tables
+        lines.push(Line::from(""));
+    }
+
+    lines
 }
 
 /// Draw the footer with help text and loading indicator (right-aligned).

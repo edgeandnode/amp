@@ -16,7 +16,7 @@ mod config;
 mod registry;
 mod ui;
 
-use app::{App, DataSource, InputMode};
+use app::{App, DataSource, InputMode, InspectResult};
 
 /// Events that can be sent from async tasks.
 enum AppEvent {
@@ -78,6 +78,7 @@ async fn run_app<B: ratatui::backend::Backend>(
         if let Ok(event) = rx.try_recv() {
             match event {
                 AppEvent::ManifestLoaded(manifest) => {
+                    app.current_inspect = manifest.as_ref().and_then(InspectResult::from_manifest);
                     app.current_manifest = manifest;
                     app.stop_loading();
                 }

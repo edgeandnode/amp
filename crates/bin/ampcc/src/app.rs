@@ -83,6 +83,128 @@ pub enum SelectedItem {
     },
 }
 
+/// Column information for inspect view.
+#[derive(Debug, Clone)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub arrow_type: String,
+    pub nullable: bool,
+}
+
+/// Table schema for inspect view.
+#[derive(Debug, Clone)]
+pub struct TableSchema {
+    pub name: String,
+    pub columns: Vec<ColumnInfo>,
+}
+
+/// Result of inspecting a dataset manifest.
+#[derive(Debug, Clone)]
+pub struct InspectResult {
+    pub tables: Vec<TableSchema>,
+}
+
+impl InspectResult {
+    /// Parse a manifest JSON to extract schema information.
+    pub fn from_manifest(manifest: &serde_json::Value) -> Option<Self> {
+        let tables_obj = manifest.get("tables")?.as_object()?;
+        let mut tables = Vec::new();
+
+        for (table_name, table_def) in tables_obj {
+            let schema = table_def.get("schema")?;
+            let arrow = schema.get("arrow")?;
+            let fields = arrow.get("fields")?.as_array()?;
+
+            let columns: Vec<ColumnInfo> = fields
+                .iter()
+                .filter_map(|field| {
+                    let name = field.get("name")?.as_str()?.to_string();
+                    let arrow_type = format_arrow_type(field.get("type")?);
+                    let nullable = field
+                        .get("nullable")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    Some(ColumnInfo {
+                        name,
+                        arrow_type,
+                        nullable,
+                    })
+                })
+                .collect();
+
+            tables.push(TableSchema {
+                name: table_name.clone(),
+                columns,
+            });
+        }
+
+        // Sort tables by name for consistent display
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Some(InspectResult { tables })
+    }
+}
+
+/// Format an Arrow type from the manifest JSON.
+fn format_arrow_type(type_value: &serde_json::Value) -> String {
+    if let Some(type_str) = type_value.as_str() {
+        return type_str.to_string();
+    }
+
+    if let Some(obj) = type_value.as_object() {
+        // Handle complex types like Timestamp, FixedSizeBinary, etc.
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+            match name {
+                "timestamp" => {
+                    let unit = obj
+                        .get("unit")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let tz = obj
+                        .get("timezone")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!(", {}", s))
+                        .unwrap_or_default();
+                    return format!("Timestamp({}{})", unit, tz);
+                }
+                "fixedsizebinary" => {
+                    let size = obj.get("byteWidth").and_then(|v| v.as_u64()).unwrap_or(0);
+                    return format!("FixedSizeBinary({})", size);
+                }
+                "fixedsizelist" => {
+                    let size = obj.get("listSize").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let child = obj
+                        .get("children")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c.get("type"))
+                        .map(format_arrow_type)
+                        .unwrap_or_else(|| "?".to_string());
+                    return format!("FixedSizeList({}, {})", child, size);
+                }
+                "list" => {
+                    let child = obj
+                        .get("children")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c.get("type"))
+                        .map(format_arrow_type)
+                        .unwrap_or_else(|| "?".to_string());
+                    return format!("List({})", child);
+                }
+                "struct" => {
+                    return "Struct(...)".to_string();
+                }
+                _ => {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+
+    "Unknown".to_string()
+}
+
 /// Main application state.
 pub struct App {
     pub config: Config,
@@ -110,6 +232,7 @@ pub struct App {
 
     // Manifest state
     pub current_manifest: Option<serde_json::Value>,
+    pub current_inspect: Option<InspectResult>,
 
     // Loading state
     pub loading: bool,
@@ -147,6 +270,7 @@ impl App {
             selected_index: 0,
             selected_version_indices: HashMap::new(),
             current_manifest: None,
+            current_inspect: None,
             loading: false,
             error_message: None,
             spinner_frame: 0,
