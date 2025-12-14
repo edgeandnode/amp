@@ -328,7 +328,7 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionMa
 
 export class DatasetDerived extends Schema.Class<DatasetDerived>("DatasetDerived")({
   kind: Schema.Literal("manifest"),
-  startBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
+  startBlock: Schema.NullOr(Schema.Number).pipe(Schema.optional, Schema.fromKey("start_block")),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),

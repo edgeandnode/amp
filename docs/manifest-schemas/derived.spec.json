@@ -31,10 +31,13 @@
       "const": "manifest"
     },
     "start_block": {
-      "description": "Dataset start block. Derived dataset tables will only be computed from this block onwards.",
-      "type": "integer",
+      "description": "Dataset start block",
+      "type": [
+        "integer",
+        "null"
+      ],
       "format": "uint64",
-      "default": 0,
+      "default": null,
       "minimum": 0
     },
     "tables": {
