@@ -4,7 +4,7 @@ use std::io;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -16,7 +16,8 @@ mod config;
 mod registry;
 mod ui;
 
-use app::{App, DataSource, InputMode, InspectResult};
+use app::{ActivePane, App, DataSource, InputMode, InspectResult};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Events that can be sent from async tasks.
 enum AppEvent {
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -47,7 +48,11 @@ async fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     if let Err(err) = res {
@@ -91,96 +96,168 @@ async fn run_app<B: ratatui::backend::Backend>(
 
         // Handle Input
         if event::poll(tick_rate)? {
-            if let Event::Key(key) = event::read()? {
-                match app.input_mode {
-                    InputMode::Normal => {
-                        match key.code {
-                            KeyCode::Char('q') => app.quit(),
+            match event::read()? {
+                Event::Key(key) => {
+                    match app.input_mode {
+                        InputMode::Normal => {
+                            match key.code {
+                                KeyCode::Char('q') => app.quit(),
 
-                            // Source switching
-                            KeyCode::Char('1') => {
-                                let tx = tx.clone();
-                                app.start_loading("Switching source...");
-                                if let Err(e) = app.switch_source(DataSource::Local).await {
-                                    let _ = tx.send(AppEvent::Error(e.to_string())).await;
-                                } else {
-                                    app.start_loading("Loading manifest...");
-                                    spawn_fetch_manifest(app, tx);
+                                // Source switching
+                                KeyCode::Char('1') => {
+                                    let tx = tx.clone();
+                                    app.start_loading("Switching source...");
+                                    if let Err(e) = app.switch_source(DataSource::Local).await {
+                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                                    } else {
+                                        app.start_loading("Loading manifest...");
+                                        spawn_fetch_manifest(app, tx);
+                                    }
                                 }
-                            }
-                            KeyCode::Char('2') => {
-                                let tx = tx.clone();
-                                app.start_loading("Switching source...");
-                                if let Err(e) = app.switch_source(DataSource::Registry).await {
-                                    let _ = tx.send(AppEvent::Error(e.to_string())).await;
-                                } else {
-                                    app.start_loading("Loading manifest...");
-                                    spawn_fetch_manifest(app, tx);
+                                KeyCode::Char('2') => {
+                                    let tx = tx.clone();
+                                    app.start_loading("Switching source...");
+                                    if let Err(e) = app.switch_source(DataSource::Registry).await {
+                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                                    } else {
+                                        app.start_loading("Loading manifest...");
+                                        spawn_fetch_manifest(app, tx);
+                                    }
                                 }
-                            }
 
-                            // Search
-                            KeyCode::Char('/') => {
-                                app.input_mode = InputMode::Search;
-                            }
-
-                            // Refresh
-                            KeyCode::Char('r') => {
-                                let tx = tx.clone();
-                                app.start_loading("Refreshing...");
-                                if let Err(e) = app.fetch_datasets().await {
-                                    let _ = tx.send(AppEvent::Error(e.to_string())).await;
-                                } else {
-                                    app.start_loading("Loading manifest...");
-                                    spawn_fetch_manifest(app, tx);
+                                // Search
+                                KeyCode::Char('/') => {
+                                    app.input_mode = InputMode::Search;
                                 }
-                            }
 
-                            // Navigation
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                app.select_next();
-                                app.start_loading("Loading manifest...");
-                                spawn_fetch_manifest(app, tx.clone());
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                app.select_previous();
-                                app.start_loading("Loading manifest...");
-                                spawn_fetch_manifest(app, tx.clone());
-                            }
+                                // Refresh
+                                KeyCode::Char('r') => {
+                                    let tx = tx.clone();
+                                    app.start_loading("Refreshing...");
+                                    if let Err(e) = app.fetch_datasets().await {
+                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                                    } else {
+                                        app.start_loading("Loading manifest...");
+                                        spawn_fetch_manifest(app, tx);
+                                    }
+                                }
 
-                            // Expand/collapse
+                                // Navigation
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    app.select_next();
+                                    app.start_loading("Loading manifest...");
+                                    spawn_fetch_manifest(app, tx.clone());
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    app.select_previous();
+                                    app.start_loading("Loading manifest...");
+                                    spawn_fetch_manifest(app, tx.clone());
+                                }
+
+                                // Expand/collapse
+                                KeyCode::Enter => {
+                                    let tx = tx.clone();
+                                    app.start_loading("Expanding...");
+                                    if let Err(e) = app.toggle_expand().await {
+                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                                    }
+                                    app.stop_loading();
+                                }
+
+                                // Pane navigation
+                                KeyCode::Tab => {
+                                    app.active_pane = app.active_pane.next();
+                                }
+                                KeyCode::BackTab => {
+                                    app.active_pane = app.active_pane.prev();
+                                }
+
+                                _ => {}
+                            }
+                        }
+                        InputMode::Search => match key.code {
                             KeyCode::Enter => {
-                                let tx = tx.clone();
-                                app.start_loading("Expanding...");
-                                if let Err(e) = app.toggle_expand().await {
-                                    let _ = tx.send(AppEvent::Error(e.to_string())).await;
-                                }
-                                app.stop_loading();
+                                app.input_mode = InputMode::Normal;
+                                app.start_loading("Loading manifest...");
+                                spawn_fetch_manifest(app, tx.clone());
                             }
-
+                            KeyCode::Esc => {
+                                app.input_mode = InputMode::Normal;
+                            }
+                            KeyCode::Char(c) => {
+                                app.search_query.push(c);
+                                app.update_search();
+                            }
+                            KeyCode::Backspace => {
+                                app.search_query.pop();
+                                app.update_search();
+                            }
                             _ => {}
+                        },
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
+                        // Calculate pane areas to determine which pane was clicked
+                        let term_size = terminal.size()?;
+                        let size = Rect::new(0, 0, term_size.width, term_size.height);
+
+                        // Top-level layout: Header (3) | Main | Footer (1)
+                        let main_chunks = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([
+                                Constraint::Length(3),
+                                Constraint::Min(0),
+                                Constraint::Length(1),
+                            ])
+                            .split(size);
+
+                        let main_area = main_chunks[1];
+
+                        // Main layout: Sidebar (35%) | Content (65%)
+                        let content_chunks = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+                            .split(main_area);
+
+                        let sidebar_area = content_chunks[0];
+                        let content_area = content_chunks[1];
+
+                        // Content layout: Manifest (60%) | Schema (40%)
+                        let pane_chunks = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                            .split(content_area);
+
+                        let manifest_area = pane_chunks[0];
+                        let schema_area = pane_chunks[1];
+
+                        // Check which pane was clicked
+                        let x = mouse.column;
+                        let y = mouse.row;
+
+                        if x >= sidebar_area.x
+                            && x < sidebar_area.x + sidebar_area.width
+                            && y >= sidebar_area.y
+                            && y < sidebar_area.y + sidebar_area.height
+                        {
+                            app.active_pane = ActivePane::Sidebar;
+                        } else if x >= manifest_area.x
+                            && x < manifest_area.x + manifest_area.width
+                            && y >= manifest_area.y
+                            && y < manifest_area.y + manifest_area.height
+                        {
+                            app.active_pane = ActivePane::Manifest;
+                        } else if x >= schema_area.x
+                            && x < schema_area.x + schema_area.width
+                            && y >= schema_area.y
+                            && y < schema_area.y + schema_area.height
+                        {
+                            app.active_pane = ActivePane::Schema;
                         }
                     }
-                    InputMode::Search => match key.code {
-                        KeyCode::Enter => {
-                            app.input_mode = InputMode::Normal;
-                            app.start_loading("Loading manifest...");
-                            spawn_fetch_manifest(app, tx.clone());
-                        }
-                        KeyCode::Esc => {
-                            app.input_mode = InputMode::Normal;
-                        }
-                        KeyCode::Char(c) => {
-                            app.search_query.push(c);
-                            app.update_search();
-                        }
-                        KeyCode::Backspace => {
-                            app.search_query.pop();
-                            app.update_search();
-                        }
-                        _ => {}
-                    },
                 }
+                _ => {}
             }
         }
 

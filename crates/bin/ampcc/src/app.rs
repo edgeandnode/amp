@@ -15,6 +15,34 @@ pub enum InputMode {
     Search,
 }
 
+/// Active pane for focus tracking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivePane {
+    Sidebar,
+    Manifest,
+    Schema,
+}
+
+impl ActivePane {
+    /// Cycle to the next pane.
+    pub fn next(self) -> Self {
+        match self {
+            ActivePane::Sidebar => ActivePane::Manifest,
+            ActivePane::Manifest => ActivePane::Schema,
+            ActivePane::Schema => ActivePane::Sidebar,
+        }
+    }
+
+    /// Cycle to the previous pane.
+    pub fn prev(self) -> Self {
+        match self {
+            ActivePane::Sidebar => ActivePane::Schema,
+            ActivePane::Manifest => ActivePane::Sidebar,
+            ActivePane::Schema => ActivePane::Manifest,
+        }
+    }
+}
+
 /// Data source for datasets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataSource {
@@ -219,6 +247,7 @@ pub struct App {
     // UI state
     pub should_quit: bool,
     pub input_mode: InputMode,
+    pub active_pane: ActivePane,
     pub search_query: String,
 
     // Dataset state
@@ -264,6 +293,7 @@ impl App {
             current_source: default_source,
             should_quit: false,
             input_mode: InputMode::Normal,
+            active_pane: ActivePane::Sidebar,
             search_query: String::new(),
             datasets: Vec::new(),
             filtered_datasets: Vec::new(),

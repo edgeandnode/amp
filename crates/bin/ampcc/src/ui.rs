@@ -11,7 +11,7 @@ use ratatui::{
 };
 use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
-use crate::app::{App, DataSource, InputMode, InspectResult};
+use crate::app::{ActivePane, App, DataSource, InputMode, InspectResult};
 
 /// Lazily initialized syntax highlighting resources.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -149,8 +149,18 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = format!("Datasets ({})", app.filtered_datasets.len());
+    let border_style = if app.active_pane == ActivePane::Sidebar {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let list = List::new(items)
-        .block(Block::default().title(title).borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        )
         .highlight_style(
             Style::default()
                 .bg(Color::Blue)
@@ -213,7 +223,15 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the manifest pane.
 fn draw_manifest(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().title("Manifest").borders(Borders::ALL);
+    let border_style = if app.active_pane == ActivePane::Manifest {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let block = Block::default()
+        .title("Manifest")
+        .borders(Borders::ALL)
+        .border_style(border_style);
 
     let text = if app.loading {
         Paragraph::new("Loading...").block(block)
@@ -237,7 +255,15 @@ fn draw_manifest(f: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the inspect pane with schema information.
 fn draw_inspect(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().title("Schema").borders(Borders::ALL);
+    let border_style = if app.active_pane == ActivePane::Schema {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let block = Block::default()
+        .title("Schema")
+        .borders(Borders::ALL)
+        .border_style(border_style);
 
     let content = if app.loading {
         Paragraph::new("Loading...").block(block)
