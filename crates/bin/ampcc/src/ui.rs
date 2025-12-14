@@ -249,6 +249,9 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
         let highlighted = highlight_json(&json_str);
         let line_count = highlighted.len();
 
+        // Update content length for scroll bounds
+        app.manifest_content_length = line_count;
+
         // Update scroll state with content length
         app.manifest_scroll_state = app.manifest_scroll_state.content_length(line_count);
 
@@ -286,6 +289,9 @@ fn draw_inspect(f: &mut Frame, app: &mut App, area: Rect) {
     } else if let Some(inspect) = &app.current_inspect {
         let lines = format_inspect_result(inspect);
         let line_count = lines.len();
+
+        // Update content length for scroll bounds
+        app.schema_content_length = line_count;
 
         // Update scroll state with content length
         app.schema_scroll_state = app.schema_scroll_state.content_length(line_count);

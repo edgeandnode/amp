@@ -4,7 +4,9 @@ use std::io;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -160,6 +162,18 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     }
                                     _ => app.scroll_up(),
                                 },
+
+                                // Page navigation (vim-style)
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.page_up(10);
+                                }
+                                KeyCode::Char('d')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.page_down(10);
+                                }
 
                                 // Expand/collapse
                                 KeyCode::Enter => {

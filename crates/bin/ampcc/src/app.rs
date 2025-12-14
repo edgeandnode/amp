@@ -277,6 +277,10 @@ pub struct App {
     pub manifest_scroll_state: ScrollbarState,
     pub schema_scroll: u16,
     pub schema_scroll_state: ScrollbarState,
+
+    // Content length for scroll bounds
+    pub manifest_content_length: usize,
+    pub schema_content_length: usize,
 }
 
 impl App {
@@ -316,6 +320,8 @@ impl App {
             manifest_scroll_state: ScrollbarState::default(),
             schema_scroll: 0,
             schema_scroll_state: ScrollbarState::default(),
+            manifest_content_length: 0,
+            schema_content_length: 0,
         })
     }
 
@@ -375,16 +381,22 @@ impl App {
     pub fn scroll_down(&mut self) {
         match self.active_pane {
             ActivePane::Manifest => {
-                self.manifest_scroll = self.manifest_scroll.saturating_add(1);
-                self.manifest_scroll_state = self
-                    .manifest_scroll_state
-                    .position(self.manifest_scroll as usize);
+                let max_scroll = self.manifest_content_length.saturating_sub(1);
+                if (self.manifest_scroll as usize) < max_scroll {
+                    self.manifest_scroll = self.manifest_scroll.saturating_add(1);
+                    self.manifest_scroll_state = self
+                        .manifest_scroll_state
+                        .position(self.manifest_scroll as usize);
+                }
             }
             ActivePane::Schema => {
-                self.schema_scroll = self.schema_scroll.saturating_add(1);
-                self.schema_scroll_state = self
-                    .schema_scroll_state
-                    .position(self.schema_scroll as usize);
+                let max_scroll = self.schema_content_length.saturating_sub(1);
+                if (self.schema_scroll as usize) < max_scroll {
+                    self.schema_scroll = self.schema_scroll.saturating_add(1);
+                    self.schema_scroll_state = self
+                        .schema_scroll_state
+                        .position(self.schema_scroll as usize);
+                }
             }
             ActivePane::Sidebar => {}
         }
@@ -396,6 +408,51 @@ impl App {
         self.manifest_scroll_state = ScrollbarState::default();
         self.schema_scroll = 0;
         self.schema_scroll_state = ScrollbarState::default();
+        self.manifest_content_length = 0;
+        self.schema_content_length = 0;
+    }
+
+    /// Page up in the focused pane.
+    pub fn page_up(&mut self, page_size: u16) {
+        match self.active_pane {
+            ActivePane::Manifest => {
+                self.manifest_scroll = self.manifest_scroll.saturating_sub(page_size);
+                self.manifest_scroll_state = self
+                    .manifest_scroll_state
+                    .position(self.manifest_scroll as usize);
+            }
+            ActivePane::Schema => {
+                self.schema_scroll = self.schema_scroll.saturating_sub(page_size);
+                self.schema_scroll_state = self
+                    .schema_scroll_state
+                    .position(self.schema_scroll as usize);
+            }
+            ActivePane::Sidebar => {}
+        }
+    }
+
+    /// Page down in the focused pane.
+    pub fn page_down(&mut self, page_size: u16) {
+        match self.active_pane {
+            ActivePane::Manifest => {
+                let max_scroll = self.manifest_content_length.saturating_sub(1) as u16;
+                self.manifest_scroll = self
+                    .manifest_scroll
+                    .saturating_add(page_size)
+                    .min(max_scroll);
+                self.manifest_scroll_state = self
+                    .manifest_scroll_state
+                    .position(self.manifest_scroll as usize);
+            }
+            ActivePane::Schema => {
+                let max_scroll = self.schema_content_length.saturating_sub(1) as u16;
+                self.schema_scroll = self.schema_scroll.saturating_add(page_size).min(max_scroll);
+                self.schema_scroll_state = self
+                    .schema_scroll_state
+                    .position(self.schema_scroll as usize);
+            }
+            ActivePane::Sidebar => {}
+        }
     }
 
     /// Get the current source URL for display.
