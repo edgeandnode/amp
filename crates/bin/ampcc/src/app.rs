@@ -4,6 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use admin_client::Client;
 use anyhow::{Context, Result};
+use ratatui::widgets::ScrollbarState;
 use url::Url;
 
 use crate::{config::Config, registry::RegistryClient};
@@ -270,6 +271,12 @@ pub struct App {
     // Spinner animation state
     pub spinner_frame: usize,
     pub loading_message: Option<String>,
+
+    // Scroll state for content panes
+    pub manifest_scroll: u16,
+    pub manifest_scroll_state: ScrollbarState,
+    pub schema_scroll: u16,
+    pub schema_scroll_state: ScrollbarState,
 }
 
 impl App {
@@ -305,6 +312,10 @@ impl App {
             error_message: None,
             spinner_frame: 0,
             loading_message: None,
+            manifest_scroll: 0,
+            manifest_scroll_state: ScrollbarState::default(),
+            schema_scroll: 0,
+            schema_scroll_state: ScrollbarState::default(),
         })
     }
 
@@ -339,6 +350,52 @@ impl App {
     pub fn stop_loading(&mut self) {
         self.loading = false;
         self.loading_message = None;
+    }
+
+    /// Scroll up in the focused pane.
+    pub fn scroll_up(&mut self) {
+        match self.active_pane {
+            ActivePane::Manifest => {
+                self.manifest_scroll = self.manifest_scroll.saturating_sub(1);
+                self.manifest_scroll_state = self
+                    .manifest_scroll_state
+                    .position(self.manifest_scroll as usize);
+            }
+            ActivePane::Schema => {
+                self.schema_scroll = self.schema_scroll.saturating_sub(1);
+                self.schema_scroll_state = self
+                    .schema_scroll_state
+                    .position(self.schema_scroll as usize);
+            }
+            ActivePane::Sidebar => {}
+        }
+    }
+
+    /// Scroll down in the focused pane.
+    pub fn scroll_down(&mut self) {
+        match self.active_pane {
+            ActivePane::Manifest => {
+                self.manifest_scroll = self.manifest_scroll.saturating_add(1);
+                self.manifest_scroll_state = self
+                    .manifest_scroll_state
+                    .position(self.manifest_scroll as usize);
+            }
+            ActivePane::Schema => {
+                self.schema_scroll = self.schema_scroll.saturating_add(1);
+                self.schema_scroll_state = self
+                    .schema_scroll_state
+                    .position(self.schema_scroll as usize);
+            }
+            ActivePane::Sidebar => {}
+        }
+    }
+
+    /// Reset scroll positions when content changes.
+    pub fn reset_scroll(&mut self) {
+        self.manifest_scroll = 0;
+        self.manifest_scroll_state = ScrollbarState::default();
+        self.schema_scroll = 0;
+        self.schema_scroll_state = ScrollbarState::default();
     }
 
     /// Get the current source URL for display.

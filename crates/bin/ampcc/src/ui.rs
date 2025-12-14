@@ -7,7 +7,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+    },
 };
 use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
@@ -18,7 +20,7 @@ static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Main draw function.
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -57,7 +59,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the main content area with sidebar and content.
-fn draw_main(f: &mut Frame, app: &App, area: Rect) {
+fn draw_main(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -207,7 +209,7 @@ fn highlight_json(json_str: &str) -> Vec<Line<'static>> {
 }
 
 /// Draw the content pane with manifest and inspect.
-fn draw_content(f: &mut Frame, app: &App, area: Rect) {
+fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
     // Split content vertically: Manifest (60%) | Inspect (40%)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -222,7 +224,7 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the manifest pane.
-fn draw_manifest(f: &mut Frame, app: &App, area: Rect) {
+fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::Manifest {
         Style::default().fg(Color::Cyan)
     } else {
@@ -233,28 +235,41 @@ fn draw_manifest(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let text = if app.loading {
-        Paragraph::new("Loading...").block(block)
+    if app.loading {
+        let text = Paragraph::new("Loading...").block(block);
+        f.render_widget(text, area);
     } else if let Some(error) = &app.error_message {
-        Paragraph::new(format!("Error: {}", error))
+        let text = Paragraph::new(format!("Error: {}", error))
             .block(block)
-            .style(Style::default().fg(Color::Red))
+            .style(Style::default().fg(Color::Red));
+        f.render_widget(text, area);
     } else if let Some(manifest) = &app.current_manifest {
         let json_str =
             serde_json::to_string_pretty(manifest).unwrap_or_else(|_| "Invalid JSON".to_string());
         let highlighted = highlight_json(&json_str);
-        Paragraph::new(highlighted).block(block)
-    } else {
-        Paragraph::new("Select a dataset to view manifest...")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray))
-    };
+        let line_count = highlighted.len();
 
-    f.render_widget(text, area);
+        // Update scroll state with content length
+        app.manifest_scroll_state = app.manifest_scroll_state.content_length(line_count);
+
+        let text = Paragraph::new(highlighted)
+            .block(block)
+            .scroll((app.manifest_scroll, 0));
+        f.render_widget(text, area);
+
+        // Render scrollbar
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        f.render_stateful_widget(scrollbar, area, &mut app.manifest_scroll_state);
+    } else {
+        let text = Paragraph::new("Select a dataset to view manifest...")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(text, area);
+    }
 }
 
 /// Draw the inspect pane with schema information.
-fn draw_inspect(f: &mut Frame, app: &App, area: Rect) {
+fn draw_inspect(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::Schema {
         Style::default().fg(Color::Cyan)
     } else {
@@ -265,22 +280,35 @@ fn draw_inspect(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let content = if app.loading {
-        Paragraph::new("Loading...").block(block)
+    if app.loading {
+        let content = Paragraph::new("Loading...").block(block);
+        f.render_widget(content, area);
     } else if let Some(inspect) = &app.current_inspect {
         let lines = format_inspect_result(inspect);
-        Paragraph::new(lines).block(block)
-    } else if app.current_manifest.is_some() {
-        Paragraph::new("No schema information available")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray))
-    } else {
-        Paragraph::new("Select a dataset to view schema...")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray))
-    };
+        let line_count = lines.len();
 
-    f.render_widget(content, area);
+        // Update scroll state with content length
+        app.schema_scroll_state = app.schema_scroll_state.content_length(line_count);
+
+        let content = Paragraph::new(lines)
+            .block(block)
+            .scroll((app.schema_scroll, 0));
+        f.render_widget(content, area);
+
+        // Render scrollbar
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        f.render_stateful_widget(scrollbar, area, &mut app.schema_scroll_state);
+    } else if app.current_manifest.is_some() {
+        let content = Paragraph::new("No schema information available")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(content, area);
+    } else {
+        let content = Paragraph::new("Select a dataset to view schema...")
+            .block(block)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(content, area);
+    }
 }
 
 /// Format inspect result into styled lines.

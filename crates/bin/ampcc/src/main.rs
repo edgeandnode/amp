@@ -83,6 +83,7 @@ async fn run_app<B: ratatui::backend::Backend>(
         if let Ok(event) = rx.try_recv() {
             match event {
                 AppEvent::ManifestLoaded(manifest) => {
+                    app.reset_scroll();
                     app.current_inspect = manifest.as_ref().and_then(InspectResult::from_manifest);
                     app.current_manifest = manifest;
                     app.stop_loading();
@@ -143,16 +144,22 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 }
 
                                 // Navigation
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    app.select_next();
-                                    app.start_loading("Loading manifest...");
-                                    spawn_fetch_manifest(app, tx.clone());
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    app.select_previous();
-                                    app.start_loading("Loading manifest...");
-                                    spawn_fetch_manifest(app, tx.clone());
-                                }
+                                KeyCode::Down | KeyCode::Char('j') => match app.active_pane {
+                                    ActivePane::Sidebar => {
+                                        app.select_next();
+                                        app.start_loading("Loading manifest...");
+                                        spawn_fetch_manifest(app, tx.clone());
+                                    }
+                                    _ => app.scroll_down(),
+                                },
+                                KeyCode::Up | KeyCode::Char('k') => match app.active_pane {
+                                    ActivePane::Sidebar => {
+                                        app.select_previous();
+                                        app.start_loading("Loading manifest...");
+                                        spawn_fetch_manifest(app, tx.clone());
+                                    }
+                                    _ => app.scroll_up(),
+                                },
 
                                 // Expand/collapse
                                 KeyCode::Enter => {
