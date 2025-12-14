@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    BoxError, Dataset, Table as LogicalTable,
+    BlockNum, BoxError, Dataset, Table as LogicalTable,
     catalog::{
         dataset_access::DatasetAccess,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
@@ -92,7 +92,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, Datas
         dependencies: manifest.dependencies,
         kind: DerivedDatasetKind.to_string(),
         network: None,
-        start_block: None,
+        start_block: manifest.start_block,
         finalized_blocks_only: false,
         tables,
         functions,
@@ -338,6 +338,27 @@ pub async fn validate(
         dependencies.insert(alias.clone(), reference);
     }
 
+    // Check if the start block is before the earliest available block of the dependencies
+    if let Some(dataset_start_block) = &manifest.start_block {
+        for (alias, hash_ref) in &dependencies {
+            let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+                ManifestValidationError::FetchDependencyDataset {
+                    alias: alias.to_string(),
+                    source: err,
+                }
+            })?;
+
+            if let Some(dep_start_block) = dataset.start_block
+                && *dataset_start_block < dep_start_block
+            {
+                return Err(ManifestValidationError::StartBlockBeforeDependencies {
+                    dataset_start_block: *dataset_start_block,
+                    dependency_earliest_block: dep_start_block,
+                });
+            }
+        }
+    }
+
     // Step 2: Parse all SQL queries and extract references
     let mut references: TableReferencesMap = BTreeMap::new();
 
@@ -503,6 +524,18 @@ pub enum ManifestValidationError {
         source: BoxError,
     },
 
+    /// Failed to fetch dependency dataset for start_block validation
+    ///
+    /// This occurs when fetching the dataset definition for a dependency fails during
+    /// start_block validation. The dataset reference was resolved successfully, but
+    /// loading the actual dataset from the store failed.
+    #[error("Failed to fetch dependency '{alias}' for start_block validation: {source}")]
+    FetchDependencyDataset {
+        alias: String,
+        #[source]
+        source: BoxError,
+    },
+
     /// Catalog-qualified table reference in SQL query
     ///
     /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
@@ -610,5 +643,17 @@ pub enum ManifestValidationError {
         table_name: TableName,
         #[source]
         source: BoxError,
+    },
+
+    /// Start block before dependencies
+    ///
+    /// This occurs when the start block of the derived dataset is before
+    /// the earliest block of one of the dependencies.
+    #[error(
+        "derived dataset start_block ({dataset_start_block}) is before dependency's earliest available block ({dependency_earliest_block})"
+    )]
+    StartBlockBeforeDependencies {
+        dataset_start_block: BlockNum,
+        dependency_earliest_block: BlockNum,
     },
 }

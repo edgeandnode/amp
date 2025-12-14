@@ -124,6 +124,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
 
         const manifest = new Model.DatasetDerived({
           kind: "manifest",
+          startBlock: config.startBlock,
           dependencies: config.dependencies,
           tables: Object.fromEntries(tables),
           functions: Object.fromEntries(functions),

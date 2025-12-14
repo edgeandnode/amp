@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use common::sql_str::SqlStr;
+use common::{BlockNum, sql_str::SqlStr};
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use datasets_common::{
@@ -29,6 +29,10 @@ use crate::dataset_kind::DerivedDatasetKind;
 pub struct Manifest {
     /// Dataset kind, must be `manifest`
     pub kind: DerivedDatasetKind,
+
+    /// Dataset start block
+    #[serde(default)]
+    pub start_block: Option<BlockNum>,
 
     /// External dataset dependencies with version requirements
     #[serde(default)]
