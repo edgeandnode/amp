@@ -16,6 +16,9 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
   RUSTFLAGS: "-D warnings"
+  # solana-storage-proto builds protoc from source via protobuf-src if PROTOC is unset.
+  # Setting this uses system protoc instead, saving ~46s per build.
+  PROTOC: /usr/bin/protoc
 
 jobs:
   unit-tests:
