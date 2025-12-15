@@ -1,10 +1,10 @@
 use common::{BoxResult, RawDatasetRows, metadata::segments::BlockRange};
-use serde::Deserialize;
 use solana_clock::Slot;
 
 use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};
 
 pub mod block_headers;
+pub mod instructions;
 pub mod messages;
 pub mod transactions;
 
@@ -13,6 +13,7 @@ pub fn all(network: &str) -> Vec<common::Table> {
         block_headers::table(network.to_string()),
         transactions::table(network.to_string()),
         messages::table(network.to_string()),
+        instructions::table(network.to_string()),
     ]
 }
 
@@ -24,6 +25,7 @@ pub(crate) fn convert_of_data_to_db_rows(
     let of_transactions_meta = std::mem::take(&mut block.transaction_metas);
     let mut db_transactions = Vec::new();
     let mut db_messages = Vec::new();
+    let mut db_instructions = Vec::new();
 
     let slot = block.slot;
 
@@ -36,9 +38,17 @@ pub(crate) fn convert_of_data_to_db_rows(
         let tx_message = tx.message.clone();
 
         let db_tx = transactions::Transaction::from_of1_transaction(slot, tx_idx, tx, tx_meta);
+        if let Some(meta) = db_tx.tx_meta.as_ref()
+            && let Some(inner_instructions) = meta.inner_instructions.as_ref()
+        {
+            for inner in inner_instructions {
+                db_instructions.extend_from_slice(inner);
+            }
+        }
         db_transactions.push(db_tx);
 
         let db_message = messages::Message::from_of1_message(slot, tx_idx, tx_message);
+        db_instructions.extend_from_slice(&db_message.instructions);
         db_messages.push(db_message);
     }
 
@@ -72,6 +82,15 @@ pub(crate) fn convert_of_data_to_db_rows(
         for message in db_messages {
             builder.append(&message);
         }
+        builder.build(range.clone())?
+    };
+    let instructions_row = {
+        let mut builder = crate::tables::instructions::InstructionRowsBuilder::with_capacity(
+            db_instructions.len(),
+        );
+        for instruction in db_instructions {
+            builder.append(&instruction);
+        }
         builder.build(range)?
     };
 
@@ -79,6 +98,7 @@ pub(crate) fn convert_of_data_to_db_rows(
         block_headers_row,
         transactions_row,
         messages_row,
+        instructions_row,
     ]))
 }
 
@@ -196,19 +216,23 @@ pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<RawDatasetRo
 
     let transactions_row = {
         let builder = transactions::TransactionRowsBuilder::with_capacity(0);
+        builder.build(range.clone())?
+    };
+
+    let messages_row = {
+        let builder = crate::tables::messages::MessageRowsBuilder::with_capacity(0);
+        builder.build(range.clone())?
+    };
+
+    let instructions_row = {
+        let builder = crate::tables::instructions::InstructionRowsBuilder::with_capacity(0);
         builder.build(range)?
     };
 
     Ok(RawDatasetRows::new(vec![
         block_headers_row,
         transactions_row,
+        messages_row,
+        instructions_row,
     ]))
-}
-
-#[derive(Debug, Default, Deserialize, Clone)]
-pub(crate) struct Instruction {
-    pub(crate) program_id_index: u8,
-    pub(crate) accounts: Vec<u8>,
-    pub(crate) data: String,
-    pub(crate) stack_height: Option<u32>,
 }
