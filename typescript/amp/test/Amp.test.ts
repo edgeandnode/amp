@@ -145,6 +145,47 @@ Testing.layer((it) => {
   )
 
   it.effect(
+    "register and deploy derived dataset with start_block",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const fixtures = yield* Fixtures.Fixtures
+      const flight = yield* ArrowFlight.ArrowFlight
+
+      // Load the example manifest and add a start_block
+      const baseDataset = yield* fixtures.load("manifest.json", Model.DatasetDerived)
+      const dataset = new Model.DatasetDerived({
+        ...baseDataset,
+        startBlock: 4,
+      })
+
+      const namespace = Model.DatasetNamespace.make("_")
+      const name = Model.DatasetName.make("example_with_start_block")
+      const version = Model.DatasetVersion.make("0.0.1")
+
+      // Register and deploy
+      yield* admin.registerDataset(namespace, name, dataset, version)
+      const job = yield* admin.deployDataset(namespace, name, version, {
+        endBlock: "5",
+      })
+
+      // Wait for job to complete
+      yield* Testing.waitForJobCompletion(job.jobId)
+
+      // Verify registration
+      const response = yield* admin.getDatasetVersion(namespace, name, version)
+      assertEquals(response.name, "example_with_start_block")
+
+      // Query the deployed dataset to verify it works
+      const stream = flight.query(`
+        SELECT block_num FROM "_/example_with_start_block@0.0.1".counts ORDER BY block_num ASC LIMIT 1
+      `)
+      const data = new Table(yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray)))
+      const rows = data.toArray()
+      assertSome(Array.head(rows).pipe(Option.map(Struct.get("block_num"))), BigInt(4))
+    }),
+  )
+
+  it.effect(
     "can fetch a list of datasets",
     Effect.fn(function*() {
       const api = yield* Admin.Admin

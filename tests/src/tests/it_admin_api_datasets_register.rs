@@ -164,6 +164,102 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
     }
 }
 
+#[tokio::test]
+async fn register_with_start_block_before_dependency_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_register_start_block_before_dep").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "start_block_invalid"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    let mut manifest = create_test_manifest();
+    manifest.start_block = Some(0); // eth_firehose starts at 15000000
+    let manifest_str =
+        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_err(),
+        "registration should fail when start_block is before dependency"
+    );
+    let err = result.unwrap_err();
+    match err {
+        RegisterError::ManifestValidationError(api_err) => {
+            assert_eq!(api_err.error_code, "MANIFEST_VALIDATION_ERROR");
+            assert!(
+                api_err.error_message.contains("start_block")
+                    && api_err.error_message.contains("before dependency"),
+                "Error should mention start_block and dependency: {}",
+                api_err.error_message
+            );
+        }
+        _ => panic!("Expected ManifestValidationError, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn register_with_valid_start_block_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup("test_register_valid_start_block").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "start_block_valid"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    let mut manifest = create_test_manifest();
+    manifest.start_block = Some(16_000_000); // After eth_firehose's 15000000
+    let manifest_str =
+        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "registration should succeed with valid start_block: {:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn register_with_start_block_equal_to_dependency_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup("test_register_start_block_equal").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "start_block_equal"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    let mut manifest = create_test_manifest();
+    manifest.start_block = Some(15_000_000); // Equal to eth_firehose's start_block
+    let manifest_str =
+        serde_json::to_string(&manifest).expect("failed to serialize manifest to JSON");
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "registration should succeed with start_block equal to dependency: {:?}",
+        result.err()
+    );
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: client::Client,
