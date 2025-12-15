@@ -1,4 +1,6 @@
 //! UI rendering for the Amp CC TUI.
+//!
+//! This module uses The Graph's official color palette for consistent branding.
 
 use std::sync::LazyLock;
 
@@ -14,6 +16,163 @@ use ratatui::{
 use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
 use crate::app::{ActivePane, App, DataSource, InputMode, InspectResult};
+
+// ============================================================================
+// The Graph Color Palette
+// ============================================================================
+//
+// Official brand colors from The Graph's design system.
+//
+// ## Primary Colors
+// - THE_GRAPH_PURPLE (#6F4CFF) - Main brand accent
+// - GALAXY_DARK (#0C0A1D) - Deep background
+// - LUNAR_GRAY (#494755) - Borders, secondary elements
+// - SPACESUIT_WHITE (#F8F6FF) - Primary text
+//
+// ## Secondary Colors
+// - ASTRO_BLUE (#4C66FF) - Selection highlights
+// - GALACTIC_AQUA (#66D8FF) - Active/focused elements
+// - STARFIELD_GREEN (#4BCA81) - Success states
+// - NEBULA_PINK (#FF79C6) - Errors
+// - SOLAR_YELLOW (#FFA801) - Warnings, drafts
+// ============================================================================
+
+/// The Graph brand colors and semantic UI theme.
+///
+/// This theme implements The Graph's official color palette, providing
+/// consistent visual styling across the TUI application.
+pub struct Theme;
+
+impl Theme {
+    // ========================================================================
+    // Primary Colors
+    // ========================================================================
+
+    /// The Graph Purple - Main brand accent color.
+    /// Hex: #6F4CFF
+    pub const THE_GRAPH_PURPLE: Color = Color::Rgb(0x6F, 0x4C, 0xFF);
+
+    /// Galaxy Dark - Deep space background.
+    /// Hex: #0C0A1D
+    ///
+    /// Note: Not actively used as terminals provide their own background color.
+    /// Kept for palette documentation completeness.
+    #[allow(dead_code)]
+    pub const GALAXY_DARK: Color = Color::Rgb(0x0C, 0x0A, 0x1D);
+
+    /// Lunar Gray - Borders and secondary elements.
+    /// Hex: #494755
+    pub const LUNAR_GRAY: Color = Color::Rgb(0x49, 0x47, 0x55);
+
+    /// Spacesuit White - Primary text color.
+    /// Hex: #F8F6FF
+    pub const SPACESUIT_WHITE: Color = Color::Rgb(0xF8, 0xF6, 0xFF);
+
+    // ========================================================================
+    // Secondary Colors
+    // ========================================================================
+
+    /// Astro Blue - Selection and highlight backgrounds.
+    /// Hex: #4C66FF
+    pub const ASTRO_BLUE: Color = Color::Rgb(0x4C, 0x66, 0xFF);
+
+    /// Galactic Aqua - Active and focused elements.
+    /// Hex: #66D8FF
+    pub const GALACTIC_AQUA: Color = Color::Rgb(0x66, 0xD8, 0xFF);
+
+    /// Starfield Green - Success and active states.
+    /// Hex: #4BCA81
+    pub const STARFIELD_GREEN: Color = Color::Rgb(0x4B, 0xCA, 0x81);
+
+    /// Nebula Pink - Error states.
+    /// Hex: #FF79C6
+    pub const NEBULA_PINK: Color = Color::Rgb(0xFF, 0x79, 0xC6);
+
+    /// Solar Yellow - Warnings, drafts, and loading states.
+    /// Hex: #FFA801
+    pub const SOLAR_YELLOW: Color = Color::Rgb(0xFF, 0xA8, 0x01);
+
+    // ========================================================================
+    // Semantic Styles
+    // ========================================================================
+
+    /// Style for focused/active pane borders.
+    pub fn border_focused() -> Style {
+        Style::default().fg(Self::GALACTIC_AQUA)
+    }
+
+    /// Style for unfocused pane borders.
+    pub fn border_unfocused() -> Style {
+        Style::default().fg(Self::LUNAR_GRAY)
+    }
+
+    /// Style for primary text.
+    pub fn text_primary() -> Style {
+        Style::default().fg(Self::SPACESUIT_WHITE)
+    }
+
+    /// Style for secondary/dimmed text.
+    pub fn text_secondary() -> Style {
+        Style::default().fg(Self::LUNAR_GRAY)
+    }
+
+    /// Style for brand accent (headers, titles).
+    pub fn accent() -> Style {
+        Style::default().fg(Self::THE_GRAPH_PURPLE)
+    }
+
+    /// Style for success states (published, active).
+    pub fn status_success() -> Style {
+        Style::default().fg(Self::STARFIELD_GREEN)
+    }
+
+    /// Style for warning states (draft, loading).
+    pub fn status_warning() -> Style {
+        Style::default().fg(Self::SOLAR_YELLOW)
+    }
+
+    /// Style for error states.
+    pub fn status_error() -> Style {
+        Style::default().fg(Self::NEBULA_PINK)
+    }
+
+    /// Style for archived/deprecated states.
+    pub fn status_archived() -> Style {
+        Style::default().fg(Self::LUNAR_GRAY)
+    }
+
+    /// Style for selected/highlighted items.
+    pub fn selection() -> Style {
+        Style::default()
+            .bg(Self::ASTRO_BLUE)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Style for local data source indicator.
+    pub fn source_local() -> Style {
+        Style::default().fg(Self::STARFIELD_GREEN)
+    }
+
+    /// Style for registry data source indicator.
+    pub fn source_registry() -> Style {
+        Style::default().fg(Self::GALACTIC_AQUA)
+    }
+
+    /// Style for version tags and labels.
+    pub fn version_tag() -> Style {
+        Style::default().fg(Self::GALACTIC_AQUA)
+    }
+
+    /// Style for type annotations in schema.
+    pub fn type_annotation() -> Style {
+        Style::default().fg(Self::SOLAR_YELLOW)
+    }
+
+    /// Style for constraint indicators (NOT NULL, etc.).
+    pub fn constraint() -> Style {
+        Style::default().fg(Self::NEBULA_PINK)
+    }
+}
 
 /// Lazily initialized syntax highlighting resources.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -63,25 +222,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 /// Draw the header with source information.
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let source_style = match app.current_source {
-        DataSource::Local => Style::default().fg(Color::Green),
-        DataSource::Registry => Style::default().fg(Color::Cyan),
+        DataSource::Local => Theme::source_local(),
+        DataSource::Registry => Theme::source_registry(),
     };
 
     let text = vec![Line::from(vec![
-        Span::styled("Amp CC", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("Amp CC", Theme::accent().add_modifier(Modifier::BOLD)),
         Span::raw(" | Source: "),
         Span::styled(app.current_source.as_str(), source_style),
         Span::raw(" | "),
         Span::styled(
             truncate_url(app.current_source_url(), 50),
-            Style::default().fg(Color::DarkGray),
+            Theme::text_secondary(),
         ),
     ])];
 
     let border_style = if app.active_pane == ActivePane::Header {
-        Style::default().fg(Color::Cyan)
+        Theme::border_focused()
     } else {
-        Style::default().fg(Color::DarkGray)
+        Theme::border_unfocused()
     };
 
     let block = Block::default()
@@ -106,13 +265,11 @@ fn draw_splash(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    // Add logo lines with cyan styling
+    // Add logo lines with The Graph Purple styling
     for line in logo_lines {
         lines.push(Line::from(Span::styled(
             line.to_string(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Theme::accent().add_modifier(Modifier::BOLD),
         )));
     }
 
@@ -122,39 +279,36 @@ fn draw_splash(f: &mut Frame, app: &App, area: Rect) {
 
     // Add version info
     lines.push(Line::from(vec![
-        Span::styled("Version ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            env!("CARGO_PKG_VERSION"),
-            Style::default().fg(Color::Yellow),
-        ),
+        Span::styled("Version ", Theme::text_secondary()),
+        Span::styled(env!("CARGO_PKG_VERSION"), Theme::version_tag()),
     ]));
 
     // Add source info
     lines.push(Line::from(""));
     let source_style = match app.current_source {
-        DataSource::Local => Style::default().fg(Color::Green),
-        DataSource::Registry => Style::default().fg(Color::Cyan),
+        DataSource::Local => Theme::source_local(),
+        DataSource::Registry => Theme::source_registry(),
     };
     lines.push(Line::from(vec![
-        Span::styled("Connected to: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Connected to: ", Theme::text_secondary()),
         Span::styled(app.current_source.as_str(), source_style),
     ]));
     lines.push(Line::from(Span::styled(
         app.current_source_url().to_string(),
-        Style::default().fg(Color::DarkGray),
+        Theme::text_secondary(),
     )));
 
     // Add navigation hint
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Press Tab to navigate to datasets",
-        Style::default().fg(Color::DarkGray),
+        Theme::text_secondary(),
     )));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Welcome")
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Theme::border_unfocused());
 
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -204,16 +358,13 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             .unwrap_or_default();
 
         let dataset_line = Line::from(vec![
-            Span::styled(expand_indicator, Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{}/", dataset.namespace),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(expand_indicator, Theme::text_secondary()),
+            Span::styled(format!("{}/", dataset.namespace), Theme::text_secondary()),
             Span::styled(
                 dataset.name.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
+                Theme::text_primary().add_modifier(Modifier::BOLD),
             ),
-            Span::styled(version_str, Style::default().fg(Color::Cyan)),
+            Span::styled(version_str, Theme::version_tag()),
         ]);
 
         items.push(ListItem::new(dataset_line));
@@ -229,11 +380,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     }
 
                     let status_style = match version.status.as_str() {
-                        "published" | "active" => Style::default().fg(Color::Green),
-                        "draft" => Style::default().fg(Color::Yellow),
-                        "deprecated" => Style::default().fg(Color::Rgb(255, 165, 0)), // Orange
-                        "archived" => Style::default().fg(Color::DarkGray),
-                        _ => Style::default().fg(Color::Gray),
+                        "published" | "active" => Theme::status_success(),
+                        "draft" => Theme::status_warning(),
+                        "deprecated" | "archived" => Theme::status_archived(),
+                        _ => Theme::text_secondary(),
                     };
 
                     let latest_str = if version.is_latest { " (latest)" } else { "" };
@@ -246,9 +396,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     };
 
                     let version_line = Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                        Span::styled(prefix, Theme::text_secondary()),
                         Span::raw(&version.version_tag),
-                        Span::styled(latest_str, Style::default().fg(Color::Cyan)),
+                        Span::styled(latest_str, Theme::version_tag()),
                         Span::raw(" ["),
                         Span::styled(&version.status, status_style),
                         Span::raw("]"),
@@ -263,9 +413,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     let title = format!("Datasets ({})", app.filtered_datasets.len());
     let border_style = if app.active_pane == ActivePane::Sidebar {
-        Style::default().fg(Color::Cyan)
+        Theme::border_focused()
     } else {
-        Style::default().fg(Color::DarkGray)
+        Theme::border_unfocused()
     };
     let list = List::new(items)
         .block(
@@ -274,11 +424,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(border_style),
         )
-        .highlight_style(
-            Style::default()
-                .bg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(Theme::selection())
         .highlight_symbol(">> ");
 
     let mut state = ListState::default();
@@ -337,9 +483,9 @@ fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
 /// Draw the manifest pane.
 fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::Manifest {
-        Style::default().fg(Color::Cyan)
+        Theme::border_focused()
     } else {
-        Style::default().fg(Color::DarkGray)
+        Theme::border_unfocused()
     };
     let block = Block::default()
         .title("Manifest")
@@ -352,7 +498,7 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
     } else if let Some(error) = &app.error_message {
         let text = Paragraph::new(format!("Error: {}", error))
             .block(block)
-            .style(Style::default().fg(Color::Red));
+            .style(Theme::status_error());
         f.render_widget(text, area);
     } else if let Some(manifest) = &app.current_manifest {
         let json_str =
@@ -377,7 +523,7 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let text = Paragraph::new("Select a dataset to view manifest...")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Theme::text_secondary());
         f.render_widget(text, area);
     }
 }
@@ -385,9 +531,9 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
 /// Draw the inspect pane with schema information.
 fn draw_inspect(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::Schema {
-        Style::default().fg(Color::Cyan)
+        Theme::border_focused()
     } else {
-        Style::default().fg(Color::DarkGray)
+        Theme::border_unfocused()
     };
     let block = Block::default()
         .title("Schema")
@@ -418,12 +564,12 @@ fn draw_inspect(f: &mut Frame, app: &mut App, area: Rect) {
     } else if app.current_manifest.is_some() {
         let content = Paragraph::new("No schema information available")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Theme::text_secondary());
         f.render_widget(content, area);
     } else {
         let content = Paragraph::new("Select a dataset to view schema...")
             .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Theme::text_secondary());
         f.render_widget(content, area);
     }
 }
@@ -437,13 +583,11 @@ fn format_inspect_result(inspect: &InspectResult) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled(
                 table.name.clone(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                Theme::border_focused().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" ({} columns)", table.columns.len()),
-                Style::default().fg(Color::DarkGray),
+                Theme::text_secondary(),
             ),
         ]));
 
@@ -452,15 +596,9 @@ fn format_inspect_result(inspect: &InspectResult) -> Vec<Line<'static>> {
             let nullable_str = if col.nullable { "" } else { " NOT NULL" };
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(
-                    format!("{:<24}", col.name),
-                    Style::default().fg(Color::White),
-                ),
-                Span::styled(
-                    format!("{:<20}", col.arrow_type),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Span::styled(nullable_str.to_string(), Style::default().fg(Color::Red)),
+                Span::styled(format!("{:<24}", col.name), Theme::text_primary()),
+                Span::styled(format!("{:<20}", col.arrow_type), Theme::type_annotation()),
+                Span::styled(nullable_str.to_string(), Theme::constraint()),
             ]));
         }
 
@@ -495,14 +633,11 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         // Show loading spinner
         let mut spans = Vec::new();
         if let Some(msg) = &app.loading_message {
-            spans.push(Span::styled(
-                format!("{} ", msg),
-                Style::default().fg(Color::Yellow),
-            ));
+            spans.push(Span::styled(format!("{} ", msg), Theme::status_warning()));
         }
         spans.push(Span::styled(
             format!("{}", app.spinner_char()),
-            Style::default().fg(Color::Yellow),
+            Theme::status_warning(),
         ));
         let msg_len = app
             .loading_message
@@ -511,7 +646,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             .unwrap_or(0);
         (spans, (msg_len + 2) as u16)
     } else if let Some(error) = &app.error_message {
-        // Show error message in red
+        // Show error message
         let display_error = if error.len() > 50 {
             format!("{}...", &error[..47])
         } else {
@@ -519,7 +654,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         };
         let spans = vec![Span::styled(
             format!("⚠ {}", display_error),
-            Style::default().fg(Color::Red),
+            Theme::status_error(),
         )];
         let width = (display_error.len() + 3) as u16; // icon + space + message
         (spans, width)
@@ -537,7 +672,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Render left side
-    let left_paragraph = Paragraph::new(left_text).style(Style::default().fg(Color::Gray));
+    let left_paragraph = Paragraph::new(left_text).style(Theme::text_secondary());
     f.render_widget(left_paragraph, chunks[0]);
 
     // Render right side (loading indicator or error)
