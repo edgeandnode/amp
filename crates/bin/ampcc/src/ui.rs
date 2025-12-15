@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -18,6 +18,17 @@ use crate::app::{ActivePane, App, DataSource, InputMode, InspectResult};
 /// Lazily initialized syntax highlighting resources.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+/// ASCII art logo for splash screen (displayed when Header pane is focused).
+const AMP_LOGO: &str = r#"
+     _    __  __ ____
+    / \  |  \/  |  _ \
+   / _ \ | |\/| | |_) |
+  / ___ \| |  | |  __/
+ /_/   \_\_|  |_|_|
+
+  Dataset Control Center
+"#;
 
 /// Main draw function.
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -53,13 +64,99 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ),
     ])];
 
-    let block = Block::default().borders(Borders::ALL).title("Header");
+    let border_style = if app.active_pane == ActivePane::Header {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Status")
+        .border_style(border_style);
     let paragraph = Paragraph::new(text).block(block);
+    f.render_widget(paragraph, area);
+}
+
+/// Draw the splash screen with logo (shown when Header is focused).
+fn draw_splash(f: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Calculate vertical padding for centering
+    let logo_lines: Vec<&str> = AMP_LOGO.lines().collect();
+    let content_height = logo_lines.len() + 8; // logo + spacing + info lines
+    let vertical_padding = area.height.saturating_sub(content_height as u16) / 2;
+
+    // Add vertical padding
+    for _ in 0..vertical_padding {
+        lines.push(Line::from(""));
+    }
+
+    // Add logo lines with cyan styling
+    for line in logo_lines {
+        lines.push(Line::from(Span::styled(
+            line.to_string(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    // Add spacing
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Add version info
+    lines.push(Line::from(vec![
+        Span::styled("Version ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            env!("CARGO_PKG_VERSION"),
+            Style::default().fg(Color::Yellow),
+        ),
+    ]));
+
+    // Add source info
+    lines.push(Line::from(""));
+    let source_style = match app.current_source {
+        DataSource::Local => Style::default().fg(Color::Green),
+        DataSource::Registry => Style::default().fg(Color::Cyan),
+    };
+    lines.push(Line::from(vec![
+        Span::styled("Connected to: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(app.current_source.as_str(), source_style),
+    ]));
+    lines.push(Line::from(Span::styled(
+        app.current_source_url().to_string(),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    // Add navigation hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press Tab to navigate to datasets",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Welcome")
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+
     f.render_widget(paragraph, area);
 }
 
 /// Draw the main content area with sidebar and content.
 fn draw_main(f: &mut Frame, app: &mut App, area: Rect) {
+    // Show splash screen when Header is focused
+    if app.active_pane == ActivePane::Header {
+        draw_splash(f, app, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

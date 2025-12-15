@@ -19,6 +19,7 @@ pub enum InputMode {
 /// Active pane for focus tracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivePane {
+    Header,
     Sidebar,
     Manifest,
     Schema,
@@ -28,16 +29,18 @@ impl ActivePane {
     /// Cycle to the next pane.
     pub fn next(self) -> Self {
         match self {
+            ActivePane::Header => ActivePane::Sidebar,
             ActivePane::Sidebar => ActivePane::Manifest,
             ActivePane::Manifest => ActivePane::Schema,
-            ActivePane::Schema => ActivePane::Sidebar,
+            ActivePane::Schema => ActivePane::Header,
         }
     }
 
     /// Cycle to the previous pane.
     pub fn prev(self) -> Self {
         match self {
-            ActivePane::Sidebar => ActivePane::Schema,
+            ActivePane::Header => ActivePane::Schema,
+            ActivePane::Sidebar => ActivePane::Header,
             ActivePane::Manifest => ActivePane::Sidebar,
             ActivePane::Schema => ActivePane::Manifest,
         }
@@ -373,7 +376,7 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Sidebar => {}
+            ActivePane::Header | ActivePane::Sidebar => {}
         }
     }
 
@@ -398,7 +401,7 @@ impl App {
                         .position(self.schema_scroll as usize);
                 }
             }
-            ActivePane::Sidebar => {}
+            ActivePane::Header | ActivePane::Sidebar => {}
         }
     }
 
@@ -427,7 +430,7 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Sidebar => {}
+            ActivePane::Header | ActivePane::Sidebar => {}
         }
     }
 
@@ -451,7 +454,7 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Sidebar => {}
+            ActivePane::Header | ActivePane::Sidebar => {}
         }
     }
 

@@ -218,6 +218,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                     }
                 }
                 Event::Mouse(mouse) => {
+                    // TODO: refactor into components (test intersections)
                     if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
                         // Calculate pane areas to determine which pane was clicked
                         let term_size = terminal.size()?;
@@ -233,48 +234,70 @@ async fn run_app<B: ratatui::backend::Backend>(
                             ])
                             .split(size);
 
+                        let header_area = main_chunks[0];
                         let main_area = main_chunks[1];
-
-                        // Main layout: Sidebar (35%) | Content (65%)
-                        let content_chunks = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-                            .split(main_area);
-
-                        let sidebar_area = content_chunks[0];
-                        let content_area = content_chunks[1];
-
-                        // Content layout: Manifest (60%) | Schema (40%)
-                        let pane_chunks = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                            .split(content_area);
-
-                        let manifest_area = pane_chunks[0];
-                        let schema_area = pane_chunks[1];
 
                         // Check which pane was clicked
                         let x = mouse.column;
                         let y = mouse.row;
 
-                        if x >= sidebar_area.x
-                            && x < sidebar_area.x + sidebar_area.width
-                            && y >= sidebar_area.y
-                            && y < sidebar_area.y + sidebar_area.height
+                        // Check if header was clicked
+                        if x >= header_area.x
+                            && x < header_area.x + header_area.width
+                            && y >= header_area.y
+                            && y < header_area.y + header_area.height
                         {
-                            app.active_pane = ActivePane::Sidebar;
-                        } else if x >= manifest_area.x
-                            && x < manifest_area.x + manifest_area.width
-                            && y >= manifest_area.y
-                            && y < manifest_area.y + manifest_area.height
-                        {
-                            app.active_pane = ActivePane::Manifest;
-                        } else if x >= schema_area.x
-                            && x < schema_area.x + schema_area.width
-                            && y >= schema_area.y
-                            && y < schema_area.y + schema_area.height
-                        {
-                            app.active_pane = ActivePane::Schema;
+                            app.active_pane = ActivePane::Header;
+                        } else if app.active_pane == ActivePane::Header {
+                            // If on splash and clicking main area, go to Sidebar
+                            if y >= main_area.y && y < main_area.y + main_area.height {
+                                app.active_pane = ActivePane::Sidebar;
+                            }
+                        } else {
+                            // Normal pane detection
+                            // Main layout: Sidebar (35%) | Content (65%)
+                            let content_chunks = Layout::default()
+                                .direction(Direction::Horizontal)
+                                .constraints([
+                                    Constraint::Percentage(35),
+                                    Constraint::Percentage(65),
+                                ])
+                                .split(main_area);
+
+                            let sidebar_area = content_chunks[0];
+                            let content_area = content_chunks[1];
+
+                            // Content layout: Manifest (60%) | Schema (40%)
+                            let pane_chunks = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Percentage(60),
+                                    Constraint::Percentage(40),
+                                ])
+                                .split(content_area);
+
+                            let manifest_area = pane_chunks[0];
+                            let schema_area = pane_chunks[1];
+
+                            if x >= sidebar_area.x
+                                && x < sidebar_area.x + sidebar_area.width
+                                && y >= sidebar_area.y
+                                && y < sidebar_area.y + sidebar_area.height
+                            {
+                                app.active_pane = ActivePane::Sidebar;
+                            } else if x >= manifest_area.x
+                                && x < manifest_area.x + manifest_area.width
+                                && y >= manifest_area.y
+                                && y < manifest_area.y + manifest_area.height
+                            {
+                                app.active_pane = ActivePane::Manifest;
+                            } else if x >= schema_area.x
+                                && x < schema_area.x + schema_area.width
+                                && y >= schema_area.y
+                                && y < schema_area.y + schema_area.height
+                            {
+                                app.active_pane = ActivePane::Schema;
+                            }
                         }
                     }
                 }
