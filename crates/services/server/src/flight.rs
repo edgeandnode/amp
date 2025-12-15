@@ -52,7 +52,7 @@ use prost::Message as _;
 use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status, service::Routes};
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use crate::{
     config::Config, metrics::MetricsRegistry,
@@ -364,6 +364,8 @@ impl Service {
             .query
             .parse::<SqlStr>()
             .map_err(|err| Error::InvalidQuery(err.to_string()))?;
+
+        debug!("SQL query: {}", sql_str);
 
         let stream = self
             .execute_query(
