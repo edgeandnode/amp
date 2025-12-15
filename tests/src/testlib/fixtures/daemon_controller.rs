@@ -6,7 +6,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, BoxResult};
+use common::{BoxError, BoxResult, store::Store};
 use controller::config::Config;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -33,6 +33,7 @@ impl DaemonController {
     pub async fn new(
         config: Arc<common::config::Config>,
         metadata_db: metadata_db::MetadataDb,
+        data_store: Arc<Store>,
         dataset_store: dataset_store::DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
@@ -43,6 +44,7 @@ impl DaemonController {
         let (admin_api_addr, controller_server) = controller::service::new(
             config.clone(),
             metadata_db.clone(),
+            data_store,
             dataset_store.clone(),
             meter,
             admin_api_addr,
@@ -99,7 +101,6 @@ impl Drop for DaemonController {
 /// Convert common config to controller config
 fn controller_config_from_common(config: &common::config::Config) -> Config {
     Config {
-        data_store: config.data_store.clone(),
         build_info: config.build_info.clone(),
     }
 }

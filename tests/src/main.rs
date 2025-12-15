@@ -48,7 +48,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use common::{BoxError, config::Config};
+use common::{BoxError, Store, config::Config};
 use dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
@@ -153,11 +153,19 @@ async fn main() {
                     .await
                     .expect("Failed to load config"),
             );
+            let data_store = Arc::new(
+                Store::new(config.data_store_url.clone()).expect("Failed to create data store"),
+            );
+            let providers_store = Store::new(config.providers_store_url.clone())
+                .expect("Failed to create providers store");
+            let manifests_store = Store::new(config.manifests_store_url.clone())
+                .expect("Failed to create manifests store");
+
             let dataset_store = {
                 let provider_configs_store =
-                    ProviderConfigsStore::new(config.providers_store.prefixed_store());
+                    ProviderConfigsStore::new(providers_store.prefixed_store());
                 let dataset_manifests_store =
-                    DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+                    DatasetManifestsStore::new(manifests_store.prefixed_store());
                 DatasetStore::new(
                     temp_db.metadata_db().clone(),
                     provider_configs_store,
@@ -169,6 +177,7 @@ async fn main() {
             let controller = DaemonController::new(
                 config.clone(),
                 temp_db.metadata_db().clone(),
+                data_store.clone(),
                 dataset_store.clone(),
                 None,
             )
@@ -207,10 +216,11 @@ async fn main() {
 
             // Run blessing procedure
             bless(
-                config,
+                config.clone(),
                 &ampctl,
                 dataset_store.clone(),
                 temp_db.metadata_db().clone(),
+                data_store.clone(),
                 dataset_ref.clone(),
                 end_block,
             )
@@ -256,6 +266,7 @@ async fn bless(
     ampctl: &Ampctl,
     dataset_store: DatasetStore,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {
@@ -296,7 +307,7 @@ async fn bless(
     }
 
     // Clear existing dataset data if it exists
-    let store = config.data_store.prefixed_store();
+    let store = data_store.prefixed_store();
     let path = object_store::path::Path::parse(dataset.name())
         .map_err(|err| format!("Invalid dataset name '{}': {}", dataset.name(), err))?;
 
@@ -327,6 +338,7 @@ async fn bless(
     let physical_tables = test_helpers::dump_dataset(
         worker_config,
         metadata_db,
+        data_store.clone(),
         dataset_store,
         dataset.clone(),
         end,
@@ -366,7 +378,6 @@ fn worker_config_from_common(config: &Config) -> worker::config::Config {
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
-        data_store: config.data_store.clone(),
         worker_info: worker::info::WorkerInfo {
             version: Some("test".to_string()),
             commit_sha: None,

@@ -10,7 +10,7 @@ pub mod git;
 use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
-    BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache,
+    BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache, Store,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -36,9 +36,11 @@ use super::fixtures::SnapshotContext;
 /// This function is only exposed for advanced test scenarios that need
 /// fine-grained control over dump parameters (end_block type, max_writers,
 /// microbatch interval).
+#[expect(clippy::too_many_arguments)]
 pub async fn dump_internal(
     config: WorkerConfig,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     dataset_ref: Reference,
     end_block: EndBlock,
@@ -58,7 +60,6 @@ pub async fn dump_internal(
 
     let mut tables = Vec::with_capacity(dataset.tables.len());
 
-    let data_store = config.data_store.clone();
     let opts = dump::parquet_opts(&config.parquet);
     let cache = ParquetFooterCache::builder(opts.cache_size_mb)
         .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
@@ -131,6 +132,7 @@ pub async fn dump_internal(
 pub async fn dump_dataset(
     config: WorkerConfig,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     dataset: Reference,
     end_block: u64,
@@ -138,6 +140,7 @@ pub async fn dump_dataset(
     dump_internal(
         config,
         metadata_db,
+        data_store,
         dataset_store,
         dataset,
         EndBlock::Absolute(end_block), // end_block

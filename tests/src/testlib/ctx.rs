@@ -30,7 +30,7 @@
 
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-use common::{BoxError, config::Config};
+use common::{BoxError, config::Config, store::Store};
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
@@ -342,15 +342,19 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
+        let data_store = Arc::new(Store::new(config.data_store_url.clone())?);
+        let providers_store = Store::new(config.providers_store_url.clone())?;
+        let manifests_store = Store::new(config.manifests_store_url.clone())?;
+
         // Create shared DatasetStore instance (used by both server and worker)
         let dataset_store = {
             use dataset_store::{
                 DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
             };
             let provider_configs_store =
-                ProviderConfigsStore::new(config.providers_store.prefixed_store());
+                ProviderConfigsStore::new(providers_store.prefixed_store());
             let dataset_manifests_store =
-                DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+                DatasetManifestsStore::new(manifests_store.prefixed_store());
             DatasetStore::new(
                 temp_db.metadata_db().clone(),
                 provider_configs_store,
@@ -393,6 +397,7 @@ impl TestCtxBuilder {
         let server = DaemonServer::new(
             config.clone(),
             temp_db.metadata_db().clone(),
+            data_store.clone(),
             dataset_store.clone(),
             self.meter,
             true, // enable_flight
@@ -404,6 +409,7 @@ impl TestCtxBuilder {
         let controller = DaemonController::new(
             config.clone(),
             temp_db.metadata_db().clone(),
+            data_store.clone(),
             dataset_store.clone(),
             controller_meter,
         )
@@ -508,7 +514,8 @@ impl TestCtxBuilder {
         let worker = DaemonWorker::new(
             config,
             temp_db.metadata_db().clone(),
-            dataset_store.clone(),
+            data_store,
+            dataset_store,
             worker_meter,
             node_id,
         )

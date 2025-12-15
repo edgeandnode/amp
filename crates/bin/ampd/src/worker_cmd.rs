@@ -1,4 +1,6 @@
-use common::config::Config;
+use std::sync::Arc;
+
+use common::{config::Config, store::Store};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -11,11 +13,17 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
         .await
         .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
+    let data_store = Store::new(config.data_store_url.clone())
+        .map(Arc::new)
+        .map_err(Error::DataStoreCreation)?;
+    let providers_store =
+        Store::new(config.providers_store_url.clone()).map_err(Error::ProvidersStoreCreation)?;
+    let manifests_store =
+        Store::new(config.manifests_store_url.clone()).map_err(Error::ManifestsStoreCreation)?;
+
     let dataset_store = {
-        let provider_configs_store =
-            ProviderConfigsStore::new(config.providers_store.prefixed_store());
-        let dataset_manifests_store =
-            DatasetManifestsStore::new(config.manifests_store.prefixed_store());
+        let provider_configs_store = ProviderConfigsStore::new(providers_store.prefixed_store());
+        let dataset_manifests_store = DatasetManifestsStore::new(manifests_store.prefixed_store());
         DatasetStore::new(
             metadata_db.clone(),
             provider_configs_store,
@@ -27,10 +35,16 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
     let worker_config = config_from_common(&config);
 
     // Initialize the worker (setup phase)
-    let worker_fut =
-        worker::service::new(worker_config, metadata_db, dataset_store, meter, node_id)
-            .await
-            .map_err(Error::Init)?;
+    let worker_fut = worker::service::new(
+        worker_config,
+        metadata_db,
+        data_store,
+        dataset_store,
+        meter,
+        node_id,
+    )
+    .await
+    .map_err(Error::Init)?;
 
     // Run the worker (runtime phase)
     worker_fut.await.map_err(Error::Runtime)
@@ -45,6 +59,24 @@ pub enum Error {
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
     MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+
+    /// Failed to create data store
+    ///
+    /// This occurs when the data store cannot be created from the configured URL.
+    #[error("Failed to create data store: {0}")]
+    DataStoreCreation(#[source] common::store::StoreError),
+
+    /// Failed to create providers store
+    ///
+    /// This occurs when the providers store cannot be created from the configured URL.
+    #[error("Failed to create providers store: {0}")]
+    ProvidersStoreCreation(#[source] common::store::StoreError),
+
+    /// Failed to create manifests store
+    ///
+    /// This occurs when the manifests store cannot be created from the configured URL.
+    #[error("Failed to create manifests store: {0}")]
+    ManifestsStoreCreation(#[source] common::store::StoreError),
 
     /// Worker initialization failed.
     ///
@@ -70,7 +102,6 @@ pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
-        data_store: config.data_store.clone(),
         worker_info: worker::info::WorkerInfo {
             version: Some(config.build_info.version.clone()),
             commit_sha: Some(config.build_info.commit_sha.clone()),

@@ -138,6 +138,7 @@ impl TestCtx {
         test_helpers::dump_internal(
             self.ctx.daemon_worker().config().clone(),
             self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().data_store().clone(),
             self.ctx.daemon_worker().dataset_store().clone(),
             dataset_ref,
             dump::EndBlock::Absolute(end), // end_block
