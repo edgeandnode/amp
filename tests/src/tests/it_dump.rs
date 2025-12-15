@@ -272,6 +272,7 @@ impl TestCtx {
         let dumped_tables = test_helpers::dump_dataset(
             self.ctx.daemon_worker().config().clone(),
             self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().data_store().clone(),
             self.ctx.daemon_worker().dataset_store().clone(),
             self.dataset_ref.clone(),
             block,

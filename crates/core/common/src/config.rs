@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use datafusion::{
     error::DataFusionError,
@@ -13,17 +13,13 @@ use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_d
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{
-    metadata::Overflow,
-    query_context::QueryEnv,
-    store::{ObjectStoreUrl, Store},
-};
+use crate::{metadata::Overflow, query_context::QueryEnv, store::ObjectStoreUrl};
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub data_store: Arc<Store>,
-    pub providers_store: Arc<Store>,
-    pub manifests_store: Arc<Store>,
+    pub data_store_url: ObjectStoreUrl,
+    pub providers_store_url: ObjectStoreUrl,
+    pub manifests_store_url: ObjectStoreUrl,
     pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
     pub query_max_mem_mb: usize,
@@ -498,21 +494,12 @@ impl Config {
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
         let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
-        let data_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.data_dir(), base)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
-        )
-        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
-        let providers_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.providers_dir(), base)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
-        )
-        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
-        let manifests_store = Store::new(
-            ObjectStoreUrl::new_with_base(config_file.manifests_dir(), base)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
-        )
-        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
+        let data_store_url = ObjectStoreUrl::new_with_base(config_file.data_dir(), base)
+            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let providers_store_url = ObjectStoreUrl::new_with_base(config_file.providers_dir(), base)
+            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let manifests_store_url = ObjectStoreUrl::new_with_base(config_file.manifests_dir(), base)
+            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
         let metadata_db = if config_file.metadata_db.url.is_some() {
             config_file.metadata_db.clone()
@@ -541,9 +528,9 @@ impl Config {
         };
 
         Ok(Self {
-            data_store: Arc::new(data_store),
-            providers_store: Arc::new(providers_store),
-            manifests_store: Arc::new(manifests_store),
+            data_store_url,
+            providers_store_url,
+            manifests_store_url,
             metadata_db,
             max_mem_mb: config_file.max_mem_mb,
             query_max_mem_mb: config_file.query_max_mem_mb,

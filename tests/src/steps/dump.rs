@@ -40,6 +40,7 @@ impl Step {
             let physical_tables = test_helpers::dump_dataset(
                 ctx.daemon_worker().config().clone(),
                 ctx.daemon_worker().metadata_db().clone(),
+                ctx.daemon_worker().data_store().clone(),
                 ctx.daemon_worker().dataset_store().clone(),
                 self.dataset.clone(),
                 self.end,

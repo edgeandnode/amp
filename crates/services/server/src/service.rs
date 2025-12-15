@@ -11,7 +11,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, utils::shutdown_signal};
+use common::{BoxError, store::Store, utils::shutdown_signal};
 use datafusion::error::DataFusionError;
 use dataset_store::DatasetStore;
 use futures::FutureExt;
@@ -30,6 +30,7 @@ use crate::{config::Config, flight, jsonl};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
@@ -37,7 +38,7 @@ pub async fn new(
 ) -> Result<(BoundAddrs, impl Future<Output = Result<(), BoxError>>), InitError> {
     // Create the internal service instance
     let service =
-        flight::Service::create(config.clone(), metadata_db.clone(), dataset_store, meter).await?;
+        flight::Service::create(config, data_store, metadata_db, dataset_store, meter).await?;
 
     // Start Arrow Flight Server if address provided
     let (flight_addr, flight_fut) = match flight_at.into() {

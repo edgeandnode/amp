@@ -45,6 +45,7 @@ use crate::{
 pub async fn new(
     config: Config,
     metadata_db: MetadataDb,
+    data_store: Arc<DataStore>,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
@@ -68,9 +69,6 @@ pub async fn new(
 
     // Create the job queue
     let queue = JobQueue::new(metadata_db.clone());
-
-    // Clone data store
-    let data_store = config.data_store.clone();
 
     // Create notification multiplexer
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));

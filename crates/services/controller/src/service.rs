@@ -7,7 +7,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, utils::shutdown_signal};
+use common::{BoxError, store::Store, utils::shutdown_signal};
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
@@ -32,6 +32,7 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     at: SocketAddr,
@@ -42,7 +43,7 @@ pub async fn new(
         metadata_db,
         dataset_store,
         scheduler: scheduler.clone(),
-        data_store: config.data_store.clone(),
+        data_store,
         build_info: config.build_info.clone(),
     };
 

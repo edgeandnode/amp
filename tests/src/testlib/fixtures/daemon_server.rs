@@ -6,7 +6,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::BoxError;
+use common::{BoxError, store::Store};
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonServer {
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     server_addrs: BoundAddrs,
 
@@ -37,6 +38,7 @@ impl DaemonServer {
     pub async fn new(
         config: Arc<common::config::Config>,
         metadb: MetadataDb,
+        data_store: Arc<Store>,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         enable_flight: bool,
@@ -57,6 +59,7 @@ impl DaemonServer {
         let (server_addrs, server) = server::service::new(
             config.clone(),
             metadb.clone(),
+            data_store.clone(),
             dataset_store.clone(),
             meter,
             flight_at,
@@ -69,23 +72,11 @@ impl DaemonServer {
         Ok(Self {
             config,
             metadata_db: metadb,
+            data_store,
             dataset_store,
             server_addrs,
             _task: server_task,
         })
-    }
-
-    /// Create and start a new Amp server with all query services enabled.
-    ///
-    /// Convenience method that starts a server with both query services
-    /// (Flight and JSON Lines) enabled. For Admin API, use `DaemonController`.
-    pub async fn new_with_all_services(
-        config: Arc<common::config::Config>,
-        metadata_db: MetadataDb,
-        dataset_store: DatasetStore,
-        meter: Option<Meter>,
-    ) -> Result<Self, BoxError> {
-        Self::new(config, metadata_db, dataset_store, meter, true, true).await
     }
 
     /// Get the server-specific configuration.
@@ -99,6 +90,11 @@ impl DaemonServer {
     /// Get a reference to the metadata database.
     pub fn metadata_db(&self) -> &MetadataDb {
         &self.metadata_db
+    }
+
+    /// Get a reference to the data store.
+    pub fn data_store(&self) -> &Arc<Store> {
+        &self.data_store
     }
 
     /// Get a reference to the dataset store.

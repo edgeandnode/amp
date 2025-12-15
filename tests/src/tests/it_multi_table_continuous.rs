@@ -33,6 +33,7 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     test_helpers::dump_dataset(
         test_ctx.daemon_worker().config().clone(),
         test_ctx.daemon_worker().metadata_db().clone(),
+        test_ctx.daemon_worker().data_store().clone(),
         test_ctx.daemon_worker().dataset_store().clone(),
         anvil_ref
             .parse()
@@ -53,11 +54,13 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     // Start continuous dump in background
     let worker_config = test_ctx.daemon_worker().config().clone();
     let metadata_db = test_ctx.daemon_worker().metadata_db().clone();
+    let data_store = test_ctx.daemon_worker().data_store().clone();
     let dataset_store = test_ctx.daemon_worker().dataset_store().clone();
     let dump_handle = tokio::spawn(async move {
         test_helpers::dump_dataset(
             worker_config,
             metadata_db,
+            data_store,
             dataset_store,
             "_/sql_over_anvil_1@0.0.0"
                 .parse()
@@ -81,6 +84,7 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
     test_helpers::dump_dataset(
         test_ctx.daemon_worker().config().clone(),
         test_ctx.daemon_worker().metadata_db().clone(),
+        test_ctx.daemon_worker().data_store().clone(),
         test_ctx.daemon_worker().dataset_store().clone(),
         anvil_ref
             .parse()

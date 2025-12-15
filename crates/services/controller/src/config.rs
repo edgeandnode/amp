@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use common::{config::BuildInfo, store::Store};
+use common::config::BuildInfo;
 
 /// Controller-specific configuration
 ///
@@ -8,8 +6,6 @@ use common::{config::BuildInfo, store::Store};
 /// for dataset management and job scheduling.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Object store for output data
-    pub data_store: Arc<Store>,
     /// Build information (passed to admin-api)
     pub build_info: BuildInfo,
 }

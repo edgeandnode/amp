@@ -121,12 +121,14 @@ async fn dump_finalized() {
     {
         let worker_config = test.ctx.daemon_worker().config().clone();
         let metadata_db = test.ctx.daemon_worker().metadata_db().clone();
+        let data_store = test.ctx.daemon_worker().data_store().clone();
         let dataset_store = test.ctx.daemon_worker().dataset_store().clone();
         tokio::spawn(async move {
             let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
             test_helpers::dump_internal(
                 worker_config,
                 metadata_db,
+                data_store,
                 dataset_store,
                 dataset_ref,
                 dump::EndBlock::None,
@@ -450,6 +452,7 @@ impl ReorgTestCtx {
         test_helpers::dump_dataset(
             self.ctx.daemon_worker().config().clone(),
             self.ctx.daemon_worker().metadata_db().clone(),
+            self.ctx.daemon_worker().data_store().clone(),
             self.ctx.daemon_worker().dataset_store().clone(),
             dataset_ref,
             end,

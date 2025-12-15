@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use common::BoxError;
+use common::{BoxError, store::Store};
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
@@ -21,6 +21,7 @@ use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRun
 pub struct DaemonWorker {
     config: Config,
     metadata_db: MetadataDb,
+    data_store: Arc<Store>,
     dataset_store: DatasetStore,
     node_id: NodeId,
 
@@ -34,7 +35,8 @@ impl DaemonWorker {
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<common::config::Config>,
-        metadb: MetadataDb,
+        metadata_db: MetadataDb,
+        data_store: Arc<Store>,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         node_id: NodeId,
@@ -43,7 +45,8 @@ impl DaemonWorker {
         let worker_config = worker_config_from_common(&config);
         let worker_fut = worker::service::new(
             worker_config.clone(),
-            metadb.clone(),
+            metadata_db.clone(),
+            data_store.clone(),
             dataset_store.clone(),
             meter,
             node_id.clone(),
@@ -54,28 +57,12 @@ impl DaemonWorker {
 
         Ok(Self {
             config: worker_config,
-            metadata_db: metadb,
+            metadata_db,
+            data_store,
             dataset_store,
             node_id,
             _task: worker_task,
         })
-    }
-
-    /// Create and start a new Amp worker with a generated worker ID.
-    ///
-    /// Convenience method that creates a worker with a worker ID based on the provided name.
-    /// This is useful for tests that don't need to specify a custom WorkerNodeId.
-    pub async fn new_with_name(
-        config: Arc<common::config::Config>,
-        metadata_db: MetadataDb,
-        dataset_store: DatasetStore,
-        worker_name: &str,
-    ) -> Result<Self, BoxError> {
-        let worker_node_id = worker_name
-            .parse()
-            .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
-
-        Self::new(config, metadata_db, dataset_store, None, worker_node_id).await
     }
 
     /// Get the worker node ID.
@@ -96,6 +83,11 @@ impl DaemonWorker {
         &self.metadata_db
     }
 
+    /// Get a reference to the data store.
+    pub fn data_store(&self) -> &Arc<Store> {
+        &self.data_store
+    }
+
     /// Get a reference to the dataset store.
     pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
@@ -111,7 +103,7 @@ impl Drop for DaemonWorker {
 
 /// Convert common::config::Config to worker::config::Config for tests
 fn worker_config_from_common(config: &common::config::Config) -> Config {
-    worker::config::Config {
+    Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,
         keep_alive_interval: config.keep_alive_interval,
@@ -119,7 +111,6 @@ fn worker_config_from_common(config: &common::config::Config) -> Config {
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
-        data_store: config.data_store.clone(),
         worker_info: worker::info::WorkerInfo {
             version: Some(config.build_info.version.clone()),
             commit_sha: Some(config.build_info.commit_sha.clone()),

@@ -1,6 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
-use common::store::Store;
+use std::{path::PathBuf, time::Duration};
 
 use crate::info::WorkerInfo;
 
@@ -31,9 +29,6 @@ pub struct Config {
 
     /// Parquet file configuration
     pub parquet: common::config::ParquetConfig,
-
-    /// Data store for Parquet files
-    pub data_store: Arc<Store>,
 
     /// Worker build/version information for registration
     pub worker_info: WorkerInfo,
