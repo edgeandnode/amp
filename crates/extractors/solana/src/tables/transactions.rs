@@ -29,6 +29,7 @@ pub fn table(network: String) -> Table {
 fn schema() -> Schema {
     let fields = vec![
         Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+        Field::new("slot", DataType::UInt64, false),
         Field::new("tx_index", DataType::UInt32, false),
         Field::new(
             "tx_signatures",
@@ -45,15 +46,6 @@ fn schema() -> Schema {
         Field::new(
             "post_balances",
             DataType::List(Arc::new(Field::new("item", DataType::UInt64, true))),
-            true,
-        ),
-        Field::new(
-            "inner_instructions",
-            DataType::List(Arc::new(Field::new(
-                "item",
-                inner_instructions_dtype(),
-                true,
-            ))),
             true,
         ),
         Field::new(
@@ -83,34 +75,9 @@ fn schema() -> Schema {
         Field::new("return_data_encoding", DataType::Utf8, true),
         Field::new("compute_units_consumed", DataType::UInt64, true),
         Field::new("cost_units", DataType::UInt64, true),
-        Field::new("slot", DataType::UInt64, false),
     ];
 
     Schema::new(fields)
-}
-
-fn inner_instructions_dtype() -> DataType {
-    DataType::Struct(Fields::from(vec![
-        Field::new("index", DataType::UInt8, false),
-        Field::new(
-            "instructions",
-            DataType::List(Arc::new(Field::new("item", instruction_dtype(), true))),
-            false,
-        ),
-    ]))
-}
-
-fn instruction_dtype() -> DataType {
-    DataType::Struct(Fields::from(vec![
-        Field::new("program_id_index", DataType::UInt8, false),
-        Field::new(
-            "accounts",
-            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-            false,
-        ),
-        Field::new("data", DataType::Utf8, false),
-        Field::new("stack_height", DataType::UInt32, true),
-    ]))
 }
 
 fn token_balances_dtype() -> DataType {
@@ -165,7 +132,7 @@ impl Transaction {
         of_tx: solana_sdk::transaction::VersionedTransaction,
         of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta,
     ) -> Self {
-        let tx_meta = TransactionStatusMeta::from(of_tx_meta);
+        let tx_meta = TransactionStatusMeta::from_of1_tx_meta(slot, tx_index, of_tx_meta);
 
         Self {
             tx_index,
@@ -186,7 +153,7 @@ impl Transaction {
                 inners
                     .iter()
                     .map(|inner| {
-                        let instructions = inner
+                        inner
                             .instructions
                             .iter()
                             .cloned()
@@ -196,18 +163,17 @@ impl Transaction {
                                         "the format of inner instructions has already been verified"
                                     )
                                 };
-                                super::Instruction {
+                                super::instructions::Instruction {
+                                    slot,
+                                    tx_index,
+                                    inner_index: Some(inner.index as u32),
                                     program_id_index: compiled.program_id_index,
                                     accounts: compiled.accounts,
                                     data: compiled.data,
                                     stack_height: compiled.stack_height,
                                 }
                             })
-                            .collect();
-                        InnerInstructions {
-                            index: inner.index,
-                            instructions,
-                        }
+                            .collect()
                     })
                     .collect()
             });
@@ -288,11 +254,12 @@ impl Transaction {
 
 #[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionStatusMeta {
+    // `true` if the transaction succeeded, `false` otherwise.
     pub(crate) status: bool,
     pub(crate) fee: u64,
     pub(crate) pre_balances: Vec<u64>,
     pub(crate) post_balances: Vec<u64>,
-    pub(crate) inner_instructions: Option<Vec<InnerInstructions>>,
+    pub(crate) inner_instructions: Option<Vec<Vec<super::instructions::Instruction>>>,
     pub(crate) log_messages: Option<Vec<String>>,
     pub(crate) pre_token_balances: Option<Vec<TransactionTokenBalance>>,
     pub(crate) post_token_balances: Option<Vec<TransactionTokenBalance>>,
@@ -303,30 +270,30 @@ pub(crate) struct TransactionStatusMeta {
     pub(crate) cost_units: Option<u64>,
 }
 
-impl From<solana_storage_proto::convert::generated::TransactionStatusMeta>
-    for TransactionStatusMeta
-{
-    fn from(of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta) -> Self {
+impl TransactionStatusMeta {
+    fn from_of1_tx_meta(
+        slot: u64,
+        tx_index: u32,
+        of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta,
+    ) -> Self {
         let inner_instructions = of_tx_meta
             .inner_instructions
             .iter()
             .map(|inner| {
-                let instructions = inner
+                inner
                     .instructions
                     .iter()
                     .cloned()
-                    .map(|inst| super::Instruction {
+                    .map(|inst| super::instructions::Instruction {
+                        slot,
+                        tx_index,
+                        inner_index: Some(inner.index),
                         program_id_index: inst.program_id_index as u8,
                         accounts: inst.accounts,
                         data: String::from_utf8(inst.data).expect("invalid utf-8"),
                         stack_height: inst.stack_height,
                     })
-                    .collect();
-
-                InnerInstructions {
-                    index: inner.index as u8,
-                    instructions,
-                }
+                    .collect()
             })
             .collect();
 
@@ -378,7 +345,7 @@ impl From<solana_storage_proto::convert::generated::TransactionStatusMeta>
             });
 
         TransactionStatusMeta {
-            status: of_tx_meta.err.is_some(),
+            status: of_tx_meta.err.is_none(),
             fee: of_tx_meta.fee,
             pre_balances: of_tx_meta.pre_balances,
             post_balances: of_tx_meta.post_balances,
@@ -393,12 +360,6 @@ impl From<solana_storage_proto::convert::generated::TransactionStatusMeta>
             cost_units: of_tx_meta.cost_units,
         }
     }
-}
-
-#[derive(Debug, Default, Deserialize, Clone)]
-pub(crate) struct InnerInstructions {
-    index: u8,
-    instructions: Vec<super::Instruction>,
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
@@ -545,13 +506,15 @@ impl From<crate::rpc_client::UiReturnDataEncoding> for ReturnDataEncoding {
 
 pub(crate) struct TransactionRowsBuilder {
     special_block_num: UInt64Builder,
+
+    slot: UInt64Builder,
     tx_index: UInt32Builder,
+
     tx_signatures: ListBuilder<StringBuilder>,
     status: BooleanBuilder,
     fee: UInt64Builder,
     pre_balances: ListBuilder<UInt64Builder>,
     post_balances: ListBuilder<UInt64Builder>,
-    inner_instructions: ListBuilder<StructBuilder>,
     log_messages: ListBuilder<StringBuilder>,
     pre_token_balances: ListBuilder<StructBuilder>,
     post_token_balances: ListBuilder<StructBuilder>,
@@ -563,51 +526,11 @@ pub(crate) struct TransactionRowsBuilder {
     return_data_encoding: StringBuilder,
     compute_units_consumed: UInt64Builder,
     cost_units: UInt64Builder,
-
-    slot: UInt64Builder,
 }
 
 impl TransactionRowsBuilder {
     /// Creates a new [TransactionRowsBuilder] with enough capacity to hold `count` transactions.
     pub(crate) fn with_capacity(count: usize) -> Self {
-        fn instruction_builder() -> StructBuilder {
-            StructBuilder::new(
-                Fields::from(vec![
-                    Field::new("program_id_index", DataType::UInt8, false),
-                    Field::new(
-                        "accounts",
-                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-                        false,
-                    ),
-                    Field::new("data", DataType::Utf8, false),
-                    Field::new("stack_height", DataType::UInt32, true),
-                ]),
-                vec![
-                    Box::new(UInt8Builder::new()),
-                    Box::new(ListBuilder::new(UInt8Builder::new())),
-                    Box::new(StringBuilder::new()),
-                    Box::new(UInt32Builder::new()),
-                ],
-            )
-        }
-
-        fn inner_instructions_builder() -> StructBuilder {
-            StructBuilder::new(
-                Fields::from(vec![
-                    Field::new("index", DataType::UInt8, false),
-                    Field::new(
-                        "instructions",
-                        DataType::List(Arc::new(Field::new("item", instruction_dtype(), true))),
-                        false,
-                    ),
-                ]),
-                vec![
-                    Box::new(UInt8Builder::new()),
-                    Box::new(ListBuilder::new(instruction_builder())),
-                ],
-            )
-        }
-
         fn ui_token_amount_builder() -> StructBuilder {
             StructBuilder::new(
                 Fields::from(vec![
@@ -671,7 +594,6 @@ impl TransactionRowsBuilder {
             fee: UInt64Builder::with_capacity(count),
             pre_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
             post_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
-            inner_instructions: ListBuilder::with_capacity(inner_instructions_builder(), count),
             log_messages: ListBuilder::with_capacity(StringBuilder::new(), count),
             pre_token_balances: ListBuilder::with_capacity(token_balances_builder(), count),
             post_token_balances: ListBuilder::with_capacity(token_balances_builder(), count),
@@ -716,55 +638,6 @@ impl TransactionRowsBuilder {
                 self.post_balances.values().append_value(*post_balance);
             }
             self.post_balances.append(true);
-
-            if let Some(inner_instructions) = &meta.inner_instructions {
-                for inner in inner_instructions {
-                    let struct_builder = self.inner_instructions.values();
-
-                    struct_builder
-                        .field_builder::<UInt8Builder>(0)
-                        .unwrap()
-                        .append_value(inner.index);
-
-                    {
-                        let list_builder = struct_builder
-                            .field_builder::<ListBuilder<StructBuilder>>(1)
-                            .unwrap();
-
-                        for instruction in &inner.instructions {
-                            let struct_builder = list_builder.values();
-
-                            struct_builder
-                                .field_builder::<UInt8Builder>(0)
-                                .unwrap()
-                                .append_value(instruction.program_id_index);
-                            let accounts_builder = struct_builder
-                                .field_builder::<ListBuilder<UInt8Builder>>(1)
-                                .unwrap();
-                            for account in &instruction.accounts {
-                                accounts_builder.values().append_value(*account);
-                            }
-                            accounts_builder.append(true);
-                            struct_builder
-                                .field_builder::<StringBuilder>(2)
-                                .unwrap()
-                                .append_value(&instruction.data);
-                            let stack_height_builder =
-                                struct_builder.field_builder::<UInt32Builder>(3).unwrap();
-                            stack_height_builder.append_option(instruction.stack_height);
-
-                            struct_builder.append(true);
-                        }
-
-                        list_builder.append(true);
-                    }
-
-                    struct_builder.append(true);
-                }
-                self.inner_instructions.append(true);
-            } else {
-                self.inner_instructions.append_null();
-            }
 
             if let Some(log_messages) = &meta.log_messages {
                 for log in log_messages {
@@ -947,7 +820,6 @@ impl TransactionRowsBuilder {
             self.fee.append_null();
             self.pre_balances.append(false);
             self.post_balances.append(false);
-            self.inner_instructions.append_null();
             self.log_messages.append_null();
             self.pre_token_balances.append_null();
             self.post_token_balances.append_null();
@@ -973,7 +845,6 @@ impl TransactionRowsBuilder {
             mut fee,
             mut pre_balances,
             mut post_balances,
-            mut inner_instructions,
             mut log_messages,
             mut pre_token_balances,
             mut post_token_balances,
@@ -990,13 +861,13 @@ impl TransactionRowsBuilder {
 
         let columns = vec![
             Arc::new(special_block_num.finish()) as ArrayRef,
+            Arc::new(slot.finish()),
             Arc::new(tx_index.finish()),
             Arc::new(tx_signatures.finish()),
             Arc::new(status.finish()),
             Arc::new(fee.finish()),
             Arc::new(pre_balances.finish()),
             Arc::new(post_balances.finish()),
-            Arc::new(inner_instructions.finish()),
             Arc::new(log_messages.finish()),
             Arc::new(pre_token_balances.finish()),
             Arc::new(post_token_balances.finish()),
@@ -1008,7 +879,6 @@ impl TransactionRowsBuilder {
             Arc::new(return_data_encoding.finish()),
             Arc::new(compute_units_consumed.finish()),
             Arc::new(cost_units.finish()),
-            Arc::new(slot.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)

@@ -34,24 +34,6 @@ fn schema() -> Schema {
         Field::new("num_readonly_signed_accounts", DataType::UInt8, false),
         Field::new("num_readonly_unsigned_accounts", DataType::UInt8, false),
         Field::new(
-            "instructions",
-            DataType::List(Arc::new(Field::new(
-                "item",
-                DataType::Struct(Fields::from(vec![
-                    Field::new("program_id_index", DataType::UInt8, false),
-                    Field::new(
-                        "accounts",
-                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-                        false,
-                    ),
-                    Field::new("data", DataType::Utf8, false),
-                    Field::new("stack_height", DataType::UInt32, true),
-                ])),
-                true,
-            ))),
-            false,
-        ),
-        Field::new(
             "address_table_lookups",
             DataType::List(Arc::new(Field::new(
                 "item",
@@ -93,7 +75,7 @@ pub(crate) struct Message {
     pub(crate) num_readonly_signed_accounts: u8,
     pub(crate) num_readonly_unsigned_accounts: u8,
 
-    pub(crate) instructions: Vec<super::Instruction>,
+    pub(crate) instructions: Vec<super::instructions::Instruction>,
     pub(crate) address_table_lookups: Option<Vec<AddressTableLookup>>,
 
     pub(crate) account_keys: Vec<String>,
@@ -109,7 +91,10 @@ impl Message {
         let instructions = message
             .instructions()
             .iter()
-            .map(|inst| super::Instruction {
+            .map(|inst| super::instructions::Instruction {
+                slot,
+                tx_index,
+                inner_index: None,
                 program_id_index: inst.program_id_index,
                 accounts: inst.accounts.clone(),
                 data: bs58::encode(&inst.data).into_string(),
@@ -154,7 +139,10 @@ impl Message {
         let instructions = message
             .instructions
             .iter()
-            .map(|inst| super::Instruction {
+            .map(|inst| super::instructions::Instruction {
+                slot,
+                tx_index,
+                inner_index: None,
                 program_id_index: inst.program_id_index,
                 accounts: inst.accounts.clone(),
                 data: inst.data.clone(),
@@ -201,36 +189,14 @@ pub(crate) struct MessageRowsBuilder {
     num_required_signatures: UInt8Builder,
     num_readonly_signed_accounts: UInt8Builder,
     num_readonly_unsigned_accounts: UInt8Builder,
-    instructions: ListBuilder<StructBuilder>,
     address_table_lookups: ListBuilder<StructBuilder>,
     account_keys: ListBuilder<StringBuilder>,
     recent_block_hash: Bytes32ArrayBuilder,
 }
 
 impl MessageRowsBuilder {
-    /// Creates a new [MessageRowsBuilder] with enough capacity to hold `count` messages.
-    pub(crate) fn with_capacity(count: usize) -> Self {
-        fn instruction_builder() -> StructBuilder {
-            StructBuilder::new(
-                Fields::from(vec![
-                    Field::new("program_id_index", DataType::UInt8, false),
-                    Field::new(
-                        "accounts",
-                        DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-                        false,
-                    ),
-                    Field::new("data", DataType::Utf8, false),
-                    Field::new("stack_height", DataType::UInt32, true),
-                ]),
-                vec![
-                    Box::new(UInt8Builder::new()),
-                    Box::new(ListBuilder::new(UInt8Builder::new())),
-                    Box::new(StringBuilder::new()),
-                    Box::new(UInt32Builder::new()),
-                ],
-            )
-        }
-
+    /// Creates a new [MessageRowsBuilder] with enough capacity to hold `capacity` messages.
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         fn address_table_lookup_builder() -> StructBuilder {
             StructBuilder::new(
                 Fields::from(vec![
@@ -255,19 +221,18 @@ impl MessageRowsBuilder {
         }
 
         Self {
-            special_block_num: UInt64Builder::with_capacity(count),
-            slot: UInt64Builder::with_capacity(count),
-            tx_index: UInt32Builder::with_capacity(count),
-            num_required_signatures: UInt8Builder::with_capacity(count),
-            num_readonly_signed_accounts: UInt8Builder::with_capacity(count),
-            num_readonly_unsigned_accounts: UInt8Builder::with_capacity(count),
-            instructions: ListBuilder::with_capacity(instruction_builder(), count),
+            special_block_num: UInt64Builder::with_capacity(capacity),
+            slot: UInt64Builder::with_capacity(capacity),
+            tx_index: UInt32Builder::with_capacity(capacity),
+            num_required_signatures: UInt8Builder::with_capacity(capacity),
+            num_readonly_signed_accounts: UInt8Builder::with_capacity(capacity),
+            num_readonly_unsigned_accounts: UInt8Builder::with_capacity(capacity),
             address_table_lookups: ListBuilder::with_capacity(
                 address_table_lookup_builder(),
-                count,
+                capacity,
             ),
-            account_keys: ListBuilder::with_capacity(StringBuilder::new(), count),
-            recent_block_hash: Bytes32ArrayBuilder::with_capacity(count),
+            account_keys: ListBuilder::with_capacity(StringBuilder::new(), capacity),
+            recent_block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
         }
     }
 
@@ -279,7 +244,7 @@ impl MessageRowsBuilder {
             num_required_signatures,
             num_readonly_signed_accounts,
             num_readonly_unsigned_accounts,
-            instructions,
+            instructions: _,
             address_table_lookups,
             account_keys,
             recent_block_hash,
@@ -294,34 +259,6 @@ impl MessageRowsBuilder {
             .append_value(*num_readonly_signed_accounts);
         self.num_readonly_unsigned_accounts
             .append_value(*num_readonly_unsigned_accounts);
-        for inst in instructions {
-            let struct_builder = self.instructions.values();
-            let program_id_index_builder = struct_builder
-                .field_builder::<UInt8Builder>(0)
-                .expect("program_id_index builder");
-            program_id_index_builder.append_value(inst.program_id_index);
-            let accounts_builder = struct_builder
-                .field_builder::<ListBuilder<UInt8Builder>>(1)
-                .expect("accounts builder");
-            for account in &inst.accounts {
-                accounts_builder.values().append_value(*account);
-            }
-            accounts_builder.append(true);
-            let data_builder = struct_builder
-                .field_builder::<StringBuilder>(2)
-                .expect("data builder");
-            data_builder.append_value(&inst.data);
-            let stack_height_builder = struct_builder
-                .field_builder::<UInt32Builder>(3)
-                .expect("stack_height builder");
-            if let Some(stack_height) = inst.stack_height {
-                stack_height_builder.append_value(stack_height);
-            } else {
-                stack_height_builder.append_null();
-            }
-            struct_builder.append(true);
-        }
-        self.instructions.append(true);
         if let Some(atls) = address_table_lookups {
             for atl in atls {
                 let struct_builder = self.address_table_lookups.values();
@@ -365,7 +302,6 @@ impl MessageRowsBuilder {
             mut num_required_signatures,
             mut num_readonly_signed_accounts,
             mut num_readonly_unsigned_accounts,
-            mut instructions,
             mut address_table_lookups,
             mut account_keys,
             recent_block_hash,
@@ -378,7 +314,6 @@ impl MessageRowsBuilder {
             Arc::new(num_required_signatures.finish()),
             Arc::new(num_readonly_signed_accounts.finish()),
             Arc::new(num_readonly_unsigned_accounts.finish()),
-            Arc::new(instructions.finish()),
             Arc::new(address_table_lookups.finish()),
             Arc::new(account_keys.finish()),
             Arc::new(recent_block_hash.finish()),
