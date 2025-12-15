@@ -3,7 +3,7 @@ use std::sync::Arc;
 use common::{
     BoxError,
     config::{Addrs, Config as CommonConfig},
-    store::Store,
+    store::{self, ObjectStoreCreationError, Store, StoreError},
 };
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
@@ -26,14 +26,22 @@ pub async fn run(
     let data_store = Store::new(config.data_store_url.clone())
         .map(Arc::new)
         .map_err(Error::DataStoreCreation)?;
-    let providers_store =
-        Store::new(config.providers_store_url.clone()).map_err(Error::ProvidersStoreCreation)?;
-    let manifests_store =
-        Store::new(config.manifests_store_url.clone()).map_err(Error::ManifestsStoreCreation)?;
 
     let dataset_store = {
-        let provider_configs_store = ProviderConfigsStore::new(providers_store.prefixed_store());
-        let dataset_manifests_store = DatasetManifestsStore::new(manifests_store.prefixed_store());
+        let provider_configs_store = ProviderConfigsStore::new(
+            store::new_with_prefix(
+                &config.providers_store_url,
+                config.providers_store_url.path(),
+            )
+            .map_err(Error::ProvidersStoreCreation)?,
+        );
+        let dataset_manifests_store = DatasetManifestsStore::new(
+            store::new_with_prefix(
+                &config.manifests_store_url,
+                config.manifests_store_url.path(),
+            )
+            .map_err(Error::ManifestsStoreCreation)?,
+        );
         DatasetStore::new(
             metadata_db.clone(),
             provider_configs_store,
@@ -104,19 +112,19 @@ pub enum Error {
     ///
     /// This occurs when the data store cannot be created from the configured URL.
     #[error("Failed to create data store: {0}")]
-    DataStoreCreation(#[source] common::store::StoreError),
+    DataStoreCreation(#[source] StoreError),
 
     /// Failed to create providers store
     ///
     /// This occurs when the providers store cannot be created from the configured URL.
     #[error("Failed to create providers store: {0}")]
-    ProvidersStoreCreation(#[source] common::store::StoreError),
+    ProvidersStoreCreation(#[source] ObjectStoreCreationError),
 
     /// Failed to create manifests store
     ///
     /// This occurs when the manifests store cannot be created from the configured URL.
     #[error("Failed to create manifests store: {0}")]
-    ManifestsStoreCreation(#[source] common::store::StoreError),
+    ManifestsStoreCreation(#[source] ObjectStoreCreationError),
 
     /// Failed to start the query server.
     ///

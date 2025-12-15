@@ -7,10 +7,10 @@ use datafusion::{
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
+        object_store::ObjectStoreUrl as DataFusionObjectStoreUrl,
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
     error::Result as DataFusionResult,
-    execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr, empty::EmptyExec},
@@ -35,7 +35,7 @@ use crate::{
         segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
     },
     sql::TableReference,
-    store::Store,
+    store::{self, ObjectStoreUrl, Store},
 };
 
 #[derive(Debug, Clone)]
@@ -409,8 +409,8 @@ impl PhysicalTable {
         let url: PhyTableUrl = table_url.into();
         let path = Path::from_url_path(url.path()).unwrap();
 
-        let object_store_url = url.inner().clone().try_into()?;
-        let (object_store, _) = crate::store::object_store(&object_store_url)?;
+        let object_store_url: ObjectStoreUrl = url.inner().clone().try_into()?;
+        let object_store = store::new(object_store_url)?;
 
         Ok(Some(Self {
             table: table.clone(),
@@ -791,7 +791,7 @@ impl PhysicalTable {
 // helper methods for implementing `TableProvider` trait
 
 impl PhysicalTable {
-    fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
+    fn object_store_url(&self) -> DataFusionResult<DataFusionObjectStoreUrl> {
         Ok(ListingTableUrl::try_new(self.url.inner().clone(), None)?.object_store())
     }
 
@@ -1078,7 +1078,7 @@ impl PhyTableUrl {
         Self::new_unchecked(raw_url)
     }
 
-    /// Create a new [`PhyTableUrl`] from a [`url::Url`] without validation
+    /// Create a new [`PhyTableUrl`] from a [`Url`] without validation
     ///
     /// # Safety
     /// The caller must ensure the provided URL is a valid object store URL.
@@ -1096,7 +1096,7 @@ impl PhyTableUrl {
         self.0.path()
     }
 
-    /// Get a reference to the inner [`url::Url`]
+    /// Get a reference to the inner [`Url`]
     pub fn inner(&self) -> &Url {
         &self.0
     }

@@ -2,17 +2,138 @@ use std::{future::Future, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use fs_err as fs;
-use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use object_store::{
-    ObjectMeta, ObjectStore, ObjectStoreScheme,
-    aws::{AmazonS3Builder, AmazonS3ConfigKey},
-    azure::{AzureConfigKey, MicrosoftAzureBuilder},
-    gcp::{GoogleCloudStorageBuilder, GoogleConfigKey},
-    local::LocalFileSystem,
-    path::Path,
-    prefix::PrefixStore,
+    ObjectStore, ObjectStoreScheme, aws::AmazonS3Builder, azure::MicrosoftAzureBuilder,
+    gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, path::Path, prefix::PrefixStore,
 };
 use url::Url;
+
+/// Creates an object store at the bucket/container root level.
+///
+/// The URL's path component is ignored - the returned store operates at the bucket/container root.
+/// Use [`new_with_prefix`] for path-scoped access where operations are relative to a prefix.
+///
+/// This function returns the appropriate object store implementation based on the URL scheme.
+/// See [`ObjectStoreUrl`] and [`ObjectStoreProvider`] for supported schemes.
+///
+/// # Providers configuration
+///
+/// Cloud providers are configured via environment variables:
+/// - **AWS S3**: Uses `AWS_*` environment variables (e.g., `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+/// - **Google Cloud**: Uses `GOOGLE_*` environment variables or service account credentials
+/// - **Azure**: Uses `AZURE_*` environment variables (e.g., `AZURE_STORAGE_ACCOUNT_NAME`)
+pub fn new(
+    url: impl AsRef<ObjectStoreUrl>,
+) -> Result<Arc<dyn ObjectStore>, ObjectStoreCreationError> {
+    let url = url.as_ref();
+
+    match url.provider() {
+        ObjectStoreProvider::GoogleCloudStorage => {
+            let store = GoogleCloudStorageBuilder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(store))
+        }
+        ObjectStoreProvider::AmazonS3 => {
+            let store = AmazonS3Builder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(store))
+        }
+        ObjectStoreProvider::MicrosoftAzure => {
+            let store = MicrosoftAzureBuilder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(store))
+        }
+        ObjectStoreProvider::Local => Ok(Arc::new(LocalFileSystem::new())),
+    }
+}
+
+/// Creates a path-scoped object store where operations are relative to the given prefix.
+///
+/// All operations on the returned store (get, put, list, etc.) are performed relative to the prefix.
+/// The prefix is prepended to all paths used in store operations.
+///
+/// See [`new`] for provider configuration details and supported schemes.
+pub fn new_with_prefix(
+    url: impl AsRef<ObjectStoreUrl>,
+    prefix: impl Into<Path>,
+) -> Result<Arc<dyn ObjectStore>, ObjectStoreCreationError> {
+    let url = url.as_ref();
+
+    match url.provider() {
+        ObjectStoreProvider::GoogleCloudStorage => {
+            let store = GoogleCloudStorageBuilder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(PrefixStore::new(store, prefix)))
+        }
+        ObjectStoreProvider::AmazonS3 => {
+            let store = AmazonS3Builder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(PrefixStore::new(store, prefix)))
+        }
+        ObjectStoreProvider::MicrosoftAzure => {
+            let store = MicrosoftAzureBuilder::from_env()
+                .with_url(url)
+                .build()
+                .map_err(|err| ObjectStoreCreationError {
+                    url: url.to_string(),
+                    source: err,
+                })?;
+            Ok(Arc::new(PrefixStore::new(store, prefix)))
+        }
+        ObjectStoreProvider::Local => {
+            let store = LocalFileSystem::new();
+            Ok(Arc::new(PrefixStore::new(store, prefix)))
+        }
+    }
+}
+
+/// Failed to create object store instance.
+///
+/// This error occurs when attempting to create an object store from a URL with valid scheme
+/// but the underlying provider cannot be initialized. The URL itself has been validated,
+/// but the object store backend failed to instantiate.
+///
+/// Common causes:
+/// - **Missing credentials**: Required environment variables not set (e.g., `AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`)
+/// - **Invalid credentials**: Environment variables set but contain invalid or expired credentials
+/// - **Network issues**: Cannot reach cloud provider's authentication endpoint
+/// - **Configuration problems**: Malformed configuration values or unsupported regions
+/// - **Permission denied**: Credentials lack required permissions for the bucket/container
+/// - **Bucket/container not found**: Referenced bucket or container does not exist
+///
+/// This error is returned by both [`new`] and [`new_with_prefix`] functions.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to create object store for {url}")]
+pub struct ObjectStoreCreationError {
+    url: String,
+    #[source]
+    source: object_store::Error,
+}
 
 /// A wrapper around an `ObjectStore`. There are a few things it helps us with over a plain
 /// `ObjectStore`:
@@ -22,12 +143,8 @@ use url::Url;
 #[derive(Debug, Clone)]
 pub struct Store {
     url: ObjectStoreUrl,
-    prefix: String,
-    store: Arc<PrefixStore<Arc<dyn ObjectStore>>>,
     unprefixed: Arc<dyn ObjectStore>,
-
-    /// `bucket` is `None` for local filesystem stores.
-    bucket: Option<String>,
+    prefixed: Arc<dyn ObjectStore>,
 }
 
 impl Store {
@@ -41,19 +158,14 @@ impl Store {
     ///
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
     pub fn new(url: ObjectStoreUrl) -> Result<Self, StoreError> {
-        let (unprefixed, bucket) =
-            object_store(&url).map_err(|err| StoreError::ObjectStoreCreation {
-                url: url.to_string(),
-                err,
-            })?;
-        let prefix = url.path().to_string();
-        let store = Arc::new(PrefixStore::new(unprefixed.clone(), prefix.as_str()));
+        let unprefixed: Arc<dyn ObjectStore> =
+            new(&url).map_err(StoreError::ObjectStoreCreation)?;
+        let prefixed: Arc<dyn ObjectStore> =
+            new_with_prefix(&url, url.path()).map_err(StoreError::ObjectStoreCreation)?;
         Ok(Self {
             url,
-            prefix,
-            store,
             unprefixed,
-            bucket,
+            prefixed,
         })
     }
 
@@ -61,103 +173,17 @@ impl Store {
         &self.url
     }
 
-    /// A store that will search for paths relative to the location provided in the constructor, as
-    /// would be expected.
-    pub fn prefixed_store(&self) -> Arc<dyn ObjectStore> {
-        self.store.clone()
-    }
-
     /// Returns the unprefixed store. Use this when you have a URL which already contains the prefix.
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.unprefixed.clone()
     }
 
-    pub async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
-        self.store.get_bytes(location).await
-    }
-
-    pub async fn get_string(&self, location: impl Into<Path>) -> Result<String, StoreError> {
-        self.store.get_string(location).await
-    }
-
-    pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {
-        self.store
-            .list(Some(&prefix.into()))
-            .map_err(StoreError::ObjectStore)
-            .boxed()
-    }
-
-    pub async fn list_all_shallow(&self) -> Result<Vec<ObjectMeta>, StoreError> {
-        Ok(self
-            .store
-            .list_with_delimiter(None)
-            .await
-            .map_err(StoreError::ObjectStore)?
-            .objects)
-    }
-
-    pub fn bucket(&self) -> Option<&str> {
-        self.bucket.as_deref()
+    /// A store that will search for paths relative to the location provided in the constructor, as
+    /// would be expected.
+    pub fn prefixed_store(&self) -> Arc<dyn ObjectStore> {
+        self.prefixed.clone()
     }
 }
-
-impl std::fmt::Display for Store {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "store with prefix {}", self.prefix)
-    }
-}
-
-/// Creates an object store instance from a validated URL.
-///
-/// This function takes an [`ObjectStoreUrl`] and returns the appropriate object store
-/// implementation based on the URL scheme. The returned tuple contains:
-/// - An `Arc<dyn ObjectStore>` - the object store implementation
-/// - An `Option<String>` - the bucket/container name, or `None` for local filesystem
-///
-/// See [`ObjectStoreUrl`] and [`ObjectStoreProvider`] for more details on supported schemes.
-///
-/// # Providers configuration
-///
-/// Cloud providers are configured via environment variables:
-/// - **AWS S3**: Uses `AWS_*` environment variables (e.g., `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-/// - **Google Cloud**: Uses `GOOGLE_*` environment variables or service account credentials
-/// - **Azure**: Uses `AZURE_*` environment variables (e.g., `AZURE_STORAGE_ACCOUNT_NAME`)
-pub fn object_store(
-    url: &ObjectStoreUrl,
-) -> Result<(Arc<dyn ObjectStore>, Option<String>), ObjectStoreCreationError> {
-    match url.provider() {
-        ObjectStoreProvider::GoogleCloudStorage => {
-            let builder = GoogleCloudStorageBuilder::from_env().with_url(url);
-            let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
-            let store = builder.build().map_err(ObjectStoreCreationError)?;
-            Ok((Arc::new(store), bucket))
-        }
-        ObjectStoreProvider::AmazonS3 => {
-            let builder = AmazonS3Builder::from_env().with_url(url);
-            let bucket = builder.get_config_value(&AmazonS3ConfigKey::Bucket);
-            let store = builder.build().map_err(ObjectStoreCreationError)?;
-            Ok((Arc::new(store), bucket))
-        }
-        ObjectStoreProvider::MicrosoftAzure => {
-            let builder = MicrosoftAzureBuilder::from_env().with_url(url);
-            let bucket = builder.get_config_value(&AzureConfigKey::ContainerName);
-            let store = builder.build().map_err(ObjectStoreCreationError)?;
-            Ok((Arc::new(store), bucket))
-        }
-        ObjectStoreProvider::Local => {
-            let store = LocalFileSystem::new();
-            Ok((Arc::new(store), None))
-        }
-    }
-}
-
-/// Error type for object store creation failures.
-///
-/// This error occurs when attempting to create an object store instance from a valid URL.
-/// Common causes include missing credentials, network issues, or configuration problems.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct ObjectStoreCreationError(object_store::Error);
 
 /// Extension trait for `ObjectStore` that provides convenient methods for common operations.
 ///
@@ -215,12 +241,8 @@ pub enum StoreError {
     ///
     /// This wraps [`ObjectStoreCreationError`] and occurs during store initialization.
     /// Common causes: missing credentials, invalid configuration, or network issues.
-    #[error("failed to create object store for {url}: {err}")]
-    ObjectStoreCreation {
-        url: String,
-        #[source]
-        err: ObjectStoreCreationError,
-    },
+    #[error("failed to create object store")]
+    ObjectStoreCreation(#[source] ObjectStoreCreationError),
 
     /// File contents are not valid UTF-8 text.
     ///
@@ -233,14 +255,6 @@ pub enum StoreError {
         #[source]
         err: std::string::FromUtf8Error,
     },
-
-    /// General runtime error from the underlying object store implementation.
-    ///
-    /// This error occurs for operations other than get/bytes, such as listing objects.
-    /// Common causes: network timeouts, permission denied, service unavailable,
-    /// or authentication token expiry.
-    #[error("object store error: {0}")]
-    ObjectStore(#[source] object_store::Error),
 
     /// Error getting object metadata or initiating object retrieval.
     ///
@@ -263,8 +277,7 @@ impl StoreError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            StoreError::ObjectStore(object_store::Error::NotFound { .. })
-                | StoreError::ObjectStoreGet(object_store::Error::NotFound { .. })
+            StoreError::ObjectStoreGet(object_store::Error::NotFound { .. })
                 | StoreError::ObjectStoreBytes(object_store::Error::NotFound { .. })
         )
     }
@@ -363,6 +376,12 @@ impl ObjectStoreUrl {
             s if ObjectStoreProvider::is_microsoft_azure(s) => ObjectStoreProvider::MicrosoftAzure,
             _ => unreachable!(), // We validate the scheme previously.
         }
+    }
+}
+
+impl AsRef<ObjectStoreUrl> for ObjectStoreUrl {
+    fn as_ref(&self) -> &ObjectStoreUrl {
+        self
     }
 }
 
