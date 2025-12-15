@@ -1,7 +1,14 @@
 //! Amp CC - Terminal UI for managing Amp datasets.
 
-use std::io;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
+use admin_client::{
+    jobs::JobInfo,
+    workers::{WorkerDetailResponse, WorkerInfo},
+};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -12,18 +19,27 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
+use worker::{job::JobId, node_id::NodeId};
 
 mod app;
 mod config;
 mod registry;
 mod ui;
 
-use app::{ActivePane, App, DataSource, InputMode, InspectResult};
+use app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+
+/// Auto-refresh interval for jobs/workers (10 seconds).
+const REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Events that can be sent from async tasks.
 enum AppEvent {
     ManifestLoaded(Option<serde_json::Value>),
+    JobsLoaded(Vec<JobInfo>),
+    WorkersLoaded(Vec<WorkerInfo>),
+    WorkerDetailLoaded(Option<WorkerDetailResponse>),
+    JobStopped(Result<(), String>),
+    JobDeleted(Result<(), String>),
     Error(String),
 }
 
@@ -37,6 +53,9 @@ async fn main() -> Result<()> {
         eprintln!("Failed to fetch datasets: {}", e);
         // Continue anyway to show UI
     }
+
+    // If starting in Local mode, also fetch jobs and workers
+    // (will be handled in run_app after channel is set up)
 
     // Setup terminal
     enable_raw_mode()?;
@@ -75,11 +94,24 @@ async fn run_app<B: ratatui::backend::Backend>(
     app.start_loading("Loading manifest...");
     spawn_fetch_manifest(app, tx.clone());
 
+    // If in Local mode, also fetch jobs and workers
+    if app.is_local() {
+        spawn_fetch_jobs(app, tx.clone());
+        spawn_fetch_workers(app, tx.clone());
+    }
+
     loop {
         // Tick spinner animation (only when loading)
         if app.loading {
             app.tick_spinner();
             app.needs_redraw = true;
+        }
+
+        // Auto-refresh jobs/workers in Local mode
+        if app.is_local() && app.last_refresh.elapsed() >= REFRESH_INTERVAL {
+            spawn_fetch_jobs(app, tx.clone());
+            spawn_fetch_workers(app, tx.clone());
+            app.last_refresh = Instant::now();
         }
 
         // Handle async updates
@@ -89,6 +121,52 @@ async fn run_app<B: ratatui::backend::Backend>(
                     app.reset_scroll();
                     app.current_inspect = manifest.as_ref().and_then(InspectResult::from_manifest);
                     app.current_manifest = manifest;
+                    app.content_view = ContentView::Dataset;
+                    app.stop_loading();
+                }
+                AppEvent::JobsLoaded(jobs) => {
+                    app.jobs = jobs;
+                    // Reset selection if out of bounds
+                    if app.selected_job_index >= app.jobs.len() && !app.jobs.is_empty() {
+                        app.selected_job_index = app.jobs.len() - 1;
+                    }
+                }
+                AppEvent::WorkersLoaded(workers) => {
+                    app.workers = workers;
+                    // Reset selection if out of bounds
+                    if app.selected_worker_index >= app.workers.len() && !app.workers.is_empty() {
+                        app.selected_worker_index = app.workers.len() - 1;
+                    }
+                }
+                AppEvent::WorkerDetailLoaded(detail) => {
+                    if let Some(worker_detail) = detail {
+                        app.content_view = ContentView::Worker(worker_detail);
+                        app.reset_scroll();
+                    }
+                    app.stop_loading();
+                }
+                AppEvent::JobStopped(result) => {
+                    match result {
+                        Ok(()) => {
+                            // Refresh jobs list after stopping
+                            spawn_fetch_jobs(app, tx.clone());
+                        }
+                        Err(msg) => {
+                            app.error_message = Some(msg);
+                        }
+                    }
+                    app.stop_loading();
+                }
+                AppEvent::JobDeleted(result) => {
+                    match result {
+                        Ok(()) => {
+                            // Refresh jobs list after deleting
+                            spawn_fetch_jobs(app, tx.clone());
+                        }
+                        Err(msg) => {
+                            app.error_message = Some(msg);
+                        }
+                    }
                     app.stop_loading();
                 }
                 AppEvent::Error(msg) => {
@@ -116,7 +194,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                                         let _ = tx.send(AppEvent::Error(e.to_string())).await;
                                     } else {
                                         app.start_loading("Loading manifest...");
-                                        spawn_fetch_manifest(app, tx);
+                                        spawn_fetch_manifest(app, tx.clone());
+                                        // Also fetch jobs and workers in Local mode
+                                        spawn_fetch_jobs(app, tx.clone());
+                                        spawn_fetch_workers(app, tx);
+                                        app.last_refresh = Instant::now();
                                     }
                                 }
                                 KeyCode::Char('2') => {
@@ -135,32 +217,124 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     app.input_mode = InputMode::Search;
                                 }
 
-                                // Refresh
+                                // Refresh - context sensitive
                                 KeyCode::Char('r') => {
                                     let tx = tx.clone();
-                                    app.start_loading("Refreshing...");
-                                    if let Err(e) = app.fetch_datasets().await {
-                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
-                                    } else {
-                                        app.start_loading("Loading manifest...");
-                                        spawn_fetch_manifest(app, tx);
+                                    match app.active_pane {
+                                        ActivePane::Datasets => {
+                                            app.start_loading("Refreshing datasets...");
+                                            if let Err(e) = app.fetch_datasets().await {
+                                                let _ =
+                                                    tx.send(AppEvent::Error(e.to_string())).await;
+                                            } else {
+                                                app.start_loading("Loading manifest...");
+                                                spawn_fetch_manifest(app, tx);
+                                            }
+                                        }
+                                        ActivePane::Jobs => {
+                                            spawn_fetch_jobs(app, tx);
+                                            app.last_refresh = Instant::now();
+                                        }
+                                        ActivePane::Workers => {
+                                            spawn_fetch_workers(app, tx);
+                                            app.last_refresh = Instant::now();
+                                        }
+                                        _ => {
+                                            // Refresh everything
+                                            app.start_loading("Refreshing...");
+                                            if let Err(e) = app.fetch_datasets().await {
+                                                let _ =
+                                                    tx.send(AppEvent::Error(e.to_string())).await;
+                                            } else {
+                                                spawn_fetch_manifest(app, tx.clone());
+                                                if app.is_local() {
+                                                    spawn_fetch_jobs(app, tx.clone());
+                                                    spawn_fetch_workers(app, tx);
+                                                    app.last_refresh = Instant::now();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Stop job (s key)
+                                KeyCode::Char('s') => {
+                                    if app.active_pane == ActivePane::Jobs {
+                                        if let Some(job) = app.get_selected_job() {
+                                            if App::can_stop_job(&job.status) {
+                                                let job_id = job.id;
+                                                app.start_loading("Stopping job...");
+                                                spawn_stop_job(app, job_id, tx.clone());
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Delete job (d key, only if not Ctrl+d)
+                                KeyCode::Char('d')
+                                    if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    if app.active_pane == ActivePane::Jobs {
+                                        if let Some(job) = app.get_selected_job() {
+                                            if App::is_job_terminal(&job.status) {
+                                                let job_id = job.id;
+                                                app.start_loading("Deleting job...");
+                                                spawn_delete_job(app, job_id, tx.clone());
+                                            }
+                                        }
                                     }
                                 }
 
                                 // Navigation
                                 KeyCode::Down | KeyCode::Char('j') => match app.active_pane {
-                                    ActivePane::Sidebar => {
+                                    ActivePane::Datasets => {
                                         app.select_next();
                                         app.start_loading("Loading manifest...");
                                         spawn_fetch_manifest(app, tx.clone());
                                     }
+                                    ActivePane::Jobs => {
+                                        app.select_next_job();
+                                        // Show job details in content pane
+                                        if let Some(job) = app.get_selected_job().cloned() {
+                                            app.content_view = ContentView::Job(job);
+                                            app.reset_scroll();
+                                        }
+                                    }
+                                    ActivePane::Workers => {
+                                        app.select_next_worker();
+                                        // Fetch and show worker details
+                                        if let Some(node_id) =
+                                            app.get_selected_worker().map(|w| w.node_id.clone())
+                                        {
+                                            app.start_loading("Loading worker details...");
+                                            spawn_fetch_worker_detail(app, &node_id, tx.clone());
+                                        }
+                                    }
                                     _ => app.scroll_down(),
                                 },
                                 KeyCode::Up | KeyCode::Char('k') => match app.active_pane {
-                                    ActivePane::Sidebar => {
+                                    ActivePane::Datasets => {
                                         app.select_previous();
                                         app.start_loading("Loading manifest...");
                                         spawn_fetch_manifest(app, tx.clone());
+                                    }
+                                    ActivePane::Jobs => {
+                                        app.select_previous_job();
+                                        // Show job details in content pane
+                                        if let Some(job) = app.get_selected_job().cloned() {
+                                            app.content_view = ContentView::Job(job);
+                                            app.reset_scroll();
+                                        }
+                                    }
+                                    ActivePane::Workers => {
+                                        app.select_previous_worker();
+                                        // Fetch and show worker details
+                                        if let Some(node_id) =
+                                            app.get_selected_worker().map(|w| w.node_id.clone())
+                                        {
+                                            app.start_loading("Loading worker details...");
+                                            spawn_fetch_worker_detail(app, &node_id, tx.clone());
+                                        }
                                     }
                                     _ => app.scroll_up(),
                                 },
@@ -177,22 +351,48 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     app.page_down(10);
                                 }
 
-                                // Expand/collapse
+                                // Expand/collapse or show details
                                 KeyCode::Enter => {
                                     let tx = tx.clone();
-                                    app.start_loading("Expanding...");
-                                    if let Err(e) = app.toggle_expand().await {
-                                        let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                                    match app.active_pane {
+                                        ActivePane::Datasets => {
+                                            app.start_loading("Expanding...");
+                                            if let Err(e) = app.toggle_expand().await {
+                                                let _ =
+                                                    tx.send(AppEvent::Error(e.to_string())).await;
+                                            }
+                                            app.stop_loading();
+                                        }
+                                        ActivePane::Jobs => {
+                                            // Show job details in content pane and focus Detail
+                                            if let Some(job) = app.get_selected_job().cloned() {
+                                                app.content_view = ContentView::Job(job);
+                                                app.reset_scroll();
+                                                app.active_pane = ActivePane::Detail;
+                                            }
+                                        }
+                                        ActivePane::Workers => {
+                                            // Fetch worker details and focus Detail
+                                            if let Some(node_id) =
+                                                app.get_selected_worker().map(|w| w.node_id.clone())
+                                            {
+                                                app.start_loading("Loading worker details...");
+                                                spawn_fetch_worker_detail(app, &node_id, tx);
+                                                app.active_pane = ActivePane::Detail;
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                    app.stop_loading();
                                 }
 
                                 // Pane navigation
                                 KeyCode::Tab => {
-                                    app.active_pane = app.active_pane.next();
+                                    let is_local = app.is_local();
+                                    app.active_pane = app.active_pane.next(is_local);
                                 }
                                 KeyCode::BackTab => {
-                                    app.active_pane = app.active_pane.prev();
+                                    let is_local = app.is_local();
+                                    app.active_pane = app.active_pane.prev(is_local);
                                 }
 
                                 _ => {}
@@ -251,9 +451,9 @@ async fn run_app<B: ratatui::backend::Backend>(
                         {
                             app.active_pane = ActivePane::Header;
                         } else if app.active_pane == ActivePane::Header {
-                            // If on splash and clicking main area, go to Sidebar
+                            // If on splash and clicking main area, go to Datasets
                             if y >= main_area.y && y < main_area.y + main_area.height {
-                                app.active_pane = ActivePane::Sidebar;
+                                app.active_pane = ActivePane::Datasets;
                             }
                         } else {
                             // Normal pane detection
@@ -269,36 +469,23 @@ async fn run_app<B: ratatui::backend::Backend>(
                             let sidebar_area = content_chunks[0];
                             let content_area = content_chunks[1];
 
-                            // Content layout: Manifest (60%) | Schema (40%)
-                            let pane_chunks = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Percentage(60),
-                                    Constraint::Percentage(40),
-                                ])
-                                .split(content_area);
-
-                            let manifest_area = pane_chunks[0];
-                            let schema_area = pane_chunks[1];
-
                             if x >= sidebar_area.x
                                 && x < sidebar_area.x + sidebar_area.width
                                 && y >= sidebar_area.y
                                 && y < sidebar_area.y + sidebar_area.height
                             {
-                                app.active_pane = ActivePane::Sidebar;
-                            } else if x >= manifest_area.x
-                                && x < manifest_area.x + manifest_area.width
-                                && y >= manifest_area.y
-                                && y < manifest_area.y + manifest_area.height
+                                // Clicked in sidebar - determine which section
+                                // For simplicity, default to Datasets for now
+                                // A more complete implementation would calculate section boundaries
+                                if !app.active_pane.is_sidebar_section() {
+                                    app.active_pane = ActivePane::Datasets;
+                                }
+                            } else if x >= content_area.x
+                                && x < content_area.x + content_area.width
+                                && y >= content_area.y
+                                && y < content_area.y + content_area.height
                             {
-                                app.active_pane = ActivePane::Manifest;
-                            } else if x >= schema_area.x
-                                && x < schema_area.x + schema_area.width
-                                && y >= schema_area.y
-                                && y < schema_area.y + schema_area.height
-                            {
-                                app.active_pane = ActivePane::Schema;
+                                app.active_pane = ActivePane::Detail;
                             }
                         }
                     }
@@ -367,4 +554,110 @@ fn spawn_fetch_manifest(app: &App, tx: mpsc::Sender<AppEvent>) {
             });
         }
     }
+}
+
+fn spawn_fetch_jobs(app: &App, tx: mpsc::Sender<AppEvent>) {
+    let client = app.local_client.clone();
+    tokio::spawn(async move {
+        match client.jobs().list(None, None, None).await {
+            Ok(response) => {
+                let _ = tx.send(AppEvent::JobsLoaded(response.jobs)).await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::Error(format!("Failed to fetch jobs: {}", e)))
+                    .await;
+            }
+        }
+    });
+}
+
+fn spawn_fetch_workers(app: &App, tx: mpsc::Sender<AppEvent>) {
+    let client = app.local_client.clone();
+    tokio::spawn(async move {
+        match client.workers().list().await {
+            Ok(response) => {
+                let _ = tx.send(AppEvent::WorkersLoaded(response.workers)).await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::Error(format!("Failed to fetch workers: {}", e)))
+                    .await;
+            }
+        }
+    });
+}
+
+fn spawn_fetch_worker_detail(app: &App, node_id: &str, tx: mpsc::Sender<AppEvent>) {
+    let client = app.local_client.clone();
+    let node_id: NodeId = match node_id.parse() {
+        Ok(id) => id,
+        Err(e) => {
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                let _ = tx_clone
+                    .send(AppEvent::Error(format!("Invalid node ID: {}", e)))
+                    .await;
+            });
+            return;
+        }
+    };
+    tokio::spawn(async move {
+        match client.workers().get(&node_id).await {
+            Ok(Some(detail)) => {
+                let _ = tx.send(AppEvent::WorkerDetailLoaded(Some(detail))).await;
+            }
+            Ok(None) => {
+                let _ = tx
+                    .send(AppEvent::Error("Worker not found".to_string()))
+                    .await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::Error(format!(
+                        "Failed to fetch worker details: {}",
+                        e
+                    )))
+                    .await;
+            }
+        }
+    });
+}
+
+fn spawn_stop_job(app: &App, job_id: JobId, tx: mpsc::Sender<AppEvent>) {
+    let client = app.local_client.clone();
+    tokio::spawn(async move {
+        match client.jobs().stop(&job_id).await {
+            Ok(()) => {
+                let _ = tx.send(AppEvent::JobStopped(Ok(()))).await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::JobStopped(Err(format!(
+                        "Failed to stop job: {}",
+                        e
+                    ))))
+                    .await;
+            }
+        }
+    });
+}
+
+fn spawn_delete_job(app: &App, job_id: JobId, tx: mpsc::Sender<AppEvent>) {
+    let client = app.local_client.clone();
+    tokio::spawn(async move {
+        match client.jobs().delete_by_id(&job_id).await {
+            Ok(()) => {
+                let _ = tx.send(AppEvent::JobDeleted(Ok(()))).await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::JobDeleted(Err(format!(
+                        "Failed to delete job: {}",
+                        e
+                    ))))
+                    .await;
+            }
+        }
+    });
 }

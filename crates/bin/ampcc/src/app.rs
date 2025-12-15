@@ -1,8 +1,12 @@
 //! Application state and business logic.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use admin_client::Client;
+use admin_client::{
+    Client,
+    jobs::JobInfo,
+    workers::{WorkerDetailResponse, WorkerInfo},
+};
 use anyhow::{Context, Result};
 use ratatui::widgets::ScrollbarState;
 use url::Url;
@@ -17,34 +21,82 @@ pub enum InputMode {
 }
 
 /// Active pane for focus tracking.
+/// In Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
+/// In Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivePane {
     Header,
-    Sidebar,
-    Manifest,
-    Schema,
+    Datasets,
+    Jobs,     // Local only
+    Workers,  // Local only
+    Manifest, // Dataset manifest pane (content area)
+    Schema,   // Dataset schema pane (content area)
+    Detail,   // Job/Worker detail view (Local only)
 }
 
 impl ActivePane {
     /// Cycle to the next pane.
-    pub fn next(self) -> Self {
+    /// Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
+    /// Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
+    pub fn next(self, is_local: bool) -> Self {
         match self {
-            ActivePane::Header => ActivePane::Sidebar,
-            ActivePane::Sidebar => ActivePane::Manifest,
+            ActivePane::Header => ActivePane::Datasets,
+            ActivePane::Datasets => {
+                if is_local {
+                    ActivePane::Jobs
+                } else {
+                    ActivePane::Manifest
+                }
+            }
+            ActivePane::Jobs => ActivePane::Workers,
+            ActivePane::Workers => ActivePane::Detail,
             ActivePane::Manifest => ActivePane::Schema,
             ActivePane::Schema => ActivePane::Header,
+            ActivePane::Detail => ActivePane::Header,
         }
     }
 
     /// Cycle to the previous pane.
-    pub fn prev(self) -> Self {
+    /// Local mode: Header -> Detail -> Workers -> Jobs -> Datasets -> Header
+    /// Registry mode: Header -> Schema -> Manifest -> Datasets -> Header
+    pub fn prev(self, is_local: bool) -> Self {
         match self {
-            ActivePane::Header => ActivePane::Schema,
-            ActivePane::Sidebar => ActivePane::Header,
-            ActivePane::Manifest => ActivePane::Sidebar,
+            ActivePane::Header => {
+                if is_local {
+                    ActivePane::Detail
+                } else {
+                    ActivePane::Schema
+                }
+            }
+            ActivePane::Datasets => ActivePane::Header,
+            ActivePane::Jobs => ActivePane::Datasets,
+            ActivePane::Workers => ActivePane::Jobs,
+            ActivePane::Manifest => ActivePane::Datasets,
             ActivePane::Schema => ActivePane::Manifest,
+            ActivePane::Detail => ActivePane::Workers,
         }
     }
+
+    /// Check if this pane is one of the sidebar sections.
+    pub fn is_sidebar_section(self) -> bool {
+        matches!(
+            self,
+            ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers
+        )
+    }
+}
+
+/// What content is displayed in the detail pane.
+#[derive(Debug, Clone)]
+pub enum ContentView {
+    /// Dataset manifest and schema (existing behavior)
+    Dataset,
+    /// Job details
+    Job(JobInfo),
+    /// Worker details
+    Worker(WorkerDetailResponse),
+    /// Nothing selected
+    None,
 }
 
 /// Data source for datasets.
@@ -263,7 +315,21 @@ pub struct App {
     // Key: dataset index in filtered_datasets, Value: selected version index
     pub selected_version_indices: HashMap<usize, usize>,
 
-    // Manifest state
+    // Jobs state (Local mode only)
+    pub jobs: Vec<JobInfo>,
+    pub selected_job_index: usize,
+
+    // Workers state (Local mode only)
+    pub workers: Vec<WorkerInfo>,
+    pub selected_worker_index: usize,
+
+    // Content view state - what's shown in the detail pane
+    pub content_view: ContentView,
+
+    // Auto-refresh timer for jobs/workers
+    pub last_refresh: Instant,
+
+    // Manifest state (for Dataset content view)
     pub current_manifest: Option<serde_json::Value>,
     pub current_inspect: Option<InspectResult>,
 
@@ -280,10 +346,13 @@ pub struct App {
     pub manifest_scroll_state: ScrollbarState,
     pub schema_scroll: u16,
     pub schema_scroll_state: ScrollbarState,
+    pub detail_scroll: u16,
+    pub detail_scroll_state: ScrollbarState,
 
     // Content length for scroll bounds
     pub manifest_content_length: usize,
     pub schema_content_length: usize,
+    pub detail_content_length: usize,
 
     // Redraw flag for CPU optimization
     pub needs_redraw: bool,
@@ -310,12 +379,18 @@ impl App {
             current_source: default_source,
             should_quit: false,
             input_mode: InputMode::Normal,
-            active_pane: ActivePane::Sidebar,
+            active_pane: ActivePane::Datasets,
             search_query: String::new(),
             datasets: Vec::new(),
             filtered_datasets: Vec::new(),
             selected_index: 0,
             selected_version_indices: HashMap::new(),
+            jobs: Vec::new(),
+            selected_job_index: 0,
+            workers: Vec::new(),
+            selected_worker_index: 0,
+            content_view: ContentView::None,
+            last_refresh: Instant::now(),
             current_manifest: None,
             current_inspect: None,
             loading: false,
@@ -326,8 +401,11 @@ impl App {
             manifest_scroll_state: ScrollbarState::default(),
             schema_scroll: 0,
             schema_scroll_state: ScrollbarState::default(),
+            detail_scroll: 0,
+            detail_scroll_state: ScrollbarState::default(),
             manifest_content_length: 0,
             schema_content_length: 0,
+            detail_content_length: 0,
             needs_redraw: true,
         })
     }
@@ -380,7 +458,13 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Sidebar => {}
+            ActivePane::Detail => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                self.detail_scroll_state = self
+                    .detail_scroll_state
+                    .position(self.detail_scroll as usize);
+            }
+            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
         }
     }
 
@@ -405,7 +489,16 @@ impl App {
                         .position(self.schema_scroll as usize);
                 }
             }
-            ActivePane::Header | ActivePane::Sidebar => {}
+            ActivePane::Detail => {
+                let max_scroll = self.detail_content_length.saturating_sub(1);
+                if (self.detail_scroll as usize) < max_scroll {
+                    self.detail_scroll = self.detail_scroll.saturating_add(1);
+                    self.detail_scroll_state = self
+                        .detail_scroll_state
+                        .position(self.detail_scroll as usize);
+                }
+            }
+            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
         }
     }
 
@@ -415,8 +508,11 @@ impl App {
         self.manifest_scroll_state = ScrollbarState::default();
         self.schema_scroll = 0;
         self.schema_scroll_state = ScrollbarState::default();
+        self.detail_scroll = 0;
+        self.detail_scroll_state = ScrollbarState::default();
         self.manifest_content_length = 0;
         self.schema_content_length = 0;
+        self.detail_content_length = 0;
     }
 
     /// Page up in the focused pane.
@@ -434,7 +530,13 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Sidebar => {}
+            ActivePane::Detail => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(page_size);
+                self.detail_scroll_state = self
+                    .detail_scroll_state
+                    .position(self.detail_scroll as usize);
+            }
+            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
         }
     }
 
@@ -458,7 +560,14 @@ impl App {
                     .schema_scroll_state
                     .position(self.schema_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Sidebar => {}
+            ActivePane::Detail => {
+                let max_scroll = self.detail_content_length.saturating_sub(1) as u16;
+                self.detail_scroll = self.detail_scroll.saturating_add(page_size).min(max_scroll);
+                self.detail_scroll_state = self
+                    .detail_scroll_state
+                    .position(self.detail_scroll as usize);
+            }
+            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
         }
     }
 
@@ -550,7 +659,84 @@ impl App {
         self.selected_version_indices.clear();
         self.current_manifest = None;
 
+        // Clear jobs/workers when switching away from Local
+        if source == DataSource::Registry {
+            self.jobs.clear();
+            self.workers.clear();
+            self.selected_job_index = 0;
+            self.selected_worker_index = 0;
+            self.content_view = ContentView::None;
+            // If currently on Jobs or Workers pane, switch to Datasets
+            if matches!(self.active_pane, ActivePane::Jobs | ActivePane::Workers) {
+                self.active_pane = ActivePane::Datasets;
+            }
+        }
+
         self.fetch_datasets().await
+    }
+
+    /// Check if the current source is Local.
+    pub fn is_local(&self) -> bool {
+        self.current_source == DataSource::Local
+    }
+
+    /// Select the next job.
+    pub fn select_next_job(&mut self) {
+        if !self.jobs.is_empty() {
+            self.selected_job_index = (self.selected_job_index + 1) % self.jobs.len();
+        }
+    }
+
+    /// Select the previous job.
+    pub fn select_previous_job(&mut self) {
+        if !self.jobs.is_empty() {
+            if self.selected_job_index == 0 {
+                self.selected_job_index = self.jobs.len() - 1;
+            } else {
+                self.selected_job_index -= 1;
+            }
+        }
+    }
+
+    /// Select the next worker.
+    pub fn select_next_worker(&mut self) {
+        if !self.workers.is_empty() {
+            self.selected_worker_index = (self.selected_worker_index + 1) % self.workers.len();
+        }
+    }
+
+    /// Select the previous worker.
+    pub fn select_previous_worker(&mut self) {
+        if !self.workers.is_empty() {
+            if self.selected_worker_index == 0 {
+                self.selected_worker_index = self.workers.len() - 1;
+            } else {
+                self.selected_worker_index -= 1;
+            }
+        }
+    }
+
+    /// Get the currently selected job.
+    pub fn get_selected_job(&self) -> Option<&JobInfo> {
+        self.jobs.get(self.selected_job_index)
+    }
+
+    /// Get the currently selected worker.
+    pub fn get_selected_worker(&self) -> Option<&WorkerInfo> {
+        self.workers.get(self.selected_worker_index)
+    }
+
+    /// Check if a job status is terminal (completed, stopped, failed).
+    pub fn is_job_terminal(status: &str) -> bool {
+        matches!(
+            status.to_lowercase().as_str(),
+            "completed" | "stopped" | "failed" | "error"
+        )
+    }
+
+    /// Check if a job can be stopped (not terminal).
+    pub fn can_stop_job(status: &str) -> bool {
+        !Self::is_job_terminal(status)
     }
 
     /// Update the filtered datasets based on search query.

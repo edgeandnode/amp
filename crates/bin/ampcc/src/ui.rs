@@ -4,6 +4,7 @@
 
 use std::sync::LazyLock;
 
+use admin_client::{jobs::JobInfo, workers::WorkerDetailResponse};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -15,7 +16,7 @@ use ratatui::{
 };
 use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
-use crate::app::{ActivePane, App, DataSource, InputMode, InspectResult};
+use crate::app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
 
 // ============================================================================
 // The Graph Color Palette
@@ -337,8 +338,214 @@ fn draw_main(f: &mut Frame, app: &mut App, area: Rect) {
         ])
         .split(area);
 
-    draw_sidebar(f, app, chunks[0]);
+    // In Local mode, split sidebar into three sections
+    if app.current_source == DataSource::Local {
+        draw_sidebar_local(f, app, chunks[0]);
+    } else {
+        draw_sidebar(f, app, chunks[0]);
+    }
     draw_content(f, app, chunks[1]);
+}
+
+/// Draw the sidebar with three sections for Local mode (Datasets, Jobs, Workers).
+fn draw_sidebar_local(f: &mut Frame, app: &mut App, area: Rect) {
+    // Split sidebar vertically into three sections
+    let sidebar_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50), // Datasets
+            Constraint::Percentage(25), // Jobs
+            Constraint::Percentage(25), // Workers
+        ])
+        .split(area);
+
+    draw_datasets_section(f, app, sidebar_chunks[0]);
+    draw_jobs_section(f, app, sidebar_chunks[1]);
+    draw_workers_section(f, app, sidebar_chunks[2]);
+}
+
+/// Draw the datasets section in the sidebar.
+fn draw_datasets_section(f: &mut Frame, app: &App, area: Rect) {
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut selected_flat_index: Option<usize> = None;
+    let mut current_flat_index = 0;
+
+    for dataset in app.filtered_datasets.iter() {
+        // Check if this dataset is selected
+        if current_flat_index == app.selected_index {
+            selected_flat_index = Some(items.len());
+        }
+
+        // Dataset line with expand/collapse indicator
+        let expand_indicator = if dataset.expanded { "▾ " } else { "▸ " };
+        let version_str = dataset
+            .latest_version
+            .as_ref()
+            .map(|v| format!(" @{}", v))
+            .unwrap_or_default();
+
+        let dataset_line = Line::from(vec![
+            Span::styled(expand_indicator, Theme::text_secondary()),
+            Span::styled(format!("{}/", dataset.namespace), Theme::text_secondary()),
+            Span::styled(
+                dataset.name.clone(),
+                Theme::text_primary().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(version_str, Theme::version_tag()),
+        ]);
+
+        items.push(ListItem::new(dataset_line));
+        current_flat_index += 1;
+
+        // If expanded, show versions
+        if dataset.expanded {
+            if let Some(versions) = &dataset.versions {
+                for (version_idx, version) in versions.iter().enumerate() {
+                    // Check if this version is selected
+                    if current_flat_index == app.selected_index {
+                        selected_flat_index = Some(items.len());
+                    }
+
+                    let status_style = match version.status.as_str() {
+                        "published" | "active" => Theme::status_success(),
+                        "draft" => Theme::status_warning(),
+                        "deprecated" | "archived" => Theme::status_archived(),
+                        _ => Theme::text_secondary(),
+                    };
+
+                    let latest_str = if version.is_latest { " (latest)" } else { "" };
+
+                    let is_last = version_idx == versions.len() - 1;
+                    let prefix = if is_last {
+                        "  └── "
+                    } else {
+                        "  ├── "
+                    };
+
+                    let version_line = Line::from(vec![
+                        Span::styled(prefix, Theme::text_secondary()),
+                        Span::raw(&version.version_tag),
+                        Span::styled(latest_str, Theme::version_tag()),
+                        Span::raw(" ["),
+                        Span::styled(&version.status, status_style),
+                        Span::raw("]"),
+                    ]);
+
+                    items.push(ListItem::new(version_line));
+                    current_flat_index += 1;
+                }
+            }
+        }
+    }
+
+    let title = format!("Datasets ({})", app.filtered_datasets.len());
+    let border_style = if app.active_pane == ActivePane::Datasets {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    state.select(selected_flat_index);
+
+    f.render_stateful_widget(list, area, &mut state);
+}
+
+/// Draw the jobs section in the sidebar.
+fn draw_jobs_section(f: &mut Frame, app: &App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .jobs
+        .iter()
+        .map(|job| {
+            let status_icon = match job.status.to_lowercase().as_str() {
+                "running" => "▶",
+                "scheduled" => "◷",
+                "completed" => "✓",
+                "stopped" | "failed" => "✗",
+                _ => "?",
+            };
+            let status_style = job_status_style(&job.status);
+
+            let line = Line::from(vec![
+                Span::styled(format!("{} ", status_icon), status_style),
+                Span::styled(format!("Job {}", job.id), Theme::text_primary()),
+                Span::styled(format!(" [{}]", job.status), status_style),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let title = format!("Jobs ({})", app.jobs.len());
+    let border_style = if app.active_pane == ActivePane::Jobs {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    if !app.jobs.is_empty() {
+        state.select(Some(app.selected_job_index));
+    }
+
+    f.render_stateful_widget(list, area, &mut state);
+}
+
+/// Draw the workers section in the sidebar.
+fn draw_workers_section(f: &mut Frame, app: &App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .workers
+        .iter()
+        .map(|worker| {
+            let line = Line::from(vec![
+                Span::styled("● ", Theme::status_success()),
+                Span::styled(truncate_node_id(&worker.node_id, 25), Theme::text_primary()),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let title = format!("Workers ({})", app.workers.len());
+    let border_style = if app.active_pane == ActivePane::Workers {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    if !app.workers.is_empty() {
+        state.select(Some(app.selected_worker_index));
+    }
+
+    f.render_stateful_widget(list, area, &mut state);
 }
 
 /// Draw the sidebar with dataset tree.
@@ -416,7 +623,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = format!("Datasets ({})", app.filtered_datasets.len());
-    let border_style = if app.active_pane == ActivePane::Sidebar {
+    let border_style = if app.active_pane == ActivePane::Datasets {
         Theme::border_focused()
     } else {
         Theme::border_unfocused()
@@ -469,19 +676,213 @@ fn highlight_json(json_str: &str) -> Vec<Line<'static>> {
     lines
 }
 
-/// Draw the content pane with manifest and inspect.
+/// Draw the content pane based on ContentView.
 fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
-    // Split content vertically: Manifest (60%) | Inspect (40%)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(60), // Manifest
-            Constraint::Percentage(40), // Inspect
-        ])
-        .split(area);
+    match &app.content_view {
+        ContentView::Dataset => {
+            // Split content vertically: Manifest (60%) | Inspect (40%)
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(60), // Manifest
+                    Constraint::Percentage(40), // Inspect
+                ])
+                .split(area);
 
-    draw_manifest(f, app, chunks[0]);
-    draw_inspect(f, app, chunks[1]);
+            draw_manifest(f, app, chunks[0]);
+            draw_inspect(f, app, chunks[1]);
+        }
+        ContentView::Job(job) => {
+            draw_job_detail(f, app, job.clone(), area);
+        }
+        ContentView::Worker(worker) => {
+            draw_worker_detail(f, app, worker.clone(), area);
+        }
+        ContentView::None => {
+            draw_empty_content(f, area);
+        }
+    }
+}
+
+/// Draw empty content placeholder.
+fn draw_empty_content(f: &mut Frame, area: Rect) {
+    let block = Block::default()
+        .title("Details")
+        .borders(Borders::ALL)
+        .border_style(Theme::border_unfocused());
+
+    let text = Paragraph::new("Select an item to view details...")
+        .block(block)
+        .style(Theme::text_secondary())
+        .alignment(Alignment::Center);
+
+    f.render_widget(text, area);
+}
+
+/// Draw job detail view.
+fn draw_job_detail(f: &mut Frame, app: &mut App, job: JobInfo, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::Detail {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let title = format!("Job: {}", job.id);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Build job details
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Status with color
+    let status_style = job_status_style(&job.status);
+    lines.push(Line::from(vec![
+        Span::styled("Status: ", Theme::text_secondary()),
+        Span::styled(&job.status, status_style),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Node ID
+    lines.push(Line::from(vec![
+        Span::styled("Node ID: ", Theme::text_secondary()),
+        Span::styled(&job.node_id, Theme::text_primary()),
+    ]));
+
+    // Timestamps
+    lines.push(Line::from(vec![
+        Span::styled("Created: ", Theme::text_secondary()),
+        Span::styled(&job.created_at, Theme::text_primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Updated: ", Theme::text_secondary()),
+        Span::styled(&job.updated_at, Theme::text_primary()),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Descriptor:",
+        Theme::text_secondary(),
+    )));
+    lines.push(Line::from(""));
+
+    // Descriptor JSON with syntax highlighting
+    let descriptor_str = serde_json::to_string_pretty(&job.descriptor)
+        .unwrap_or_else(|_| "Invalid JSON".to_string());
+    let highlighted = highlight_json(&descriptor_str);
+    lines.extend(highlighted);
+
+    // Update content length for scroll bounds
+    app.detail_content_length = lines.len();
+    app.detail_scroll_state = app.detail_scroll_state.content_length(lines.len());
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.detail_scroll, 0));
+    f.render_widget(paragraph, area);
+
+    // Render scrollbar
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+    f.render_stateful_widget(scrollbar, area, &mut app.detail_scroll_state);
+}
+
+/// Draw worker detail view.
+fn draw_worker_detail(f: &mut Frame, app: &mut App, worker: WorkerDetailResponse, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::Detail {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let title = format!("Worker: {}", truncate_node_id(&worker.node_id, 20));
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Node ID
+    lines.push(Line::from(vec![
+        Span::styled("Node ID: ", Theme::text_secondary()),
+        Span::styled(&worker.node_id, Theme::text_primary()),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Timestamps
+    lines.push(Line::from(vec![
+        Span::styled("Created: ", Theme::text_secondary()),
+        Span::styled(&worker.created_at, Theme::text_primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Registered: ", Theme::text_secondary()),
+        Span::styled(&worker.registered_at, Theme::text_primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Last Heartbeat: ", Theme::text_secondary()),
+        Span::styled(&worker.heartbeat_at, Theme::status_success()),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Build Information:",
+        Theme::text_secondary(),
+    )));
+    lines.push(Line::from(""));
+
+    // Worker metadata
+    lines.push(Line::from(vec![
+        Span::styled("  Version: ", Theme::text_secondary()),
+        Span::styled(&worker.info.version, Theme::version_tag()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Commit SHA: ", Theme::text_secondary()),
+        Span::styled(&worker.info.commit_sha, Theme::text_primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Commit Time: ", Theme::text_secondary()),
+        Span::styled(&worker.info.commit_timestamp, Theme::text_primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Build Date: ", Theme::text_secondary()),
+        Span::styled(&worker.info.build_date, Theme::text_primary()),
+    ]));
+
+    // Update content length for scroll bounds
+    app.detail_content_length = lines.len();
+    app.detail_scroll_state = app.detail_scroll_state.content_length(lines.len());
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.detail_scroll, 0));
+    f.render_widget(paragraph, area);
+
+    // Render scrollbar
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+    f.render_stateful_widget(scrollbar, area, &mut app.detail_scroll_state);
+}
+
+/// Get style for job status.
+fn job_status_style(status: &str) -> Style {
+    match status.to_lowercase().as_str() {
+        "running" => Theme::status_success(),
+        "scheduled" => Theme::status_warning(),
+        "completed" => Theme::text_secondary(),
+        "stopped" | "failed" => Theme::status_error(),
+        _ => Theme::text_primary(),
+    }
+}
+
+/// Truncate node ID for display.
+fn truncate_node_id(node_id: &str, max_len: usize) -> String {
+    if node_id.len() <= max_len {
+        node_id.to_string()
+    } else {
+        format!("{}...", &node_id[..max_len - 3])
+    }
 }
 
 /// Draw the manifest pane.
@@ -626,9 +1027,19 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             DataSource::Local => "[1]Local [2]Registry",
             DataSource::Registry => "[1]Local [2]Registry",
         };
+
+        // Context-sensitive keybindings based on active pane
+        let context_keys = match app.active_pane {
+            ActivePane::Jobs => "[s] Stop [d] Delete [r] Refresh",
+            ActivePane::Workers => "[r] Refresh",
+            ActivePane::Datasets => "[Enter] Expand [r] Refresh",
+            ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
+            ActivePane::Header => "[Tab] Navigate",
+        };
+
         format!(
-            "{} | '/' search | 'r' refresh | Enter expand | 'j/k' nav | 'q' quit",
-            source_hint
+            "{} | {} | '/' search | 'j/k' nav | Tab cycle | 'q' quit",
+            source_hint, context_keys
         )
     };
 

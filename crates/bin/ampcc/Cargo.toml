@@ -10,6 +10,7 @@ crossterm = "0.29.0"
 ratatui = "0.29.0"
 tokio.workspace = true
 admin-client = { path = "../../admin-client" }
+worker = { path = "../../services/worker" }
 serde.workspace = true
 figment.workspace = true
 directories = "5.0"
