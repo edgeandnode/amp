@@ -76,10 +76,11 @@ async fn run_app<B: ratatui::backend::Backend>(
     spawn_fetch_manifest(app, tx.clone());
 
     loop {
-        terminal.draw(|f| ui::draw(f, app))?;
-
-        // Tick spinner animation
-        app.tick_spinner();
+        // Tick spinner animation (only when loading)
+        if app.loading {
+            app.tick_spinner();
+            app.needs_redraw = true;
+        }
 
         // Handle async updates
         if let Ok(event) = rx.try_recv() {
@@ -95,6 +96,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                     app.stop_loading();
                 }
             }
+            app.needs_redraw = true;
         }
 
         // Handle Input
@@ -303,6 +305,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                 }
                 _ => {}
             }
+            app.needs_redraw = true;
+        }
+
+        // Only draw when needed (reduces CPU usage from ~20% to near 0% when idle)
+        if app.needs_redraw {
+            terminal.draw(|f| ui::draw(f, app))?;
+            app.needs_redraw = false;
         }
 
         if app.should_quit {

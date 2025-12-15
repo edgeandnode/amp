@@ -284,6 +284,9 @@ pub struct App {
     // Content length for scroll bounds
     pub manifest_content_length: usize,
     pub schema_content_length: usize,
+
+    // Redraw flag for CPU optimization
+    pub needs_redraw: bool,
 }
 
 impl App {
@@ -325,6 +328,7 @@ impl App {
             schema_scroll_state: ScrollbarState::default(),
             manifest_content_length: 0,
             schema_content_length: 0,
+            needs_redraw: true,
         })
     }
 
