@@ -18,7 +18,7 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use common::store::{ObjectStoreExt as _, ObjectStoreUrl, object_store};
+use common::store::{self, ObjectStoreExt as _, ObjectStoreUrl};
 use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 
@@ -101,8 +101,8 @@ pub async fn run(
 #[tracing::instrument(skip_all)]
 async fn load_provider(provider_path: &ProviderFilePath) -> Result<String, Error> {
     // Create object store from the URL
-    let (store, _) =
-        object_store(provider_path.as_url()).map_err(|source| Error::ObjectStoreCreation {
+    let store =
+        store::new(provider_path.as_url()).map_err(|source| Error::ObjectStoreCreation {
             path: provider_path.to_string(),
             source,
         })?;
