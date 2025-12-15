@@ -21,13 +21,27 @@ static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// ASCII art logo for splash screen (displayed when Header pane is focused).
 const AMP_LOGO: &str = r#"
-     _    __  __ ____
-    / \  |  \/  |  _ \
-   / _ \ | |\/| | |_) |
-  / ___ \| |  | |  __/
- /_/   \_\_|  |_|_|
+                    ▒█░                     
+                   ▒███░                    
+                  ▒█████░                   
+                 ░▓██░██▓░                  
+                ░▓██░ ░██▓░                 
+               ░▓██░   ░██▓░                
+              ░▓██▒     ░██▓░               
+             ░▓██▒       ▒██▓░              
+            ░▓██▒         ▒██▓░             
+            ▓███▒░       ░▓███▒░            
+           ▓██▓▓██▒░   ░▒██▓▓██▒            
+          ▓██▒ ░▓███▒ ▒███▓░░▒██▒           
+         ▓██▓   ░▓███████▓░  ░▓██▒          
+        ▒██▓     ▒▓█████▓░     ▓██▒         
+       ░░░░       ▒█████░       ░░░░        
+                   ▒███░                    
+                    ▒█░                     
+                     ░                      
 
-  Dataset Control Center
+AMP Command & Control
+The Graph
 "#;
 
 /// Main draw function.
