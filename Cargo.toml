@@ -147,5 +147,9 @@ tonic = { version = "0.13", features = [
 ] }
 tonic-build = "0.13"
 
+[profile.dev]
+# Locally measured to reduce total wall clock time of `cargo build` by 34%
+debug = "line-tables-only"
+
 [profile.release]
 debug = "line-tables-only"
