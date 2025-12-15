@@ -23,7 +23,6 @@ use datasets_common::{
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
-use tracing::{debug, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -199,7 +198,12 @@ pub async fn register_new_table_revision(
     dataset: HashReference,
     table: ResolvedTable,
 ) -> Result<PhysicalTable, RegisterNewTableRevisionError> {
-    let url = make_table_url(data_store, dataset.name(), table.name());
+    let url = PhyTableUrl::new(
+        data_store.url(),
+        dataset.name(),
+        table.name(),
+        Uuid::now_v7(),
+    );
 
     let mut tx = metadata_db
         .begin_txn()
@@ -344,32 +348,6 @@ pub struct PhysicalTable {
 
 // Methods for creating and managing PhysicalTable instances
 impl PhysicalTable {
-    /// Create a new physical table with the given dataset name, table, URL, and object store.
-    pub fn new(
-        table: ResolvedTable,
-        raw_url: Url,
-        location_id: LocationId,
-        metadata_db: MetadataDb,
-        dataset_reference: HashReference,
-    ) -> Result<Self, BoxError> {
-        let path = Path::from_url_path(raw_url.path()).unwrap();
-        let object_store_url = raw_url.clone().try_into()?;
-        let (object_store, _) = crate::store::object_store(&object_store_url)?;
-
-        // SAFETY: URL is validated by caller
-        let url = PhyTableUrl::new_unchecked(raw_url);
-
-        Ok(Self {
-            table,
-            url,
-            path,
-            location_id,
-            metadata_db,
-            object_store,
-            dataset: dataset_reference,
-        })
-    }
-
     /// Attempts to restore the latest revision of a table from the data store.
     /// If the table is not found, it returns `None`.
     pub async fn restore_latest_revision(
@@ -388,7 +366,7 @@ impl PhysicalTable {
             .map_err(RestoreLatestRevisionError::UrlConstruction)?;
         let path = Path::from_url_path(url.path()).unwrap();
 
-        debug!("Restoring latest revision in prefix {}", path);
+        tracing::debug!("Restoring latest revision in prefix {}", path);
 
         let revisions = list_revisions(&data_store, &prefix, &path)
             .await
@@ -862,11 +840,11 @@ impl TableProvider for TableSnapshot {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        debug!("creating scan execution plan");
+        tracing::debug!("creating scan execution plan");
 
         if self.synced_range().is_none() {
             // This is necessary to work around empty tables tripping the DF sanity checker
-            debug!("table has no synced data, returning empty execution plan");
+            tracing::debug!("table has no synced data, returning empty execution plan");
             let projected_schema = project_schema(&self.schema(), projection)?;
             return Ok(Arc::new(EmptyExec::new(projected_schema)));
         }
@@ -882,7 +860,7 @@ impl TableProvider for TableSnapshot {
         };
         if statistics.num_rows == Precision::Absent {
             // This log likely signifies a bug in our statistics fetching.
-            warn!("Table has no row count statistics. Queries may be inefficient.");
+            tracing::warn!("Table has no row count statistics. Queries may be inefficient.");
         }
 
         let output_ordering = self.physical_table.output_ordering()?;
@@ -1054,23 +1032,6 @@ pub enum RestoreLatestRevisionError {
     RestoreLatest(#[source] RestoreLatestError),
 }
 
-/// Constructs a unique table URL for a new revision.
-///
-/// The URL follows the structure: `<store_url>/<dataset_name>/<table>/<UUIDv7>/`
-///
-/// Where:
-/// - `store_url`: Object store root URL from `data_store` (e.g., `s3://bucket`, `file:///data`)
-/// - `dataset_name`: Dataset name without namespace
-/// - `table`: Table name
-/// - `UUIDv7`: Time-ordered unique identifier
-fn make_table_url(data_store: &Store, dataset_name: &Name, table_name: &TableName) -> PhyTableUrl {
-    let path = format!("{}/{}/{}/", dataset_name, table_name, Uuid::now_v7());
-    // SAFETY: Path components (Name, TableName, Uuid) contain only URL-safe characters
-    let raw_url = data_store.url().join(&path).expect("path is URL-safe");
-    // SAFETY: URL comes from data_store.url().join() which produces valid URLs
-    PhyTableUrl::new_unchecked(raw_url)
-}
-
 /// Physical table URL _new-type_ wrapper
 ///
 /// Represents a base directory URL in the object store containing all parquet files for a table.
@@ -1078,23 +1039,45 @@ fn make_table_url(data_store: &Store, dataset_name: &Name, table_name: &TableNam
 ///
 /// ## URL Format
 ///
-/// `<store_url>/<dataset_name>/<table>/<uuid_v7>/`
+/// `<store_base_url>/<dataset_name>/<table_name>/<revision_id>/`
 ///
 /// Where:
-/// - `store_url`: The object store root URL (e.g., `s3://bucket`, `file:///data`)
+/// - `store_base_url`: Object store base URL, may include path prefix after bucket
+///   (e.g., `s3://bucket/prefix`, `file:///data/subdir`)
 /// - `dataset_name`: Dataset name (without namespace)
-/// - `table`: Table name
-/// - `uuid_v7`: Unique identifier for this table revision/location
+/// - `table_name`: Table name
+/// - `revision_id`: Unique identifier for this table revision (typically UUIDv7)
 ///
 /// ## Example
 ///
 /// ```text
-/// s3://my-bucket/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
+/// s3://my-bucket/prefix/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhyTableUrl(Url);
 
 impl PhyTableUrl {
+    /// Constructs a unique table URL for a new revision.
+    ///
+    /// Where:
+    /// - `store_base_url`: Object store base URL, may include path prefix after bucket
+    ///   (e.g., `s3://bucket/prefix`, `file:///data/subdir`)
+    /// - `dataset_name`: Dataset name (without namespace)
+    /// - `table_name`: Table name
+    /// - `revision_id`: Unique identifier for this table revision (typically UUIDv7)
+    pub fn new(
+        store_base_url: &Url,
+        dataset_name: &Name,
+        table_name: &TableName,
+        revision_id: impl AsRef<Uuid>,
+    ) -> Self {
+        let path = format!("{}/{}/{}/", dataset_name, table_name, revision_id.as_ref());
+        // SAFETY: Path components (Name, TableName, Uuid) contain only URL-safe characters
+        let raw_url = store_base_url.join(&path).expect("path is URL-safe");
+        // SAFETY: URL comes from store_base_url.join() which produces valid URLs
+        Self::new_unchecked(raw_url)
+    }
+
     /// Create a new [`PhyTableUrl`] from a [`url::Url`] without validation
     ///
     /// # Safety
