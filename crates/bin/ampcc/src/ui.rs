@@ -60,9 +60,13 @@ impl Theme {
     #[allow(dead_code)]
     pub const GALAXY_DARK: Color = Color::Rgb(0x0C, 0x0A, 0x1D);
 
-    /// Lunar Gray - Borders and secondary elements.
+    /// Lunar Gray - Borders and dividers.
     /// Hex: #494755
     pub const LUNAR_GRAY: Color = Color::Rgb(0x49, 0x47, 0x55);
+
+    /// Lunar Gray Light - Secondary text (lighter variant for readability).
+    /// Hex: #8A8894
+    pub const LUNAR_GRAY_LIGHT: Color = Color::Rgb(0x8A, 0x88, 0x94);
 
     /// Spacesuit White - Primary text color.
     /// Hex: #F8F6FF
@@ -113,7 +117,7 @@ impl Theme {
 
     /// Style for secondary/dimmed text.
     pub fn text_secondary() -> Style {
-        Style::default().fg(Self::LUNAR_GRAY)
+        Style::default().fg(Self::LUNAR_GRAY_LIGHT)
     }
 
     /// Style for brand accent (headers, titles).
