@@ -398,42 +398,42 @@ fn draw_datasets_section(f: &mut Frame, app: &App, area: Rect) {
         current_flat_index += 1;
 
         // If expanded, show versions
-        if dataset.expanded {
-            if let Some(versions) = &dataset.versions {
-                for (version_idx, version) in versions.iter().enumerate() {
-                    // Check if this version is selected
-                    if current_flat_index == app.selected_index {
-                        selected_flat_index = Some(items.len());
-                    }
-
-                    let status_style = match version.status.as_str() {
-                        "published" | "active" => Theme::status_success(),
-                        "draft" => Theme::status_warning(),
-                        "deprecated" | "archived" => Theme::status_archived(),
-                        _ => Theme::text_secondary(),
-                    };
-
-                    let latest_str = if version.is_latest { " (latest)" } else { "" };
-
-                    let is_last = version_idx == versions.len() - 1;
-                    let prefix = if is_last {
-                        "  └── "
-                    } else {
-                        "  ├── "
-                    };
-
-                    let version_line = Line::from(vec![
-                        Span::styled(prefix, Theme::text_secondary()),
-                        Span::raw(&version.version_tag),
-                        Span::styled(latest_str, Theme::version_tag()),
-                        Span::raw(" ["),
-                        Span::styled(&version.status, status_style),
-                        Span::raw("]"),
-                    ]);
-
-                    items.push(ListItem::new(version_line));
-                    current_flat_index += 1;
+        if dataset.expanded
+            && let Some(versions) = &dataset.versions
+        {
+            for (version_idx, version) in versions.iter().enumerate() {
+                // Check if this version is selected
+                if current_flat_index == app.selected_index {
+                    selected_flat_index = Some(items.len());
                 }
+
+                let status_style = match version.status.as_str() {
+                    "published" | "active" => Theme::status_success(),
+                    "draft" => Theme::status_warning(),
+                    "deprecated" | "archived" => Theme::status_archived(),
+                    _ => Theme::text_secondary(),
+                };
+
+                let latest_str = if version.is_latest { " (latest)" } else { "" };
+
+                let is_last = version_idx == versions.len() - 1;
+                let prefix = if is_last {
+                    "  └── "
+                } else {
+                    "  ├── "
+                };
+
+                let version_line = Line::from(vec![
+                    Span::styled(prefix, Theme::text_secondary()),
+                    Span::raw(&version.version_tag),
+                    Span::styled(latest_str, Theme::version_tag()),
+                    Span::raw(" ["),
+                    Span::styled(&version.status, status_style),
+                    Span::raw("]"),
+                ]);
+
+                items.push(ListItem::new(version_line));
+                current_flat_index += 1;
             }
         }
     }
@@ -582,42 +582,42 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         current_flat_index += 1;
 
         // If expanded, show versions
-        if dataset.expanded {
-            if let Some(versions) = &dataset.versions {
-                for (version_idx, version) in versions.iter().enumerate() {
-                    // Check if this version is selected
-                    if current_flat_index == app.selected_index {
-                        selected_flat_index = Some(items.len());
-                    }
-
-                    let status_style = match version.status.as_str() {
-                        "published" | "active" => Theme::status_success(),
-                        "draft" => Theme::status_warning(),
-                        "deprecated" | "archived" => Theme::status_archived(),
-                        _ => Theme::text_secondary(),
-                    };
-
-                    let latest_str = if version.is_latest { " (latest)" } else { "" };
-
-                    let is_last = version_idx == versions.len() - 1;
-                    let prefix = if is_last {
-                        "  └── "
-                    } else {
-                        "  ├── "
-                    };
-
-                    let version_line = Line::from(vec![
-                        Span::styled(prefix, Theme::text_secondary()),
-                        Span::raw(&version.version_tag),
-                        Span::styled(latest_str, Theme::version_tag()),
-                        Span::raw(" ["),
-                        Span::styled(&version.status, status_style),
-                        Span::raw("]"),
-                    ]);
-
-                    items.push(ListItem::new(version_line));
-                    current_flat_index += 1;
+        if dataset.expanded
+            && let Some(versions) = &dataset.versions
+        {
+            for (version_idx, version) in versions.iter().enumerate() {
+                // Check if this version is selected
+                if current_flat_index == app.selected_index {
+                    selected_flat_index = Some(items.len());
                 }
+
+                let status_style = match version.status.as_str() {
+                    "published" | "active" => Theme::status_success(),
+                    "draft" => Theme::status_warning(),
+                    "deprecated" | "archived" => Theme::status_archived(),
+                    _ => Theme::text_secondary(),
+                };
+
+                let latest_str = if version.is_latest { " (latest)" } else { "" };
+
+                let is_last = version_idx == versions.len() - 1;
+                let prefix = if is_last {
+                    "  └── "
+                } else {
+                    "  ├── "
+                };
+
+                let version_line = Line::from(vec![
+                    Span::styled(prefix, Theme::text_secondary()),
+                    Span::raw(&version.version_tag),
+                    Span::styled(latest_str, Theme::version_tag()),
+                    Span::raw(" ["),
+                    Span::styled(&version.status, status_style),
+                    Span::raw("]"),
+                ]);
+
+                items.push(ListItem::new(version_line));
+                current_flat_index += 1;
             }
         }
     }
@@ -802,54 +802,47 @@ fn draw_worker_detail(f: &mut Frame, app: &mut App, worker: WorkerDetailResponse
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Node ID
-    lines.push(Line::from(vec![
-        Span::styled("Node ID: ", Theme::text_secondary()),
-        Span::styled(&worker.node_id, Theme::text_primary()),
-    ]));
-
-    lines.push(Line::from(""));
-
-    // Timestamps
-    lines.push(Line::from(vec![
-        Span::styled("Created: ", Theme::text_secondary()),
-        Span::styled(&worker.created_at, Theme::text_primary()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Registered: ", Theme::text_secondary()),
-        Span::styled(&worker.registered_at, Theme::text_primary()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Last Heartbeat: ", Theme::text_secondary()),
-        Span::styled(&worker.heartbeat_at, Theme::status_success()),
-    ]));
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Build Information:",
-        Theme::text_secondary(),
-    )));
-    lines.push(Line::from(""));
-
-    // Worker metadata
-    lines.push(Line::from(vec![
-        Span::styled("  Version: ", Theme::text_secondary()),
-        Span::styled(&worker.info.version, Theme::version_tag()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  Commit SHA: ", Theme::text_secondary()),
-        Span::styled(&worker.info.commit_sha, Theme::text_primary()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  Commit Time: ", Theme::text_secondary()),
-        Span::styled(&worker.info.commit_timestamp, Theme::text_primary()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  Build Date: ", Theme::text_secondary()),
-        Span::styled(&worker.info.build_date, Theme::text_primary()),
-    ]));
+    let lines: Vec<Line> = vec![
+        // Node ID
+        Line::from(vec![
+            Span::styled("Node ID: ", Theme::text_secondary()),
+            Span::styled(&worker.node_id, Theme::text_primary()),
+        ]),
+        Line::from(""),
+        // Timestamps
+        Line::from(vec![
+            Span::styled("Created: ", Theme::text_secondary()),
+            Span::styled(&worker.created_at, Theme::text_primary()),
+        ]),
+        Line::from(vec![
+            Span::styled("Registered: ", Theme::text_secondary()),
+            Span::styled(&worker.registered_at, Theme::text_primary()),
+        ]),
+        Line::from(vec![
+            Span::styled("Last Heartbeat: ", Theme::text_secondary()),
+            Span::styled(&worker.heartbeat_at, Theme::status_success()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("Build Information:", Theme::text_secondary())),
+        Line::from(""),
+        // Worker metadata
+        Line::from(vec![
+            Span::styled("  Version: ", Theme::text_secondary()),
+            Span::styled(&worker.info.version, Theme::version_tag()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Commit SHA: ", Theme::text_secondary()),
+            Span::styled(&worker.info.commit_sha, Theme::text_primary()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Commit Time: ", Theme::text_secondary()),
+            Span::styled(&worker.info.commit_timestamp, Theme::text_primary()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Build Date: ", Theme::text_secondary()),
+            Span::styled(&worker.info.build_date, Theme::text_primary()),
+        ]),
+    ];
 
     // Update content length for scroll bounds
     app.detail_content_length = lines.len();

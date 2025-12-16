@@ -259,14 +259,13 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                                 // Stop job (s key)
                                 KeyCode::Char('s') => {
-                                    if app.active_pane == ActivePane::Jobs {
-                                        if let Some(job) = app.get_selected_job() {
-                                            if App::can_stop_job(&job.status) {
-                                                let job_id = job.id;
-                                                app.start_loading("Stopping job...");
-                                                spawn_stop_job(app, job_id, tx.clone());
-                                            }
-                                        }
+                                    if app.active_pane == ActivePane::Jobs
+                                        && let Some(job) = app.get_selected_job()
+                                        && App::can_stop_job(&job.status)
+                                    {
+                                        let job_id = job.id;
+                                        app.start_loading("Stopping job...");
+                                        spawn_stop_job(app, job_id, tx.clone());
                                     }
                                 }
 
@@ -274,14 +273,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 KeyCode::Char('d')
                                     if !key.modifiers.contains(KeyModifiers::CONTROL) =>
                                 {
-                                    if app.active_pane == ActivePane::Jobs {
-                                        if let Some(job) = app.get_selected_job() {
-                                            if App::is_job_terminal(&job.status) {
-                                                let job_id = job.id;
-                                                app.start_loading("Deleting job...");
-                                                spawn_delete_job(app, job_id, tx.clone());
-                                            }
-                                        }
+                                    if app.active_pane == ActivePane::Jobs
+                                        && let Some(job) = app.get_selected_job()
+                                        && App::is_job_terminal(&job.status)
+                                    {
+                                        let job_id = job.id;
+                                        app.start_loading("Deleting job...");
+                                        spawn_delete_job(app, job_id, tx.clone());
                                     }
                                 }
 

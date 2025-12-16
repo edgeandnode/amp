@@ -772,10 +772,10 @@ impl App {
         let mut count = 0;
         for (i, dataset) in self.filtered_datasets.iter().enumerate() {
             count += 1; // The dataset itself
-            if dataset.expanded {
-                if let Some(versions) = &dataset.versions {
-                    count += versions.len();
-                }
+            if dataset.expanded
+                && let Some(versions) = &dataset.versions
+            {
+                count += versions.len();
             }
             // Update version indices if needed
             if !self.selected_version_indices.contains_key(&i) && dataset.expanded {
@@ -795,14 +795,14 @@ impl App {
             }
             current += 1;
 
-            if dataset.expanded {
-                if let Some(versions) = &dataset.versions {
-                    for version_idx in 0..versions.len() {
-                        if current == flat_index {
-                            return Some((dataset_idx, Some(version_idx)));
-                        }
-                        current += 1;
+            if dataset.expanded
+                && let Some(versions) = &dataset.versions
+            {
+                for version_idx in 0..versions.len() {
+                    if current == flat_index {
+                        return Some((dataset_idx, Some(version_idx)));
                     }
+                    current += 1;
                 }
             }
         }
@@ -820,10 +820,10 @@ impl App {
                 return index;
             }
             index += 1;
-            if dataset.expanded {
-                if let Some(versions) = &dataset.versions {
-                    index += versions.len();
-                }
+            if dataset.expanded
+                && let Some(versions) = &dataset.versions
+            {
+                index += versions.len();
             }
         }
         index

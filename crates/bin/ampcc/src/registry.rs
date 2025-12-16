@@ -106,10 +106,10 @@ impl RegistryClient {
     /// 2. ~/.amp/cache/amp_cli_auth file
     fn load_auth_token() -> Option<String> {
         // Check environment variable first
-        if let Ok(token) = std::env::var("AMP_AUTH_TOKEN") {
-            if !token.is_empty() {
-                return Some(token);
-            }
+        if let Ok(token) = std::env::var("AMP_AUTH_TOKEN")
+            && !token.is_empty()
+        {
+            return Some(token);
         }
 
         // Try loading from auth file (~/.amp/cache/amp_cli_auth)
@@ -120,12 +120,11 @@ impl RegistryClient {
                 .join("amp_cli_auth");
             if let Ok(contents) = std::fs::read_to_string(&auth_path) {
                 // Parse JSON and extract accessToken
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    if let Some(token) = json.get("accessToken").and_then(|v| v.as_str()) {
-                        if !token.is_empty() {
-                            return Some(token.to_string());
-                        }
-                    }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents)
+                    && let Some(token) = json.get("accessToken").and_then(|v| v.as_str())
+                    && !token.is_empty()
+                {
+                    return Some(token.to_string());
                 }
             }
         }
