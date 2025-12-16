@@ -494,6 +494,7 @@ impl ReorgTestCtx {
         let catalog = catalog_for_sql(
             test_env.daemon_server().dataset_store(),
             test_env.daemon_server().metadata_db(),
+            test_env.daemon_server().data_store(),
             &sql,
             env,
         )

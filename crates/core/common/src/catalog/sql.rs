@@ -76,14 +76,12 @@ use metadata_db::MetadataDb;
 
 use super::{
     dataset_access::DatasetAccess,
-    errors::{
-        CatalogForSqlError, GetLogicalCatalogError, GetPhysicalCatalogError, PlanningCtxForSqlError,
-    },
+    errors::{CatalogForSqlError, GetLogicalCatalogError, PlanningCtxForSqlError},
     logical::LogicalCatalog,
     physical::{Catalog, PhysicalTable},
 };
 use crate::{
-    PlanningContext, ResolvedTable,
+    PlanningContext, ResolvedTable, Store,
     query_context::QueryEnv,
     sql::{
         FunctionReference, TableReference, resolve_function_references, resolve_table_references,
@@ -96,27 +94,25 @@ use crate::{
 ///
 /// ## Where Used
 ///
-/// This function is used in two data paths that require actual SQL execution against physical data:
+/// This function is used exclusively in the **Query Execution Path**:
 ///
-/// 1. **Query Execution Path** (`crates/services/server/src/flight.rs`):
-///    - Called during Arrow Flight `DoGet` phase to execute user queries
-///    - Provides physical catalog for streaming query results to clients
+/// - **Arrow Flight DoGet** (`crates/services/server/src/flight.rs`):
+///   - Called during Arrow Flight `DoGet` phase to execute user queries
+///   - Provides physical catalog for streaming query results to clients
 ///
-/// 2. **Derived Dataset Execution Path** (`crates/core/dump/src/sql_dump.rs`):
-///    - Called during worker-based extraction to execute SQL-defined derived datasets
-///    - Writes query results as parquet files to object storage
+/// For derived dataset execution, use [`catalog_for_sql_with_deps`] instead.
 ///
 /// ## Implementation
 ///
-/// The function analyzes the SQL query to:
-/// 1. Extract table references and function names from the query
-/// 2. Resolve dataset names to hashes via the dataset store
-/// 3. Build logical catalog with schemas and UDFs
-/// 4. Query metadata database for physical parquet locations
-/// 5. Construct physical catalog for query execution
+/// The function:
+/// 1. Extracts table references and function names from the query
+/// 2. Calls [`get_logical_catalog`] to resolve datasets and build the logical catalog
+/// 3. Queries metadata database for physical parquet locations
+/// 4. Constructs physical catalog for query execution
 pub async fn catalog_for_sql(
-    store: &impl DatasetAccess,
+    dataset_store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
+    _data_store: &Store,
     query: &Statement,
     env: QueryEnv,
 ) -> Result<Catalog, CatalogForSqlError> {
@@ -125,9 +121,26 @@ pub async fn catalog_for_sql(
     let func_refs = resolve_function_references::<PartialReference>(query)
         .map_err(CatalogForSqlError::FunctionReferenceResolution)?;
 
-    get_physical_catalog(store, metadata_db, table_refs, func_refs, &env)
-        .await
-        .map_err(CatalogForSqlError::GetPhysicalCatalog)
+    let logical_catalog =
+        get_logical_catalog(dataset_store, table_refs, func_refs, &env.isolate_pool)
+            .await
+            .map_err(CatalogForSqlError::GetLogicalCatalog)?;
+
+    let mut tables = Vec::new();
+    for table in &logical_catalog.tables {
+        let physical_table = PhysicalTable::get_active(table, metadata_db.clone())
+            .await
+            .map_err(|err| CatalogForSqlError::PhysicalTableRetrieval {
+                table: table.to_string(),
+                source: err,
+            })?
+            .ok_or_else(|| CatalogForSqlError::TableNotSynced {
+                table: table.to_string(),
+            })?;
+        tables.push(physical_table.into());
+    }
+
+    Ok(Catalog::new(tables, logical_catalog))
 }
 
 /// Creates a full catalog with physical data access for SQL query execution with pre-resolved dependencies.
@@ -355,55 +368,15 @@ pub async fn planning_ctx_for_sql(
     }))
 }
 
-/// Internal helper that converts logical catalog to physical catalog with data locations.
+/// Internal helper that builds a logical catalog from table and function references.
 ///
-/// This function queries the metadata database to retrieve physical parquet file locations
-/// for all tables in the logical catalog, enabling actual query execution.
-///
-/// ## Where Used
-///
-/// Called internally by `catalog_for_sql` as part of building the full physical catalog
-/// for query execution.
-async fn get_physical_catalog(
-    store: &impl DatasetAccess,
-    metadata_db: &MetadataDb,
-    table_refs: impl IntoIterator<Item = TableReference<PartialReference>>,
-    function_refs: impl IntoIterator<Item = FunctionReference<PartialReference>>,
-    env: &QueryEnv,
-) -> Result<Catalog, GetPhysicalCatalogError> {
-    let logical_catalog = get_logical_catalog(store, table_refs, function_refs, &env.isolate_pool)
-        .await
-        .map_err(GetPhysicalCatalogError::GetLogicalCatalog)?;
-
-    let mut tables = Vec::new();
-    for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(table, metadata_db.clone())
-            .await
-            .map_err(|err| GetPhysicalCatalogError::PhysicalTableRetrieval {
-                table: table.to_string(),
-                source: err,
-            })?
-            .ok_or(GetPhysicalCatalogError::TableNotSynced {
-                table: table.to_string(),
-            })?;
-        tables.push(physical_table.into());
-    }
-    Ok(Catalog::new(tables, logical_catalog))
-}
-
-/// Internal helper that converts logical catalog to physical catalog with data locations using pre-resolved dependencies.
-///
-/// This function queries the metadata database to retrieve physical parquet file locations
-/// for all tables in the logical catalog, enabling actual query execution. Unlike
-/// `get_physical_catalog`, this function uses pre-resolved dependencies to build the
-/// logical catalog.
+/// This function resolves dataset references, loads datasets, and constructs a logical
+/// catalog containing resolved tables and UDFs for query planning and execution.
 ///
 /// ## Where Used
 ///
-/// Called internally by `catalog_for_sql_with_deps` as part of building the full physical catalog
-/// for derived dataset execution.
-/// This function is part of the catalog construction pipeline for query execution and
-/// derived dataset dumps.
+/// Called internally by [`catalog_for_sql`] to build the logical catalog before
+/// retrieving physical parquet locations from the metadata database.
 async fn get_logical_catalog(
     store: &impl DatasetAccess,
     table_refs: impl IntoIterator<Item = TableReference<PartialReference>>,

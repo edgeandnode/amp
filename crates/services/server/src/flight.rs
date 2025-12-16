@@ -27,7 +27,7 @@ use common::{
         ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
     catalog::{
-        errors::{CatalogForSqlError, GetPhysicalCatalogError, PlanningCtxForSqlError},
+        errors::{CatalogForSqlError, PlanningCtxForSqlError},
         physical::Catalog,
         sql::{catalog_for_sql, planning_ctx_for_sql},
     },
@@ -65,7 +65,6 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
-    #[expect(unused)] // TODO: Use it in query execution
     data_store: Arc<Store>,
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
@@ -108,6 +107,7 @@ impl Service {
         let catalog = catalog_for_sql(
             &self.dataset_store,
             &self.metadata_db,
+            &self.data_store,
             &query,
             self.env.clone(),
         )
@@ -913,9 +913,6 @@ pub enum Error {
     #[error("error loading catalog for SQL")]
     CatalogForSqlError(#[source] CatalogForSqlError),
 
-    #[error("error loading physical catalog")]
-    GetPhysicalCatalogError(#[source] GetPhysicalCatalogError),
-
     #[error("error creating planning context")]
     PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
 
@@ -944,7 +941,6 @@ impl Error {
             Error::ExecutionError(_) => "EXECUTION_ERROR",
             Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
             Error::CatalogForSqlError(_) => "CATALOG_FOR_SQL_ERROR",
-            Error::GetPhysicalCatalogError(_) => "LOAD_PHYSICAL_CATALOG_ERROR",
             Error::PlanningCtxForSqlError(_) => "PLANNING_CTX_FOR_SQL_ERROR",
             Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
             Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
@@ -993,7 +989,6 @@ impl IntoResponse for Error {
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::CatalogForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::GetPhysicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PlanningCtxForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
@@ -1035,7 +1030,6 @@ impl From<Error> for Status {
             Error::ExecutionError(df) => datafusion_error_to_status(df, message),
             Error::StreamingExecutionError(_) => Status::internal(message),
             Error::CatalogForSqlError(_) => Status::internal(message),
-            Error::GetPhysicalCatalogError(_) => Status::internal(message),
             Error::PlanningCtxForSqlError(_) => Status::internal(message),
             Error::InvalidQuery(_) => Status::invalid_argument(message),
             Error::TicketEncodingError(_) => Status::invalid_argument(message),

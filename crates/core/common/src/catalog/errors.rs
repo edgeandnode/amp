@@ -29,14 +29,34 @@ pub enum CatalogForSqlError {
     #[error("Failed to resolve function references from SQL")]
     FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
-    /// Failed to get the physical catalog for the resolved tables and functions.
+    /// Failed to get the logical catalog.
     ///
-    /// This wraps errors from `get_physical_catalog`, which can occur when:
+    /// This wraps errors from `get_logical_catalog`, which can occur when:
+    /// - Dataset names cannot be extracted from table references or function names
     /// - Dataset retrieval fails
-    /// - Physical table metadata cannot be retrieved
-    /// - Tables have not been synced
-    #[error("Failed to get physical catalog")]
-    GetPhysicalCatalog(#[source] GetPhysicalCatalogError),
+    /// - UDF creation fails
+    #[error("Failed to get logical catalog")]
+    GetLogicalCatalog(#[source] GetLogicalCatalogError),
+
+    /// Failed to retrieve physical table metadata from the metadata database.
+    ///
+    /// This occurs when querying the metadata database for the active physical
+    /// location of a table fails due to database connection issues, query errors,
+    /// or other database-related problems.
+    #[error("Failed to retrieve physical table metadata for table '{table}'")]
+    PhysicalTableRetrieval {
+        table: String,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Table has not been synced and no physical location exists.
+    ///
+    /// This occurs when attempting to load a physical catalog for a table that
+    /// has been defined but has not yet been dumped/synced to storage. The table
+    /// exists in the dataset definition but has no physical parquet files.
+    #[error("Table '{table}' has not been synced")]
+    TableNotSynced { table: String },
 }
 
 /// Errors specific to planning_ctx_for_sql_tables_with_deps operations
@@ -142,39 +162,6 @@ pub enum PlanningCtxForSqlError {
     /// dataset does not support eth_call (not an EVM RPC dataset or no provider configured).
     #[error("Function 'eth_call' not available for dataset '{reference}'")]
     EthCallNotAvailable { reference: HashReference },
-}
-
-/// Errors specific to get_physical_catalog operations
-#[derive(Debug, thiserror::Error)]
-pub enum GetPhysicalCatalogError {
-    /// Failed to get the logical catalog.
-    ///
-    /// This wraps errors from `get_logical_catalog`, which can occur when:
-    /// - Dataset names cannot be extracted from table references or function names
-    /// - Dataset retrieval fails
-    /// - UDF creation fails
-    #[error("Failed to get logical catalog")]
-    GetLogicalCatalog(#[source] GetLogicalCatalogError),
-
-    /// Failed to retrieve physical table metadata from the metadata database.
-    ///
-    /// This occurs when querying the metadata database for the active physical
-    /// location of a table fails due to database connection issues, query errors,
-    /// or other database-related problems.
-    #[error("Failed to retrieve physical table metadata for table '{table}'")]
-    PhysicalTableRetrieval {
-        table: String,
-        #[source]
-        source: BoxError,
-    },
-
-    /// Table has not been synced and no physical location exists.
-    ///
-    /// This occurs when attempting to load a physical catalog for a table that
-    /// has been defined but has not yet been dumped/synced to storage. The table
-    /// exists in the dataset definition but has no physical parquet files.
-    #[error("Table '{table}' has not been synced")]
-    TableNotSynced { table: String },
 }
 
 /// Errors specific to catalog_for_sql_with_deps operations
