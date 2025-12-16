@@ -122,10 +122,10 @@ pub async fn handler(
 
         let task = tokio::spawn(async move {
             let physical_table = PhysicalTable::restore_latest_revision(
-                &table,
-                data_store,
                 metadata_db,
+                data_store,
                 &dataset_reference_clone,
+                &table,
             )
             .await
             .map_err(|err| {
