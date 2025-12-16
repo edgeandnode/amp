@@ -282,6 +282,7 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
   .addError(Error.EthCallNotAvailable)
   .addError(Error.DependencyAliasNotFound)
   .addError(Error.SchemaInference)
+  .addError(Error.NonIncrementalQuery)
   .addSuccess(GetOutputSchemaResponse)
   .setPayload(GetOutputSchemaPayload)
 
@@ -326,6 +327,7 @@ export type GetOutputSchemaError =
   | Error.EthCallNotAvailable
   | Error.DependencyAliasNotFound
   | Error.SchemaInference
+  | Error.NonIncrementalQuery
 
 /**
  * The api group for the dataset endpoints.

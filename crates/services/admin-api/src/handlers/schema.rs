@@ -331,6 +331,20 @@ pub async fn handler(
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
     for (table_name, stmt) in statements {
+        let plan =
+            planning_ctx
+                .plan_sql(stmt.clone())
+                .await
+                .map_err(|err| Error::SchemaInference {
+                    table_name: table_name.clone(),
+                    source: err,
+                })?;
+        // Return error if query is non-incremental
+        plan.is_incremental()
+            .map_err(|err| Error::NonIncrementalQuery {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
         // Infer schema using the planning context
         let schema =
             planning_ctx
@@ -458,6 +472,13 @@ enum Error {
         /// The underlying parse error
         #[source]
         source: common::sql::ParseSqlError,
+    },
+
+    #[error("Table '{table_name}' contains non-incremental SQL: {source}")]
+    NonIncrementalQuery {
+        table_name: TableName,
+        #[source]
+        source: BoxError,
     },
 
     /// Failed to resolve table references in SQL query
@@ -683,6 +704,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPayloadFormat { .. } => "INVALID_PAYLOAD_FORMAT",
             Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
             Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
+            Error::NonIncrementalQuery { .. } => "NON_INCREMENTAL_QUERY",
             Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
@@ -713,6 +735,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPayloadFormat { .. } => StatusCode::BAD_REQUEST,
             Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
             Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
+            Error::NonIncrementalQuery { .. } => StatusCode::BAD_REQUEST,
             Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
