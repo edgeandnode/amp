@@ -56,6 +56,13 @@ impl AsRef<str> for TableName {
     }
 }
 
+impl AsRef<TableName> for TableName {
+    #[inline(always)]
+    fn as_ref(&self) -> &TableName {
+        self
+    }
+}
+
 impl std::ops::Deref for TableName {
     type Target = str;
 
