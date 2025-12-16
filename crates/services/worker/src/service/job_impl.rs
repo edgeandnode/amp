@@ -70,7 +70,7 @@ pub(super) async fn new(
     for table in dataset.resolved_tables(reference.to_reference().into()) {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(&table, ctx.metadata_db.clone())
+            match PhysicalTable::get_active(ctx.metadata_db.clone(), &ctx.data_store, &table)
                 .await
                 .map_err(JobInitError::GetActivePhysicalTable)?
             {

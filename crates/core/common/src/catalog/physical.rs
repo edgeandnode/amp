@@ -1,6 +1,5 @@
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc};
 
-use amp_object_store::url::ObjectStoreUrl;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
@@ -19,7 +18,7 @@ use datafusion::{
 };
 use datafusion_datasource::compute_all_files_statistics;
 use datasets_common::{hash_reference::HashReference, name::Name, table_name::TableName};
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, stream, stream::BoxStream};
 use metadata_db::{LocationId, MetadataDb};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use url::Url;
@@ -36,6 +35,9 @@ use crate::{
     sql::TableReference,
     store::Store,
 };
+
+/// Path delimiter used in object store paths.
+const PATH_DELIMITER: char = '/';
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
@@ -150,12 +152,9 @@ pub async fn register_new_table_revision(
     dataset: HashReference,
     table: ResolvedTable,
 ) -> Result<PhysicalTable, RegisterNewTableRevisionError> {
-    let url = PhyTableUrl::new(
-        data_store.url(),
-        dataset.name(),
-        table.name(),
-        Uuid::now_v7(),
-    );
+    let revision_id = Uuid::now_v7();
+    let path = PhyTableRevisionPath::new(dataset.name(), table.name(), revision_id);
+    let url = PhyTableUrl::new(data_store.url(), &path);
 
     let mut tx = metadata_db
         .begin_txn()
@@ -168,7 +167,7 @@ pub async fn register_new_table_revision(
         dataset.name(),
         dataset.hash(),
         table.name(),
-        &url,
+        &path,
         false,
     )
     .await
@@ -193,10 +192,8 @@ pub async fn register_new_table_revision(
 
     tracing::info!("Registered new revision at: {}", url);
 
-    // SAFETY: URL was constructed and validated during table creation
-    let path = Path::from_url_path(url.path_str()).expect("URL path should be valid");
+    let object_store = data_store.as_inner().clone();
 
-    let object_store = data_store.object_store();
     Ok(PhysicalTable {
         table,
         url,
@@ -204,7 +201,6 @@ pub async fn register_new_table_revision(
         location_id,
         metadata_db,
         object_store,
-        dataset,
     })
 }
 
@@ -282,10 +278,12 @@ pub struct PhysicalTable {
     /// Logical table representation.
     table: ResolvedTable,
 
-    /// Base directory URL containing all parquet files for this table.
+    /// Full URL to the table directory (for compatibility/display).
     url: PhyTableUrl,
-    /// Path to the data location in the object store.
-    path: Path,
+
+    /// Relative path to the table revision in object storage.
+    /// Format: `<dataset_name>/<table_name>/<revision_uuid>`
+    path: PhyTableRevisionPath,
 
     /// Location ID in the metadata database.
     location_id: LocationId,
@@ -293,9 +291,6 @@ pub struct PhysicalTable {
     metadata_db: MetadataDb,
     /// Object store for accessing the data files.
     object_store: Arc<dyn ObjectStore>,
-
-    /// Dataset reference with hash for observability and management.
-    dataset: HashReference,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -350,29 +345,18 @@ impl PhysicalTable {
         dataset: &HashReference,
         table: &ResolvedTable,
     ) -> Result<Option<Self>, RestoreLatestRevisionError> {
-        let manifest_hash = dataset.hash();
-        let table_name = table.name();
+        let table_path = PhyTablePath::new(dataset.name(), table.name());
 
-        let prefix = location_prefix(dataset, table_name);
-        let url = data_store
-            .url()
-            .join(&prefix)
-            .map_err(RestoreLatestRevisionError::UrlConstruction)?;
-        let path = Path::from_url_path(url.path()).unwrap();
+        tracing::debug!("Restoring latest revision in prefix {}", table_path);
 
-        tracing::debug!("Restoring latest revision in prefix {}", path);
-
-        let revisions = list_revisions(&data_store, &prefix, &path)
+        let Some(path) = find_table_latest_revision(data_store.as_inner(), &table_path)
             .await
-            .map_err(RestoreLatestRevisionError::ListRevisions)?;
-
-        // If no revisions listed, return None
-        let Some((path, raw_url)) = revisions.values().last() else {
+            .map_err(RestoreLatestRevisionError::FindLatestRevision)?
+        else {
             return Ok(None);
         };
 
-        // SAFETY: The URL is validated by the caller and comes from the restore operation
-        let url = PhyTableUrl(raw_url.clone());
+        let url = PhyTableUrl::new(data_store.url(), &path);
 
         let mut tx = metadata_db
             .begin_txn()
@@ -384,23 +368,27 @@ impl PhysicalTable {
             &mut tx,
             dataset.namespace(),
             dataset.name(),
-            manifest_hash,
-            table_name,
-            &url,
+            dataset.hash(),
+            table.name(),
+            &path,
             false,
         )
         .await
         .map_err(RestoreLatestRevisionError::RegisterPhysicalTable)?;
 
         // Mark all other revisions as inactive, and this one as active
-        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, manifest_hash, table_name)
-            .await
-            .map_err(RestoreLatestRevisionError::MarkInactive)?;
+        metadata_db::physical_table::mark_inactive_by_table_id(
+            &mut tx,
+            dataset.hash(),
+            table.name(),
+        )
+        .await
+        .map_err(RestoreLatestRevisionError::MarkInactive)?;
         metadata_db::physical_table::mark_active_by_id(
             &mut tx,
             location_id,
-            manifest_hash,
-            table_name,
+            dataset.hash(),
+            table.name(),
         )
         .await
         .map_err(RestoreLatestRevisionError::MarkActive)?;
@@ -409,9 +397,9 @@ impl PhysicalTable {
             .await
             .map_err(RestoreLatestRevisionError::TransactionCommit)?;
 
-        let object_store = data_store.object_store();
-        let mut files = object_store
-            .list(Some(path))
+        let mut files = data_store
+            .as_inner()
+            .list(Some(&path))
             .try_collect::<Vec<_>>()
             .await
             .map_err(RestoreLatestRevisionError::ListFiles)?;
@@ -422,7 +410,7 @@ impl PhysicalTable {
 
         let mut file_stream = stream::iter(files.into_iter())
             .map(|object_meta| {
-                let object_store = object_store.clone();
+                let object_store = data_store.as_inner().clone();
                 async move {
                     let (file_name, amp_meta, footer) =
                         amp_metadata_from_parquet_file(&object_meta, object_store)
@@ -474,18 +462,18 @@ impl PhysicalTable {
         Ok(Some(Self {
             table: table.clone(),
             url,
-            path: path.clone(),
+            path,
             location_id,
             metadata_db,
-            object_store: Arc::clone(&object_store),
-            dataset: dataset.clone(),
+            object_store: data_store.as_inner().clone(),
         }))
     }
 
     /// Attempt to get the active revision of a table.
     pub async fn get_active(
-        table: &ResolvedTable,
         metadata_db: MetadataDb,
+        store: &Store,
+        table: &ResolvedTable,
     ) -> Result<Option<Self>, BoxError> {
         let manifest_hash = table.dataset().manifest_hash();
         let table_name = table.name();
@@ -500,28 +488,20 @@ impl PhysicalTable {
             return Ok(None);
         };
 
-        let table_url = physical_table.url;
-        let location_id = physical_table.id;
+        // Convert database path to PhyTableRevisionPath
+        let path: PhyTableRevisionPath = physical_table.path.into();
 
-        // Convert TableUrl to PhyTableUrl
-        let url: PhyTableUrl = table_url.into();
-        let path = Path::from_url_path(url.path_str()).unwrap();
-
-        let object_store_url: ObjectStoreUrl = url.inner().clone().try_into()?;
-        let object_store = amp_object_store::new(object_store_url)?;
+        // Construct full URL from store base URL and revision path
+        let url = PhyTableUrl::new(store.url(), &path);
+        let object_store = store.as_inner().clone();
 
         Ok(Some(Self {
             table: table.clone(),
             url,
             path,
-            location_id,
+            location_id: physical_table.id,
             metadata_db,
             object_store,
-            dataset: HashReference::new(
-                physical_table.dataset_namespace.into(),
-                physical_table.dataset_name.into(),
-                physical_table.manifest_hash.into(),
-            ),
         }))
     }
 
@@ -565,7 +545,7 @@ impl PhysicalTable {
         self.url.inner()
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &PhyTableRevisionPath {
         &self.path
     }
 
@@ -579,10 +559,6 @@ impl PhysicalTable {
 
     pub fn location_id(&self) -> LocationId {
         self.location_id
-    }
-
-    pub fn dataset_reference(&self) -> &HashReference {
-        &self.dataset
     }
 
     /// Qualified table reference in the format `dataset_name.table_name`.
@@ -641,6 +617,13 @@ impl PhysicalTable {
     #[tracing::instrument(skip_all, err, fields(table = %self.table_ref_compact()))]
     pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
         self.stream_file_metadata().try_collect().await
+    }
+
+    /// List all files in this physical table's storage location.
+    ///
+    /// Returns a stream of object metadata for each file in the table's directory.
+    pub fn list_files(&self) -> BoxStream<'_, Result<ObjectMeta, object_store::Error>> {
+        self.object_store.list(Some(&self.path))
     }
 
     pub async fn missing_ranges(
@@ -729,8 +712,9 @@ impl PhysicalTable {
     fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
+        let table_path = self.path.as_object_store_path().clone();
         metadata_db::files::stream_by_location_id_with_details(&self.metadata_db, self.location_id)
-            .map(|row| row?.try_into())
+            .map(move |row| FileMetadata::from_row_with_table_path(row?, &table_path))
     }
 }
 
@@ -880,44 +864,81 @@ impl TableProvider for TableSnapshot {
     }
 }
 
-pub fn location_prefix(dataset_reference: &HashReference, table: &TableName) -> String {
-    let mut prefix = String::new();
-
-    // Add dataset
-    prefix.push_str(dataset_reference.name().as_str());
-    prefix.push('/');
-
-    // Add table
-    prefix.push_str(table);
-    prefix.push('/');
-
-    prefix
-}
-
-pub async fn list_revisions(
-    store: &Store,
-    prefix: &str,
-    path: &Path,
-) -> Result<BTreeMap<String, (Path, Url)>, ListRevisionsError> {
-    let object_store = store.object_store();
-    Ok(object_store
+/// Lists all table revision paths found in object storage.
+///
+/// The `store` parameter must be a prefixed object store pointing to the data directory root,
+/// as this function uses relative paths like `dataset/table/revision_id`.
+///
+/// This function performs a `list_with_delimiter` query on the provided table path,
+/// iterates through the returned subdirectories, and parses each as a `PhyTableRevisionPath`.
+/// All valid revision paths are collected and returned in no particular order.
+/// If no revisions exist, an empty vector is returned.
+pub async fn list_table_revisions<S>(
+    store: &S,
+    path: &PhyTablePath,
+) -> Result<Vec<PhyTableRevisionPath>, ListRevisionsError>
+where
+    S: ObjectStore + ?Sized,
+{
+    let list_result = store
         .list_with_delimiter(Some(path))
         .await
-        .map_err(ListRevisionsError)?
+        .map_err(ListRevisionsError)?;
+
+    let revisions = list_result
         .common_prefixes
         .into_iter()
-        .filter_map(|path| {
-            let revision = Uuid::parse_str(path.parts().last()?.as_ref())
-                .as_ref()
-                .map(Uuid::to_string)
-                .ok()?;
-            let full_prefix = format!("{prefix}{revision}/");
-            let full_url = store.url().join(&full_prefix).ok()?;
-            let full_path = Path::from_url_path(full_url.path()).ok()?;
-            Some((revision, (full_path, full_url)))
-        })
-        .collect())
+        .filter_map(|path| path.as_ref().parse::<PhyTableRevisionPath>().ok())
+        .collect();
+
+    Ok(revisions)
 }
+
+/// Error when listing revisions from object store
+///
+/// This error type is used by `list_table_revisions()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list revisions from object store")]
+pub struct ListRevisionsError(#[source] pub object_store::Error);
+
+/// Finds the latest table revision by lexicographic comparison of revision IDs.
+///
+/// The `store` parameter must be a prefixed object store pointing to the data directory root,
+/// as this function uses relative paths like `dataset/table/revision_id`.
+///
+/// This function performs a `list_with_delimiter` query on the provided table path,
+/// iterates through the returned subdirectories, parses each as a `PhyTableRevisionPath`,
+/// and finds the maximum by lexicographic comparison.
+///
+/// Lexicographic comparison works correctly for UUIDv7 revisions since they are
+/// time-ordered by design. The latest UUID will sort last lexicographically.
+pub async fn find_table_latest_revision<S>(
+    store: &S,
+    path: &PhyTablePath,
+) -> Result<Option<PhyTableRevisionPath>, FindLatestRevisionError>
+where
+    S: ObjectStore + ?Sized,
+{
+    let list_result = store
+        .list_with_delimiter(Some(path))
+        .await
+        .map_err(FindLatestRevisionError)?;
+
+    let latest_revision_path = list_result
+        .common_prefixes
+        .into_iter()
+        .filter_map(|rev| rev.as_ref().parse::<PhyTableRevisionPath>().ok())
+        .max_by(|a, b| a.as_str().cmp(b.as_str()));
+
+    Ok(latest_revision_path)
+}
+
+/// Error when finding the latest revision from object store
+///
+/// This error type is used by `find_table_latest_revision()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to find latest revision from object store")]
+pub struct FindLatestRevisionError(#[source] pub object_store::Error);
 
 async fn round_robin(
     files: impl Stream<Item = Result<PartitionedFile, BoxError>> + Send,
@@ -933,31 +954,17 @@ async fn round_robin(
     Ok(groups)
 }
 
-/// Error when listing revisions from object store
-///
-/// This error type is used by `list_revisions()`.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to list revisions from object store")]
-pub struct ListRevisionsError(#[source] pub object_store::Error);
-
 /// Errors that occur when restoring the latest revision of a physical table
 ///
 /// This error type is used by `PhysicalTable::restore_latest_revision()`.
 #[derive(Debug, thiserror::Error)]
 pub enum RestoreLatestRevisionError {
-    /// Failed to construct URL for the table prefix
-    ///
-    /// This occurs when the data store URL cannot be joined with the table prefix,
-    /// typically due to malformed URL components.
-    #[error("Failed to construct URL for table prefix")]
-    UrlConstruction(#[source] url::ParseError),
-
-    /// Failed to list revisions from object store
+    /// Failed to find latest revision from object store
     ///
     /// This occurs when the object store cannot be queried for existing revisions,
     /// typically due to network issues, permission errors, or storage unavailability.
-    #[error("Failed to list revisions from object store")]
-    ListRevisions(#[source] ListRevisionsError),
+    #[error("Failed to find latest revision from object store")]
+    FindLatestRevision(#[source] FindLatestRevisionError),
 
     /// Failed to begin transaction for marking table active
     #[error("Failed to begin transaction")]
@@ -1028,36 +1035,24 @@ pub enum RestoreLatestRevisionError {
 pub struct PhyTableUrl(Url);
 
 impl PhyTableUrl {
-    /// Constructs a unique table URL for a new revision.
+    /// Constructs a table URL from a base URL and revision path.
+    ///
+    /// The URL follows the structure: `<base_url>/<revision_path>/`
     ///
     /// Where:
-    /// - `store_base_url`: Object store base URL, may include path prefix after bucket
-    ///   (e.g., `s3://bucket/prefix`, `file:///data/subdir`)
-    /// - `dataset_name`: Dataset name (without namespace)
-    /// - `table_name`: Table name
-    /// - `revision_id`: Unique identifier for this table revision (typically UUIDv7)
-    pub fn new(
-        store_base_url: &Url,
-        dataset_name: &Name,
-        table_name: &TableName,
-        revision_id: impl AsRef<Uuid>,
-    ) -> Self {
-        let path = format!("{}/{}/{}/", dataset_name, table_name, revision_id.as_ref());
-
+    /// - `base_url`: Object store root URL (e.g., `s3://bucket/prefix/`, `file:///data/`)
+    /// - `revision_path`: Complete path to the table revision (dataset_name/table_name/revision_uuid)
+    pub fn new(base_url: &Url, revision_path: &PhyTableRevisionPath) -> Self {
         // SAFETY: Path components (Name, TableName, Uuid) contain only URL-safe characters
-        let raw_url = store_base_url.join(&path).expect("path is URL-safe");
-
-        Self(raw_url)
+        let raw_url = base_url
+            .join(&format!("{}/", revision_path))
+            .expect("path is URL-safe");
+        PhyTableUrl(raw_url)
     }
 
     /// Get the URL as a string slice
     pub fn as_str(&self) -> &str {
         self.0.as_str()
-    }
-
-    /// Get the path portion of the URL
-    pub fn path_str(&self) -> &str {
-        self.0.path()
     }
 
     /// Get a reference to the inner [`Url`]
@@ -1084,27 +1079,163 @@ impl std::fmt::Display for PhyTableUrl {
     }
 }
 
-impl From<PhyTableUrl> for metadata_db::physical_table::TableUrlOwned {
-    fn from(value: PhyTableUrl) -> Self {
-        // SAFETY: PhyTableUrl is validated at construction via FromStr, ensuring invariants are upheld.
-        metadata_db::physical_table::TableUrl::from_owned_unchecked(value.as_str().to_owned())
+/// Path to a table directory in object storage (without revision).
+///
+/// Represents the parent directory containing all revisions of a table.
+/// Format: `<dataset_name>/<table_name>`
+///
+/// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
+/// trailing slashes, so the string representation will not contain a trailing slash.
+///
+/// ## Example
+///
+/// ```text
+/// ethereum_mainnet/logs
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhyTablePath(Path);
+
+impl PhyTablePath {
+    /// Constructs the path to a table directory (without revision).
+    pub fn new(dataset_name: impl AsRef<Name>, table_name: impl AsRef<TableName>) -> Self {
+        Self(format!("{}/{}", dataset_name.as_ref(), table_name.as_ref()).into())
+    }
+
+    /// Create a revision path by appending the given revision ID to this table path.
+    pub fn with_revision(&self, revision_id: impl AsRef<Uuid>) -> PhyTableRevisionPath {
+        let path = self.0.child(revision_id.as_ref().to_string());
+        PhyTableRevisionPath(path)
+    }
+
+    /// Get a reference to the underlying [`object_store::path::Path`]
+    pub fn as_object_store_path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Get the path as a string slice
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
-impl<'a> From<&'a PhyTableUrl> for metadata_db::physical_table::TableUrl<'a> {
-    fn from(value: &'a PhyTableUrl) -> Self {
-        // SAFETY: PhyTableUrl is validated at construction via FromStr, ensuring invariants are upheld.
-        metadata_db::physical_table::TableUrl::from_ref_unchecked(value.as_str())
+impl std::fmt::Display for PhyTablePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
-impl From<metadata_db::physical_table::TableUrlOwned> for PhyTableUrl {
-    fn from(value: metadata_db::physical_table::TableUrlOwned) -> Self {
-        value
-            .as_str()
+impl std::ops::Deref for PhyTablePath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Path to a table revision directory in object storage.
+///
+/// Represents a specific revision of a table, identified by a UUID.
+/// Format: `<dataset_name>/<table_name>/<revision_uuid>`
+///
+/// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
+/// trailing slashes, so the string representation will not contain a trailing slash.
+///
+/// ## Example
+///
+/// ```text
+/// ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhyTableRevisionPath(Path);
+
+impl PhyTableRevisionPath {
+    /// Constructs the path to a table revision directory.
+    pub fn new(
+        dataset_name: impl AsRef<Name>,
+        table_name: impl AsRef<TableName>,
+        revision_id: impl AsRef<Uuid>,
+    ) -> Self {
+        Self(
+            format!(
+                "{}/{}/{}",
+                dataset_name.as_ref(),
+                table_name.as_ref(),
+                revision_id.as_ref()
+            )
+            .into(),
+        )
+    }
+
+    /// Get a reference to the underlying [`Path`]
+    pub fn as_object_store_path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Get the path as a string slice
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl std::str::FromStr for PhyTableRevisionPath {
+    type Err = PhyTableRevisionPathError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.trim_end_matches(PATH_DELIMITER).split(PATH_DELIMITER);
+
+        let revision_uuid: Uuid = parts
+            .next_back()
+            .filter(|s| !s.is_empty())
+            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(0))?
             .parse()
-            .expect("database URL should be valid")
+            .map_err(PhyTableRevisionPathError::InvalidRevisionUuid)?;
+
+        let table_name: TableName = parts
+            .next_back()
+            .filter(|s| !s.is_empty())
+            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(1))?
+            .parse()
+            .map_err(PhyTableRevisionPathError::InvalidTableName)?;
+
+        let dataset_name: Name = parts
+            .next_back()
+            .filter(|s| !s.is_empty())
+            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(2))?
+            .parse()
+            .map_err(PhyTableRevisionPathError::InvalidDatasetName)?;
+
+        Ok(Self::new(dataset_name, table_name, revision_uuid))
     }
+}
+
+impl std::fmt::Display for PhyTableRevisionPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::ops::Deref for PhyTableRevisionPath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Error when parsing a path into a [`PhyTableRevisionPath`]
+#[derive(Debug, thiserror::Error)]
+pub enum PhyTableRevisionPathError {
+    #[error("path must have at least 3 components, got {0}")]
+    NotEnoughComponents(usize),
+
+    #[error("invalid dataset name")]
+    InvalidDatasetName(#[source] datasets_common::name::NameError),
+
+    #[error("invalid table name")]
+    InvalidTableName(#[source] datasets_common::table_name::TableNameError),
+
+    #[error("invalid revision UUID")]
+    InvalidRevisionUuid(#[source] uuid::Error),
 }
 
 /// Error type for PhyTableUrl parsing
@@ -1114,4 +1245,25 @@ pub struct PhyTableUrlParseError {
     url: String,
     #[source]
     source: url::ParseError,
+}
+
+impl From<PhyTableRevisionPath> for metadata_db::physical_table::TablePathOwned {
+    fn from(value: PhyTableRevisionPath) -> Self {
+        metadata_db::physical_table::TablePath::from_owned_unchecked(value.as_str().to_owned())
+    }
+}
+
+impl<'a> From<&'a PhyTableRevisionPath> for metadata_db::physical_table::TablePath<'a> {
+    fn from(value: &'a PhyTableRevisionPath) -> Self {
+        metadata_db::physical_table::TablePath::from_ref_unchecked(value.as_str())
+    }
+}
+
+impl From<metadata_db::physical_table::TablePathOwned> for PhyTableRevisionPath {
+    fn from(value: metadata_db::physical_table::TablePathOwned) -> Self {
+        value
+            .as_str()
+            .parse()
+            .expect("database path should be a valid revision path")
+    }
 }

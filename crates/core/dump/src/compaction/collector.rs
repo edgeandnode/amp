@@ -83,12 +83,8 @@ impl Collector {
                     ..
                 } = manifest_row?;
 
-                let url = self
-                    .table
-                    .url()
-                    .join(&file_name)
-                    .map_err(CollectorError::parse_error(file_id))?;
-                let path = Path::from_url_path(url.path()).map_err(CollectorError::path_error)?;
+                // Use relative path (table path + filename), not the absolute URL path
+                let path = self.table.path().child(file_name.as_str());
                 Ok::<_, CollectorError>((file_id, path))
             })
             .try_collect()

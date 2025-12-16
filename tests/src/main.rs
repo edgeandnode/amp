@@ -164,9 +164,9 @@ async fn main() {
 
             let dataset_store = {
                 let provider_configs_store =
-                    ProviderConfigsStore::new(providers_store.prefixed_store());
+                    ProviderConfigsStore::new(providers_store.as_inner().clone());
                 let dataset_manifests_store =
-                    DatasetManifestsStore::new(manifests_store.prefixed_store());
+                    DatasetManifestsStore::new(manifests_store.as_inner().clone());
                 DatasetStore::new(
                     sysdb.conn_pool().clone(),
                     provider_configs_store,
@@ -297,18 +297,24 @@ async fn bless(
 
     tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
-        test_helpers::restore_dataset_snapshot(ampctl, &dataset_store, &metadata_db, &dep)
-            .await
-            .map_err(|err| {
-                format!(
-                    "Failed to restore dependency '{}' for dataset '{}': {}",
-                    dep, dataset, err
-                )
-            })?;
+        test_helpers::restore_dataset_snapshot(
+            ampctl,
+            &dataset_store,
+            &metadata_db,
+            &data_store,
+            &dep,
+        )
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to restore dependency '{}' for dataset '{}': {}",
+                dep, dataset, err
+            )
+        })?;
     }
 
     // Clear existing dataset data if it exists
-    let store = data_store.prefixed_store();
+    let store = data_store.as_inner();
     let path = object_store::path::Path::parse(dataset.name())
         .map_err(|err| format!("Invalid dataset name '{}': {}", dataset.name(), err))?;
 

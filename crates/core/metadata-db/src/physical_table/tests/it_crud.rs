@@ -7,7 +7,7 @@ use crate::{
     db::Connection,
     jobs::{self, JobId},
     manifests::ManifestHash,
-    physical_table::{self, LocationId, TableName, TableUrl},
+    physical_table::{self, LocationId, TableName, TablePath},
     workers,
 };
 
@@ -28,12 +28,14 @@ async fn insert_creates_location_and_returns_id() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
     let table_name = TableName::from_ref_unchecked("test_table");
-    let url = TableUrl::from_ref_unchecked("s3://test-bucket/test/path/file.parquet");
+    let path = TablePath::from_ref_unchecked(
+        "test-dataset/test_table/01234567-89ab-cdef-0123-456789abcdef",
+    );
     let active = true;
 
     //* When
     let location_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, url, active)
+        physical_table::register(&mut conn, namespace, name, hash, table_name, path, active)
             .await
             .expect("Failed to insert location");
 
@@ -44,7 +46,7 @@ async fn insert_creates_location_and_returns_id() {
     );
 
     // Verify the location was created correctly
-    let (row_location_id, row_manifest_hash, row_table_name, row_url, row_active) =
+    let (row_location_id, row_manifest_hash, row_table_name, row_path, row_active) =
         get_location_by_id(&mut conn, location_id)
             .await
             .expect("Failed to fetch inserted location");
@@ -62,8 +64,8 @@ async fn insert_creates_location_and_returns_id() {
         "database should persist table_name"
     );
     assert_eq!(
-        row_url, "s3://test-bucket/test/path/file.parquet",
-        "database should persist URL"
+        row_path, "test-dataset/test_table/01234567-89ab-cdef-0123-456789abcdef",
+        "database should persist path"
     );
     assert!(row_active, "database should persist active status");
 }
@@ -85,29 +87,36 @@ async fn insert_on_conflict_returns_existing_id() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
     let table_name = TableName::from_ref_unchecked("test_table");
-    let url = TableUrl::from_ref_unchecked("s3://test-bucket/unique-file.parquet");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/unique-revision-id");
 
     // Insert first location
-    let first_id =
-        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &url, true)
-            .await
-            .expect("Failed to insert first location");
+    let first_id = physical_table::register(
+        &mut conn,
+        &namespace,
+        &name,
+        &hash,
+        &table_name,
+        &path,
+        true,
+    )
+    .await
+    .expect("Failed to insert first location");
 
-    //* When - Try to insert with same URL but different data
+    //* When - Try to insert with same path but different data
     let second_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, url, false)
+        physical_table::register(&mut conn, namespace, name, hash, table_name, path, false)
             .await
             .expect("Failed to insert second location");
 
     //* Then - Should return the same ID due to conflict resolution
     assert_eq!(
         first_id, second_id,
-        "register with duplicate URL should return existing location_id (conflict resolution)"
+        "register with duplicate path should return existing location_id (conflict resolution)"
     );
 }
 
 #[tokio::test]
-async fn url_to_location_id_finds_existing_location() {
+async fn path_to_location_id_finds_existing_location() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
@@ -124,15 +133,15 @@ async fn url_to_location_id_finds_existing_location() {
     );
 
     let table_name = TableName::from_ref_unchecked("test_table");
-    let url = TableUrl::from_ref_unchecked("s3://test-bucket/find-me.parquet");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/find-me-revision");
 
     let expected_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, &url, false)
+        physical_table::register(&mut conn, namespace, name, hash, table_name, &path, false)
             .await
             .expect("Failed to insert location");
 
     //* When
-    let found_id = physical_table::url_to_id(&mut conn, url)
+    let found_id = physical_table::path_to_id(&mut conn, path)
         .await
         .expect("Failed to search for location");
 
@@ -140,12 +149,12 @@ async fn url_to_location_id_finds_existing_location() {
     assert_eq!(
         found_id,
         Some(expected_id),
-        "url_to_id should find location_id by URL lookup"
+        "path_to_id should find location_id by path lookup"
     );
 }
 
 #[tokio::test]
-async fn url_to_location_id_returns_none_when_not_found() {
+async fn path_to_location_id_returns_none_when_not_found() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
@@ -155,17 +164,17 @@ async fn url_to_location_id_returns_none_when_not_found() {
         .await
         .expect("Failed to run migrations");
 
-    let url = TableUrl::from_ref_unchecked("s3://test-bucket/nonexistent.parquet");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/nonexistent-revision");
 
     //* When
-    let found_id = physical_table::url_to_id(&mut conn, url)
+    let found_id = physical_table::path_to_id(&mut conn, path)
         .await
         .expect("Failed to search for location");
 
     //* Then
     assert_eq!(
         found_id, None,
-        "url_to_id should return None when URL not found"
+        "path_to_id should return None when path not found"
     );
 }
 
@@ -191,56 +200,56 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     let other_table_name = TableName::from_ref_unchecked("other_table");
 
     // Create active location for target table
-    let url1 = TableUrl::from_ref_unchecked("s3://bucket/active1.parquet");
+    let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/active1-revision");
     let active_id1 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        &url1,
+        &path1,
         true,
     )
     .await
     .expect("Failed to insert active location 1");
 
     // Create another active location for different table (still should be returned)
-    let url2 = TableUrl::from_ref_unchecked("s3://bucket/active2.parquet");
+    let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/active2-revision");
     let active_id2 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        &url2,
+        &path2,
         true,
     )
     .await
     .expect("Failed to insert active location 2");
 
     // Create inactive location for target table (should be filtered out)
-    let url3 = TableUrl::from_ref_unchecked("s3://bucket/inactive.parquet");
+    let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/inactive-revision");
     physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url3,
+        path3,
         false,
     )
     .await
     .expect("Failed to insert inactive location");
 
     // Create active location for different table (should be filtered out)
-    let url4 = TableUrl::from_ref_unchecked("s3://bucket/other-table.parquet");
+    let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
     physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &other_table_name,
-        url4,
+        path4,
         true,
     )
     .await
@@ -270,12 +279,12 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 
     // Check that we got the right locations
     assert_eq!(
-        active_location1.url, url1,
-        "get_active_physical_table should return location with matching URL for table 1"
+        active_location1.path, path1,
+        "get_active_physical_table should return location with matching path for table 1"
     );
     assert_eq!(
-        active_location2.url, url2,
-        "get_active_physical_table should return location with matching URL for table 2"
+        active_location2.path, path2,
+        "get_active_physical_table should return location with matching path for table 2"
     );
 
     // Check that we got the right IDs
@@ -311,49 +320,56 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     let other_table_name = TableName::from_ref_unchecked("other_table");
 
     // Create active location for first target table
-    let url1 = TableUrl::from_ref_unchecked("s3://bucket/target1.parquet");
-    let target_id1 =
-        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, url1, true)
-            .await
-            .expect("Failed to insert target location 1");
+    let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/target1-revision");
+    let target_id1 = physical_table::register(
+        &mut conn,
+        &namespace,
+        &name,
+        &hash,
+        &table_name,
+        path1,
+        true,
+    )
+    .await
+    .expect("Failed to insert target location 1");
 
     // Create active location for second target table
-    let url2 = TableUrl::from_ref_unchecked("s3://bucket/target2.parquet");
+    let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/target2-revision");
     let target_id2 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        url2,
+        path2,
         true,
     )
     .await
     .expect("Failed to insert target location 2");
 
     // Create already inactive location for target table (should remain unchanged)
-    let url3 = TableUrl::from_ref_unchecked("s3://bucket/already-inactive.parquet");
+    let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/already-inactive-revision");
     let inactive_id = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url3,
+        path3,
         false,
     )
     .await
     .expect("Failed to insert inactive location");
 
     // Create active location for different table (should remain unchanged)
-    let url4 = TableUrl::from_ref_unchecked("s3://bucket/other.parquet");
+    let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
     let other_id = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &other_table_name,
-        url4,
+        path4,
         true,
     )
     .await
@@ -416,27 +432,27 @@ async fn mark_active_by_id_activates_specific_location() {
 
     let table_name = TableName::from_ref_unchecked("test_table");
 
-    let url1 = TableUrl::from_ref_unchecked("s3://bucket/to-activate.parquet");
+    let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/to-activate-revision");
     let target_id = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url1,
+        path1,
         false,
     )
     .await
     .expect("Failed to insert location to activate");
 
-    let url2 = TableUrl::from_ref_unchecked("s3://bucket/stay-inactive.parquet");
+    let path2 = TablePath::from_ref_unchecked("test-dataset/test_table/stay-inactive-revision");
     let other_id = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url2,
+        path2,
         false,
     )
     .await
@@ -499,49 +515,49 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let table_name = TableName::from_ref_unchecked("output_table");
 
     // Create locations to assign
-    let url1 = TableUrl::from_ref_unchecked("s3://bucket/assign1.parquet");
+    let path1 = TablePath::from_ref_unchecked("test-dataset/output_table/assign1-revision");
     let location_id1 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url1,
+        path1,
         false,
     )
     .await
     .expect("Failed to insert location 1");
 
-    let url2 = TableUrl::from_ref_unchecked("s3://bucket/assign2.parquet");
+    let path2 = TablePath::from_ref_unchecked("test-dataset/output_table/assign2-revision");
     let location_id2 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url2,
+        path2,
         false,
     )
     .await
     .expect("Failed to insert location 2");
 
-    let url3 = TableUrl::from_ref_unchecked("s3://bucket/assign3.parquet");
+    let path3 = TablePath::from_ref_unchecked("test-dataset/output_table/assign3-revision");
     let location_id3 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table_name,
-        url3,
+        path3,
         false,
     )
     .await
     .expect("Failed to insert location 3");
 
     // Create a location that should not be assigned
-    let url4 = TableUrl::from_ref_unchecked("s3://bucket/not-assigned.parquet");
+    let path4 = TablePath::from_ref_unchecked("test-dataset/output_table/not-assigned-revision");
     let unassigned_id =
-        physical_table::register(&mut conn, namespace, name, hash, &table_name, url4, false)
+        physical_table::register(&mut conn, namespace, name, hash, &table_name, path4, false)
             .await
             .expect("Failed to insert unassigned location");
 
@@ -607,10 +623,10 @@ async fn get_by_id_returns_existing_location() {
     );
 
     let table_name = TableName::from_ref_unchecked("test_table");
-    let url = TableUrl::from_ref_unchecked("s3://bucket/get-by-id.parquet");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/get-by-id-revision");
 
     let inserted_id =
-        physical_table::register(&mut conn, namespace, name, hash, &table_name, &url, true)
+        physical_table::register(&mut conn, namespace, name, hash, &table_name, &path, true)
             .await
             .expect("Failed to insert location");
 
@@ -639,9 +655,9 @@ async fn get_by_id_returns_existing_location() {
         "get_by_id_with_details should return location with persisted table_name"
     );
     assert_eq!(
-        location.url(),
-        &url,
-        "get_by_id_with_details should return location with persisted URL"
+        location.path(),
+        &path,
+        "get_by_id_with_details should return location with persisted path"
     );
     assert!(
         location.active(),
@@ -685,7 +701,7 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query =
-        "SELECT id, manifest_hash, table_name, url, active FROM physical_tables WHERE id = $1";
+        "SELECT id, manifest_hash, table_name, path, active FROM physical_tables WHERE id = $1";
     sqlx::query_as(query).bind(location_id).fetch_one(exe).await
 }
 

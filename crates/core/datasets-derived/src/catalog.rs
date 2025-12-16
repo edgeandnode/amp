@@ -16,7 +16,7 @@ use std::{
 };
 
 use common::{
-    BoxError, PlanningContext, ResolvedTable,
+    BoxError, PlanningContext, ResolvedTable, Store,
     catalog::{
         dataset_access::DatasetAccess,
         logical::LogicalCatalog,
@@ -48,6 +48,7 @@ use crate::manifest::Function;
 pub async fn catalog_for_sql_with_deps(
     store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
+    data_store: &Store,
     query: &Statement,
     env: &QueryEnv,
     dependencies: &BTreeMap<DepAlias, HashReference>,
@@ -61,6 +62,7 @@ pub async fn catalog_for_sql_with_deps(
     get_physical_catalog_with_deps(
         store,
         metadata_db,
+        data_store,
         table_refs,
         func_refs,
         env,
@@ -71,9 +73,11 @@ pub async fn catalog_for_sql_with_deps(
     .map_err(CatalogForSqlWithDepsError::GetPhysicalCatalogWithDeps)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn get_physical_catalog_with_deps(
-    store: &impl DatasetAccess,
+    dataset_store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
+    data_store: &common::store::Store,
     table_refs: impl IntoIterator<Item = TableReference<DepAlias>>,
     function_refs: impl IntoIterator<Item = FunctionReference<DepAliasOrSelfRef>>,
     env: &QueryEnv,
@@ -81,7 +85,7 @@ async fn get_physical_catalog_with_deps(
     functions: &BTreeMap<FuncName, Function>,
 ) -> Result<Catalog, GetPhysicalCatalogWithDepsError> {
     let logical_catalog = get_logical_catalog_with_deps_and_funcs(
-        store,
+        dataset_store,
         table_refs,
         function_refs,
         &env.isolate_pool,
@@ -93,7 +97,7 @@ async fn get_physical_catalog_with_deps(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(table, metadata_db.clone())
+        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, table)
             .await
             .map_err(
                 |err| GetPhysicalCatalogWithDepsError::PhysicalTableRetrieval {
@@ -210,7 +214,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
             FunctionReference::Qualified { schema, function } => {
                 // Match on schema type: DepAlias (external dependency) or SelfRef (same-dataset function)
                 match schema.as_ref() {
-                    datasets_common::deps::alias::DepAliasOrSelfRef::DepAlias(dep_alias) => {
+                    DepAliasOrSelfRef::DepAlias(dep_alias) => {
                         // External dependency reference - lookup in dependencies map
                         let hash_ref = dependencies.get(dep_alias).ok_or_else(|| {
                             GetLogicalCatalogWithDepsAndFuncsError::DependencyAliasNotFoundForFunctionRef {
@@ -268,7 +272,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
 
                         entry.insert(udf);
                     }
-                    datasets_common::deps::alias::DepAliasOrSelfRef::SelfRef => {
+                    DepAliasOrSelfRef::SelfRef => {
                         // Same-dataset function reference (self.function_name)
                         // Look up function in the functions map (defined in this dataset)
                         if let Some(func_def) = functions.get(function) {

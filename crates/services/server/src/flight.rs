@@ -220,6 +220,7 @@ impl Service {
                 self.env.clone(),
                 catalog,
                 dataset_store,
+                &self.data_store,
                 plan,
                 earliest_block,
                 None,

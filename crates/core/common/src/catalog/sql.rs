@@ -112,7 +112,7 @@ use crate::{
 pub async fn catalog_for_sql(
     dataset_store: &impl DatasetAccess,
     metadata_db: &MetadataDb,
-    _data_store: &Store,
+    data_store: &Store,
     query: &Statement,
     env: QueryEnv,
 ) -> Result<Catalog, CatalogForSqlError> {
@@ -128,7 +128,7 @@ pub async fn catalog_for_sql(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(table, metadata_db.clone())
+        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, table)
             .await
             .map_err(|err| CatalogForSqlError::PhysicalTableRetrieval {
                 table: table.to_string(),

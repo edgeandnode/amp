@@ -10,7 +10,7 @@ use sqlx::{Executor, Postgres, types::JsonValue};
 use super::{
     LocationId, LocationWithDetails, PhysicalTable,
     name::{Name, NameOwned},
-    url::{Url, UrlOwned},
+    path::{Path, PathOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, JobStatus,
@@ -27,7 +27,7 @@ pub async fn insert<'c, E>(
     dataset_name: DatasetName<'_>,
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
-    url: Url<'_>,
+    path: Path<'_>,
     active: bool,
 ) -> Result<LocationId, sqlx::Error>
 where
@@ -35,9 +35,9 @@ where
 {
     // Upsert with RETURNING id - the no-op update ensures RETURNING works for both insert and conflict cases
     let query = indoc::indoc! {"
-        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, url, active)
+        INSERT INTO physical_tables(manifest_hash, table_name, dataset_namespace, dataset_name, path, active)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (url) DO UPDATE SET manifest_hash = EXCLUDED.manifest_hash
+        ON CONFLICT (path) DO UPDATE SET manifest_hash = EXCLUDED.manifest_hash
         RETURNING id
     "};
 
@@ -46,7 +46,7 @@ where
         .bind(table_name)
         .bind(dataset_namespace)
         .bind(dataset_name)
-        .bind(url)
+        .bind(path)
         .bind(active)
         .fetch_one(exe)
         .await?;
@@ -63,15 +63,15 @@ where
     sqlx::query_as(query).bind(id).fetch_optional(exe).await
 }
 
-/// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_id<'c, E>(exe: E, url: Url<'_>) -> Result<Option<LocationId>, sqlx::Error>
+/// Get location ID by path only, returns first match if multiple exist
+pub async fn path_to_id<'c, E>(exe: E, path: Path<'_>) -> Result<Option<LocationId>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = "SELECT id FROM physical_tables WHERE url = $1 LIMIT 1";
+    let query = "SELECT id FROM physical_tables WHERE path = $1 LIMIT 1";
 
     let id: Option<LocationId> = sqlx::query_scalar(query)
-        .bind(url)
+        .bind(path)
         .fetch_optional(exe)
         .await?;
     Ok(id)
@@ -91,7 +91,7 @@ where
             l.id,
             l.manifest_hash,
             l.table_name,
-            l.url,
+            l.path,
             l.active,
             l.dataset_namespace,
             l.dataset_name,
@@ -114,7 +114,7 @@ where
         id: LocationId,
         manifest_hash: ManifestHashOwned,
         table_name: NameOwned,
-        url: UrlOwned,
+        path: PathOwned,
         active: bool,
         dataset_namespace: DatasetNamespaceOwned,
         dataset_name: DatasetNameOwned,
@@ -162,7 +162,7 @@ where
         dataset_namespace: row.dataset_namespace,
         dataset_name: row.dataset_name,
         table_name: row.table_name,
-        url: row.url,
+        path: row.path,
         active: row.active,
         writer: writer.as_ref().map(|j| j.id),
     };
@@ -298,7 +298,7 @@ where
             dataset_namespace,
             dataset_name,
             table_name,
-            url,
+            path,
             active,
             writer
         FROM physical_tables
@@ -330,7 +330,7 @@ where
             dataset_namespace,
             dataset_name,
             table_name,
-            url,
+            path,
             active,
             writer
         FROM physical_tables

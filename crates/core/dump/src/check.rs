@@ -45,10 +45,9 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
     let registered_files: BTreeSet<FileName> = files.into_iter().map(|m| m.file_name).collect();
 
     let store = table.object_store();
-    let path = table.path();
 
-    let stored_files: BTreeMap<FileName, ObjectMeta> = store
-        .list(Some(table.path()))
+    let stored_files: BTreeMap<FileName, ObjectMeta> = table
+        .list_files()
         .try_collect::<Vec<ObjectMeta>>()
         .await
         .map_err(|err| ConsistencyError::ListObjectStore {
@@ -85,7 +84,7 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             return Err(ConsistencyError::MissingRegisteredFile {
                 location_id,
                 filename: filename.to_string(),
-                path: path.to_string(),
+                path: table.path().to_string(),
             });
         }
     }

@@ -257,6 +257,7 @@ impl TestCtx {
             &ampctl,
             self.ctx.daemon_controller().dataset_store(),
             self.ctx.daemon_controller().metadata_db(),
+            self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )
         .await

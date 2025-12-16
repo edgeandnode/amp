@@ -17,7 +17,7 @@ use metadata_db::{
     LocationId, MetadataDb,
     files::{FileId, FooterBytes},
 };
-use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
+use object_store::{ObjectMeta, buffered::BufWriter};
 use rand::RngCore as _;
 use tracing::{debug, instrument, trace};
 use url::Url;
@@ -62,7 +62,6 @@ pub async fn commit_metadata(
 
 pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
-    file_url: Url,
     filename: String,
     table: Arc<PhysicalTable>,
     max_row_group_bytes: usize,
@@ -80,14 +79,14 @@ impl ParquetFileWriter {
             // Add a 64-bit hex value from a crytpo RNG to avoid name conflicts from chain reorgs.
             format!("{:09}-{:016x}.parquet", start, rand::rng().next_u64())
         };
-        let file_url = table.url().join(&filename)?;
-        let file_path = Path::from_url_path(file_url.path())?;
+        // Use the table's relative path + filename, not the absolute URL path.
+        // The object store already has the base prefix, so we only need the relative path.
+        let file_path = table.path().child(filename.as_str());
         let object_writer = BufWriter::new(table.object_store(), file_path);
         let writer =
             AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.parquet.clone()))?;
         Ok(ParquetFileWriter {
             writer,
-            file_url,
             filename,
             table,
             max_row_group_bytes,
@@ -155,7 +154,8 @@ impl ParquetFileWriter {
             meta.num_rows,
         );
 
-        let location = Path::from_url_path(self.file_url.path())?;
+        // Use relative path (table path + filename), not the absolute URL path
+        let location = self.table.path().child(self.filename.as_str());
         let object_meta = self.table.object_store().head(&location).await?;
 
         let footer =

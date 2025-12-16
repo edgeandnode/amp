@@ -31,6 +31,7 @@ impl Step {
             &ampctl,
             ctx.daemon_controller().dataset_store(),
             ctx.daemon_controller().metadata_db(),
+            ctx.daemon_server().data_store(),
             &self.snapshot_name,
         )
         .await?;
