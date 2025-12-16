@@ -79,6 +79,13 @@ impl AsRef<str> for Name {
     }
 }
 
+impl AsRef<Name> for Name {
+    #[inline(always)]
+    fn as_ref(&self) -> &Name {
+        self
+    }
+}
+
 impl std::ops::Deref for Name {
     type Target = str;
 
