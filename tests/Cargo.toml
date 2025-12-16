@@ -36,7 +36,7 @@ metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-amp-client = { path = "../crates/client" }
+amp-client = { path = "../crates/clients/flight" }
 object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true

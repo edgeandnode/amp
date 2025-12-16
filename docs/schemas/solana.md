@@ -1,6 +1,5 @@
 # Schema
-Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.rs`.
-
+Auto-generated file. See `schema_to_markdown` in `crates/core/common/src/catalog.rs`.
 ## block_headers
 ````
 +---------------------+---------------------+-------------+

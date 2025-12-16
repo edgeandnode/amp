@@ -18,7 +18,7 @@ path = "src/main.rs"
 default = []
 
 [dependencies]
-amp-client = { path = "../../client", features = ["postgres"] }
+amp-client = { path = "../../clients/flight", features = ["postgres"] }
 anyhow.workspace = true
 axum.workspace = true
 arrow-array = { version = "56", default-features = false }

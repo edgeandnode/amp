@@ -9,7 +9,7 @@ anyhow.workspace = true
 crossterm = "0.29.0"
 ratatui = "0.29.0"
 tokio.workspace = true
-admin-client = { path = "../../admin-client" }
+admin-client = { path = "../../clients/admin" }
 worker = { path = "../../services/worker" }
 serde.workspace = true
 figment.workspace = true
