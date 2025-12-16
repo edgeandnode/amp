@@ -1771,6 +1771,41 @@ async fn multiple_functions_mixed_validity_fails() {
     );
 }
 
+#[tokio::test]
+async fn non_incremental_query_with_limit_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "non_incremental_query_with_limit",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [("table1", "SELECT block_num FROM eth.blocks LIMIT 10")],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail with LIMIT clause"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "NON_INCREMENTAL_QUERY",
+        "should return NON_INCREMENTAL_QUERY for LIMIT"
+    );
+}
+
 struct TestCtx {
     _ctx: crate::testlib::ctx::TestCtx,
     client: reqwest::Client,
