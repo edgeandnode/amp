@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, sync::Arc};
 
 use common::BoxResult;
 use futures::{Stream, StreamExt};
@@ -14,7 +14,7 @@ pub(crate) fn stream(
     start: solana_clock::Slot,
     end: solana_clock::Slot,
     of1_car_directory: PathBuf,
-    solana_rpc_client: rpc_client::SolanaRpcClient,
+    solana_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     get_block_config: rpc_client::rpc_config::RpcBlockConfig,
 ) -> impl Stream<Item = BoxResult<DecodedBlock>> {
     async_stream::stream! {

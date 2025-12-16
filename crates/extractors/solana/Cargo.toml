@@ -15,6 +15,7 @@ bs58 = "0.5.1"
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
 futures.workspace = true
+governor.workspace = true
 monitoring = { path = "../../core/monitoring" }
 reqwest.workspace = true
 schemars = { workspace = true, optional = true }

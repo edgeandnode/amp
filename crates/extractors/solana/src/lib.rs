@@ -11,7 +11,7 @@
 //! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
 //! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
 use datasets_common::manifest::TableSchema;
@@ -76,7 +76,6 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-// TODO: Add rate limiting.
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {
@@ -84,7 +83,8 @@ pub struct ProviderConfig {
     pub kind: SolanaDatasetKind,
     pub network: String,
     #[serde_as(as = "serde_with::DisplayFromStr")]
-    pub http_url: Url,
+    pub rpc_provider_url: Url,
+    pub max_rpc_calls_per_second: Option<NonZeroU32>,
     pub of1_car_directory: PathBuf,
 }
 
@@ -110,16 +110,17 @@ pub fn extractor(
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, Error> {
-    let client = match config.http_url.scheme() {
+    let client = match config.rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
-            config.http_url,
+            config.rpc_provider_url,
+            config.max_rpc_calls_per_second,
             config.network,
             config.name,
             config.of1_car_directory,
             meter,
         ),
         scheme => {
-            let err = format!("unsupported URL scheme: {}", scheme);
+            let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
             return Err(Error::Client(err.into()));
         }
     };
