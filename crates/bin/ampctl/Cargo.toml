@@ -14,6 +14,7 @@ name = "ampctl"
 path = "src/main.rs"
 
 [dependencies]
+admin-client = { path = "../../clients/admin" }
 anyhow.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }

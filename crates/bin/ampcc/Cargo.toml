@@ -1,0 +1,24 @@
+[package]
+name = "ampcc"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+crossterm = "0.29.0"
+ratatui = "0.29.0"
+tokio.workspace = true
+admin-client = { path = "../../clients/admin" }
+worker = { path = "../../services/worker" }
+serde.workspace = true
+figment.workspace = true
+directories = "5.0"
+url.workspace = true
+datasets-common = { path = "../../core/datasets-common" }
+serde_json.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+urlencoding = "2.1"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+syntect-tui = "3"

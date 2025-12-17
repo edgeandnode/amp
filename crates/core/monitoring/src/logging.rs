@@ -64,7 +64,9 @@ pub fn init_with_telemetry(url: &str, trace_ratio: f64) -> telemetry::traces::Re
 /// List of crates in the workspace.
 const AMP_CRATES: &[&str] = &[
     "admin_api",
+    "admin_client",
     "amp_client",
+    "ampcc",
     "ampctl",
     "ampd",
     "ampsync",
