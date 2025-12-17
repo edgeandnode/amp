@@ -63,9 +63,9 @@ pub mod fixtures {
     mod daemon_worker;
     mod flight_client;
     mod jsonl_client;
+    mod metadata_db;
     mod package;
     mod snapshot_ctx;
-    mod temp_db;
 
     // Re-export commonly used types for convenience
     pub use ampctl::*;
@@ -79,7 +79,7 @@ pub mod fixtures {
     pub use daemon_worker::*;
     pub use flight_client::*;
     pub use jsonl_client::*;
+    pub use metadata_db::*;
     pub use package::*;
     pub use snapshot_ctx::*;
-    pub use temp_db::*;
 }

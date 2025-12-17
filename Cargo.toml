@@ -31,6 +31,7 @@ members = [
     "crates/services/admin-api/gen",
     "crates/services/controller",
     "crates/services/server",
+    "crates/services/metadata-db-postgres",
     "crates/services/worker",
     "tests",
 ]

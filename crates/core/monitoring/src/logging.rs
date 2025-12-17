@@ -86,6 +86,7 @@ const AMP_CRATES: &[&str] = &[
     "firehose_datasets",
     "js_runtime",
     "metadata_db",
+    "metadata_db_postgres",
     "monitoring",
     "server",
     "solana_datasets",

@@ -47,6 +47,7 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 server = { path = "../crates/services/server" }
 solana-datasets = { path = "../crates/extractors/solana" }
+metadata-db-postgres = { path = "../crates/services/metadata-db-postgres" }
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -16,7 +16,6 @@
 //!     ├── providers/                # Provider configs directory (initially empty, registered via Admin API)
 //!     └── data/                     # Output directory (dataset snapshots copied if requested)
 //!         └── eth_mainnet/          # Dataset snapshot reference data with complete structure
-//!             └── revisions/
 //! ```
 //!
 //! # Key Features
@@ -37,7 +36,7 @@ use worker::node_id::NodeId;
 
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
-    DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, TempMetadataDb as MetadataDbFixture,
+    DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
     builder as daemon_state_dir_builder,
 };
 use crate::testlib::{
@@ -295,11 +294,11 @@ impl TestCtxBuilder {
         let _ = dotenvy::dotenv_override();
 
         // Create temporary metadata database fixture
-        let temp_db = MetadataDbFixture::new().await;
+        let metadata_db = MetadataDbFixture::new().await;
 
         // Update daemon config with the temp database URL
         let daemon_config = DaemonConfigBuilder::from_config(&self.daemon_config)
-            .metadata_db_url(temp_db.connection_url().to_string())
+            .metadata_db_url(metadata_db.connection_url().to_string())
             .build();
 
         // Serialize config content before moving daemon_config
@@ -357,7 +356,7 @@ impl TestCtxBuilder {
             let dataset_manifests_store =
                 DatasetManifestsStore::new(manifests_store.prefixed_store());
             DatasetStore::new(
-                temp_db.metadata_db().clone(),
+                metadata_db.conn_pool().clone(),
                 provider_configs_store,
                 dataset_manifests_store,
             )
@@ -397,7 +396,7 @@ impl TestCtxBuilder {
         // Start query server (pass shared dataset_store)
         let server = DaemonServer::new(
             config.clone(),
-            temp_db.metadata_db().clone(),
+            metadata_db.conn_pool().clone(),
             data_store.clone(),
             dataset_store.clone(),
             self.meter,
@@ -409,7 +408,7 @@ impl TestCtxBuilder {
         // Start controller (Admin API) with shared dataset_store
         let controller = DaemonController::new(
             config.clone(),
-            temp_db.metadata_db().clone(),
+            metadata_db.conn_pool().clone(),
             data_store.clone(),
             dataset_store.clone(),
             controller_meter,
@@ -514,7 +513,7 @@ impl TestCtxBuilder {
             .expect("test name should be a valid WorkerNodeId");
         let worker = DaemonWorker::new(
             config,
-            temp_db.metadata_db().clone(),
+            metadata_db.conn_pool().clone(),
             data_store,
             dataset_store,
             worker_meter,
@@ -527,7 +526,7 @@ impl TestCtxBuilder {
             test_name: self.test_name,
             test_dir,
             daemon_state_dir,
-            tempdb_fixture: temp_db,
+            _metadata_db_fixture: metadata_db,
             daemon_server_fixture: server,
             daemon_controller_fixture: controller,
             daemon_worker_fixture: worker,
@@ -547,8 +546,7 @@ pub struct TestCtx {
 
     daemon_state_dir: DaemonStateDir,
 
-    #[allow(dead_code)] // Kept alive to maintain database connection
-    tempdb_fixture: MetadataDbFixture,
+    _metadata_db_fixture: MetadataDbFixture,
     daemon_server_fixture: DaemonServer,
     daemon_controller_fixture: DaemonController,
     daemon_worker_fixture: DaemonWorker,
