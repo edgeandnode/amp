@@ -24,7 +24,7 @@ governor.workspace = true
 indoc.workspace = true
 itertools.workspace = true
 js-runtime = { path = "../js-runtime" }
-metadata-db = { path = "../metadata-db", features = ["temp-db"] }
+metadata-db = { path = "../metadata-db" }
 object_store.workspace = true
 regex.workspace = true
 schemars = { workspace = true, optional = true }

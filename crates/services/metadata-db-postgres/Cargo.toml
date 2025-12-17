@@ -1,0 +1,10 @@
+[package]
+name = "metadata-db-postgres"
+version.workspace = true
+license-file.workspace = true
+edition.workspace = true
+
+[dependencies]
+pgtemp = "0.7.1"
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true

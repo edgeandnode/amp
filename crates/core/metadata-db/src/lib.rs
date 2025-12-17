@@ -18,13 +18,9 @@ pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
 pub mod physical_table;
-#[cfg(feature = "temp-db")]
-pub mod temp;
 pub mod workers;
 
 use self::db::ConnPool;
-#[cfg(feature = "temp-db")]
-pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,

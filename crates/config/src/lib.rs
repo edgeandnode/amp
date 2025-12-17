@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::LazyLock, time::Duration};
 
 use common::{query_context::QueryEnv, store::ObjectStoreUrl};
 use datafusion::error::DataFusionError;
@@ -11,10 +11,43 @@ use figment::{
     providers::{Env, Format as _, Toml},
 };
 use fs_err as fs;
-use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
+use metadata_db::{DEFAULT_POOL_SIZE, MetadataDb};
+use metadata_db_postgres::service::Handle;
 pub use monitoring::config::OpenTelemetryConfig;
 use serde::Deserialize;
 use thiserror::Error;
+use tokio::sync::OnceCell;
+
+/// Whether to keep the temporary directory after the database is dropped
+///
+/// This is set to `false` by default, but can be overridden by the `KEEP_TEMP_DIRS` environment
+/// variable.
+static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("KEEP_TEMP_DIRS")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false)
+});
+
+/// Global singleton temporary metadata database instance
+///
+/// This is a shared instance of the temporary database that can be used by the config system.
+/// The service future is spawned automatically when the database is first accessed.
+static GLOBAL_METADATA_DB: OnceCell<Handle> = OnceCell::const_new();
+
+/// Gets or creates the global singleton temporary metadata database
+///
+/// Service is spawned automatically on first access. Used by config system
+/// for backward compatibility with the old `temp_metadata_db()` function.
+async fn global_metadata_db(keep: bool) -> &'static Handle {
+    GLOBAL_METADATA_DB
+        .get_or_init(|| async {
+            let (handle, fut) = metadata_db_postgres::service::new(keep);
+            // Spawn the service future to keep the database alive
+            tokio::spawn(fut);
+            handle
+        })
+        .await
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -244,12 +277,7 @@ impl Config {
             }
         } else if allow_temp_db {
             MetadataDbConfig {
-                url: Some(
-                    temp_metadata_db(*KEEP_TEMP_DIRS, config_file.metadata_db.pool_size)
-                        .await
-                        .url()
-                        .to_string(),
-                ),
+                url: Some(global_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string()),
                 pool_size: config_file.metadata_db.pool_size,
                 auto_migrate: config_file.metadata_db.auto_migrate,
             }

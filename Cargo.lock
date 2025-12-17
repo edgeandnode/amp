@@ -909,7 +909,7 @@ dependencies = [
  "futures",
  "heed",
  "http 1.4.0",
- "pgtemp",
+ "pgtemp 0.6.0",
  "serde",
  "serde_json",
  "sqlx",
@@ -1014,7 +1014,7 @@ dependencies = [
  "futures",
  "monitoring",
  "pg_escape",
- "pgtemp",
+ "pgtemp 0.6.0",
  "sqlparser",
  "sqlx",
  "thiserror 2.0.17",
@@ -2702,9 +2702,11 @@ dependencies = [
  "figment",
  "fs-err",
  "metadata-db",
+ "metadata-db-postgres",
  "monitoring",
  "serde",
  "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]
@@ -6551,7 +6553,7 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
- "pgtemp",
+ "pgtemp 0.6.0",
  "serde",
  "serde_json",
  "sqlx",
@@ -6561,6 +6563,15 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "metadata-db-postgres"
+version = "0.1.0"
+dependencies = [
+ "pgtemp 0.7.1",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7492,6 +7503,18 @@ name = "pgtemp"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f44c7106f7ce2df81a3223120eaf4b629317149d9613fc58ec3f9cd342aadcf5"
+dependencies = [
+ "libc",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "pgtemp"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6d35886f9448b0a12b24c9fee002332d19b5c021af45745fa1731f140eaf14e"
 dependencies = [
  "libc",
  "tempfile",
@@ -11965,6 +11988,7 @@ dependencies = [
  "futures",
  "indoc",
  "metadata-db",
+ "metadata-db-postgres",
  "monitoring",
  "object_store",
  "opentelemetry",

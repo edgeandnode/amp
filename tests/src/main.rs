@@ -61,7 +61,7 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use monitoring::logging;
 use tests::testlib::{
-    fixtures::{Ampctl, DaemonConfigBuilder, DaemonController, TempMetadataDb},
+    fixtures::{Ampctl, DaemonConfigBuilder, DaemonController, MetadataDb as MetadataDbFixture},
     helpers as test_helpers,
 };
 
@@ -118,7 +118,7 @@ async fn main() {
             let _ = dotenvy::dotenv_override();
 
             // Create temporary metadata database
-            let temp_db = TempMetadataDb::new().await;
+            let sysdb = MetadataDbFixture::new().await;
 
             // Get test data directory and create absolute paths for subdirectories
             let test_data_dir =
@@ -132,7 +132,7 @@ async fn main() {
                 .manifests_dir(manifests_dir.to_string_lossy().to_string())
                 .providers_dir(providers_dir.to_string_lossy().to_string())
                 .data_dir(snapshots_dir.to_string_lossy().to_string())
-                .metadata_db_url(temp_db.connection_url())
+                .metadata_db_url(sysdb.connection_url())
                 .build();
 
             // Write config to temporary file
@@ -168,7 +168,7 @@ async fn main() {
                 let dataset_manifests_store =
                     DatasetManifestsStore::new(manifests_store.prefixed_store());
                 DatasetStore::new(
-                    temp_db.metadata_db().clone(),
+                    sysdb.conn_pool().clone(),
                     provider_configs_store,
                     dataset_manifests_store,
                 )
@@ -177,7 +177,7 @@ async fn main() {
             // Start controller for Admin API access during dependency restoration
             let controller = DaemonController::new(
                 config.clone(),
-                temp_db.metadata_db().clone(),
+                sysdb.conn_pool().clone(),
                 data_store.clone(),
                 dataset_store.clone(),
                 None,
@@ -220,7 +220,7 @@ async fn main() {
                 config.clone(),
                 &ampctl,
                 dataset_store.clone(),
-                temp_db.metadata_db().clone(),
+                sysdb.conn_pool().clone(),
                 data_store.clone(),
                 dataset_ref.clone(),
                 end_block,
