@@ -15,12 +15,13 @@ use common::{BlockNum, BlockStreamer, BoxResult, RawDatasetRows};
 use futures::{Stream, StreamExt};
 use url::Url;
 
-use crate::{of1_client, rpc_client, tables};
+use crate::{metrics, of1_client, rpc_client, tables};
 
 /// A JSON-RPC based Solana extractor that implements the [`BlockStreamer`] trait.
 #[derive(Clone)]
 pub struct SolanaExtractor {
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
     network: String,
     provider_name: String,
     of1_car_directory: PathBuf,
@@ -35,16 +36,17 @@ impl SolanaExtractor {
         of1_car_directory: PathBuf,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
-        let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
+        let rpc_client = rpc_client::SolanaRpcClient::new(
             rpc_provider_url,
             max_rpc_calls_per_second,
             provider_name.clone(),
             network.clone(),
-            meter,
-        ));
+        );
+        let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
         Self {
-            rpc_client,
+            rpc_client: Arc::new(rpc_client),
+            metrics,
             network,
             provider_name,
             of1_car_directory,
@@ -107,7 +109,11 @@ impl SolanaExtractor {
 
             // Download the remaining blocks via JSON-RPC.
             for block_num in expected_next_slot..=end {
-                let get_block_resp = self.rpc_client.get_block(block_num, get_block_config).await;
+                let get_block_resp = self.rpc_client.get_block(
+                    block_num,
+                    get_block_config,
+                    self.metrics.clone(),
+                ).await;
 
                 let block = match get_block_resp {
                     Ok(block) => block,
@@ -149,13 +155,16 @@ impl BlockStreamer for SolanaExtractor {
             self.of1_car_directory.clone(),
             self.rpc_client.clone(),
             get_block_config,
+            self.metrics.clone(),
+            self.provider_name.clone(),
+            self.network.clone(),
         );
 
         self.block_stream_impl(start, end, historical_block_stream, get_block_config)
     }
 
     async fn latest_block(&mut self, _finalized: bool) -> BoxResult<Option<BlockNum>> {
-        let get_block_height_resp = self.rpc_client.get_block_height().await;
+        let get_block_height_resp = self.rpc_client.get_block_height(self.metrics.clone()).await;
 
         match get_block_height_resp {
             Ok(block_height) => Ok(Some(block_height)),
