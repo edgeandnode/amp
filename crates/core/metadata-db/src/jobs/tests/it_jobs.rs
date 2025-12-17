@@ -3,7 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    MetadataDb, WorkerInfo, WorkerNodeId, job_attempts,
+    DEFAULT_POOL_SIZE, WorkerInfo, WorkerNodeId, job_attempts,
     jobs::{self, JobStatus},
     workers,
 };
@@ -12,14 +12,13 @@ use crate::{
 async fn register_job_creates_with_scheduled_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -32,13 +31,12 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    let job_id =
-        jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to schedule job");
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        .await
+        .expect("Failed to schedule job");
 
     //* Then
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -52,19 +50,18 @@ async fn register_job_creates_with_scheduled_status() {
 async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id_main = WorkerNodeId::from_ref_unchecked("test-worker-main");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id_main.clone(), worker_info)
+    workers::register(&conn, worker_id_main.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker 1");
     let worker_id_other = WorkerNodeId::from_ref_unchecked("test-worker-other");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id_other.clone(), worker_info)
+    workers::register(&conn, worker_id_other.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker 2");
 
@@ -72,7 +69,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc1 = serde_json::json!({ "job": 1 });
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
     let job_id1 = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id_main.clone(),
         &job_desc_str1,
         JobStatus::default(),
@@ -83,7 +80,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc2 = serde_json::json!({ "job": 2 });
     let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
     let job_id2 = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id_main.clone(),
         &job_desc_str2,
         JobStatus::default(),
@@ -95,7 +92,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
     let job_desc_other = serde_json::json!({ "job": "other" });
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
     let job_id_other = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id_other.clone(),
         &job_desc_str_other,
         JobStatus::default(),
@@ -105,7 +102,7 @@ async fn get_jobs_for_node_filters_by_node_id() {
 
     //* When
     let jobs_list = jobs::sql::get_by_node_id_and_statuses(
-        &metadata_db,
+        &conn,
         worker_id_main.clone(),
         [JobStatus::Scheduled],
     )
@@ -136,14 +133,13 @@ async fn get_jobs_for_node_filters_by_status() {
     let temp_db = PgTempDB::new();
 
     // Connect to the DB
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-active-ids");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -152,7 +148,7 @@ async fn get_jobs_for_node_filters_by_status() {
 
     // Active jobs
     let job_id_scheduled = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::Scheduled,
@@ -160,18 +156,14 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register job_id_scheduled");
 
-    let job_id_running = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Running,
-    )
-    .await
-    .expect("Failed to register job_id_running");
+    let job_id_running =
+        jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+            .await
+            .expect("Failed to register job_id_running");
 
     // Terminal state jobs (should not be retrieved)
     jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::Completed,
@@ -179,17 +171,12 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register completed job");
 
-    jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to register failed job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to register failed job");
 
     let job_id_stop_requested = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::StopRequested,
@@ -197,18 +184,13 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register job_id_stop_requested");
 
-    jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Stopped,
-    )
-    .await
-    .expect("Failed to register stopped job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Stopped)
+        .await
+        .expect("Failed to register stopped job");
 
     //* When
     let active_jobs = jobs::sql::get_by_node_id_and_statuses(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         [
             JobStatus::Scheduled,
@@ -243,14 +225,13 @@ async fn get_jobs_for_node_filters_by_status() {
 async fn get_job_by_id_returns_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-get");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -261,13 +242,12 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id =
-        jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to register job");
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        .await
+        .expect("Failed to register job");
 
     //* When
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -283,14 +263,13 @@ async fn get_job_by_id_returns_job() {
 async fn get_job_includes_timestamps() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-details");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -300,13 +279,12 @@ async fn get_job_includes_timestamps() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id =
-        jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to register job");
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        .await
+        .expect("Failed to register job");
 
     //* When
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -323,13 +301,12 @@ async fn get_job_includes_timestamps() {
 async fn list_jobs_first_page_when_empty() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     //* When
-    let jobs = jobs::sql::list_first_page(&metadata_db, 10, None)
+    let jobs = jobs::sql::list_first_page(&conn, 10, None)
         .await
         .expect("Failed to list jobs");
 
@@ -341,17 +318,16 @@ async fn list_jobs_first_page_when_empty() {
 async fn list_jobs_first_page_respects_limit() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     // Create workers and jobs
     let mut job_ids = Vec::new();
     for i in 0..5 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-{}", i));
         let worker_info = WorkerInfo::default(); // {}
-        workers::register(&metadata_db, worker_id.clone(), worker_info)
+        workers::register(&conn, worker_id.clone(), worker_info)
             .await
             .expect("Failed to register worker");
 
@@ -361,10 +337,9 @@ async fn list_jobs_first_page_respects_limit() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id =
-            jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-                .await
-                .expect("Failed to register job");
+        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to register job");
         job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -372,7 +347,7 @@ async fn list_jobs_first_page_respects_limit() {
     }
 
     //* When
-    let jobs = jobs::sql::list_first_page(&metadata_db, 3, None)
+    let jobs = jobs::sql::list_first_page(&conn, 3, None)
         .await
         .expect("Failed to list jobs");
 
@@ -390,17 +365,16 @@ async fn list_jobs_first_page_respects_limit() {
 async fn list_jobs_next_page_uses_cursor() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     // Create 10 jobs
     let mut all_job_ids = Vec::new();
     for i in 0..10 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-page-{}", i));
         let worker_info = WorkerInfo::default(); // {}
-        workers::register(&metadata_db, worker_id.clone(), worker_info)
+        workers::register(&conn, worker_id.clone(), worker_info)
             .await
             .expect("Failed to register worker");
 
@@ -410,10 +384,9 @@ async fn list_jobs_next_page_uses_cursor() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id =
-            jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-                .await
-                .expect("Failed to register job");
+        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+            .await
+            .expect("Failed to register job");
         all_job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -421,7 +394,7 @@ async fn list_jobs_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = jobs::sql::list_first_page(&metadata_db, 3, None)
+    let first_page = jobs::sql::list_first_page(&conn, 3, None)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -430,7 +403,7 @@ async fn list_jobs_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = jobs::sql::list_next_page(&metadata_db, 3, cursor, None)
+    let second_page = jobs::sql::list_next_page(&conn, 3, cursor, None)
         .await
         .expect("Failed to list second page");
 
@@ -452,35 +425,32 @@ async fn list_jobs_next_page_uses_cursor() {
 async fn delete_by_id_and_statuses_deletes_matching_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-delete");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id =
-        jobs::sql::insert_with_default_status(&metadata_db, worker_id.clone(), &job_desc_str)
-            .await
-            .expect("Failed to insert job");
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        .await
+        .expect("Failed to insert job");
 
     //* When
-    let deleted =
-        jobs::sql::delete_by_id_and_statuses(&metadata_db, job_id, [JobStatus::Scheduled])
-            .await
-            .expect("Failed to delete job");
+    let deleted = jobs::sql::delete_by_id_and_statuses(&conn, job_id, [JobStatus::Scheduled])
+        .await
+        .expect("Failed to delete job");
 
     //* Then
     assert!(deleted);
 
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to query job");
     assert!(job.is_none());
@@ -490,39 +460,32 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
 async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-no-delete");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Running,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job");
 
     //* When
-    let deleted =
-        jobs::sql::delete_by_id_and_statuses(&metadata_db, job_id, [JobStatus::Scheduled])
-            .await
-            .expect("Failed to delete job");
+    let deleted = jobs::sql::delete_by_id_and_statuses(&conn, job_id, [JobStatus::Scheduled])
+        .await
+        .expect("Failed to delete job");
 
     //* Then
     assert!(!deleted);
 
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to query job")
         .expect("Job should still exist");
@@ -533,14 +496,13 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
 async fn delete_by_status_deletes_all_matching_jobs() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-bulk-delete");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -549,7 +511,7 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 
     // Create 3 jobs, 2 will be Completed, 1 will be Running
     let job_id1 = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::Completed,
@@ -557,24 +519,19 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     .await
     .expect("Failed to insert job 1");
     let job_id2 = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::Completed,
     )
     .await
     .expect("Failed to insert job 2");
-    let job_id3 = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Running,
-    )
-    .await
-    .expect("Failed to insert job 3");
+    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job 3");
 
     //* When
-    let deleted_count = jobs::sql::delete_by_status(&metadata_db, [JobStatus::Completed])
+    let deleted_count = jobs::sql::delete_by_status(&conn, [JobStatus::Completed])
         .await
         .expect("Failed to delete jobs");
 
@@ -583,20 +540,20 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 
     // Verify the Completed jobs are gone
     assert!(
-        jobs::sql::get_by_id(&metadata_db, job_id1)
+        jobs::sql::get_by_id(&conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::sql::get_by_id(&metadata_db, job_id2)
+        jobs::sql::get_by_id(&conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::sql::get_by_id(&metadata_db, job_id3)
+    let running_job = jobs::sql::get_by_id(&conn, job_id3)
         .await
         .expect("Failed to query job 3")
         .expect("Running job should still exist");
@@ -607,14 +564,13 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi-delete");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -623,41 +579,26 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 
     // Create 4 jobs with different statuses
     let job_id1 = jobs::sql::insert(
-        &metadata_db,
+        &conn,
         worker_id.clone(),
         &job_desc_str,
         JobStatus::Completed,
     )
     .await
     .expect("Failed to insert job 1");
-    let job_id2 = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job 2");
-    let job_id3 = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Stopped,
-    )
-    .await
-    .expect("Failed to insert job 3");
-    let job_id4 = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Running,
-    )
-    .await
-    .expect("Failed to insert job 4");
+    let job_id2 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job 2");
+    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Stopped)
+        .await
+        .expect("Failed to insert job 3");
+    let job_id4 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job 4");
 
     //* When
     let deleted_count = jobs::sql::delete_by_status(
-        &metadata_db,
+        &conn,
         [JobStatus::Completed, JobStatus::Failed, JobStatus::Stopped],
     )
     .await
@@ -668,26 +609,26 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 
     // Verify terminal jobs are gone
     assert!(
-        jobs::sql::get_by_id(&metadata_db, job_id1)
+        jobs::sql::get_by_id(&conn, job_id1)
             .await
             .expect("Failed to query job 1")
             .is_none()
     );
     assert!(
-        jobs::sql::get_by_id(&metadata_db, job_id2)
+        jobs::sql::get_by_id(&conn, job_id2)
             .await
             .expect("Failed to query job 2")
             .is_none()
     );
     assert!(
-        jobs::sql::get_by_id(&metadata_db, job_id3)
+        jobs::sql::get_by_id(&conn, job_id3)
             .await
             .expect("Failed to query job 3")
             .is_none()
     );
 
     // Verify the Running job still exists
-    let running_job = jobs::sql::get_by_id(&metadata_db, job_id4)
+    let running_job = jobs::sql::get_by_id(&conn, job_id4)
         .await
         .expect("Failed to query job 4")
         .expect("Running job should still exist");
@@ -698,14 +639,13 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-retry-query");
     let worker_info = WorkerInfo::default();
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -713,20 +653,15 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create a failed job
-    let job_id = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job");
 
     // Wait longer than initial backoff (1 second)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     //* When
-    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db)
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
         .await
         .expect("Failed to get ready jobs");
 
@@ -740,14 +675,13 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
 async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-not-ready");
     let worker_info = WorkerInfo::default();
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -755,17 +689,12 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create a failed job
-    jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job");
 
     //* When (immediately check, before backoff expires)
-    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db)
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
         .await
         .expect("Failed to get ready jobs");
 
@@ -777,14 +706,13 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
 async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-calc");
     let worker_info = WorkerInfo::default();
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -792,23 +720,18 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create a failed job
-    let job_id = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job");
 
     // Insert multiple attempts
-    job_attempts::insert_attempt(&metadata_db, job_id, 0)
+    job_attempts::insert_attempt(&conn, job_id, 0)
         .await
         .expect("Failed to insert attempt 0");
-    job_attempts::insert_attempt(&metadata_db, job_id, 1)
+    job_attempts::insert_attempt(&conn, job_id, 1)
         .await
         .expect("Failed to insert attempt 1");
-    job_attempts::insert_attempt(&metadata_db, job_id, 2)
+    job_attempts::insert_attempt(&conn, job_id, 2)
         .await
         .expect("Failed to insert attempt 2");
 
@@ -816,7 +739,7 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     tokio::time::sleep(tokio::time::Duration::from_secs(9)).await;
 
     //* When
-    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db)
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
         .await
         .expect("Failed to get ready jobs");
 
@@ -830,14 +753,13 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
 async fn get_failed_jobs_handles_missing_attempts() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-missing");
     let worker_info = WorkerInfo::default();
-    workers::register(&metadata_db, worker_id.clone(), worker_info)
+    workers::register(&conn, worker_id.clone(), worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -845,19 +767,14 @@ async fn get_failed_jobs_handles_missing_attempts() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Create a failed job WITHOUT any attempts (edge case)
-    let job_id = jobs::sql::insert(
-        &metadata_db,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job");
 
     // Manually delete any backfilled attempts to simulate edge case
     sqlx::query("DELETE FROM job_attempts WHERE job_id = $1")
         .bind(job_id)
-        .execute(&metadata_db.pool)
+        .execute(&conn)
         .await
         .expect("Failed to delete attempts");
 
@@ -865,7 +782,7 @@ async fn get_failed_jobs_handles_missing_attempts() {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     //* When
-    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&metadata_db)
+    let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
         .await
         .expect("Failed to get ready jobs");
 
@@ -879,40 +796,34 @@ async fn get_failed_jobs_handles_missing_attempts() {
 async fn reschedule_updates_status_and_worker() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let worker_id1 = WorkerNodeId::from_ref_unchecked("test-worker-original");
     let worker_id2 = WorkerNodeId::from_ref_unchecked("test-worker-new");
     let worker_info = WorkerInfo::default();
-    workers::register(&metadata_db, worker_id1.clone(), worker_info.clone())
+    workers::register(&conn, worker_id1.clone(), worker_info.clone())
         .await
         .expect("Failed to register worker 1");
-    workers::register(&metadata_db, worker_id2.clone(), worker_info)
+    workers::register(&conn, worker_id2.clone(), worker_info)
         .await
         .expect("Failed to register worker 2");
 
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::sql::insert(
-        &metadata_db,
-        worker_id1.clone(),
-        &job_desc_str,
-        JobStatus::Failed,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id1.clone(), &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job");
 
     //* When
-    jobs::sql::reschedule(&metadata_db, job_id, worker_id2.clone())
+    jobs::sql::reschedule(&conn, job_id, worker_id2.clone())
         .await
         .expect("Failed to reschedule job");
 
     //* Then
-    let job = jobs::sql::get_by_id(&metadata_db, job_id)
+    let job = jobs::sql::get_by_id(&conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");

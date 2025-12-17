@@ -10,11 +10,11 @@ use crate::error::Error;
 /// The transaction will be rolled back automatically when dropped unless `commit()`
 /// is called explicitly.
 #[derive(Debug)]
-pub struct Transaction(sqlx::Transaction<'static, Postgres>);
+pub struct Transaction<'a>(sqlx::Transaction<'a, Postgres>);
 
-impl Transaction {
+impl<'a> Transaction<'a> {
     /// Wraps a `sqlx` transaction with RAII rollback semantics.
-    pub(crate) fn new(tx: sqlx::Transaction<'static, Postgres>) -> Self {
+    pub(crate) fn new(tx: sqlx::Transaction<'a, Postgres>) -> Self {
         Self(tx)
     }
 
@@ -34,7 +34,7 @@ impl Transaction {
 }
 
 // Implement sqlx::Executor for &mut Transaction by delegating to the underlying sqlx::Transaction
-impl<'c> sqlx::Executor<'c> for &'c mut Transaction {
+impl<'c, 'a> sqlx::Executor<'c> for &'c mut Transaction<'a> {
     type Database = Postgres;
 
     fn fetch_many<'e, 'q: 'e, E>(
@@ -96,6 +96,6 @@ impl<'c> sqlx::Executor<'c> for &'c mut Transaction {
     }
 }
 
-impl<'c> super::Executor<'c> for &'c mut Transaction {}
+impl<'c, 'a> super::Executor<'c> for &'c mut Transaction<'a> {}
 
-impl crate::_priv::Sealed for &mut Transaction {}
+impl<'a> crate::_priv::Sealed for &mut Transaction<'a> {}
