@@ -31,6 +31,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.7",
  "common",
+ "config",
  "datafusion",
  "dataset-store",
  "datasets-common",
@@ -980,6 +981,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "common",
+ "config",
  "console-subscriber",
  "controller",
  "dataset-store",
@@ -2691,6 +2693,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "config"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "datafusion",
+ "dump",
+ "figment",
+ "fs-err",
+ "metadata-db",
+ "monitoring",
+ "serde",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2833,6 +2850,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.7",
  "common",
+ "config",
  "dataset-store",
  "datasets-common",
  "dump",
@@ -6607,6 +6625,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "serde",
  "thiserror 2.0.17",
  "tracing",
  "tracing-opentelemetry",
@@ -11932,6 +11951,7 @@ dependencies = [
  "clap",
  "color-backtrace",
  "common",
+ "config",
  "controller",
  "ctor",
  "dataset-store",
@@ -13660,6 +13680,7 @@ dependencies = [
  "backon",
  "chrono",
  "common",
+ "config",
  "dataset-store",
  "datasets-common",
  "dump",

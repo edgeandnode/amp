@@ -11,7 +11,6 @@ use std::{
 use common::{
     BlockNum, ParquetFooterCache,
     catalog::physical::PhysicalTable,
-    config::ParquetConfig,
     metadata::{SegmentSize, segments::BlockRange},
 };
 use futures::{StreamExt, TryStreamExt, stream};
@@ -24,6 +23,7 @@ use crate::{
         CompactionAlgorithm, CompactionResult, CompactorError,
         plan::{CompactionFile, CompactionPlan},
     },
+    config::ParquetConfig,
     metrics::MetricsRegistry,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };

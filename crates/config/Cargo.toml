@@ -1,0 +1,16 @@
+[package]
+name = "config"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+common = { path = "../core/common" }
+datafusion.workspace = true
+dump = { path = "../core/dump" }
+figment.workspace = true
+fs-err.workspace = true
+metadata-db = { path = "../core/metadata-db" }
+monitoring = { path = "../core/monitoring" }
+serde.workspace = true
+thiserror.workspace = true

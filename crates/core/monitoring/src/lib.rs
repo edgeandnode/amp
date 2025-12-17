@@ -1,11 +1,15 @@
 use opentelemetry::metrics::Meter;
 
+pub mod config;
 pub mod logging;
 pub mod telemetry;
 
-use self::telemetry::{
-    metrics::{self, MeterProvider},
-    traces::TracerProvider,
+use self::{
+    config::OpenTelemetryConfig,
+    telemetry::{
+        metrics::{self, MeterProvider},
+        traces::TracerProvider,
+    },
 };
 
 /// Return type for the `init` function containing optional telemetry providers and meter.
@@ -19,7 +23,7 @@ pub type TelemetryKit = (
 );
 
 pub fn init(
-    config: Option<&common::config::OpenTelemetryConfig>,
+    config: Option<&OpenTelemetryConfig>,
 ) -> Result<TelemetryKit, telemetry::ExporterBuildError> {
     let Some(config) = config else {
         logging::init();

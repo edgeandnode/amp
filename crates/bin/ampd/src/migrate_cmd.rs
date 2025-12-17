@@ -1,4 +1,4 @@
-use common::config::Config;
+use config::Config;
 use metadata_db::MetadataDb;
 
 pub async fn run(config: Config) -> Result<(), Error> {

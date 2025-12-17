@@ -26,6 +26,10 @@ mod tasks;
 pub use self::{
     block_ranges::{EndBlock, ResolvedEndBlock},
     check::consistency_check,
+    config::{
+        CollectorConfig, CompactionAlgorithmConfig, CompactorConfig, ConfigDuration, ParquetConfig,
+        SizeLimitConfig,
+    },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
 };
 use crate::{
@@ -119,7 +123,7 @@ pub struct WriterProperties {
     pub max_row_group_bytes: usize,
 }
 
-pub fn parquet_opts(config: &common::config::ParquetConfig) -> Arc<WriterProperties> {
+pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
     // We have not done our own benchmarking, but the default 1_000_000 value for this adds about a
     // megabyte of storage per column, per row group. This analysis by InfluxData suggests that
     // smaller NDV values may be equally effective:

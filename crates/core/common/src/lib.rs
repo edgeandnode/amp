@@ -1,6 +1,5 @@
 pub mod arrow_helpers;
 pub mod catalog;
-pub mod config;
 pub mod evm;
 pub mod incrementalizer;
 pub mod js_udf;

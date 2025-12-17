@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use common::{
-    config::Config,
-    store::{self, ObjectStoreCreationError, Store, StoreError},
-};
+use common::store::{self, ObjectStoreCreationError, Store, StoreError};
+use config::Config;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -69,7 +67,7 @@ pub enum Error {
     /// This occurs when the worker cannot establish a connection to the
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+    MetadataDbConnection(#[source] Box<config::ConfigError>),
 
     /// Failed to create data store
     ///
@@ -103,7 +101,7 @@ pub enum Error {
     Runtime(#[source] worker::service::RuntimeError),
 }
 
-/// Convert common::config::Config to worker::config::Config
+/// Convert config::Config to worker::config::Config
 pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
     worker::config::Config {
         microbatch_max_interval: config.microbatch_max_interval,

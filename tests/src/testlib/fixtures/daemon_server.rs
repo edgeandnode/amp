@@ -36,7 +36,7 @@ impl DaemonServer {
     /// use the `DaemonController` fixture.
     /// The server will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        config: Arc<common::config::Config>,
+        config: Arc<config::Config>,
         metadb: MetadataDb,
         data_store: Arc<Store>,
         dataset_store: DatasetStore,
@@ -143,8 +143,8 @@ impl Drop for DaemonServer {
     }
 }
 
-/// Convert common::config::Config to server::config::Config
-fn server_config_from_common(config: &common::config::Config) -> Config {
+/// Convert config::Config to server::config::Config
+fn server_config_from_common(config: &config::Config) -> Config {
     Config {
         server_microbatch_max_interval: config.server_microbatch_max_interval,
         keep_alive_interval: config.keep_alive_interval,

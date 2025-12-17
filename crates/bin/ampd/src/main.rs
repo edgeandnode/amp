@@ -1,4 +1,5 @@
-use common::{BoxError, config::Config};
+use common::BoxError;
+use config::Config;
 
 mod controller_cmd;
 mod dev_cmd;
@@ -165,7 +166,7 @@ async fn load_config(
     };
 
     // Gather build info from environment variables set by vergen
-    let build_info = common::config::BuildInfo {
+    let build_info = config::BuildInfo {
         version: env!("VERGEN_GIT_DESCRIBE").to_string(),
         commit_sha: env!("VERGEN_GIT_SHA").to_string(),
         commit_timestamp: env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),

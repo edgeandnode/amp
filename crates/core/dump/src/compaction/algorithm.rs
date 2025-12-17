@@ -7,11 +7,13 @@ use std::{
 use common::{
     Timestamp,
     arrow::array::ArrowNativeTypeOp,
-    config::{ParquetConfig, SizeLimitConfig},
     metadata::{Generation, Overflow, SegmentSize},
 };
 
-use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
+use crate::{
+    compaction::{compactor::CompactionGroup, plan::CompactionFile},
+    config::{ParquetConfig, SizeLimitConfig},
+};
 
 /// Compaction algorithm parameters.
 /// Defines the criteria for grouping files for compaction

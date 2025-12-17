@@ -2,9 +2,9 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use common::{
     BoxError,
-    config::Config as CommonConfig,
     store::{self, ObjectStoreCreationError, Store, StoreError},
 };
+use config::Config as CommonConfig;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -141,7 +141,7 @@ pub enum Error {
     /// This occurs when the dev command cannot establish a connection to the
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<common::config::ConfigError>),
+    MetadataDbConnection(#[source] Box<config::ConfigError>),
 
     /// Failed to create data store
     ///

@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use common::{catalog::physical::PhysicalTable, config::ParquetConfig};
+use common::catalog::physical::PhysicalTable;
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, path::Path};
@@ -13,6 +13,7 @@ use object_store::{Error as ObjectStoreError, path::Path};
 use crate::{
     WriterProperties,
     compaction::error::{CollectionResult, CollectorError},
+    config::ParquetConfig,
     metrics::MetricsRegistry,
 };
 
