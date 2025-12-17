@@ -19,7 +19,7 @@ New to Amp? Start here:
 Complete guide to Amp's operational modes and deployment patterns:
 
 - **Distributed Mode**: Separate server and worker components for production
-- **Development Mode**: Combined server + worker for local testing
+- **Local Development Mode**: Combined server + worker for local testing
 - Deployment patterns and architecture diagrams
 
 #### [Configuration Guide](config.md)

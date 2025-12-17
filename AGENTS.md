@@ -27,7 +27,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 
 - Central command dispatcher
 - Commands:
-  - `dev`: Start development server
+  - `solo`: Start amp in local development mode
   - `server`: Start query servers
   - `worker`: Run distributed worker node
   - `controller`: Run controller with Admin API

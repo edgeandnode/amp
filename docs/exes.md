@@ -69,21 +69,21 @@ ampup build --path /path/to/amp-repo
 
 **Operational Modes**: `ampd` supports two primary operational modes, each suited for different deployment patterns:
 
-1. **Single-Node Mode** (`ampd dev`) - Combined server + worker for local development
+1. **Single-Node Mode** (`ampd solo`) - Combined server + worker for local development
 2. **Distributed Mode** - Separate controller, server, and worker processes for production
 
 For detailed information about operational modes, deployment patterns, and scaling strategies, see [Operational Modes](modes.md).
 
 **Key Commands**:
 
-- `ampd dev` - Start development server with embedded worker (single-node mode)
+- `ampd solo` - Start solo server with embedded worker (single-node mode)
 - `ampd server` - Run query server (Arrow Flight + JSON Lines)
 - `ampd controller` - Run the controller responsible for job scheduling and exposing the engine administration interface
 - `ampd worker` - Run extraction worker process
 
 **When to Use**:
 
-- **Development**: Use `ampd dev` for local testing and prototyping
+- **Development**: Use `ampd solo` for local testing and prototyping
 - **Production extraction and serving**: Use distributed mode (`server`, `controller`, `worker`) for scalable deployments
 
 ### `ampctl` - Administration and Control CLI

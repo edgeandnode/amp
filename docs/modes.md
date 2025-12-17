@@ -17,14 +17,14 @@ Amp provides several commands that can be combined into different deployment pat
 
 Amp supports two primary operational modes:
 
-1. **Single-Node Mode**: Combined controller, server and embedded worker using `ampd dev` for local development and testing
+1. **Single-Node Mode**: Combined controller, server and embedded worker using `ampd solo` for local development and testing
 2. **Distributed Mode**: Separate `ampd controller`, `ampd server` and `ampd worker` processes coordinating via metadata DB for production deployments
 
 ### Common Deployment Patterns
 
 1. **Server-Only Mode**: Query serving without extraction workers (distributed, read-only)
 2. **Controller-Only Mode**: Management interface without query server or workers
-3. **Development Mode**: Combined server + embedded worker `ampd dev` (single-node)
+3. **Local Development Mode**: Combined server + embedded worker `ampd solo` (single-node)
 4. **Controller + Server + Workers**: Separate server and worker processes coordinating via metadata DB (distributed)
 
 ## Distributed Mode
@@ -59,7 +59,7 @@ The server provides two query interfaces:
    - Supports streaming queries
    - Compression support (gzip, brotli, deflate)
 
-> **Note:** In development mode (`--dev`), the server also includes the Admin API (controller) for convenience.
+> **Note:** In local development mode (`ampd solo`), the server also includes the Admin API (controller) for convenience.
 
 #### Basic Usage
 
@@ -292,13 +292,13 @@ curl http://localhost:1610/files?dataset=my_namespace/eth_mainnet
 curl http://localhost:1610/files/512
 ```
 
-> **Note:** In development mode (`ampd dev`), the controller (Admin API) is automatically included with the server for convenience, so you don't need to run it separately.
+> **Note:** In solo mode (`ampd solo`), the controller (Admin API) is automatically included with the server for convenience, so you don't need to run it separately.
 
-## Development Mode _(Single-Node)_
+## Local Development Mode _(Single-Node)_
 
 ### Purpose
 
-Development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated with the `ampd dev` command.
+Local development mode runs a combined server and worker in a single process for simplified local testing and development. This implements **single-node mode** for local development, where all components run together in a single process. It is activated with the `ampd solo` command.
 
 ### When to Use
 
@@ -310,7 +310,7 @@ Development mode runs a combined server and worker in a single process for simpl
 
 ### How It Works
 
-When running `ampd dev`:
+When running `ampd solo`:
 
 1. Server starts both query interfaces (Arrow Flight, JSON Lines)
 2. Controller (Admin API) automatically starts in the same process
@@ -323,7 +323,7 @@ When running `ampd dev`:
 
 ```bash
 # Start development mode
-ampd dev
+ampd solo
 
 # Schedule a job via Admin API (executed by embedded worker)
 curl -X POST http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/dev/deploy \
@@ -356,11 +356,11 @@ curl -X POST http://localhost:1603 \
 
 This section describes common deployment topologies and when to use each.
 
-### Pattern 1: Development Mode _(Single-Node)_
+### Pattern 1: Local Development Mode _(Single-Node)_
 
 ```
 ┌──────────────────────────────────────────┐
-│ ampd dev                               │
+│ ampd solo                                │
 │ ┌──────────────┐ ┌────────────────────┐  │
 │ │Server        │ │ Controller         │  │
 │ │- Flight      │ │ - Admin API        │  │
@@ -388,14 +388,14 @@ This section describes common deployment topologies and when to use each.
 **Commands:**
 
 ```bash
-ampd dev
+ampd solo
 ```
 
 ### Pattern 2: Query-Only Server _(Distributed, Read-Only)_
 
 ```
 ┌─────────────────────┐
-│ ampd server       │
+│ ampd server         │
 │ ┌─────────────────┐ │
 │ │Server           │ │
 │ │- Flight         │ │
@@ -426,7 +426,7 @@ ampd server
 
 ```
 ┌────────────────────┐   ┌──────────────────┐
-│ampd server       │   │ampd controller │
+│ampd server         │   │ampd controller   │
 │┌──────────────────┐│   │┌────────────────┐│
 ││Server            ││   ││Controller      ││
 ││- Flight          ││   ││- Admin API     ││
@@ -435,13 +435,13 @@ ampd server
 └────────────────────┘            │
          │                        │
          │               ┌──────────────────┐
-         │               │ampd worker     │
+         │               │ampd worker       │
          │               │┌────────────────┐│
          │               ││Worker-1        ││
          │               │└────────────────┘│
          │               └──────────────────┘
          │               ┌──────────────────┐
-         │               │ampd worker     │
+         │               │ampd worker       │
          │               │┌────────────────┐│
          │               ││Worker-2        ││
          │               │└────────────────┘│
@@ -483,7 +483,7 @@ ampd worker --node-id worker-03
 ```
 Region A                      Region B
 ┌────────────────────┐        ┌────────────────────┐
-│ampd server       │        │ampd server       │
+│ampd server         │        │ampd server         │
 │┌──────────────────┐│        │┌──────────────────┐│
 ││Server            ││        ││Server            ││
 ││- Flight          ││        ││- Flight          ││
@@ -492,7 +492,7 @@ Region A                      Region B
 └────────────────────┘        └────────────────────┘
          │                             │
 ┌────────────────────┐        ┌────────────────────┐
-│ampd controller   │        │ampd worker       │
+│ampd controller     │        │ampd worker         │
 │┌──────────────────┐│        │┌──────────────────┐│
 ││Controller        ││        ││Worker            ││
 ││- Admin API       ││        ││Region-B          ││
@@ -500,7 +500,7 @@ Region A                      Region B
 └────────────────────┘        └────────────────────┘
          │                             │
 ┌────────────────────┐                 │
-│ampd worker       │                 │
+│ampd worker         │                 │
 │┌──────────────────┐│                 │
 ││Worker            ││                 │
 ││Region-A          ││                 │
@@ -578,7 +578,7 @@ ampd worker --node-id eu-west-1-worker
 ### Stage 1: Development & Testing
 
 - **Mode:** Single-Node
-- Use `ampd dev` for local development and testing
+- Use `ampd solo` for local development and testing
 - Single machine, minimal setup
 - **Not for production use**
 
