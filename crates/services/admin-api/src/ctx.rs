@@ -1,7 +1,8 @@
 //! Service context
 use std::sync::Arc;
 
-use common::{config::BuildInfo, store::Store};
+use common::store::Store;
+use config::BuildInfo;
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 

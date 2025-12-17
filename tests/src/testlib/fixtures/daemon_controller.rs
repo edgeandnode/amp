@@ -31,7 +31,7 @@ impl DaemonController {
     /// Starts a Amp controller with the provided configuration and metadata database.
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        config: Arc<common::config::Config>,
+        config: Arc<config::Config>,
         metadata_db: metadata_db::MetadataDb,
         data_store: Arc<Store>,
         dataset_store: dataset_store::DatasetStore,
@@ -99,7 +99,7 @@ impl Drop for DaemonController {
 }
 
 /// Convert common config to controller config
-fn controller_config_from_common(config: &common::config::Config) -> Config {
+fn controller_config_from_common(config: &config::Config) -> Config {
     Config {
         build_info: config.build_info.clone(),
     }

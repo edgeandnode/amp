@@ -1,4 +1,4 @@
-use common::config::BuildInfo;
+use config::BuildInfo;
 
 /// Controller-specific configuration
 ///

@@ -48,7 +48,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use common::{BoxError, Store, config::Config};
+use common::{BoxError, Store};
+use config::Config;
 use dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
@@ -365,7 +366,7 @@ async fn bless(
     Ok(())
 }
 
-/// Convert common::config::Config to worker::config::Config
+/// Convert config::Config to worker::config::Config
 ///
 /// Creates a worker configuration with a dummy WorkerInfo since the blessing
 /// process doesn't need real build information.

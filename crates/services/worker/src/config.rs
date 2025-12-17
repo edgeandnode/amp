@@ -1,5 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
+use config::ParquetConfig;
+
 use crate::info::WorkerInfo;
 
 /// Configuration specific to the worker service
@@ -28,7 +30,7 @@ pub struct Config {
     pub spill_location: Vec<PathBuf>,
 
     /// Parquet file configuration
-    pub parquet: common::config::ParquetConfig,
+    pub parquet: ParquetConfig,
 
     /// Worker build/version information for registration
     pub worker_info: WorkerInfo,

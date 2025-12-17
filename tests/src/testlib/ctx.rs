@@ -30,7 +30,8 @@
 
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-use common::{BoxError, config::Config, store::Store};
+use common::{BoxError, store::Store};
+use config::Config;
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
