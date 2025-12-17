@@ -27,6 +27,7 @@ members = [
     "crates/extractors/firehose/gen",
     "crates/extractors/solana",
     "crates/extractors/solana/gen",
+    "crates/extractors/solana-storage-proto",
     "crates/services/admin-api",
     "crates/services/admin-api/gen",
     "crates/services/controller",

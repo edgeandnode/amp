@@ -322,6 +322,24 @@ gen-admin-api-openapi-spec DEST_DIR=GEN_OPENAPI_SCHEMAS_OUTDIR:
 gen-firehose-datasets-proto:
     RUSTFLAGS="--cfg gen_proto" cargo check -p firehose-datasets
 
+# Generate solana-storage-proto protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
+[group: 'codegen']
+gen-solana-storage-proto:
+    RUSTFLAGS="--cfg gen_proto" cargo check -p solana-storage-proto
+
+# Update solana-storage-proto .proto files from upstream agave repo
+[group: 'codegen']
+update-solana-storage-proto BRANCH="master":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASE_URL="https://raw.githubusercontent.com/anza-xyz/agave/{{BRANCH}}/storage-proto/proto"
+    DEST="crates/extractors/solana-storage-proto/proto"
+    echo "Fetching proto files from agave@{{BRANCH}}..."
+    curl -fsSL "$BASE_URL/confirmed_block.proto" -o "$DEST/confirmed_block.proto"
+    curl -fsSL "$BASE_URL/entries.proto" -o "$DEST/entries.proto"
+    curl -fsSL "$BASE_URL/transaction_by_addr.proto" -o "$DEST/transaction_by_addr.proto"
+    echo "Proto files updated. Run 'just gen-solana-storage-proto' to regenerate bindings."
+
 
 ## Misc
 
