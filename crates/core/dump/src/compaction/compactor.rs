@@ -141,7 +141,7 @@ impl Compactor {
                         "compaction group completed successfully"
                     );
                     if let Some(metrics) = &self.metrics {
-                        metrics.inc_successful_compactions(table_name.to_string(), block_num);
+                        metrics.inc_successful_compactions(table_name.to_string());
                     }
                 }
                 Err(err) => {

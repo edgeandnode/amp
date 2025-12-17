@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use common::BlockNum;
 use datasets_common::hash_reference::HashReference;
 use monitoring::telemetry;
 
@@ -277,12 +276,9 @@ impl MetricsRegistry {
             .record_with_kvs(duration_millis, &kv_pairs);
     }
 
-    pub(crate) fn inc_successful_compactions(&self, table: String, range_start: BlockNum) {
+    pub(crate) fn inc_successful_compactions(&self, table: String) {
         let mut kv_pairs = self.base_kvs();
-        kv_pairs.extend_from_slice(&[
-            telemetry::metrics::KeyValue::new("table", table),
-            telemetry::metrics::KeyValue::new("range_start", range_start as i64),
-        ]);
+        kv_pairs.extend_from_slice(&[telemetry::metrics::KeyValue::new("table", table)]);
         self.successful_compactions.inc_with_kvs(&kv_pairs);
     }
 
