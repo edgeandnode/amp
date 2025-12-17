@@ -71,7 +71,7 @@ services:
 
   amp:
     image: ghcr.io/edgeandnode/amp:latest
-    command: ["dev"]
+    command: ["solo"]
     ports:
       - "1602:1602"  # Arrow Flight
       - "1610:1610"  # Admin API

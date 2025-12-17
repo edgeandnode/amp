@@ -2,9 +2,9 @@ use common::BoxError;
 use config::Config;
 
 mod controller_cmd;
-mod dev_cmd;
 mod migrate_cmd;
 mod server_cmd;
+mod solo_cmd;
 mod worker_cmd;
 
 #[cfg(feature = "snmalloc")]
@@ -25,7 +25,8 @@ struct Args {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 enum Command {
-    Dev {
+    #[command(alias = "dev", hide = true)]
+    Solo {
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
@@ -87,7 +88,7 @@ async fn main_inner() -> Result<(), BoxError> {
     );
 
     match command {
-        Command::Dev {
+        Command::Solo {
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
@@ -103,7 +104,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
             let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
-            dev_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
+            solo_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
                 .await
                 .map_err(Into::into)
         }

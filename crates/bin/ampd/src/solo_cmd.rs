@@ -133,12 +133,12 @@ pub async fn run(
     Ok(())
 }
 
-/// Errors that can occur during dev mode execution.
+/// Errors that can occur during solo mode execution.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Failed to connect to metadata database
     ///
-    /// This occurs when the dev command cannot establish a connection to the
+    /// This occurs when the solo command cannot establish a connection to the
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
     MetadataDbConnection(#[source] Box<config::ConfigError>),

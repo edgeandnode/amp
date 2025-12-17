@@ -190,7 +190,7 @@ When implementing or modifying a service in `crates/services/`, ensure:
 Services are designed to compose via `tokio::select!`:
 
 ```rust
-// In ampd/src/dev_cmd.rs
+// In ampd/src/solo_cmd.rs
 let controller_fut = controller::service::new(config.clone(), meter.as_ref(), admin_addr).await?;
 let server_fut = server::service::new(config.clone(), metadata_db.clone(), flight_addr, jsonl_addr, meter.as_ref()).await?;
 let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter);
