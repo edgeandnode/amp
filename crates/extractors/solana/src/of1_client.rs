@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use common::BoxResult;
 use futures::{Stream, StreamExt};
