@@ -130,7 +130,7 @@ impl Transaction {
         slot: Slot,
         tx_index: u32,
         of_tx: solana_sdk::transaction::VersionedTransaction,
-        of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta,
+        of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> Self {
         let tx_meta = TransactionStatusMeta::from_of1_tx_meta(slot, tx_index, of_tx_meta);
 
@@ -274,7 +274,7 @@ impl TransactionStatusMeta {
     fn from_of1_tx_meta(
         slot: u64,
         tx_index: u32,
-        of_tx_meta: solana_storage_proto::convert::generated::TransactionStatusMeta,
+        of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> Self {
         let inner_instructions = of_tx_meta
             .inner_instructions
@@ -388,8 +388,8 @@ impl From<crate::rpc_client::UiTransactionTokenBalance> for TransactionTokenBala
     }
 }
 
-impl From<solana_storage_proto::convert::generated::TokenBalance> for TransactionTokenBalance {
-    fn from(value: solana_storage_proto::convert::generated::TokenBalance) -> Self {
+impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTokenBalance {
+    fn from(value: solana_storage_proto::confirmed_block::TokenBalance) -> Self {
         let ui_token_amount = value
             .ui_token_amount
             .map(|token_amount| TokenAmount {

@@ -2,6 +2,14 @@
 
 This crate is vendored from [anza-xyz/agave](https://github.com/anza-xyz/agave/tree/master/storage-proto) to avoid the `protobuf-src` dependency which compiles C++ libprotobuf from source, causing slow build times.
 
+## Differences from Upstream
+
+This is a **minimal version** that only includes the generated protobuf types. The following upstream code was removed:
+
+- `convert.rs` - Conversion impls between proto types and solana-transaction-status types
+- `Stored*` types in `lib.rs` - Bincode-serializable wrappers (StoredExtendedReward, StoredTransactionStatusMeta, etc.)
+- Tests
+
 ## Regenerating Protobuf Bindings
 
 If you modify the `.proto` files, regenerate the Rust bindings:
@@ -27,13 +35,7 @@ When upstream `solana-storage-proto` has changes you need:
    just gen-solana-storage-proto
    ```
 
-3. **Update source files** (if changed) - this requires manual work:
-   - Copy `lib.rs` and `convert.rs` from upstream
-   - Remove the `#![cfg_attr(not(feature = "agave-unstable-api"), deprecated(...))]` attribute from lib.rs
-   - Add `mod proto;` to lib.rs
-   - Replace `include!(concat!(env!("OUT_DIR"), ...))` in convert.rs with `pub use crate::proto::...`
-
-4. **Update dependency versions** in `Cargo.toml` if needed (solana-* crates).
+3. **Update dependency versions** in `Cargo.toml` if needed (solana-* crates).
 
 ## Why Vendor?
 
