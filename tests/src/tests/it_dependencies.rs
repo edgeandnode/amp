@@ -25,7 +25,7 @@ async fn intra_deps_test() {
         "intra-deps",
         &test_ctx,
         &mut client,
-        Some(Duration::from_secs(1)),
+        Some(Duration::from_millis(100)),
     )
     .await
     .expect("Failed to run spec");
@@ -51,7 +51,7 @@ async fn multi_version_test() {
         "multi-version",
         &test_ctx,
         &mut client,
-        Some(Duration::from_secs(1)),
+        Some(Duration::from_millis(100)),
     )
     .await
     .expect("Failed to run spec");
