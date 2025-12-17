@@ -9,7 +9,7 @@
 //!
 //! Learn more about the Old Faithful archive here: <https://docs.old-faithful.net/>.
 
-use std::path::PathBuf;
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 
 use common::{BlockNum, BlockStreamer, BoxResult, RawDatasetRows};
 use futures::{Stream, StreamExt};
@@ -20,7 +20,7 @@ use crate::{of1_client, rpc_client, tables};
 /// A JSON-RPC based Solana extractor that implements the [`BlockStreamer`] trait.
 #[derive(Clone)]
 pub struct SolanaExtractor {
-    rpc_client: rpc_client::SolanaRpcClient,
+    rpc_client: Arc<rpc_client::SolanaRpcClient>,
     network: String,
     provider_name: String,
     of1_car_directory: PathBuf,
@@ -28,19 +28,20 @@ pub struct SolanaExtractor {
 
 impl SolanaExtractor {
     pub fn new(
-        rpc_url: Url,
+        rpc_provider_url: Url,
+        max_rpc_calls_per_second: Option<NonZeroU32>,
         network: String,
         provider_name: String,
         of1_car_directory: PathBuf,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
-        let rpc_client = rpc_client::SolanaRpcClient::new(
-            rpc_url,
+        let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
+            rpc_provider_url,
+            max_rpc_calls_per_second,
             provider_name.clone(),
             network.clone(),
-            None,
             meter,
-        );
+        ));
 
         Self {
             rpc_client,
@@ -192,6 +193,7 @@ mod tests {
     async fn historical_blocks_only() {
         let extractor = SolanaExtractor::new(
             Url::parse("https://example.net").unwrap(),
+            None,
             String::new(),
             String::new(),
             PathBuf::new(),
@@ -236,6 +238,7 @@ mod tests {
 
         let extractor = SolanaExtractor::new(
             solana_rpc_provider_url,
+            None,
             String::new(),
             String::new(),
             PathBuf::new(),

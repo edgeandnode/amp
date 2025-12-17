@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, sync::Arc, time::Instant};
+use std::{num::NonZeroU32, time::Instant};
 
 pub use solana_client::{
     rpc_config,
@@ -17,9 +17,9 @@ use crate::metrics;
 ///
 /// If provided with a [meter](monitoring::telemetry::metrics::Meter), the client will record
 /// JSON-RPC related metrics.
-#[derive(Clone)]
 pub(crate) struct SolanaRpcClient {
-    inner: Arc<solana_client::nonblocking::rpc_client::RpcClient>,
+    inner: solana_client::nonblocking::rpc_client::RpcClient,
+    rate_limiter: Option<governor::DefaultDirectRateLimiter>,
     metrics: Option<metrics::MetricsRegistry>,
     provider: String,
     network: String,
@@ -28,15 +28,20 @@ pub(crate) struct SolanaRpcClient {
 impl SolanaRpcClient {
     pub(crate) fn new(
         url: Url,
+        max_calls_per_second: Option<NonZeroU32>,
         provider: String,
         network: String,
-        _rate_limit: Option<NonZeroU32>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let inner = solana_client::nonblocking::rpc_client::RpcClient::new(url.to_string());
+        let rate_limiter = max_calls_per_second.map(|max| {
+            let quota = governor::Quota::per_second(max);
+            governor::RateLimiter::direct(quota)
+        });
         let metrics = meter.map(metrics::MetricsRegistry::new);
         Self {
-            inner: Arc::new(inner),
+            inner,
+            rate_limiter,
             metrics,
             provider,
             network,
@@ -52,7 +57,7 @@ impl SolanaRpcClient {
         &self,
     ) -> solana_rpc_client_api::client_error::Result<u64> {
         let height = self
-            .with_metrics("getBlockHeight", async |c| c.get_block_height().await)
+            .rpc_call("getBlockHeight", self.inner.get_block_height())
             .await?;
 
         Ok(height)
@@ -69,28 +74,32 @@ impl SolanaRpcClient {
         config: rpc_config::RpcBlockConfig,
     ) -> solana_rpc_client_api::client_error::Result<UiConfirmedBlock> {
         let block = self
-            .with_metrics("getBlock", async |c| {
-                c.get_block_with_config(slot, config).await
-            })
+            .rpc_call("getBlock", self.inner.get_block_with_config(slot, config))
             .await?;
 
         Ok(block)
     }
 
-    /// Use the [SolanaRpcClient] to execute a function, recording metrics if enabled.
-    async fn with_metrics<T, E, F, Fut>(&self, method: &str, func: F) -> Fut::Output
+    /// Use the [SolanaRpcClient] to execute a JSON-RPC call with the following additional behavior:
+    ///   - Record metrics if enabled.
+    ///   - Perform rate limiting if enabled.
+    async fn rpc_call<T, E, Fut>(&self, method: &str, fut: Fut) -> Result<T, E>
     where
-        F: FnOnce(Arc<solana_client::nonblocking::rpc_client::RpcClient>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
+        if let Some(rate_limiter) = &self.rate_limiter {
+            // Wait for a permit from the rate limiter.
+            rate_limiter.until_ready().await;
+        }
+
         let Some(metrics) = self.metrics.as_ref() else {
-            // Execute the function without recording metrics.
-            return func(Arc::clone(&self.inner)).await;
+            // Execute the future without recording metrics.
+            return fut.await;
         };
 
         let start = Instant::now();
 
-        let resp = func(Arc::clone(&self.inner)).await;
+        let resp = fut.await;
 
         let duration = start.elapsed().as_millis() as f64;
         metrics.record_single_request(duration, &self.provider, &self.network, method);
