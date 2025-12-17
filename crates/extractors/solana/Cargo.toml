@@ -27,7 +27,9 @@ solana-client = "3.0.10"
 solana-rpc-client-types = "3.0.10"
 solana-rpc-client-api = "3.0.10"
 solana-sdk = "3.0.0"
-solana-storage-proto = { version = "3.0.10", features = ["agave-unstable-api"] }
+# Using fork with optional protobuf-src for faster compilation (avoids compiling C++ protobuf).
+# Can switch back to upstream once https://github.com/anza-xyz/agave/pull/9615 is merged.
+solana-storage-proto = { git = "https://github.com/edgeandnode/agave", branch = "optional-protobuf-src", default-features = false, features = ["agave-unstable-api"] }
 solana-transaction-status-client-types = "3.0.10"
 thiserror.workspace = true
 tokio.workspace = true
