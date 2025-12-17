@@ -21,12 +21,11 @@ where
         SELECT fm.id,
                fm.location_id,
                fm.file_name,
-               l.url,
+               fm.url,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version
         FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.location_id = $1
         ORDER BY fm.id DESC
         LIMIT $2
@@ -58,12 +57,11 @@ where
         SELECT fm.id,
                fm.location_id,
                fm.file_name,
-               l.url,
+               fm.url,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version
         FROM file_metadata fm
-        JOIN physical_tables l ON fm.location_id = l.id
         WHERE fm.location_id = $1 AND fm.id < $3
         ORDER BY fm.id DESC
         LIMIT $2
