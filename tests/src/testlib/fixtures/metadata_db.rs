@@ -42,7 +42,7 @@ impl MetadataDb {
         // Spawn the service to keep the database alive
         let task = tokio::spawn(service);
 
-        let conn_pool = MetadataDbConnPool::connect_with_retry(postgres_handle.url(), pool_size)
+        let conn_pool = metadata_db::connect_pool_with_retry(postgres_handle.url(), pool_size)
             .await
             .expect("failed to connect to temp metadata-db");
 

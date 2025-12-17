@@ -1,5 +1,4 @@
 use config::Config;
-use metadata_db::MetadataDb;
 
 pub async fn run(config: Config) -> Result<(), Error> {
     let url = config
@@ -9,9 +8,10 @@ pub async fn run(config: Config) -> Result<(), Error> {
         .ok_or(Error::MissingDatabaseUrl)?;
 
     tracing::info!("Running migrations on metadata database...");
-    let _metadata_db = MetadataDb::connect_with_config(url, config.metadata_db.pool_size, true)
-        .await
-        .map_err(Error::MigrationFailed)?;
+    let _metadata_db =
+        metadata_db::connect_pool_with_config(url, config.metadata_db.pool_size, true)
+            .await
+            .map_err(Error::MigrationFailed)?;
     tracing::info!("Migrations completed successfully");
 
     Ok(())

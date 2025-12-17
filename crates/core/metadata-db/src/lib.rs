@@ -20,7 +20,6 @@ pub mod notification_multiplexer;
 pub mod physical_table;
 pub mod workers;
 
-use self::db::ConnPool;
 pub use self::{
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
@@ -52,93 +51,102 @@ pub use self::{
 /// Default pool size for the metadata DB.
 pub const DEFAULT_POOL_SIZE: u32 = 10;
 
-/// Connection pool to the metadata DB. Clones will refer to the same instance.
+/// Connects to the metadata database with a single connection (no pooling).
+/// Does not run migrations - the database schema must already be initialized.
+#[instrument(skip_all, err)]
+pub async fn connect(url: &str) -> Result<SingleConnMetadataDb, Error> {
+    let conn = db::Connection::connect(url).await?;
+    Ok(SingleConnMetadataDb(conn))
+}
+
+/// Connects to the metadata database with retry logic.
+/// Retries on PostgreSQL error code 57P03 (database starting up). Does not run migrations.
+#[instrument(skip_all, err)]
+pub async fn connect_with_retry(url: &str) -> Result<SingleConnMetadataDb, Error> {
+    let conn = db::Connection::connect_with_retry(url).await?;
+    Ok(SingleConnMetadataDb(conn))
+}
+
+/// Connects to the metadata database with connection pooling.
+/// Automatically runs migrations to ensure the database schema is up-to-date.
+#[instrument(skip_all, err)]
+pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
+    connect_pool_with_config(url, size, true).await
+}
+
+/// Connects to the metadata database with connection pooling and configurable migrations.
+/// Similar to [`connect_pool`], but allows control over whether migrations run automatically.
+#[instrument(skip_all, err)]
+pub async fn connect_pool_with_config(
+    url: &str,
+    size: u32,
+    auto_migrate: bool,
+) -> Result<MetadataDb, Error> {
+    let pool = db::ConnPool::connect(url, size).await?;
+    if auto_migrate {
+        pool.run_migrations().await?;
+    }
+    Ok(MetadataDb {
+        pool,
+        url: url.into(),
+    })
+}
+
+/// Connects to the metadata database with connection pooling and retry logic.
+/// Retries on PostgreSQL error code 57P03 with exponential backoff (10-100ms, max 20 attempts).
+/// Automatically runs migrations after the pool is established.
+#[instrument(skip_all, err)]
+pub async fn connect_pool_with_retry(url: &str, size: u32) -> Result<MetadataDb, Error> {
+    use backon::{ExponentialBuilder, Retryable};
+
+    let retry_policy = ExponentialBuilder::default()
+        .with_min_delay(Duration::from_millis(10))
+        .with_max_delay(Duration::from_millis(100))
+        .with_max_times(20);
+
+    fn is_db_starting_up(err: &ConnError) -> bool {
+        matches!(
+            err,
+            ConnError::ConnectionError(sqlx::Error::Database(db_err))
+            if db_err.code().is_some_and(|code| code == "57P03")
+        )
+    }
+
+    fn notify_retry(err: &ConnError, dur: Duration) {
+        tracing::warn!(
+            error = %err,
+            "Database still starting up during connection. Retrying in {:.1}s",
+            dur.as_secs_f32()
+        );
+    }
+
+    let pool = (|| db::ConnPool::connect(url, size))
+        .retry(retry_policy)
+        .when(is_db_starting_up)
+        .notify(notify_retry)
+        .await?;
+
+    pool.run_migrations().await?;
+
+    Ok(MetadataDb {
+        pool,
+        url: url.into(),
+    })
+}
+
+/// Pooled connection handle to the metadata database. Clones share the same pool.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pool: ConnPool,
+    pool: db::ConnPool,
     pub(crate) url: Arc<str>,
 }
 
 impl MetadataDb {
-    /// Sets up a connection pool to the Metadata DB
-    ///
-    /// Runs migrations if necessary.
-    #[instrument(skip_all, err)]
-    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
-        Self::connect_with_config(url, pool_size, true).await
-    }
-
-    /// Sets up a connection pool to the Metadata DB with configurable migration behavior
-    ///
-    /// Runs migrations only if `auto_migrate` is true.
-    #[instrument(skip_all, err)]
-    pub async fn connect_with_config(
-        url: &str,
-        pool_size: u32,
-        auto_migrate: bool,
-    ) -> Result<Self, Error> {
-        let pool = ConnPool::connect(url, pool_size).await?;
-        if auto_migrate {
-            pool.run_migrations().await?;
-        }
-        Ok(Self {
-            pool,
-            url: url.into(),
-        })
-    }
-
-    /// Sets up a connection pool to the Metadata DB with retry logic for temporary databases.
-    #[instrument(skip_all, err)]
-    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {
-        use backon::{ExponentialBuilder, Retryable};
-
-        let retry_policy = ExponentialBuilder::default()
-            .with_min_delay(Duration::from_millis(10))
-            .with_max_delay(Duration::from_millis(100))
-            .with_max_times(20);
-
-        fn is_db_starting_up(err: &ConnError) -> bool {
-            matches!(
-                err,
-                ConnError::ConnectionError(sqlx::Error::Database(db_err))
-                if db_err.code().is_some_and(|code| code == "57P03")
-            )
-        }
-
-        fn notify_retry(err: &ConnError, dur: Duration) {
-            tracing::warn!(
-                error = %err,
-                "Database still starting up during connection. Retrying in {:.1}s",
-                dur.as_secs_f32()
-            );
-        }
-
-        let pool = (|| ConnPool::connect(url, pool_size))
-            .retry(retry_policy)
-            .when(is_db_starting_up)
-            .notify(notify_retry)
-            .await?;
-
-        pool.run_migrations().await?;
-
-        Ok(Self {
-            pool,
-            url: url.into(),
-        })
-    }
-
-    /// Begins a new database transaction
-    ///
-    /// Returns a `Transaction` that provides RAII semantics - it will automatically
-    /// roll back when dropped unless explicitly committed with `.commit()`.
+    /// Begins a new database transaction. Automatically rolls back when dropped unless committed.
     #[instrument(skip(self), err)]
-    pub async fn begin_txn(&self) -> Result<Transaction, Error> {
+    pub async fn begin_txn(&self) -> Result<Transaction<'static>, Error> {
         let tx = self.pool.begin().await.map_err(Error::Database)?;
         Ok(Transaction::new(tx))
-    }
-
-    pub fn default_pool_size() -> u32 {
-        DEFAULT_POOL_SIZE
     }
 }
 
@@ -202,6 +210,82 @@ impl<'c> sqlx::Executor<'c> for &'c MetadataDb {
 impl<'c> Executor<'c> for &'c MetadataDb {}
 
 impl _priv::Sealed for &MetadataDb {}
+
+/// Single-connection handle to the metadata database. Not cloneable.
+#[derive(Debug)]
+pub struct SingleConnMetadataDb(db::Connection);
+
+impl SingleConnMetadataDb {
+    /// Begins a new database transaction. Borrows the connection until transaction completes.
+    /// Automatically rolls back when dropped unless committed.
+    #[instrument(skip(self), err)]
+    pub async fn begin_txn(&mut self) -> Result<Transaction<'_>, Error> {
+        use sqlx::Connection as _;
+        let tx = self.0.begin().await.map_err(Error::Database)?;
+        Ok(Transaction::new(tx))
+    }
+}
+
+// Implement sqlx::Executor for &mut SingleConnMetadataDb by delegating to the connection
+impl<'c> sqlx::Executor<'c> for &'c mut SingleConnMetadataDb {
+    type Database = sqlx::Postgres;
+
+    fn fetch_many<'e, 'q: 'e, E>(
+        self,
+        query: E,
+    ) -> BoxStream<
+        'e,
+        Result<
+            sqlx::Either<
+                <sqlx::Postgres as sqlx::Database>::QueryResult,
+                <sqlx::Postgres as sqlx::Database>::Row,
+            >,
+            sqlx::Error,
+        >,
+    >
+    where
+        'c: 'e,
+        E: 'q + sqlx::Execute<'q, Self::Database>,
+    {
+        (&mut self.0).fetch_many(query)
+    }
+
+    fn fetch_optional<'e, 'q: 'e, E>(
+        self,
+        query: E,
+    ) -> BoxFuture<'e, Result<Option<<sqlx::Postgres as sqlx::Database>::Row>, sqlx::Error>>
+    where
+        'c: 'e,
+        E: 'q + sqlx::Execute<'q, Self::Database>,
+    {
+        (&mut self.0).fetch_optional(query)
+    }
+
+    fn prepare_with<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+        parameters: &'e [<sqlx::Postgres as sqlx::Database>::TypeInfo],
+    ) -> BoxFuture<'e, Result<<sqlx::Postgres as sqlx::Database>::Statement<'q>, sqlx::Error>>
+    where
+        'c: 'e,
+    {
+        (&mut self.0).prepare_with(sql, parameters)
+    }
+
+    fn describe<'e, 'q: 'e>(
+        self,
+        sql: &'q str,
+    ) -> BoxFuture<'e, Result<sqlx::Describe<Self::Database>, sqlx::Error>>
+    where
+        'c: 'e,
+    {
+        (&mut self.0).describe(sql)
+    }
+}
+
+impl<'c> Executor<'c> for &'c mut SingleConnMetadataDb {}
+
+impl _priv::Sealed for &mut SingleConnMetadataDb {}
 
 /// File metadata-related API
 impl MetadataDb {

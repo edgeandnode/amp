@@ -3,17 +3,17 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DatasetName, DatasetNamespace, ManifestHash, ManifestPath, MetadataDb, datasets, manifests,
+    DEFAULT_POOL_SIZE, DatasetName, DatasetNamespace, ManifestHash, ManifestPath, datasets,
+    manifests,
 };
 
 #[tokio::test]
 async fn commit_persists_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-commit");
@@ -23,10 +23,7 @@ async fn commit_persists_changes() {
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-commit.json");
 
     // Begin transaction
-    let mut tx = metadata_db
-        .begin_txn()
-        .await
-        .expect("Failed to begin transaction");
+    let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
     manifests::register(&mut tx, &manifest_hash, &manifest_path)
@@ -43,7 +40,7 @@ async fn commit_persists_changes() {
     assert!(commit_result.is_ok(), "transaction commit should succeed");
 
     // Verify data persisted by querying outside the transaction
-    let path = manifests::get_path(&metadata_db, manifest_hash)
+    let path = manifests::get_path(&conn, manifest_hash)
         .await
         .expect("Failed to query manifest path after commit");
     assert_eq!(
@@ -57,10 +54,9 @@ async fn commit_persists_changes() {
 async fn explicit_rollback_discards_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-rollback");
@@ -69,10 +65,7 @@ async fn explicit_rollback_discards_changes() {
     );
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-rollback.json");
 
-    let mut tx = metadata_db
-        .begin_txn()
-        .await
-        .expect("Failed to begin transaction");
+    let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
     manifests::register(&mut tx, &manifest_hash, manifest_path)
@@ -92,7 +85,7 @@ async fn explicit_rollback_discards_changes() {
     );
 
     // Verify data was NOT persisted
-    let path = manifests::get_path(&metadata_db, manifest_hash)
+    let path = manifests::get_path(&conn, manifest_hash)
         .await
         .expect("Failed to query manifest path after rollback");
     assert_eq!(
@@ -105,10 +98,9 @@ async fn explicit_rollback_discards_changes() {
 async fn rollback_on_drop_discards_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-drop");
@@ -117,10 +109,7 @@ async fn rollback_on_drop_discards_changes() {
     );
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-drop.json");
 
-    let mut tx = metadata_db
-        .begin_txn()
-        .await
-        .expect("Failed to begin transaction");
+    let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
     manifests::register(&mut tx, &manifest_hash, manifest_path)
@@ -135,7 +124,7 @@ async fn rollback_on_drop_discards_changes() {
 
     //* Then
     // Verify data was NOT persisted
-    let path = manifests::get_path(&metadata_db, manifest_hash)
+    let path = manifests::get_path(&conn, manifest_hash)
         .await
         .expect("Failed to query manifest path after drop");
     assert_eq!(

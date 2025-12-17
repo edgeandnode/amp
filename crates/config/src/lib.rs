@@ -323,7 +323,7 @@ impl Config {
         let url = self.metadata_db.url.as_ref().ok_or_else(|| {
             ConfigError::MissingConfig(self.config_path.clone(), "metadata_db.url")
         })?;
-        MetadataDb::connect_with_config(
+        metadata_db::connect_pool_with_config(
             url,
             self.metadata_db.pool_size,
             self.metadata_db.auto_migrate,

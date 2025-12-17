@@ -2,22 +2,21 @@
 
 use pgtemp::PgTempDB;
 
-use crate::{JobStatus, MetadataDb, WorkerInfo, WorkerNodeId, jobs, workers};
+use crate::{DEFAULT_POOL_SIZE, JobStatus, WorkerInfo, WorkerNodeId, jobs, workers};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, &worker_id, worker_info)
+    workers::register(&conn, &worker_id, worker_info)
         .await
         .expect("Failed to pre-register the worker");
 
@@ -32,12 +31,12 @@ async fn schedule_and_retrieve_job() {
 
     //* When
     // Register the job
-    let job_id = jobs::register(&metadata_db, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
     // Get the job
-    let job = jobs::get_by_id(&metadata_db, job_id)
+    let job = jobs::get_by_id(&conn, job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -53,15 +52,14 @@ async fn schedule_and_retrieve_job() {
 async fn pagination_traverses_all_jobs_ordered() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db =
-        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+        .await
+        .expect("Failed to connect to metadata db");
 
     let total_jobs = 7;
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");
     let worker_info = WorkerInfo::default(); // {}
-    workers::register(&metadata_db, &worker_id, worker_info)
+    workers::register(&conn, &worker_id, worker_info)
         .await
         .expect("Failed to register worker");
 
@@ -73,7 +71,7 @@ async fn pagination_traverses_all_jobs_ordered() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::register(&metadata_db, &worker_id, &job_desc_str)
+        let job_id = jobs::register(&conn, &worker_id, &job_desc_str)
             .await
             .expect("Failed to register job");
         created_job_ids.push(job_id);
@@ -85,7 +83,7 @@ async fn pagination_traverses_all_jobs_ordered() {
     let mut cursor = None;
 
     loop {
-        let page = jobs::list(&metadata_db, page_size, cursor, None)
+        let page = jobs::list(&conn, page_size, cursor, None)
             .await
             .expect("Failed to list jobs");
 
