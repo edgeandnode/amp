@@ -59,6 +59,18 @@ pub enum CatalogForSqlError {
     TableNotSynced { table: String },
 }
 
+impl CatalogForSqlError {
+    /// Returns true if this error is due to a table not being found in a dataset.
+    pub fn is_table_not_found(&self) -> bool {
+        matches!(
+            self,
+            CatalogForSqlError::GetLogicalCatalog(
+                GetLogicalCatalogError::TableNotFoundInDataset { .. }
+            )
+        )
+    }
+}
+
 /// Errors specific to planning_ctx_for_sql_tables_with_deps operations
 ///
 /// This error type is used exclusively by `planning_ctx_for_sql_tables_with_deps()` to create

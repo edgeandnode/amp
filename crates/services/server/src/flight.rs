@@ -988,6 +988,7 @@ impl IntoResponse for Error {
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CatalogForSqlError(ref e) if e.is_table_not_found() => StatusCode::NOT_FOUND,
             Error::CatalogForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PlanningCtxForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
