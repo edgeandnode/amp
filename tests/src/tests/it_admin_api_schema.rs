@@ -907,14 +907,14 @@ async fn multiple_tables_aggregations_succeeds() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "schema resolution should succeed with aggregations"
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail with aggregations since it's non-incremental"
     );
 
-    let _response: SchemaResponse = resp
+    let _response: ErrorResponse = resp
         .json()
         .await
-        .expect("failed to parse schema response JSON");
+        .expect("failed to parse error response JSON");
 }
 
 #[tokio::test]
@@ -1013,14 +1013,14 @@ async fn multiple_tables_mixed_queries_succeeds() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "schema resolution should succeed with mixed query types"
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail with mixed query types since aggregate is non-incremental"
     );
 
-    let _response: SchemaResponse = resp
+    let _response: ErrorResponse = resp
         .json()
         .await
-        .expect("failed to parse schema response JSON");
+        .expect("failed to parse error response JSON");
 }
 
 #[tokio::test]
@@ -1481,45 +1481,6 @@ async fn multiple_tables_with_missing_function_fails_on_first() {
 }
 
 #[tokio::test]
-async fn qualified_builtin_function_succeeds() {
-    //* Given
-    let ctx = TestCtx::setup(
-        "qualified_builtin_function",
-        [("eth_firehose", "_/eth_firehose@0.0.1")],
-    )
-    .await;
-
-    let sql_query = r#"SELECT COUNT(*) as total_blocks, SUM(gas_used) as total_gas, AVG(gas_limit) as avg_gas_limit FROM eth.blocks"#;
-
-    //* When
-    let resp = ctx
-        .send_schema_request_with_tables_and_deps(
-            [("query", sql_query)],
-            [("eth", "_/eth_firehose@0.0.1")],
-        )
-        .await;
-
-    //* Then
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "schema resolution should succeed with built-in aggregation functions"
-    );
-
-    let response: SchemaResponse = resp
-        .json()
-        .await
-        .expect("failed to parse schema response JSON");
-
-    // Verify the schema includes the aggregated columns
-    let schemas = response
-        .schemas
-        .as_object()
-        .expect("schemas should be an object");
-    assert!(schemas.contains_key("query"), "query schema should exist");
-}
-
-#[tokio::test]
 async fn bare_builtin_function_succeeds() {
     //* Given
     let ctx = TestCtx::setup(
@@ -1768,6 +1729,41 @@ async fn multiple_functions_mixed_validity_fails() {
         response.error_message.contains("eth.nonexistent_fn"),
         "error message should indicate the invalid function, got: {}",
         response.error_message
+    );
+}
+
+#[tokio::test]
+async fn non_incremental_query_with_limit_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "non_incremental_query_with_limit",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [("table1", "SELECT block_num FROM eth.blocks LIMIT 10")],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail with LIMIT clause"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "NON_INCREMENTAL_QUERY",
+        "should return NON_INCREMENTAL_QUERY for LIMIT"
     );
 }
 

@@ -1078,3 +1078,26 @@ export class SchemaInference extends Schema.Class<SchemaInference>("SchemaInfere
 ) {
   readonly _tag = "SchemaInference" as const
 }
+
+/**
+ * NonIncrementalQuery - SQL query contains non-incremental operations.
+ *
+ * Causes:
+ * - SQL contains LIMIT, ORDER BY, GROUP BY, DISTINCT, window functions
+ * - SQL uses outer joins (LEFT/RIGHT/FULL JOIN)
+ * - SQL contains recursive queries
+ *
+ * Applies to:
+ * - POST /schema - When validating SQL queries for incremental processing
+ */
+export class NonIncrementalQuery extends Schema.Class<NonIncrementalQuery>("NonIncrementalQuery")(
+  {
+    code: Schema.Literal("NON_INCREMENTAL_QUERY").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "NonIncrementalQuery" as const
+}
