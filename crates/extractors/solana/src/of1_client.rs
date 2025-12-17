@@ -9,16 +9,20 @@ use solana_clock::Slot;
 use tokio::io::AsyncWriteExt;
 pub use yellowstone_faithful_car_parser as of1_car_parser;
 
-use crate::rpc_client;
+use crate::{metrics, rpc_client};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn stream(
     start: solana_clock::Slot,
     end: solana_clock::Slot,
     of1_car_directory: PathBuf,
     solana_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     get_block_config: rpc_client::rpc_config::RpcBlockConfig,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+    provider: String,
+    network: String,
 ) -> impl Stream<Item = BoxResult<DecodedBlock>> {
     async_stream::stream! {
         let mut epoch = start / solana_clock::DEFAULT_SLOTS_PER_EPOCH;
@@ -31,7 +35,7 @@ pub(crate) fn stream(
             let mut parent_slot = start - 1;
             loop {
                 let resp = solana_rpc_client
-                    .get_block(parent_slot, get_block_config)
+                    .get_block(parent_slot, get_block_config, metrics.clone())
                     .await;
 
                 match resp {
@@ -65,18 +69,23 @@ pub(crate) fn stream(
             tracing::debug!(epoch, "processing Old Faithful epoch CAR file");
             let epoch_car_file_path = of1_car_directory.join(of1_car_filename(epoch));
 
-            if !std::fs::exists(&epoch_car_file_path)? {
-                // This can take a while.
-                if let Err(e) = download_of1_car_file(epoch, &of1_car_directory).await {
-                    if let FileDownloadError::Http(404) = e {
-                        // No more epoch CAR files available.
-                        break 'epochs;
-                    } else {
-                        yield Err(e.into());
-                        return;
-                    }
-                };
-            }
+            if !std::fs::exists(&epoch_car_file_path)?
+                && let Err(e) = download_of1_car_file(
+                    epoch,
+                    &of1_car_directory,
+                    metrics.clone(),
+                    &provider,
+                    &network,
+                ).await
+            {
+                if let FileDownloadError::Http(404) = e {
+                    // No more epoch CAR files available.
+                    break 'epochs;
+                } else {
+                    yield Err(e.into());
+                    return;
+                }
+            };
 
             let buf_reader = tokio::fs::File::open(&epoch_car_file_path).await.map(tokio::io::BufReader::new)?;
             let mut node_reader = of1_car_parser::node::NodeReader::new(buf_reader);
@@ -106,6 +115,9 @@ pub(crate) fn stream(
 async fn download_of1_car_file(
     epoch: solana_clock::Epoch,
     output_dir: &Path,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+    provider: &str,
+    network: &str,
 ) -> Result<(), FileDownloadError> {
     let filename = of1_car_filename(epoch);
     let car_file_url = format!("{OLD_FAITHFUL_ARCHIVE_URL}/{epoch}/{filename}");
@@ -114,20 +126,56 @@ async fn download_of1_car_file(
     let car_file_path = output_dir.join(filename);
     let mut file = tokio::fs::File::create(&car_file_path).await?;
 
+    let start = std::time::Instant::now();
     let response = reqwest::get(&car_file_url).await?;
     let status = response.status();
+
     if !status.is_success() {
         tracing::debug!(
             %status,
             "failed to download Old Faithful CAR file"
         );
+
+        if let Some(metrics) = metrics {
+            metrics.record_of1_car_download_error(epoch, provider, network);
+        }
+
         return Err(FileDownloadError::Http(status.as_u16()));
     }
 
     // Stream the file content since these files can be extremely large.
+    let mut total_bytes = 0u64;
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await.transpose()? {
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(err) => {
+                if let Some(metrics) = metrics {
+                    metrics.record_of1_car_download_error(epoch, provider, network);
+                }
+                return Err(FileDownloadError::Reqwest(err));
+            }
+        };
+
+        if let Some(ref metrics) = metrics {
+            metrics.record_of1_car_download_bytes(total_bytes, epoch, provider, network);
+        }
+
+        total_bytes += chunk.len() as u64;
         file.write_all(&chunk).await?;
+    }
+
+    let duration = start.elapsed().as_secs_f64();
+
+    tracing::info!(
+        epoch,
+        bytes = total_bytes,
+        duration_secs = duration,
+        "downloaded Old Faithful CAR file"
+    );
+
+    if let Some(ref metrics) = metrics {
+        metrics.record_of1_car_download(duration, epoch, provider, network);
     }
 
     Ok(())
@@ -189,8 +237,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             let tx_df = nodes.reassemble_dataframes(&tx.data)?;
             let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
 
-            let tx = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())
-                .map(|(tx, _)| tx)?;
+            let (tx, _) = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())?;
             let tx_meta = prost::Message::decode(&tx_meta_df[..])?;
 
             transactions.push(tx);
