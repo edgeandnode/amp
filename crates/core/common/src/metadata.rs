@@ -8,7 +8,10 @@ use datafusion::parquet::{
     errors::ParquetError,
     file::metadata::{ParquetMetaData, ParquetMetaDataWriter},
 };
-use metadata_db::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes, LocationId};
+use metadata_db::{
+    LocationId,
+    files::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes},
+};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::instrument;
 
@@ -26,10 +29,10 @@ pub use size::{Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_n
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
     pub file_id: FileId,
-    pub file_name: String,
+    pub file_name: FileName,
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
-    pub parquet_meta: parquet::ParquetMeta,
+    pub parquet_meta: ParquetMeta,
 }
 
 impl TryFrom<FileMetadataRow> for FileMetadata {
@@ -50,7 +53,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
         let url = url.join(&file_name)?;
         let location = Path::from_url_path(url.path())?;
 
-        let parquet_meta: parquet::ParquetMeta = serde_json::from_value(metadata)?;
+        let parquet_meta: ParquetMeta = serde_json::from_value(metadata)?;
 
         let size = object_size.unwrap_or_default() as u64;
 
@@ -64,7 +67,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
 
         Ok(Self {
             file_id,
-            file_name,
+            file_name: file_name.into(),
             location_id,
             object_meta,
             parquet_meta,
@@ -146,4 +149,149 @@ async fn extract_parquet_metadata_from_file(
 
     let options = ArrowReaderOptions::default().with_page_index(true);
     reader.get_metadata(Some(&options)).await
+}
+
+/// A validated file name for parquet files.
+///
+/// File names must be non-empty and not exceed filesystem limits.
+/// This type validates at system boundaries and converts to/from the
+/// database transport type `metadata_db::files::FileName`.
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct FileName(String);
+
+impl FileName {
+    /// Create a new FileName from a String without validation.
+    ///
+    /// This constructor trusts that the caller provides a valid filename.
+    // TODO: Add a validation function that checks if the filename was corretly created
+    pub fn new_unchecked(name: String) -> Self {
+        Self(name)
+    }
+
+    /// Returns a reference to the inner string value.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consumes the FileName and returns the inner String.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for FileName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<FileName> for FileName {
+    #[inline(always)]
+    fn as_ref(&self) -> &FileName {
+        self
+    }
+}
+
+impl std::ops::Deref for FileName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for FileName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<FileName> for str {
+    fn eq(&self, other: &FileName) -> bool {
+        *self == other.0
+    }
+}
+
+impl PartialEq<&str> for FileName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == **other
+    }
+}
+
+impl PartialEq<String> for FileName {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<FileName> for String {
+    fn eq(&self, other: &FileName) -> bool {
+        *self == other.0
+    }
+}
+
+impl std::fmt::Display for FileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<metadata_db::files::FileNameOwned> for FileName {
+    fn from(value: metadata_db::files::FileNameOwned) -> Self {
+        // Convert to string and wrap - this should always be valid since FileNameOwned
+        // comes from the database and should already be validated
+        FileName(value.into_inner())
+    }
+}
+
+impl From<FileName> for metadata_db::files::FileNameOwned {
+    fn from(value: FileName) -> Self {
+        // SAFETY: FileName maintains invariants through its constructor. It is the constructor's
+        // responsibility to ensure invariants hold at creation time.
+        metadata_db::files::FileName::from_owned_unchecked(value.0)
+    }
+}
+
+impl<'a> From<&'a FileName> for metadata_db::files::FileName<'a> {
+    fn from(value: &'a FileName) -> Self {
+        // SAFETY: FileName maintains invariants through its constructor. It is the constructor's
+        // responsibility to ensure invariants hold at creation time.
+        metadata_db::files::FileName::from_ref_unchecked(&value.0)
+    }
+}
+
+impl<'a> PartialEq<metadata_db::files::FileName<'a>> for FileName {
+    fn eq(&self, other: &metadata_db::files::FileName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<FileName> for metadata_db::files::FileName<'a> {
+    fn eq(&self, other: &FileName) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<&metadata_db::files::FileName<'a>> for FileName {
+    fn eq(&self, other: &&metadata_db::files::FileName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<FileName> for &metadata_db::files::FileName<'a> {
+    fn eq(&self, other: &FileName) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<&FileName> for metadata_db::files::FileName<'a> {
+    fn eq(&self, other: &&FileName) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<metadata_db::files::FileName<'a>> for &FileName {
+    fn eq(&self, other: &metadata_db::files::FileName<'a>) -> bool {
+        self.as_str() == other.as_str()
+    }
 }

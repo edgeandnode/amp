@@ -31,7 +31,7 @@ use futures::{
     Stream, StreamExt, TryFutureExt, TryStreamExt,
     stream::{self, BoxStream},
 };
-use metadata_db::{FileId, MetadataDb};
+use metadata_db::{MetadataDb, files::FileId};
 
 use crate::{
     WriterProperties,
