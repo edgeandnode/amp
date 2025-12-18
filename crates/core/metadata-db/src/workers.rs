@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use sqlx::types::chrono::{DateTime, Utc};
-use tokio::time::MissedTickBehavior;
 
 pub mod events;
 mod info;
@@ -13,15 +11,7 @@ pub use self::{
     info::{WorkerInfo, WorkerInfoOwned},
     node_id::{NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned},
 };
-use crate::{
-    MetadataDb,
-    db::{Connection, Executor},
-    error::Error,
-    workers::events::NotifListener,
-};
-
-/// Frequency on which to send a heartbeat.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+use crate::{MetadataDb, db::Executor, error::Error, workers::events::NotifListener};
 
 /// Register a worker in the metadata database
 ///
@@ -86,39 +76,35 @@ where
         .map_err(Error::Database)
 }
 
-/// Establish a dedicated connection to the metadata DB, and return a future that loops
-/// forever, updating the worker's heartbeat in the dedicated DB connection.
-/// This connection also holds a PG advisory lock, ensuring unique worker node IDs.
+/// Locks a PG advisory lock on the given worker node ID.
 ///
-/// If the initial connection fails, an error is returned.
-pub async fn heartbeat_loop(
-    metadata_db: &MetadataDb,
-    node_id: impl Into<WorkerNodeIdOwned>,
-) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
-    let node_id = node_id.into();
-
-    let mut conn = Connection::connect(&metadata_db.url).await?;
-
-    let lock_acquired = sql::lock_node_id(&mut conn, node_id.clone())
+/// Returns whether a lock on the given node ID was successfully acquired.
+/// The lock is held for as long as the connection stays open.
+#[tracing::instrument(skip(exe), err)]
+pub async fn lock_node_id<'c, E>(
+    exe: E,
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+) -> Result<bool, Error>
+where
+    E: Executor<'c>,
+{
+    sql::lock_node_id(exe, node_id.into())
         .await
-        .map_err(Error::Database)?;
+        .map_err(Error::Database)
+}
 
-    if !lock_acquired {
-        return Err(Error::WorkerNodeIdInUse(node_id));
-    }
-
-    let fut = async move {
-        let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            interval.tick().await;
-            sql::update_heartbeat(&mut conn, node_id.clone())
-                .await
-                .map_err(Error::Database)?;
-        }
-    };
-
-    Ok(Box::pin(fut))
+/// Updates the `heartbeat_at` column for a given worker.
+#[tracing::instrument(skip(exe), err)]
+pub async fn update_heartbeat<'c, E>(
+    exe: E,
+    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_heartbeat(exe, node_id.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// Listen to the job actions notification channel for job notifications.
@@ -135,9 +121,7 @@ pub async fn listen_for_job_notif(
 ) -> Result<NotifListener, Error> {
     events::listen_url(&metadata_db.url, node_id.into())
         .await
-        .map_err(|err| {
-            Error::JobNotificationRecv(crate::workers::events::NotifRecvError::Database(err))
-        })
+        .map_err(|err| Error::JobNotificationRecv(events::NotifRecvError::Database(err)))
 }
 
 /// Send a job notification to a worker.

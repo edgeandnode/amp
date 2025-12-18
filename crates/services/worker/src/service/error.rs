@@ -3,7 +3,7 @@
 //! This module provides fine-grained error types for each major operation,
 //! enabling better error tracing and debugging without losing context.
 
-use crate::job::JobId;
+use crate::{job::JobId, node_id::NodeId};
 
 /// Errors that can occur during worker initialization (Phase 1).
 ///
@@ -30,18 +30,15 @@ pub enum InitError {
     #[error("database error during registration")]
     Registration(#[source] metadata_db::Error),
 
-    /// Heartbeat setup failed.
+    /// Heartbeat loop initialization failed.
     ///
-    /// This occurs when establishing the dedicated database connection for the heartbeat
-    /// loop. The heartbeat is required to maintain the worker's active status in the
-    /// metadata database.
+    /// This occurs during the setup of the heartbeat loop, which is required to
+    /// maintain the worker's active status in the metadata database.
     ///
-    /// Common causes include:
-    /// - Database connection pool exhaustion
-    /// - Network connectivity issues
-    /// - Database authentication failures
-    #[error("failed to establish heartbeat connection")]
-    HeartbeatSetup(#[source] metadata_db::Error),
+    /// See [`HeartbeatLoopInitError`] for specific failure modes during heartbeat
+    /// loop initialization.
+    #[error("heartbeat loop initialization failed")]
+    HeartbeatLoopInit(#[source] HeartbeatLoopInitError),
 
     /// Notification listener setup failed.
     ///
@@ -81,6 +78,56 @@ pub enum InitError {
         #[source]
         source: SpawnJobError,
     },
+}
+
+/// Errors that can occur during heartbeat loop initialization.
+///
+/// The heartbeat loop maintains the worker's active status by periodically
+/// updating a timestamp in the metadata database. Initialization involves:
+/// - Establishing a dedicated database connection
+/// - Acquiring a PostgreSQL advisory lock on the worker node ID
+///
+/// These errors occur during the setup phase before the heartbeat loop starts.
+#[derive(Debug, thiserror::Error)]
+pub enum HeartbeatLoopInitError {
+    /// Failed to establish database connection for heartbeat loop.
+    ///
+    /// This occurs when creating a dedicated connection to the metadata database
+    /// for the heartbeat loop. The heartbeat requires its own connection to avoid
+    /// interfering with other database operations.
+    ///
+    /// Common causes include:
+    /// - Database unavailable or not accepting connections
+    /// - Network connectivity issues
+    /// - Database authentication failures
+    /// - Connection string configuration errors
+    #[error("failed to establish database connection for heartbeat loop")]
+    ConnectionFailed(#[source] metadata_db::Error),
+
+    /// Failed to acquire advisory lock on worker node ID.
+    ///
+    /// This occurs when the PostgreSQL advisory lock acquisition fails due to a
+    /// database error (not because the lock is already held). The lock is used
+    /// to ensure that only one worker process can use a given node ID at a time.
+    ///
+    /// Common causes include:
+    /// - Database connection lost after initial connection
+    /// - Database query execution error
+    /// - Permission issues preventing lock acquisition
+    #[error("failed to acquire advisory lock on worker node ID")]
+    LockAcquisitionFailed(#[source] metadata_db::Error),
+
+    /// Worker node ID is already in use by another worker process.
+    ///
+    /// This occurs when attempting to acquire a PostgreSQL advisory lock on the
+    /// worker node ID, but the lock is already held by another active worker process.
+    /// Each worker must have a unique node ID to prevent conflicts.
+    ///
+    /// The advisory lock is held for as long as the worker's database connection
+    /// stays open. If this error occurs, another worker with the same node ID is
+    /// currently running.
+    #[error("worker node ID '{0}' is already in use")]
+    NodeIdInUse(NodeId),
 }
 
 /// Errors that can occur during worker runtime (Phase 2).

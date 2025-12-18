@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 use backon::{ExponentialBuilder, Retryable};
 use common::{CachedParquetData, ParquetFooterCache, store::Store as DataStore};
 use dataset_store::DatasetStore;
-use futures::{TryStreamExt as _, future::BoxFuture};
+use futures::TryStreamExt as _;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,
     WorkerNotifListener as NotifListener, notification_multiplexer,
@@ -19,8 +19,9 @@ mod job_queue;
 mod job_set;
 
 pub use self::error::{
-    AbortJobError, HeartbeatTaskError, InitError, JobCreationError, JobResultError,
-    NotificationError, ReconcileError, RuntimeError, SpawnJobError, StartActionError,
+    AbortJobError, HeartbeatLoopInitError, HeartbeatTaskError, InitError, JobCreationError,
+    JobResultError, NotificationError, ReconcileError, RuntimeError, SpawnJobError,
+    StartActionError,
 };
 use self::{
     job_queue::JobQueue,
@@ -32,6 +33,9 @@ use crate::{
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
+
+/// Frequency on which to send a heartbeat.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Run the worker service
 ///
@@ -57,9 +61,9 @@ pub async fn new(
         .map_err(InitError::Registration)?;
 
     // Establish a dedicated connection to the metadata DB, and start the heartbeat loop
-    let heartbeat_fut = worker_heartbeat_loop_with_retry(&metadata_db, node_id.clone())
+    let heartbeat_fut = worker_heartbeat_loop_with_retry(metadata_db.url(), node_id.clone())
         .await
-        .map_err(InitError::HeartbeatSetup)?;
+        .map_err(InitError::HeartbeatLoopInit)?;
     let mut heartbeat_loop_handle = AbortOnDropHandle::new(tokio::spawn(heartbeat_fut));
 
     // Start listening for job notifications. Retry on initial connection failure
@@ -458,28 +462,50 @@ async fn register_worker_with_retry(
         .await
 }
 
-/// Establishes a connection to the metadata DB and returns a future that runs the worker
+/// Establishes a dedicated connection to the metadata DB and returns a future that runs the worker
 /// heartbeat loop.
 ///
 /// If the initial connection fails, the method will retry the reconnection with an exponential
 /// backoff. Retries on connection errors.
 async fn worker_heartbeat_loop_with_retry(
-    metadata_db: &MetadataDb,
+    metadata_db_url: &str,
     node_id: NodeId,
-) -> Result<BoxFuture<'static, Result<(), MetadataDbError>>, MetadataDbError> {
-    let node_id_str = node_id.to_string();
-    (move || metadata_db::workers::heartbeat_loop(metadata_db, node_id.clone()))
+) -> Result<impl Future<Output = Result<(), MetadataDbError>> + 'static, HeartbeatLoopInitError> {
+    // Establish a dedicated connection (with retry)
+    let mut conn = (|| metadata_db::connect(metadata_db_url))
         .retry(with_policy())
         .when(MetadataDbError::is_connection_error)
         .notify(|err, dur| {
             tracing::warn!(
-                node_id = %node_id_str,
+                %node_id,
                 error = %err, error_source = logging::error_source(&err),
                 "Worker heartbeat connection establishment failed. Retrying in {:.1}s",
                 dur.as_secs_f32()
             );
         })
         .await
+        .map_err(HeartbeatLoopInitError::ConnectionFailed)?;
+
+    // Acquire advisory lock
+    let lock_acquired = metadata_db::workers::lock_node_id(&mut conn, &node_id)
+        .await
+        .map_err(HeartbeatLoopInitError::LockAcquisitionFailed)?;
+
+    if !lock_acquired {
+        return Err(HeartbeatLoopInitError::NodeIdInUse(node_id));
+    }
+
+    // Return heartbeat loop future
+    let fut = async move {
+        let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            interval.tick().await;
+            metadata_db::workers::update_heartbeat(&mut conn, &node_id).await?;
+        }
+    };
+    Ok(fut)
 }
 
 /// Listens for job notifications from the metadata DB.

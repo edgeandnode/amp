@@ -59,9 +59,7 @@ pub async fn lock_node_id<'c, E>(exe: E, id: NodeId<'_>) -> Result<bool, sqlx::E
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {r#"
-        SELECT pg_try_advisory_lock(hashtextextended($1, 0))
-    "#};
+    let query = "SELECT pg_try_advisory_lock(hashtextextended($1, 0))";
     sqlx::query_scalar(query).bind(id).fetch_one(exe).await
 }
 
