@@ -32,7 +32,7 @@ pub use datafusion::{arrow, parquet};
 pub use foyer::Cache;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
-use metadata_db::FileId;
+use metadata_db::files::FileId;
 pub use planning_context::{DetachedLogicalPlan, PlanningContext};
 pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};

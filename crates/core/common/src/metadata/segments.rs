@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
 
 use alloy::primitives::BlockHash;
-use metadata_db::FileId;
+use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
 use crate::{BlockNum, BoxError, block_range_intersection};
@@ -388,7 +388,7 @@ mod test {
 
     use alloy::primitives::BlockHash;
     use chrono::DateTime;
-    use metadata_db::FileId;
+    use metadata_db::files::FileId;
     use object_store::ObjectMeta;
     use rand::{Rng as _, RngCore as _, SeedableRng as _, rngs::StdRng, seq::SliceRandom};
 

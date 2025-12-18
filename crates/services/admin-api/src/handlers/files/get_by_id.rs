@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::{FileId, LocationId};
+use metadata_db::{LocationId, files::FileId};
 use monitoring::logging;
 
 use crate::{
@@ -67,7 +67,7 @@ pub async fn handler(
     };
 
     // Get file metadata with details from the database
-    match ctx.metadata_db.get_file_by_id_with_details(file_id).await {
+    match metadata_db::files::get_by_id_with_details(&ctx.metadata_db, file_id).await {
         Ok(Some(file_metadata)) => {
             tracing::debug!(file_id=?file_id, "successfully retrieved file metadata");
             Ok(Json(file_metadata.into()))
@@ -115,17 +115,17 @@ pub struct FileInfo {
     pub metadata: serde_json::Value,
 }
 
-impl From<metadata_db::FileMetadataWithDetails> for FileInfo {
+impl From<metadata_db::files::FileMetadataWithDetails> for FileInfo {
     /// Converts a database `FileMetadataWithDetails` record into an API-friendly `FileInfo`
     ///
     /// This conversion handles:
     /// - Converting the base location URL to `String` for JSON serialization
     /// - Preserving all other fields as-is from the database record
-    fn from(value: metadata_db::FileMetadataWithDetails) -> Self {
+    fn from(value: metadata_db::files::FileMetadataWithDetails) -> Self {
         Self {
             id: value.id,
             location_id: value.location_id,
-            file_name: value.file_name,
+            file_name: value.file_name.into_inner(),
             url: value.url.to_string(),
             object_size: value.object_size,
             object_e_tag: value.object_e_tag,

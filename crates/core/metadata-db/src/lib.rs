@@ -1,18 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
-use futures::{
-    StreamExt, TryStreamExt,
-    future::BoxFuture,
-    stream::{BoxStream, Stream},
-};
+use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream::BoxStream};
 use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
 use tracing::instrument;
-use url::Url;
 
 pub mod datasets;
 mod db;
 mod error;
-mod files;
+pub mod files;
 pub mod job_attempts;
 pub mod jobs;
 pub mod manifests;
@@ -20,6 +15,7 @@ pub mod notification_multiplexer;
 pub mod physical_table;
 pub mod workers;
 
+use self::files::FileId;
 pub use self::{
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
@@ -27,10 +23,6 @@ pub use self::{
     },
     db::{ConnError, Executor, Transaction},
     error::Error,
-    files::{
-        FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
-        FileMetadataWithDetails, FooterBytes,
-    },
     jobs::{Job, JobId, JobStatus, JobStatusUpdateError},
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -287,109 +279,6 @@ impl<'c> Executor<'c> for &'c mut SingleConnMetadataDb {}
 
 impl _priv::Sealed for &mut SingleConnMetadataDb {}
 
-/// File metadata-related API
-impl MetadataDb {
-    /// Inserts new file metadata record.
-    ///
-    /// Creates a new file metadata entry with the provided information. Uses
-    /// ON CONFLICT DO NOTHING to make the operation idempotent.
-    /// Also inserts the footer into the footer_cache table.
-    #[expect(clippy::too_many_arguments)]
-    pub async fn register_file(
-        &self,
-        location_id: LocationId,
-        url: &Url,
-        file_name: String,
-        object_size: u64,
-        object_e_tag: Option<String>,
-        object_version: Option<String>,
-        parquet_meta: serde_json::Value,
-        footer: &Vec<u8>,
-    ) -> Result<(), Error> {
-        files::insert(
-            &*self.pool,
-            location_id,
-            url,
-            file_name,
-            object_size,
-            object_e_tag,
-            object_version,
-            parquet_meta,
-            footer,
-        )
-        .await
-        .map_err(Error::Database)
-    }
-
-    /// Streams file metadata for a specific location.
-    ///
-    /// Returns a stream of file metadata rows that includes information from both
-    /// the file_metadata and locations tables via a JOIN operation.
-    pub fn stream_files_by_location_id_with_details(
-        &self,
-        location_id: LocationId,
-    ) -> impl Stream<Item = Result<FileMetadataWithDetails, Error>> + '_ {
-        files::stream_with_details(&*self.pool, location_id)
-            .map(|result| result.map_err(Error::Database))
-    }
-
-    /// List file metadata records for a specific location with cursor-based pagination support
-    ///
-    /// Uses cursor-based pagination where `last_file_id` is the ID of the last file
-    /// from the previous page. For the first page, pass `None` for `last_file_id`.
-    /// Returns file metadata records for the specified location ordered by ID in descending order (newest first).
-    pub async fn list_files_by_location_id(
-        &self,
-        location_id: LocationId,
-        limit: i64,
-        last_file_id: Option<FileId>,
-    ) -> Result<Vec<FileMetadata>, Error> {
-        match last_file_id {
-            Some(file_id) => {
-                files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
-                    .await
-                    .map_err(Error::Database)
-            }
-            None => files::pagination::list_first_page(&*self.pool, location_id, limit)
-                .await
-                .map_err(Error::Database),
-        }
-    }
-
-    /// Get file metadata by ID with detailed location information
-    ///
-    /// Retrieves a single file metadata record joined with location data.
-    /// Returns the complete file metadata including location URL needed for object store operations.
-    /// Returns `None` if the file ID is not found.
-    pub async fn get_file_by_id_with_details(
-        &self,
-        file_id: FileId,
-    ) -> Result<Option<FileMetadataWithDetails>, Error> {
-        files::get_by_id_with_details(&*self.pool, file_id)
-            .await
-            .map_err(Error::Database)
-    }
-
-    /// Retrieves footer bytes for a specific file.
-    ///
-    /// Returns the binary footer data stored for the specified file ID.
-    #[instrument(skip(self), err)]
-    pub async fn get_file_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
-        files::get_footer_bytes_by_id(&*self.pool, file_id)
-            .await
-            .map_err(Error::Database)
-    }
-
-    /// Delete file metadata record by ID
-    ///
-    /// Returns `true` if a file was deleted, `false` if no file was found.
-    pub async fn delete_file(&self, file_id: FileId) -> Result<bool, Error> {
-        files::delete(&*self.pool, file_id)
-            .await
-            .map_err(Error::Database)
-    }
-}
-
 #[derive(Debug, sqlx::FromRow)]
 pub struct GcManifestRow {
     /// gc_manifest.location_id
@@ -404,38 +293,6 @@ pub struct GcManifestRow {
 
 // Garbage Collection API
 impl MetadataDb {
-    pub async fn delete_file_id(&self, file_id: FileId) -> Result<(), Error> {
-        let sql = "
-        DELETE FROM file_metadata
-         WHERE id = $1;
-        ";
-
-        sqlx::query(sql)
-            .bind(file_id)
-            .execute(&*self.pool)
-            .await
-            .map_err(Error::Database)?;
-
-        Ok(())
-    }
-
-    pub async fn delete_file_ids(
-        &self,
-        file_ids: impl Iterator<Item = &FileId>,
-    ) -> Result<Vec<FileId>, Error> {
-        let sql = "
-        DELETE FROM file_metadata
-         WHERE id = ANY($1)
-        RETURNING id;
-        ";
-
-        sqlx::query_scalar(sql)
-            .bind(file_ids.map(|id| **id).collect::<Vec<_>>())
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(Error::Database)
-    }
-
     /// Inserts or updates the GC manifest for the given file IDs.
     /// If a file ID already exists, it updates the expiration time.
     /// The expiration time is set to the current time plus the given duration.

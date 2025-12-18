@@ -335,24 +335,25 @@ impl ParquetFileWriterOutput {
     async fn commit_metadata(&self, metadata_db: &MetadataDb) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
         let file_name = self.object_meta.location.filename().unwrap().to_string();
+        let file_name = common::metadata::FileName::new_unchecked(file_name);
         let object_size = self.object_meta.size;
         let object_e_tag = self.object_meta.e_tag.clone();
         let object_version = self.object_meta.version.clone();
         let parquet_meta = serde_json::to_value(&self.parquet_meta).unwrap();
         let footer = &self.footer;
 
-        metadata_db
-            .register_file(
-                location_id,
-                &self.url,
-                file_name,
-                object_size,
-                object_e_tag,
-                object_version,
-                parquet_meta,
-                footer,
-            )
-            .await
+        metadata_db::files::register(
+            metadata_db,
+            location_id,
+            &self.url,
+            file_name,
+            object_size,
+            object_e_tag,
+            object_version,
+            parquet_meta,
+            footer,
+        )
+        .await
     }
 
     async fn upsert_gc_manifest(

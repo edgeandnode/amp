@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
+use common::{
+    catalog::physical::PhysicalTable, metadata::FileName, query_context::Error as QueryError,
+};
 use futures::TryStreamExt as _;
 use metadata_db::LocationId;
 use object_store::ObjectMeta;
@@ -40,12 +42,12 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             source: QueryError::DatasetError(err),
         })?;
 
-    let registered_files: BTreeSet<String> = files.into_iter().map(|m| m.file_name).collect();
+    let registered_files: BTreeSet<FileName> = files.into_iter().map(|m| m.file_name).collect();
 
     let store = table.object_store();
     let path = table.path();
 
-    let stored_files: BTreeMap<String, ObjectMeta> = store
+    let stored_files: BTreeMap<FileName, ObjectMeta> = store
         .list(Some(table.path()))
         .try_collect::<Vec<ObjectMeta>>()
         .await
@@ -54,7 +56,10 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             source: err,
         })?
         .into_iter()
-        .filter_map(|object| Some((object.location.filename()?.to_string(), object)))
+        .filter_map(|object| {
+            let filename = object.location.filename()?;
+            Some((FileName::new_unchecked(filename.to_string()), object))
+        })
         .collect();
 
     // TODO: Move the orphaned files deletion logic out of this check function. This side effect
@@ -67,7 +72,7 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             store.delete(&object_meta.location).await.map_err(|err| {
                 ConsistencyError::DeleteOrphanedFile {
                     location_id,
-                    filename: filename.clone(),
+                    filename: filename.to_string(),
                     source: err,
                 }
             })?;
@@ -79,7 +84,7 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
         if !stored_files.contains_key(&filename) {
             return Err(ConsistencyError::MissingRegisteredFile {
                 location_id,
-                filename,
+                filename: filename.to_string(),
                 path: path.to_string(),
             });
         }

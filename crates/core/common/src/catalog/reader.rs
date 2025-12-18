@@ -21,7 +21,7 @@ use datafusion::{
 };
 use foyer::Cache;
 use futures::{TryFutureExt as _, future::BoxFuture};
-use metadata_db::{FileId, LocationId, MetadataDb};
+use metadata_db::{LocationId, MetadataDb, files::FileId};
 use object_store::ObjectStore;
 
 use crate::BoxError;
@@ -148,8 +148,7 @@ async fn get_cached_metadata(
     cache
         .get_or_fetch(&file_id, || async move {
             // Cache miss, fetch from database
-            let footer = metadata_db
-                .get_file_footer_bytes(file_id)
+            let footer = metadata_db::files::get_footer_bytes(&metadata_db, file_id)
                 .await
                 .map_err(GetCachedMetadataError::FetchFooter)?;
 

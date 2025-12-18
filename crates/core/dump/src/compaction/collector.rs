@@ -7,7 +7,7 @@ use std::{
 
 use common::catalog::physical::PhysicalTable;
 use futures::{StreamExt, TryStreamExt, stream};
-use metadata_db::{FileId, GcManifestRow, MetadataDb};
+use metadata_db::{GcManifestRow, MetadataDb, files::FileId};
 use object_store::{Error as ObjectStoreError, path::Path};
 
 use crate::{
@@ -107,16 +107,16 @@ impl Collector {
             );
         }
 
-        let paths_to_remove = self
-            .metadata_db
-            .delete_file_ids(found_file_ids_to_paths.keys())
-            .await
-            .map_err(CollectorError::file_metadata_delete(
-                found_file_ids_to_paths.keys(),
-            ))?
-            .into_iter()
-            .filter_map(|file_id| found_file_ids_to_paths.get(&file_id).cloned())
-            .collect::<BTreeSet<_>>();
+        let file_ids_to_delete = found_file_ids_to_paths.keys().copied().collect::<Vec<_>>();
+        let paths_to_remove =
+            metadata_db::files::delete_by_ids(&self.metadata_db, &file_ids_to_delete)
+                .await
+                .map_err(CollectorError::file_metadata_delete(
+                    found_file_ids_to_paths.keys(),
+                ))?
+                .into_iter()
+                .filter_map(|file_id| found_file_ids_to_paths.get(&file_id).cloned())
+                .collect::<BTreeSet<_>>();
 
         tracing::debug!("Metadata entries deleted: {}", paths_to_remove.len());
 

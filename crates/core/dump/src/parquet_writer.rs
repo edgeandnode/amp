@@ -13,7 +13,10 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
+use metadata_db::{
+    LocationId, MetadataDb,
+    files::{FileId, FooterBytes},
+};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::{debug, instrument, trace};
@@ -35,19 +38,20 @@ pub async fn commit_metadata(
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
+    let file_name = common::metadata::FileName::new_unchecked(file_name);
     let parquet_meta = serde_json::to_value(parquet_meta)?;
-    metadata_db
-        .register_file(
-            location_id,
-            url,
-            file_name,
-            object_size,
-            object_e_tag,
-            object_version,
-            parquet_meta,
-            &footer,
-        )
-        .await?;
+    metadata_db::files::register(
+        metadata_db,
+        location_id,
+        url,
+        file_name,
+        object_size,
+        object_e_tag,
+        object_version,
+        parquet_meta,
+        &footer,
+    )
+    .await?;
 
     // Notify that the dataset has been changed
     trace!("notifying location change for location_id: {}", location_id);

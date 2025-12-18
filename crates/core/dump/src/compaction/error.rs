@@ -7,7 +7,7 @@ use common::{
     },
 };
 use datafusion::error::DataFusionError;
-use metadata_db::FileId;
+use metadata_db::files::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 

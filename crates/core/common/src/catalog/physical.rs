@@ -455,19 +455,20 @@ impl PhysicalTable {
         while let Some(result) = file_stream.next().await {
             let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
                 result?;
-            metadata_db
-                .register_file(
-                    location_id,
-                    url.inner(),
-                    file_name,
-                    object_size,
-                    object_e_tag,
-                    object_version,
-                    parquet_meta_json,
-                    &footer,
-                )
-                .await
-                .map_err(RestoreLatestRevisionError::RegisterFile)?;
+            let file_name = crate::metadata::FileName::new_unchecked(file_name);
+            metadata_db::files::register(
+                &metadata_db,
+                location_id,
+                url.inner(),
+                file_name,
+                object_size,
+                object_e_tag,
+                object_version,
+                parquet_meta_json,
+                &footer,
+            )
+            .await
+            .map_err(RestoreLatestRevisionError::RegisterFile)?;
         }
 
         Ok(Some(Self {
@@ -728,8 +729,7 @@ impl PhysicalTable {
     fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
-        self.metadata_db
-            .stream_files_by_location_id_with_details(self.location_id)
+        metadata_db::files::stream_by_location_id_with_details(&self.metadata_db, self.location_id)
             .map(|row| row?.try_into())
     }
 }
