@@ -34,7 +34,11 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use common::store::{self, ObjectStoreExt as _, ObjectStoreUrl};
+use amp_object_store::{
+    self as store, ObjectStoreCreationError,
+    ext::{ObjectStoreExt as _, ObjectStoreExtError},
+    url::{ObjectStoreUrl, ObjectStoreUrlError},
+};
 use datasets_common::{fqn::FullyQualifiedName, version::Version};
 use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
@@ -168,14 +172,16 @@ pub enum Error {
     #[error("failed to create object store for manifest at {path}")]
     ObjectStoreCreation {
         path: String,
-        source: common::store::ObjectStoreCreationError,
+        #[source]
+        source: ObjectStoreCreationError,
     },
 
     /// Failed to read manifest from storage
     #[error("failed to read manifest from {path}")]
     ManifestReadError {
         path: String,
-        source: common::store::StoreError,
+        #[source]
+        source: ObjectStoreExtError,
     },
 
     /// Invalid manifest format (not valid JSON or hash)
@@ -227,8 +233,9 @@ impl std::fmt::Display for ManifestFilePath {
 
 /// Error when parsing a manifest file path.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid manifest file path '{path}'")]
+#[error("invalid manifest file path: {path}")]
 pub struct ManifestFilePathError {
     path: String,
-    source: common::store::InvalidObjectStoreUrlError,
+    #[source]
+    source: ObjectStoreUrlError,
 }

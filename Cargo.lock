@@ -922,6 +922,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-object-store"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "fs-err",
+ "object_store",
+ "tempfile",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
 name = "ampcc"
 version = "0.1.0"
 dependencies = [
@@ -949,6 +961,7 @@ name = "ampctl"
 version = "0.1.0"
 dependencies = [
  "admin-client",
+ "amp-object-store",
  "anyhow",
  "clap",
  "common",
@@ -979,6 +992,7 @@ dependencies = [
 name = "ampd"
 version = "0.1.0"
 dependencies = [
+ "amp-object-store",
  "clap",
  "common",
  "config",
@@ -2635,6 +2649,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "amp-object-store",
  "async-stream",
  "async-trait",
  "axum 0.8.7",
@@ -2696,6 +2711,7 @@ dependencies = [
 name = "config"
 version = "0.1.0"
 dependencies = [
+ "amp-object-store",
  "common",
  "datafusion",
  "dump",

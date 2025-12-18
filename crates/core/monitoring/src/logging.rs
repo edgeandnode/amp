@@ -66,6 +66,7 @@ const AMP_CRATES: &[&str] = &[
     "admin_api",
     "admin_client",
     "amp_client",
+    "amp_object_store",
     "ampcc",
     "ampctl",
     "ampd",
