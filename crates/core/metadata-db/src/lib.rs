@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream::BoxStream};
-use sqlx::{postgres::types::PgInterval, types::chrono::NaiveDateTime};
+use futures::{StreamExt as _, TryStreamExt as _, future::BoxFuture, stream::BoxStream};
+use sqlx::{Connection as _, postgres::types::PgInterval, types::chrono::NaiveDateTime};
 use tracing::instrument;
 
 pub mod datasets;
@@ -35,7 +35,7 @@ pub use self::{
         },
     },
     workers::{
-        HEARTBEAT_INTERVAL, Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
+        Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
     },
 };
@@ -134,6 +134,11 @@ pub struct MetadataDb {
 }
 
 impl MetadataDb {
+    /// Returns the database URL.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     /// Begins a new database transaction. Automatically rolls back when dropped unless committed.
     #[instrument(skip(self), err)]
     pub async fn begin_txn(&self) -> Result<Transaction<'static>, Error> {
@@ -212,7 +217,6 @@ impl SingleConnMetadataDb {
     /// Automatically rolls back when dropped unless committed.
     #[instrument(skip(self), err)]
     pub async fn begin_txn(&mut self) -> Result<Transaction<'_>, Error> {
-        use sqlx::Connection as _;
         let tx = self.0.begin().await.map_err(Error::Database)?;
         Ok(Transaction::new(tx))
     }
