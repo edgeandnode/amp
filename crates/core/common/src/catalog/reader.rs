@@ -142,34 +142,107 @@ async fn get_cached_metadata(
     cache: ParquetMetaDataCache,
     metadata_db: MetadataDb,
     schema: SchemaRef,
-) -> Result<CachedParquetData, foyer::Error> {
+) -> Result<CachedParquetData, GetCachedMetadataError> {
     let file_id = file;
 
     cache
-        .fetch(file_id, || async move {
+        .get_or_fetch(&file_id, || async move {
             // Cache miss, fetch from database
             let footer = metadata_db
                 .get_file_footer_bytes(file_id)
                 .await
-                .map_err(|e| foyer::Error::Other(e.into()))?;
+                .map_err(GetCachedMetadataError::FetchFooter)?;
 
             let metadata = Arc::new(
                 ParquetMetaDataReader::new()
                     .with_page_index_policy(PageIndexPolicy::Required)
                     .parse_and_finish(&Bytes::from_owner(footer))
-                    .map_err(|e| foyer::Error::Other(e.into()))?,
+                    .map_err(GetCachedMetadataError::ParseMetadata)?,
             );
 
             let statistics = Arc::new(
                 DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &schema)
-                    .map_err(|e| foyer::Error::Other(e.into()))?,
+                    .map_err(GetCachedMetadataError::ComputeStatistics)?,
             );
 
-            Ok(CachedParquetData {
+            Ok::<CachedParquetData, GetCachedMetadataError>(CachedParquetData {
                 metadata,
                 statistics,
             })
         })
         .await
-        .map(|c| c.value().clone())
+        .map(|entry| entry.value().clone())
+        .map_err(GetCachedMetadataError::CacheError)
+}
+
+/// Errors that occur when fetching cached parquet metadata
+#[derive(Debug, thiserror::Error)]
+pub enum GetCachedMetadataError {
+    /// Failed to fetch file footer bytes from metadata database
+    ///
+    /// This occurs when the database query to retrieve the parquet file footer fails.
+    /// The footer contains critical metadata including schema, row group information,
+    /// and page index data required for query planning and execution.
+    ///
+    /// Possible causes:
+    /// - Database connection lost or network interruption
+    /// - File ID not found in the metadata database
+    /// - Database query timeout
+    /// - Insufficient database permissions
+    /// - Database server error or unavailability
+    #[error("failed to fetch file footer from metadata database")]
+    FetchFooter(#[source] metadata_db::Error),
+
+    /// Failed to parse parquet metadata from footer bytes
+    ///
+    /// This occurs when the parquet library cannot parse the footer bytes into
+    /// valid ParquetMetaData. This typically indicates corrupted or invalid parquet
+    /// file data.
+    ///
+    /// Possible causes:
+    /// - Corrupted parquet file footer data in the database
+    /// - Incompatible parquet format version
+    /// - Truncated or incomplete footer bytes
+    /// - File was not a valid parquet file
+    /// - Parquet file written with incompatible compression or encoding
+    ///
+    /// This error is not recoverable through retry as it indicates data corruption.
+    #[error("failed to parse parquet metadata")]
+    ParseMetadata(#[source] ParquetError),
+
+    /// Failed to compute statistics from parquet metadata
+    ///
+    /// This occurs when DataFusion cannot extract statistics (min/max values,
+    /// null counts, etc.) from the parquet metadata. These statistics are used
+    /// for query optimization and predicate pushdown.
+    ///
+    /// Possible causes:
+    /// - Schema mismatch between parquet file and expected schema
+    /// - Invalid or missing statistics in the parquet metadata
+    /// - Incompatible data types between parquet schema and arrow schema
+    /// - Corrupted row group metadata
+    /// - Unsupported parquet logical types
+    ///
+    /// This error typically indicates a schema evolution issue or incompatible
+    /// parquet file format.
+    #[error("failed to compute statistics from parquet metadata")]
+    ComputeStatistics(#[source] DataFusionError),
+
+    /// Cache layer error during get or fetch operation
+    ///
+    /// This occurs when the foyer cache fails during retrieval or storage operations.
+    /// The cache provides both in-memory and disk-based caching of parquet metadata
+    /// to avoid repeated database queries and parsing overhead.
+    ///
+    /// Possible causes:
+    /// - Disk cache I/O errors (disk full, permissions, hardware failure)
+    /// - Memory allocation failure in the in-memory cache
+    /// - Cache corruption or checksum mismatch
+    /// - Concurrent cache operations conflict
+    /// - Cache storage backend unavailable
+    ///
+    /// This error may be transient and safe to retry. If it persists, it indicates
+    /// a problem with the cache storage layer rather than the underlying data.
+    #[error("cache layer error")]
+    CacheError(#[source] foyer::Error),
 }

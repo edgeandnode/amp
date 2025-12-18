@@ -18,7 +18,7 @@ datafusion-datasource.workspace = true
 datafusion-tracing.workspace = true
 datasets-common = { path = "../datasets-common" }
 figment.workspace = true
-foyer = "0.18"
+foyer = "0.21"
 fs-err.workspace = true
 futures.workspace = true
 governor.workspace = true
