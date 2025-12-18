@@ -375,7 +375,7 @@
 
 - name: evm_encode_transaction_values
   query: |
-    SELECT evm_encode_type(value, 'uint256') AS value
+    SELECT evm_encode_type(CAST(value AS DECIMAL(38, 0)), 'uint256') AS value
     FROM eth_rpc.transactions
     WHERE block_num = 15000000
     LIMIT 20

@@ -6,7 +6,9 @@ use common::{
     EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table, Timestamp,
     TimestampArrayBuilder,
     arrow::{
-        array::{ArrayRef, BinaryBuilder, Int32Builder, UInt32Builder, UInt64Builder},
+        array::{
+            ArrayRef, BinaryBuilder, Int32Builder, StringBuilder, UInt32Builder, UInt64Builder,
+        },
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
     metadata::segments::BlockRange,
@@ -38,7 +40,7 @@ fn schema() -> Schema {
     let nonce = Field::new("nonce", DataType::UInt64, false);
     let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
-    let value = Field::new("value", EVM_CURRENCY_TYPE, true);
+    let value = Field::new("value", DataType::Utf8, true);
     let input = Field::new("input", DataType::Binary, false);
     let v = Field::new("v", DataType::Binary, false);
     let r = Field::new("r", DataType::Binary, false);
@@ -101,7 +103,7 @@ pub(crate) struct Transaction {
     pub(crate) gas_limit: u64,
 
     // Value is the amount of Ether transferred as part of this transaction.
-    pub(crate) value: Option<EvmCurrency>,
+    pub(crate) value: Option<String>,
 
     // Input data the transaction will receive for EVM execution.
     pub(crate) input: Vec<u8>,
@@ -138,7 +140,7 @@ pub(crate) struct TransactionRowsBuilder {
     nonce: UInt64Builder,
     gas_price: EvmCurrencyArrayBuilder,
     gas_limit: UInt64Builder,
-    value: EvmCurrencyArrayBuilder,
+    value: StringBuilder,
     input: BinaryBuilder,
     v: BinaryBuilder,
     r: BinaryBuilder,
@@ -176,7 +178,7 @@ impl TransactionRowsBuilder {
             nonce: UInt64Builder::with_capacity(count),
             gas_price: EvmCurrencyArrayBuilder::with_capacity(count),
             gas_limit: UInt64Builder::with_capacity(count),
-            value: EvmCurrencyArrayBuilder::with_capacity(count),
+            value: StringBuilder::new(),
             input: BinaryBuilder::with_capacity(count, total_input_size),
             v: BinaryBuilder::with_capacity(count, total_v_size),
             r: BinaryBuilder::with_capacity(count, total_r_size),
@@ -232,7 +234,7 @@ impl TransactionRowsBuilder {
         self.nonce.append_value(*nonce);
         self.gas_price.append_option(*gas_price);
         self.gas_limit.append_value(*gas_limit);
-        self.value.append_option(*value);
+        self.value.append_option(value.as_deref());
         self.input.append_value(input);
         self.v.append_value(v);
         self.r.append_value(r);
@@ -262,7 +264,7 @@ impl TransactionRowsBuilder {
             mut nonce,
             gas_price,
             mut gas_limit,
-            value,
+            mut value,
             mut input,
             mut v,
             mut r,

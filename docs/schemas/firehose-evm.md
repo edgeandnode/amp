@@ -46,7 +46,7 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | nonce                    | UInt64                                | NO          |
 | gas_price                | Decimal128(38, 0)                     | YES         |
 | gas_limit                | UInt64                                | NO          |
-| value                    | Decimal128(38, 0)                     | YES         |
+| value                    | Utf8                                  | YES         |
 | input                    | Binary                                | NO          |
 | v                        | Binary                                | NO          |
 | r                        | Binary                                | NO          |
