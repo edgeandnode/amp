@@ -2664,7 +2664,7 @@ dependencies = [
  "foyer",
  "fs-err",
  "futures",
- "governor 0.10.2",
+ "governor 0.10.4",
  "indoc",
  "itertools 0.14.0",
  "js-runtime",
@@ -3326,7 +3326,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.111",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -4619,7 +4619,7 @@ dependencies = [
  "common",
  "datasets-common",
  "futures",
- "governor 0.10.2",
+ "governor 0.10.4",
  "reqwest",
  "schemars 1.1.0",
  "serde",
@@ -5260,9 +5260,9 @@ dependencies = [
 
 [[package]]
 name = "governor"
-version = "0.10.2"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e23d5986fd4364c2fb7498523540618b4b8d92eec6c36a02e565f66748e2f79"
+checksum = "9efcab3c1958580ff1f25a2a41be1668f7603d849bb63af523b208a3cc1223b8"
 dependencies = [
  "cfg-if",
  "dashmap 6.1.0",
@@ -9773,7 +9773,7 @@ dependencies = [
  "datasets-common",
  "fs-err",
  "futures",
- "governor 0.10.2",
+ "governor 0.10.4",
  "monitoring",
  "prost 0.11.9",
  "reqwest",
