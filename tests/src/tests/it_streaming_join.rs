@@ -5,10 +5,7 @@
 
 use monitoring::logging;
 
-use crate::{
-    steps::run_spec,
-    testlib::ctx::TestCtxBuilder,
-};
+use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_join_self() {
