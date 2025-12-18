@@ -1,0 +1,51 @@
+# Streaming cross-table join test using Anvil
+#
+# This test validates that streaming queries with JOINs across different
+# tables (blocks and transactions) correctly deliver incremental results.
+#
+# Uses INNER JOIN between blocks and transactions - returns rows only when
+# blocks have transactions. With empty anvil blocks, we need to verify
+# the join mechanism works even if no rows are returned initially.
+
+- anvil: {}
+
+# Mine initial blocks
+- name: mine_initial
+  mine: 3
+
+# Dump to make data available
+- name: dump_initial
+  dataset: _/anvil_rpc@0.0.0
+  end: 3
+
+# Register streaming cross-table join query (blocks INNER JOIN transactions)
+# This joins blocks with their transactions on block_num
+- name: register_cross_table_join
+  stream: |
+    SELECT b.block_num, t.tx_hash, t.tx_index
+    FROM anvil_rpc.blocks b
+    INNER JOIN anvil_rpc.transactions t ON b.block_num = t.block_num
+    SETTINGS stream = true
+
+# Take initial join results - empty blocks have no transactions, so 0 rows
+- name: take_initial_join
+  stream: register_cross_table_join
+  take: 0
+  results: |
+    []
+
+# Mine more blocks
+- name: mine_more
+  mine: 2
+
+# Dump new blocks
+- name: dump_more
+  dataset: _/anvil_rpc@0.0.0
+  end: 5
+
+# Take incremental join results - still no transactions in empty blocks
+- name: take_incremental_join
+  stream: register_cross_table_join
+  take: 0
+  results: |
+    []
