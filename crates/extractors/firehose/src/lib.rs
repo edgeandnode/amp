@@ -2,7 +2,7 @@
 //! multiple versions. There is no universal encoding, and we're not going to try to enforce one.
 //! Each extraction layer can have its own data format. This `firehose` crate defines Firehose
 //! data formats and provides a client to fetch them from a Firehose gRPC endpoint.
-use common::{BoxError, store::StoreError};
+use common::BoxError;
 use tonic::{codegen::http::uri::InvalidUri, metadata::errors::InvalidMetadataValue};
 
 pub mod client;
@@ -22,24 +22,21 @@ pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// HTTP/2 connection error occurred while connecting to Firehose endpoint
-    #[error("HTTP/2 connection error: {0}")]
+    #[error("HTTP/2 connection error")]
     Connection(#[source] tonic::transport::Error),
     /// gRPC call error occurred during communication with Firehose
-    #[error("gRPC call error: {0}")]
+    #[error("gRPC call error")]
     Call(#[source] tonic::Status),
     /// Protocol Buffers decoding error occurred while parsing Firehose data
-    #[error("ProtocolBuffers decoding error: {0}")]
+    #[error("ProtocolBuffers decoding error")]
     PbDecodeError(#[source] prost::DecodeError),
     /// Internal assertion failure
-    #[error("Assertion failure: {0}")]
+    #[error("Assertion failure")]
     AssertFail(BoxError),
     /// URI parsing error occurred while parsing Firehose endpoint URL
-    #[error("URL parse error: {0}")]
+    #[error("URL parse error")]
     UriParse(#[source] InvalidUri),
     /// Invalid authentication token metadata value
-    #[error("invalid auth token: {0}")]
+    #[error("invalid auth token")]
     Utf8(#[source] InvalidMetadataValue),
-    /// Store error occurred during data storage operations
-    #[error("store error: {0}")]
-    StoreError(#[source] StoreError),
 }
