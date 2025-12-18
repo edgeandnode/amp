@@ -203,7 +203,7 @@ Time spent in compaction operations. Use to estimate compaction windows, identif
 ### successful_compactions
 
 **Type:** Counter
-**Labels:** `dataset`, `table`, `range_start`
+**Labels:** `dataset`, `table`
 
 Count of successful compaction operations. Tracks each successful compaction job by dataset, table, and the starting block number of the compacted range. Use to monitor compaction success rate, verify compaction jobs are completing successfully, identify which block ranges have been compacted, and calculate compaction success/failure ratios. Essential for understanding compaction reliability and troubleshooting compaction issues.
 
