@@ -1,0 +1,15 @@
+[package]
+name = "amp-object-store"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+bytes.workspace = true
+fs-err.workspace = true
+object_store.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

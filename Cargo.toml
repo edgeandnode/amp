@@ -19,6 +19,7 @@ members = [
     "crates/core/js-runtime",
     "crates/core/metadata-db",
     "crates/core/monitoring",
+    "crates/core/object-store",
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",
     "crates/extractors/eth-beacon",

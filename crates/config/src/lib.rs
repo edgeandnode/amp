@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::LazyLock, time::Duration};
 
-use common::{query_context::QueryEnv, store::ObjectStoreUrl};
+use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
+use common::query_context::QueryEnv;
 use datafusion::error::DataFusionError;
 pub use dump::{
     CollectorConfig, CompactionAlgorithmConfig, CompactorConfig, ConfigDuration, ParquetConfig,
@@ -216,9 +217,7 @@ pub enum ConfigError {
     #[error("Config parse error at {0}: {1}")]
     Figment(PathBuf, figment::Error),
     #[error("Invalid object store URL at {0}: {1}")]
-    InvalidObjectStoreUrl(PathBuf, common::store::InvalidObjectStoreUrlError),
-    #[error("Store error at {0}: {1}")]
-    Store(PathBuf, common::store::StoreError),
+    InvalidObjectStoreUrl(PathBuf, ObjectStoreUrlError),
     #[error("Metadata DB error at {0}: {1}")]
     MetadataDb(PathBuf, metadata_db::Error),
     #[error("Invalid address format for {0}: {1}")]

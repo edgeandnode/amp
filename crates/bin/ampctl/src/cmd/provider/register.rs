@@ -18,7 +18,11 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use common::store::{self, ObjectStoreExt as _, ObjectStoreUrl};
+use amp_object_store::{
+    self as store, ObjectStoreCreationError,
+    ext::{ObjectStoreExt as _, ObjectStoreExtError},
+    url::{ObjectStoreUrl, ObjectStoreUrlError},
+};
 use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 
@@ -179,14 +183,16 @@ pub enum Error {
     #[error("failed to create object store for provider at {path}")]
     ObjectStoreCreation {
         path: String,
-        source: common::store::ObjectStoreCreationError,
+        #[source]
+        source: ObjectStoreCreationError,
     },
 
     /// Failed to read provider from storage
     #[error("failed to read provider from {path}")]
     ProviderReadError {
         path: String,
-        source: common::store::StoreError,
+        #[source]
+        source: ObjectStoreExtError,
     },
 
     /// Failed to parse provider TOML
@@ -250,8 +256,9 @@ impl std::fmt::Display for ProviderFilePath {
 
 /// Error when parsing a provider file path.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid provider file path '{path}'")]
+#[error("invalid provider file path: {path}")]
 pub struct ProviderFilePathError {
     path: String,
-    source: common::store::InvalidObjectStoreUrlError,
+    #[source]
+    source: ObjectStoreUrlError,
 }

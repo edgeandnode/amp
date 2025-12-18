@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use common::store::{self, ObjectStoreCreationError, Store, StoreError};
+use amp_object_store::ObjectStoreCreationError;
+use common::store::Store;
 use config::Config;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
@@ -20,14 +21,14 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
 
     let dataset_store = {
         let provider_configs_store = ProviderConfigsStore::new(
-            store::new_with_prefix(
+            amp_object_store::new_with_prefix(
                 &config.providers_store_url,
                 config.providers_store_url.path(),
             )
             .map_err(Error::ProvidersStoreCreation)?,
         );
         let dataset_manifests_store = DatasetManifestsStore::new(
-            store::new_with_prefix(
+            amp_object_store::new_with_prefix(
                 &config.manifests_store_url,
                 config.manifests_store_url.path(),
             )
@@ -73,7 +74,7 @@ pub enum Error {
     ///
     /// This occurs when the data store cannot be created from the configured URL.
     #[error("Failed to create data store: {0}")]
-    DataStoreCreation(#[source] StoreError),
+    DataStoreCreation(#[source] ObjectStoreCreationError),
 
     /// Failed to create providers store
     ///

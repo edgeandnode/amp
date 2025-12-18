@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
+use amp_object_store::url::ObjectStoreUrl;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
@@ -33,7 +34,7 @@ use crate::{
         segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
     },
     sql::TableReference,
-    store::{self, ObjectStoreUrl, Store},
+    store::Store,
 };
 
 #[derive(Debug, Clone)]
@@ -506,7 +507,7 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path_str()).unwrap();
 
         let object_store_url: ObjectStoreUrl = url.inner().clone().try_into()?;
-        let object_store = store::new(object_store_url)?;
+        let object_store = amp_object_store::new(object_store_url)?;
 
         Ok(Some(Self {
             table: table.clone(),
