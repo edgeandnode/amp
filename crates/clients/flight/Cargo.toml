@@ -38,6 +38,6 @@ uuid = { workspace = true, optional = true }
 heed = { version = "0.20", optional = true }
 
 [dev-dependencies]
-pgtemp = "0.6.0"
+pgtemp = "0.7.0"
 tempfile.workspace = true
 uuid = { workspace = true, features = ["v4"] }

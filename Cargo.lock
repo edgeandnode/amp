@@ -909,7 +909,7 @@ dependencies = [
  "futures",
  "heed",
  "http 1.4.0",
- "pgtemp 0.6.0",
+ "pgtemp",
  "serde",
  "serde_json",
  "sqlx",
@@ -1014,7 +1014,7 @@ dependencies = [
  "futures",
  "monitoring",
  "pg_escape",
- "pgtemp 0.6.0",
+ "pgtemp",
  "sqlparser",
  "sqlx",
  "thiserror 2.0.17",
@@ -3310,7 +3310,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.111",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -4580,7 +4580,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5701,7 +5701,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -6553,7 +6553,7 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
- "pgtemp 0.6.0",
+ "pgtemp",
  "serde",
  "serde_json",
  "sqlx",
@@ -6569,7 +6569,7 @@ dependencies = [
 name = "metadata-db-postgres"
 version = "0.1.0"
 dependencies = [
- "pgtemp 0.7.1",
+ "pgtemp",
  "tokio",
  "tracing",
 ]
@@ -6750,7 +6750,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7500,18 +7500,6 @@ dependencies = [
 
 [[package]]
 name = "pgtemp"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f44c7106f7ce2df81a3223120eaf4b629317149d9613fc58ec3f9cd342aadcf5"
-dependencies = [
- "libc",
- "tempfile",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "pgtemp"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6d35886f9448b0a12b24c9fee002332d19b5c021af45745fa1731f140eaf14e"
@@ -8160,7 +8148,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -8199,9 +8187,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8681,7 +8669,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8748,7 +8736,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11951,7 +11939,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13301,7 +13289,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
