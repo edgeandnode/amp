@@ -66,7 +66,7 @@ pub(crate) fn stream(
 
         // Download historical data via Old Faithful archive CAR files.
         'epochs: loop {
-            tracing::debug!(epoch, "processing Old Faithful epoch CAR file");
+            tracing::debug!(epoch, "processing Old Faithful CAR file");
             let epoch_car_file_path = of1_car_directory.join(of1_car_filename(epoch));
 
             if !std::fs::exists(&epoch_car_file_path)?
@@ -104,6 +104,13 @@ pub(crate) fn stream(
                 }
 
                 yield Ok(block);
+            }
+
+            tracing::debug!(%epoch, "deleting processed Old Faithful CAR file");
+            if let Err(e) = tokio::fs::remove_file(epoch_car_file_path).await
+                && e.kind() != std::io::ErrorKind::NotFound {
+                    yield Err(e.into());
+                    return;
             }
 
             epoch += 1;
