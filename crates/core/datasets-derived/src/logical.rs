@@ -445,8 +445,9 @@ pub async fn validate(
             ManifestValidationError::EthCallNotAvailable(err)
         }
         PlanningCtxForSqlTablesWithDepsError::Resolution(resolve_err) => {
-            use crate::catalog::PreResolvedError;
             use common::catalog::resolve::ResolveError;
+
+            use crate::catalog::PreResolvedError;
             match resolve_err {
                 ResolveError::SchemaResolution(PreResolvedError::AliasNotFound(_)) => {
                     ManifestValidationError::DependencyAliasNotFound(err)
