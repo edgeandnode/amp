@@ -294,11 +294,10 @@ pub(crate) struct DecodedBlock {
     pub(crate) blocktime: u64,
 
     pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas:
-        Vec<solana_storage_proto::convert::generated::TransactionStatusMeta>,
+    pub(crate) transaction_metas: Vec<solana_storage_proto::confirmed_block::TransactionStatusMeta>,
 
     #[allow(dead_code)]
-    pub(crate) block_rewards: Vec<solana_storage_proto::convert::generated::Rewards>,
+    pub(crate) block_rewards: Vec<solana_storage_proto::confirmed_block::Rewards>,
 }
 
 /// Generates the Old Faithful epoch CAR filename for the given epoch.
