@@ -13,7 +13,7 @@ admin-client = { path = "../../clients/admin" }
 worker = { path = "../../services/worker" }
 serde.workspace = true
 figment.workspace = true
-directories = "5.0"
+directories = "6.0"
 url.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 serde_json.workspace = true
