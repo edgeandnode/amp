@@ -2,12 +2,9 @@
 
 use futures::StreamExt;
 
-use crate::{
-    scenario,
-    tests::utils::{
-        SharedStore, Step, assert_data_event, assert_data_event_with_label,
-        assert_undo_event_with_cause, assert_undo_event_with_invalidation, assert_watermark_event,
-    },
+use crate::tests::utils::{
+    SharedStore, Step, assert_data_event, assert_data_event_with_label,
+    assert_undo_event_with_cause, assert_undo_event_with_invalidation, assert_watermark_event,
 };
 
 /// Tests the basic crash recovery mechanism where the stream detects uncommitted

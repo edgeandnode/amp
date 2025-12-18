@@ -1,11 +1,7 @@
 //! Happy path streaming scenarios testing state transitions.
 
-use crate::{
-    scenario,
-    tests::utils::{
-        Step, assert_data_event_with_label, assert_watermark_event,
-        assert_watermark_event_with_prune,
-    },
+use crate::tests::utils::{
+    Step, assert_data_event_with_label, assert_watermark_event, assert_watermark_event_with_prune,
 };
 
 /// Verifies that a basic stream with one data batch followed by a watermark

@@ -36,7 +36,7 @@ use common::{
 };
 use futures::{Stream, future::try_join_all};
 use thiserror::Error;
-use tracing::{error, instrument, warn};
+use tracing::{instrument, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 

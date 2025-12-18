@@ -1,11 +1,8 @@
 //! Reorg scenarios testing invalidation logic.
 
-use crate::{
-    scenario,
-    tests::utils::{
-        Step, assert_data_event, assert_data_event_with_label, assert_undo_event_with_cause,
-        assert_undo_event_with_invalidation, assert_watermark_event,
-    },
+use crate::tests::utils::{
+    Step, assert_data_event, assert_data_event_with_label, assert_undo_event_with_cause,
+    assert_undo_event_with_invalidation, assert_watermark_event,
 };
 
 /// Tests basic reorg detection when a watermark arrives with different hashes
