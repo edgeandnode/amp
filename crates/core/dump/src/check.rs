@@ -56,8 +56,13 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
         })?
         .into_iter()
         .filter_map(|object| {
-            let filename = object.location.filename()?;
-            Some((FileName::new_unchecked(filename.to_string()), object))
+            let filename = object.location.filename()?.to_string();
+
+            // SAFETY: Object store filenames are trusted - created by our
+            // constructors or already validated by the storage system.
+            let filename = FileName::new_unchecked(filename);
+
+            Some((filename, object))
         })
         .collect();
 

@@ -837,7 +837,10 @@ pub mod test {
 
     use crate::{
         Timestamp,
-        metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        metadata::{
+            file_name::FileName,
+            parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        },
         parquet::{
             basic::{Repetition, Type as PhysicalType},
             file::{
@@ -1096,7 +1099,7 @@ pub mod test {
             let parquet_meta = ParquetMeta {
                 table: String::from("test"),
                 created_at,
-                filename: String::from("test.parquet"),
+                filename: FileName::new(0, 0),
                 ranges: vec![],
             };
 

@@ -443,7 +443,6 @@ impl PhysicalTable {
         while let Some(result) = file_stream.next().await {
             let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
                 result?;
-            let file_name = crate::metadata::FileName::new_unchecked(file_name);
             metadata_db::files::register(
                 &metadata_db,
                 location_id,

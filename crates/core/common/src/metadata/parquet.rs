@@ -20,7 +20,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Timestamp, metadata::segments::BlockRange};
+use crate::{
+    Timestamp,
+    metadata::{file_name::FileName, segments::BlockRange},
+};
 
 pub const PARQUET_METADATA_KEY: &str = "nozzle_metadata";
 pub const PARENT_FILE_ID_METADATA_KEY: &str = "parent_file_ids";
@@ -32,7 +35,7 @@ pub const GENERATION_METADATA_KEY: &str = "generation";
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ParquetMeta {
     pub table: String,
-    pub filename: String,
+    pub filename: FileName,
     pub created_at: Timestamp,
     // for now, this list should contain exactly 1 entry
     pub ranges: Vec<BlockRange>,
