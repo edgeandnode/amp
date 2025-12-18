@@ -25,5 +25,5 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-pgtemp = "0.6.0"
+pgtemp.workspace = true
 tokio = { workspace = true, features = ["macros", "test-util"] }

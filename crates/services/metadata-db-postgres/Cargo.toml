@@ -5,6 +5,6 @@ license-file.workspace = true
 edition.workspace = true
 
 [dependencies]
-pgtemp = "0.7.1"
+pgtemp.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
