@@ -264,7 +264,7 @@ jobs:
 
       - name: Create multi-arch Dockerfile
         run: |
-          cat > Dockerfile.native << 'EOF'
+          cat > Dockerfile.native << 'DOCKERFILE'
           FROM debian:trixie-slim
           ARG TARGETARCH
 
@@ -277,8 +277,19 @@ jobs:
           # Copy the appropriate binary based on target architecture
           COPY ${{ matrix.binary }}-linux-$TARGETARCH /${{ matrix.binary }}
           RUN chmod +x /${{ matrix.binary }}
+          DOCKERFILE
+
+          # Add ampctl for the amp image only
+          if [ "${{ matrix.binary }}" = "ampd" ]; then
+            cat >> Dockerfile.native << 'DOCKERFILE'
+          COPY ampctl-linux-$TARGETARCH /ampctl
+          RUN chmod +x /ampctl
+          DOCKERFILE
+          fi
+
+          cat >> Dockerfile.native << 'DOCKERFILE'
           ENTRYPOINT ["/${{ matrix.binary }}"]
-          EOF
+          DOCKERFILE
 
       - name: Rename binaries for Docker context
         run: |
@@ -288,8 +299,19 @@ jobs:
           cp ./arm64/${{ matrix.binary }} ./${{ matrix.binary }}-linux-arm64
           chmod +x ./${{ matrix.binary }}-linux-arm64
 
+          if [ "${{ matrix.binary }}" = "ampd" ]; then
+            cp ./amd64/ampctl ./ampctl-linux-amd64
+            chmod +x ./ampctl-linux-amd64
+            cp ./arm64/ampctl ./ampctl-linux-arm64
+            chmod +x ./ampctl-linux-arm64
+          fi
+
           # Verify binaries exist
           ls -la ${{ matrix.binary }}-linux-*
+          
+          if [ "${{ matrix.binary }}" = "ampd" ]; then
+            ls -la ampctl-linux-*
+          fi
 
       - name: Build and push Docker image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
