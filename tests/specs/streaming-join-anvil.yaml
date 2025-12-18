@@ -1,0 +1,53 @@
+# Streaming join test using Anvil
+#
+# This test validates that streaming queries with JOINs correctly deliver
+# incremental results as new blocks are mined on Anvil.
+
+- anvil: {}
+
+# Mine initial blocks (anvil starts with block 0)
+- name: mine_initial
+  mine: 3
+
+# Dump to make data available (must happen before registering stream)
+- name: dump_initial
+  dataset: _/anvil_rpc@0.0.0
+  end: 3
+
+# Register the streaming join query (self-join on blocks via parent_hash)
+- name: register_streaming_join
+  stream: |
+    SELECT child.block_num, parent.block_num as parent_num
+    FROM anvil_rpc.blocks child
+    JOIN anvil_rpc.blocks parent ON child.parent_hash = parent.hash
+    SETTINGS stream = true
+
+# Take initial join results - blocks 1,2,3 each joined with their parent
+- name: take_initial_join
+  stream: register_streaming_join
+  take: 3
+  results: |
+    [
+      {"block_num": 1, "parent_num": 0},
+      {"block_num": 2, "parent_num": 1},
+      {"block_num": 3, "parent_num": 2}
+    ]
+
+# Mine more blocks
+- name: mine_more
+  mine: 2
+
+# Dump new blocks
+- name: dump_more
+  dataset: _/anvil_rpc@0.0.0
+  end: 5
+
+# Take incremental join results - blocks 4,5 joined with their parents
+- name: take_incremental_join
+  stream: register_streaming_join
+  take: 2
+  results: |
+    [
+      {"block_num": 4, "parent_num": 3},
+      {"block_num": 5, "parent_num": 4}
+    ]

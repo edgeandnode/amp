@@ -10,10 +10,13 @@ use common::utils::error_with_causes;
 use fs_err as fs;
 
 // Submodules of the step implementations
+mod anvil;
 mod clean_dump_location;
 mod dump;
+mod mine;
 mod query;
 mod register;
+mod reorg;
 mod restore;
 mod stream;
 mod stream_take;
@@ -27,6 +30,12 @@ use crate::testlib::{ctx::TestCtx, fixtures::FlightClient};
 #[derive(Debug, serde::Deserialize)]
 #[serde(untagged)]
 pub enum TestStep {
+    /// Initialize Anvil blockchain fixture.
+    Anvil(anvil::Step),
+    /// Mine blocks on Anvil.
+    Mine(mine::Step),
+    /// Trigger blockchain reorganization on Anvil.
+    Reorg(reorg::Step),
     /// Dump dataset data to storage.
     Dump(dump::Step),
     /// Register a stream with the client.
@@ -47,9 +56,12 @@ impl TestStep {
     /// Gets the name of the test step.
     ///
     /// Returns the step name for logging and identification purposes.
-    /// Note that CleanDumpLocation steps use their location as the name.
+    /// Note that CleanDumpLocation and Anvil steps use their field values as the name.
     pub fn name(&self) -> &str {
         match self {
+            TestStep::Anvil(_) => "anvil",
+            TestStep::Mine(step) => &step.name,
+            TestStep::Reorg(step) => &step.name,
             TestStep::Dump(step) => &step.name,
             TestStep::StreamTake(step) => &step.name,
             TestStep::Query(step) => &step.name,
@@ -66,6 +78,9 @@ impl TestStep {
     /// with comprehensive logging and error handling.
     pub async fn run(&self, ctx: &TestCtx, client: &mut FlightClient) -> Result<(), TestStepError> {
         let result = match self {
+            TestStep::Anvil(step) => step.run(ctx).await,
+            TestStep::Mine(step) => step.run(ctx).await,
+            TestStep::Reorg(step) => step.run(ctx).await,
             TestStep::Dump(step) => step.run(ctx).await,
             TestStep::StreamTake(step) => step.run(client).await,
             TestStep::Query(step) => step.run(client).await,
