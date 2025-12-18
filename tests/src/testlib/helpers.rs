@@ -68,7 +68,7 @@ pub async fn dump_internal(
         let db = metadata_db.clone();
         // Always reuse existing physical tables in test scenarios (fresh = false)
         let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+            match PhysicalTable::get_active(metadata_db.clone(), &data_store, &table).await? {
                 Some(physical_table) => physical_table,
                 None => {
                     common::catalog::physical::register_new_table_revision(
@@ -175,6 +175,7 @@ pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
     dataset_store: &DatasetStore,
     metadata_db: &MetadataDb,
+    data_store: &Store,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     // 1. Restore via Admin API (indexes files into metadata DB)
@@ -217,7 +218,7 @@ pub async fn restore_dataset_snapshot(
         );
 
         // Load the PhysicalTable using get_active (it was just marked active by restore)
-        let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
+        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, &table)
             .await?
             .ok_or_else(|| {
                 format!(
@@ -357,6 +358,7 @@ pub async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &DatasetStore,
     metadata_db: &MetadataDb,
+    data_store: &Store,
 ) -> Result<Catalog, BoxError> {
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")
         .parse()
@@ -369,7 +371,7 @@ pub async fn catalog_for_dataset(
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in dataset.resolved_tables(dataset_ref.into()) {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
-        let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
+        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, &table)
             .await?
             .unwrap();
         tables.push(physical_table.into());

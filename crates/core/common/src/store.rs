@@ -18,8 +18,7 @@ use object_store::ObjectStore;
 #[derive(Debug, Clone)]
 pub struct Store {
     url: ObjectStoreUrl,
-    unprefixed: Arc<dyn ObjectStore>,
-    prefixed: Arc<dyn ObjectStore>,
+    inner: Arc<dyn ObjectStore>,
 }
 
 impl Store {
@@ -33,27 +32,18 @@ impl Store {
     ///
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
     pub fn new(url: ObjectStoreUrl) -> Result<Self, ObjectStoreCreationError> {
-        let unprefixed: Arc<dyn ObjectStore> = amp_object_store::new(&url)?;
-        let prefixed: Arc<dyn ObjectStore> = amp_object_store::new_with_prefix(&url, url.path())?;
-        Ok(Self {
-            url,
-            unprefixed,
-            prefixed,
-        })
+        let inner: Arc<dyn ObjectStore> = amp_object_store::new_with_prefix(&url, url.path())?;
+        Ok(Self { url, inner })
     }
 
     pub fn url(&self) -> &url::Url {
         &self.url
     }
 
-    /// Returns the unprefixed store. Use this when you have a URL which already contains the prefix.
-    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        self.unprefixed.clone()
-    }
-
-    /// A store that will search for paths relative to the location provided in the constructor, as
-    /// would be expected.
-    pub fn prefixed_store(&self) -> Arc<dyn ObjectStore> {
-        self.prefixed.clone()
+    /// Returns a reference to the inner object store for this location.
+    ///
+    /// All operations are relative to the URL path provided in the constructor.
+    pub fn as_inner(&self) -> &Arc<dyn ObjectStore> {
+        &self.inner
     }
 }

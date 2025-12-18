@@ -158,6 +158,7 @@ impl TestCtx {
             dataset_name,
             self.ctx.daemon_server().dataset_store(),
             self.ctx.daemon_server().metadata_db(),
+            self.ctx.daemon_server().data_store(),
         )
         .await
     }

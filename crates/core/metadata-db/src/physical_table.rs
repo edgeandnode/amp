@@ -6,13 +6,13 @@
 pub mod events;
 mod location_id;
 mod name;
+mod path;
 pub(crate) mod sql;
-mod url;
 
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
     name::{Name as TableName, NameOwned as TableNameOwned},
-    url::{Url as TableUrl, UrlOwned as TableUrlOwned},
+    path::{Path as TablePath, PathOwned as TablePathOwned},
 };
 use crate::{
     DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
@@ -24,7 +24,7 @@ use crate::{
 
 /// Register a new physical table location in the database
 ///
-/// This operation is idempotent - if a location with the same URL already exists,
+/// This operation is idempotent - if a location with the same path already exists,
 /// its manifest_hash will be updated and the existing location ID will be returned.
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
@@ -33,7 +33,7 @@ pub async fn register<'c, E>(
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-    url: impl Into<TableUrl<'_>> + std::fmt::Debug,
+    path: impl Into<TablePath<'_>> + std::fmt::Debug,
     active: bool,
 ) -> Result<LocationId, Error>
 where
@@ -45,7 +45,7 @@ where
         dataset_name.into(),
         manifest_hash.into(),
         table_name.into(),
-        url.into(),
+        path.into(),
         active,
     )
     .await
@@ -80,19 +80,19 @@ where
         .map_err(Error::Database)
 }
 
-/// Look up a location ID by its storage URL
+/// Look up a location ID by its storage path
 ///
-/// If multiple locations exist with the same URL (which shouldn't happen in normal operation),
+/// If multiple locations exist with the same path (which shouldn't happen in normal operation),
 /// this returns the first match found.
 #[tracing::instrument(skip(exe), err)]
-pub async fn url_to_id<'c, E>(
+pub async fn path_to_id<'c, E>(
     exe: E,
-    url: impl Into<TableUrl<'_>> + std::fmt::Debug,
+    path: impl Into<TablePath<'_>> + std::fmt::Debug,
 ) -> Result<Option<LocationId>, Error>
 where
     E: Executor<'c>,
 {
-    sql::url_to_id(exe, url.into())
+    sql::path_to_id(exe, path.into())
         .await
         .map_err(Error::Database)
 }
@@ -271,8 +271,8 @@ pub struct PhysicalTable {
 
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
-    /// Full URL to the storage location
-    pub url: TableUrlOwned,
+    /// Relative path to the storage location
+    pub path: TablePathOwned,
     /// Whether this location is currently active for queries
     pub active: bool,
     /// Writer job ID (if one exists)
@@ -294,9 +294,9 @@ impl LocationWithDetails {
         self.table.id
     }
 
-    /// Get the storage URL for this location
-    pub fn url(&self) -> &TableUrlOwned {
-        &self.table.url
+    /// Get the storage path for this location
+    pub fn path(&self) -> &TablePathOwned {
+        &self.table.path
     }
 
     /// Check if this location is currently active for queries

@@ -35,23 +35,31 @@ pub struct FileMetadata {
     pub parquet_meta: ParquetMeta,
 }
 
-impl TryFrom<FileMetadataRow> for FileMetadata {
-    type Error = BoxError;
-    fn try_from(
-        FileMetadataRow {
+impl FileMetadata {
+    /// Create FileMetadata from a database row with a table path prefix.
+    ///
+    /// The `table_path` should be the relative path of the table within the data store
+    /// (e.g., `anvil_rpc/blocks/uuid`). This is used to construct the file's location
+    /// relative to the data store, which is needed for the object store to find the file.
+    pub fn from_row_with_table_path(
+        row: FileMetadataRow,
+        table_path: &Path,
+    ) -> Result<Self, BoxError> {
+        let FileMetadataRow {
             id: file_id,
             location_id,
             file_name,
-            url,
             object_size,
             object_e_tag: e_tag,
             object_version: version,
             metadata,
             ..
-        }: FileMetadataRow,
-    ) -> Result<Self, Self::Error> {
-        let url = url.join(&file_name)?;
-        let location = Path::from_url_path(url.path())?;
+        } = row;
+
+        // The location is the table path + filename, relative to the data store prefix.
+        // The AmpReaderFactory's object_store has the data store prefix, so paths
+        // should be like "dataset/table/revision_id/filename.parquet".
+        let location = table_path.child(file_name.as_str());
 
         let parquet_meta: ParquetMeta = serde_json::from_value(metadata)?;
 

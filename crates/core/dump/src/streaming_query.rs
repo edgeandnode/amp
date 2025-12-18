@@ -9,7 +9,7 @@ use std::{
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
     BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
-    QueryContext, SPECIAL_BLOCK_NUM,
+    QueryContext, SPECIAL_BLOCK_NUM, Store,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -208,6 +208,7 @@ impl StreamingQuery {
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
+        data_store: &Store,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -243,8 +244,14 @@ impl StreamingQuery {
             .iter()
             .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
             .collect();
-        let blocks_table =
-            resolve_blocks_table(metadata_db, dataset_store, src_datasets, network).await?;
+        let blocks_table = resolve_blocks_table(
+            metadata_db,
+            dataset_store,
+            data_store,
+            src_datasets,
+            network,
+        )
+        .await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
@@ -687,10 +694,11 @@ pub fn keep_alive_stream<'a>(
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
-#[tracing::instrument(skip(dataset_store), err)]
+#[tracing::instrument(skip(metadata_db, dataset_store, data_store), err)]
 async fn resolve_blocks_table(
     metadata_db: MetadataDb,
     dataset_store: &DatasetStore,
+    data_store: &Store,
     root_datasets: BTreeMap<Hash, Arc<Dataset>>,
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {
@@ -715,7 +723,7 @@ async fn resolve_blocks_table(
             ))
         })?;
 
-    PhysicalTable::get_active(&table, metadata_db)
+    PhysicalTable::get_active(metadata_db, data_store, &table)
         .await?
         .ok_or_else(|| {
             BoxError::from(format!(

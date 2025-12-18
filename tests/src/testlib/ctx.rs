@@ -352,9 +352,9 @@ impl TestCtxBuilder {
                 DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
             };
             let provider_configs_store =
-                ProviderConfigsStore::new(providers_store.prefixed_store());
+                ProviderConfigsStore::new(providers_store.as_inner().clone());
             let dataset_manifests_store =
-                DatasetManifestsStore::new(manifests_store.prefixed_store());
+                DatasetManifestsStore::new(manifests_store.as_inner().clone());
             DatasetStore::new(
                 metadata_db.conn_pool().clone(),
                 provider_configs_store,

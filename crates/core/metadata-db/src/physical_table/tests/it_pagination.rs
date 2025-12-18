@@ -7,7 +7,7 @@ use crate::{
     db::Connection,
     manifests::ManifestHash,
     physical_table,
-    physical_table::{LocationId, TableName, TableUrl},
+    physical_table::{LocationId, TableName, TablePath},
 };
 
 #[tokio::test]
@@ -53,8 +53,11 @@ async fn list_locations_first_page_respects_limit() {
     // Create 5 locations with unique table names to avoid unique constraint violation
     for i in 0..5 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_{}", i));
-        let url = TableUrl::from_owned_unchecked(format!("s3://bucket/file{}.parquet", i));
-        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, url, true)
+        let path = TablePath::from_owned_unchecked(format!(
+            "test-dataset/test_table_{}/revision-{}",
+            i, i
+        ));
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path, true)
             .await
             .expect("Failed to insert location");
 
@@ -114,9 +117,12 @@ async fn list_locations_next_page_uses_cursor() {
     let mut all_location_ids = Vec::new();
     for i in 0..10 {
         let table_name = TableName::from_owned_unchecked(format!("test_table_page_{}", i));
-        let url = TableUrl::from_owned_unchecked(format!("s3://bucket/page{}.parquet", i));
+        let path = TablePath::from_owned_unchecked(format!(
+            "test-dataset/test_table_page_{}/page-revision-{}",
+            i, i
+        ));
         let location_id =
-            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, url, true)
+            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path, true)
                 .await
                 .expect("Failed to insert location");
         all_location_ids.push(location_id);

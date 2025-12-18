@@ -358,6 +358,7 @@ async fn dump_table(
     let catalog = catalog_for_sql_with_deps(
         &ctx.dataset_store,
         &ctx.metadata_db,
+        &ctx.data_store,
         &query,
         &env,
         &dependencies,
@@ -487,6 +488,7 @@ async fn dump_sql_query(
             env.clone(),
             catalog.clone(),
             &ctx.dataset_store,
+            &ctx.data_store,
             query,
             start,
             end,
