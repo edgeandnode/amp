@@ -8,6 +8,7 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars", "common/schemars", "dep:serde_json"]
 
 [dependencies]
+async-trait.workspace = true
 common = { version = "0.1.0", path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }

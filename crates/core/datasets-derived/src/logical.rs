@@ -38,6 +38,7 @@ use crate::{
     DerivedDatasetKind, Manifest,
     catalog::{
         PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
+        self_refs_from_manifest,
     },
     manifest::{TableInput, View},
 };
@@ -411,7 +412,7 @@ pub async fn validate(
         store,
         references,
         dependencies,
-        manifest.functions.clone(),
+        self_refs_from_manifest(manifest),
         IsolatePool::dummy(), // For manifest validation only (no JS execution)
     )
     .await
@@ -442,6 +443,30 @@ pub async fn validate(
         }
         PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
             ManifestValidationError::EthCallNotAvailable(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::Resolution(resolve_err) => {
+            use crate::catalog::PreResolvedError;
+            use common::catalog::resolve::ResolveError;
+            match resolve_err {
+                ResolveError::SchemaResolution(PreResolvedError::AliasNotFound(_)) => {
+                    ManifestValidationError::DependencyAliasNotFound(err)
+                }
+                ResolveError::FunctionNotFound { .. }
+                | ResolveError::SelfFunctionNotFound { .. } => {
+                    ManifestValidationError::FunctionNotFoundInDataset(err)
+                }
+                ResolveError::TableNotFound { .. } => {
+                    ManifestValidationError::TableNotFoundInDataset(err)
+                }
+                ResolveError::EthCallNotAvailable { .. } => {
+                    ManifestValidationError::EthCallNotAvailable(err)
+                }
+                ResolveError::DatasetLoad { .. } => ManifestValidationError::GetDataset(err),
+                ResolveError::EthCallCreation { .. } => {
+                    ManifestValidationError::EthCallUdfCreation(err)
+                }
+                _ => ManifestValidationError::CatalogResolution(err),
+            }
         }
     })?;
 
@@ -613,6 +638,12 @@ pub enum ManifestValidationError {
     /// A table reference uses an alias that was not provided in the dependencies map.
     #[error("Dependency alias not found: {0}")]
     DependencyAliasNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+
+    /// Catalog resolution failed
+    ///
+    /// This occurs when the core catalog resolution logic fails.
+    #[error("Catalog resolution failed: {0}")]
+    CatalogResolution(#[source] PlanningCtxForSqlTablesWithDepsError),
 
     /// Non-incremental SQL operation in table query
     ///

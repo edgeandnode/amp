@@ -104,7 +104,9 @@ use common::{
 };
 use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
 use datasets_derived::{
-    Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps, manifest::TableInput,
+    Manifest as DerivedManifest,
+    catalog::{catalog_for_derived_table, self_refs_from_manifest},
+    manifest::TableInput,
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
@@ -355,13 +357,13 @@ async fn dump_table(
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
-    let catalog = catalog_for_sql_with_deps(
+    let catalog = catalog_for_derived_table(
         &ctx.dataset_store,
         &ctx.data_store,
         &query,
         &env,
         &dependencies,
-        &manifest.functions,
+        self_refs_from_manifest(&manifest),
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());

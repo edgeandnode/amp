@@ -1471,11 +1471,12 @@ async fn multiple_tables_with_missing_function_fails_on_first() {
         response.error_code, "FUNCTION_NOT_FOUND_IN_DATASET",
         "should return FUNCTION_NOT_FOUND_IN_DATASET error"
     );
-    // Should fail on table2 which references fake_decode
+    // Should mention the missing function and the dataset
     assert!(
-        response.error_message.contains("table2")
-            && response.error_message.contains("eth.fake_decode"),
-        "error message should reference the failing table and function, got: {}",
+        response
+            .error_message
+            .contains("function 'eth.fake_decode' not found in dataset _/eth_firehose"),
+        "error message should reference the missing function and dataset, got: {}",
         response.error_message
     );
 }
