@@ -12,6 +12,7 @@ name = "tests"
 
 [dependencies]
 alloy.workspace = true
+amp-client = { path = "../crates/clients/flight" }
 ampctl = { path = "../crates/bin/ampctl" }
 arrow-flight.workspace = true
 backon.workspace = true
@@ -34,11 +35,11 @@ fs-err.workspace = true
 futures.workspace = true
 indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
+metadata-db-postgres = { path = "../crates/services/metadata-db-postgres" }
 monitoring = { path = "../crates/core/monitoring" }
+object_store.workspace = true
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-amp-client = { path = "../crates/clients/flight" }
-object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true
 reqwest.workspace = true
@@ -47,7 +48,6 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 server = { path = "../crates/services/server" }
 solana-datasets = { path = "../crates/extractors/solana" }
-metadata-db-postgres = { path = "../crates/services/metadata-db-postgres" }
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
