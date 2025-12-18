@@ -13,7 +13,7 @@
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError, Dataset, store::StoreError};
+use common::{BlockNum, BoxError, Dataset};
 use datasets_common::manifest::TableSchema;
 use serde_with::serde_as;
 use url::Url;
@@ -30,15 +30,9 @@ pub use self::{
     extractor::SolanaExtractor,
 };
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("RPC client error: {0}")]
-    Client(BoxError),
-    #[error("store error: {0}")]
-    StoreError(#[from] StoreError),
-}
+#[derive(Debug, thiserror::Error)]
+#[error("RPC client error")]
+pub struct Error(#[source] pub BoxError);
 
 /// Table definition for raw datasets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -121,7 +115,7 @@ pub fn extractor(
         ),
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
-            return Err(Error::Client(err.into()));
+            return Err(Error(err.into()));
         }
     };
 

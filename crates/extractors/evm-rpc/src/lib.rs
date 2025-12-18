@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError, Dataset, store::StoreError};
+use common::{BlockNum, BoxError, Dataset};
 use serde_with::serde_as;
 use url::Url;
 
@@ -34,13 +34,10 @@ impl Table {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("RPC client error: {0}")]
-    Client(BoxError),
-    #[error("store error: {0}")]
-    StoreError(#[source] StoreError),
-}
+/// RPC client error.
+#[derive(Debug, thiserror::Error)]
+#[error("RPC client error")]
+pub struct Error(#[source] pub BoxError);
 
 /// EVM RPC dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -118,7 +115,7 @@ pub async fn client(
                 meter,
             )
             .await
-            .map_err(Error::Client)?
+            .map_err(Error)?
         }
         "ws" | "wss" => JsonRpcClient::new_ws(
             config.url,
@@ -131,7 +128,7 @@ pub async fn client(
             meter,
         )
         .await
-        .map_err(Error::Client)?,
+        .map_err(Error)?,
         _ => JsonRpcClient::new(
             config.url,
             config.network,
@@ -142,7 +139,7 @@ pub async fn client(
             config.fetch_receipts_per_tx,
             meter,
         )
-        .map_err(Error::Client)?,
+        .map_err(Error)?,
     };
 
     Ok(client)
