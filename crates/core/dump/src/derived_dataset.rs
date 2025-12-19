@@ -363,7 +363,7 @@ async fn dump_table(
         &query,
         &env,
         &dependencies,
-        self_refs_from_manifest(&manifest),
+        self_refs_from_manifest(manifest),
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
