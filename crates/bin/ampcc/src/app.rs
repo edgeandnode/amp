@@ -237,56 +237,106 @@ fn format_arrow_type(type_value: &serde_json::Value) -> String {
 
     if let Some(obj) = type_value.as_object() {
         // Handle complex types like Timestamp, FixedSizeBinary, etc.
-        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-            match name {
-                "timestamp" => {
-                    let unit = obj
-                        .get("unit")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let tz = obj
-                        .get("timezone")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!(", {}", s))
-                        .unwrap_or_default();
-                    return format!("Timestamp({}{})", unit, tz);
-                }
-                "fixedsizebinary" => {
-                    let size = obj.get("byteWidth").and_then(|v| v.as_u64()).unwrap_or(0);
-                    return format!("FixedSizeBinary({})", size);
-                }
-                "fixedsizelist" => {
-                    let size = obj.get("listSize").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let child = obj
-                        .get("children")
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|c| c.get("type"))
-                        .map(format_arrow_type)
-                        .unwrap_or_else(|| "?".to_string());
-                    return format!("FixedSizeList({}, {})", child, size);
-                }
-                "list" => {
-                    let child = obj
-                        .get("children")
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|c| c.get("type"))
-                        .map(format_arrow_type)
-                        .unwrap_or_else(|| "?".to_string());
-                    return format!("List({})", child);
-                }
-                "struct" => {
-                    return "Struct(...)".to_string();
-                }
-                _ => {
-                    return name.to_string();
-                }
-            }
+        if let Some((type_name, type_params)) = obj.iter().next() {
+            return format_complex_type(type_name, type_params);
         }
     }
 
     "Unknown".to_string()
+}
+
+/// Format a complex Arrow type given its name and parameters.
+fn format_complex_type(type_name: &str, params: &serde_json::Value) -> String {
+    match type_name {
+        "FixedSizeBinary" => {
+            let size = params.as_u64().unwrap_or(0);
+            format!("FixedSizeBinary({})", size)
+        }
+        "Decimal128" | "Decimal256" => {
+            if let Some(obj) = params.as_object() {
+                let precision = obj.get("precision").and_then(|v| v.as_u64()).unwrap_or(0);
+                let scale = obj.get("scale").and_then(|v| v.as_i64()).unwrap_or(0);
+                format!("{}({}, {})", type_name, precision, scale)
+            } else {
+                type_name.to_string()
+            }
+        }
+        "Timestamp" => {
+            if let Some(arr) = params.as_array() {
+                let unit = arr.first().and_then(|v| v.as_str()).unwrap_or("unknown");
+                let tz = arr
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| format!(", {}", s))
+                    .unwrap_or_default();
+                format!("Timestamp({}{})", unit, tz)
+            } else {
+                "Timestamp".to_string()
+            }
+        }
+        "Duration" => {
+            if let Some(unit) = params.as_str() {
+                format!("Duration({})", unit)
+            } else if let Some(obj) = params.as_object() {
+                let unit = obj
+                    .get("unit")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                format!("Duration({})", unit)
+            } else {
+                "Duration".to_string()
+            }
+        }
+        "Time32" | "Time64" => {
+            if let Some(unit) = params.as_str() {
+                format!("{}({})", type_name, unit)
+            } else {
+                type_name.to_string()
+            }
+        }
+        "FixedSizeList" => {
+            if let Some(arr) = params.as_array() {
+                let size = arr.get(1).and_then(|v| v.as_u64()).unwrap_or(0);
+                let child = arr
+                    .first()
+                    .and_then(|c| c.get("data_type"))
+                    .map(format_arrow_type)
+                    .unwrap_or_else(|| "?".to_string());
+                format!("FixedSizeList({}, {})", size, child)
+            } else {
+                "FixedSizeList".to_string()
+            }
+        }
+        "List" | "LargeList" => {
+            if let Some(obj) = params.as_object() {
+                let child = obj
+                    .get("data_type")
+                    .map(format_arrow_type)
+                    .unwrap_or_else(|| "?".to_string());
+                format!("{}({})", type_name, child)
+            } else {
+                type_name.to_string()
+            }
+        }
+        "Interval" => {
+            if let Some(unit) = params.as_str() {
+                format!("Interval({})", unit)
+            } else {
+                "Interval".to_string()
+            }
+        }
+        "Dictionary" => {
+            if let Some(arr) = params.as_array() {
+                let key_type = arr.first().and_then(|v| v.as_str()).unwrap_or("unknown");
+                let val_type = arr.get(1).and_then(|v| v.as_str()).unwrap_or("unknown");
+                format!("Dictionary({}, {})", key_type, val_type)
+            } else {
+                "Dictionary".to_string()
+            }
+        }
+        _ => "Unknown".to_string(),
+    }
 }
 
 /// Main application state.
