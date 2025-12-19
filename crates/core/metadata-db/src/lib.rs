@@ -1,13 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
-use futures::{StreamExt as _, TryStreamExt as _, future::BoxFuture, stream::BoxStream};
-use sqlx::{Connection as _, postgres::types::PgInterval, types::chrono::NaiveDateTime};
+use futures::{future::BoxFuture, stream::BoxStream};
+use sqlx::Connection as _;
 use tracing::instrument;
 
 pub mod datasets;
 mod db;
 mod error;
 pub mod files;
+pub mod gc;
 pub mod job_attempts;
 pub mod jobs;
 pub mod manifests;
@@ -15,7 +16,6 @@ pub mod notification_multiplexer;
 pub mod physical_table;
 pub mod workers;
 
-use self::files::FileId;
 pub use self::{
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
@@ -282,78 +282,6 @@ impl<'c> sqlx::Executor<'c> for &'c mut SingleConnMetadataDb {
 impl<'c> Executor<'c> for &'c mut SingleConnMetadataDb {}
 
 impl _priv::Sealed for &mut SingleConnMetadataDb {}
-
-#[derive(Debug, sqlx::FromRow)]
-pub struct GcManifestRow {
-    /// gc_manifest.location_id
-    pub location_id: LocationId,
-    /// gc_manifest.file_id
-    pub file_id: FileId,
-    /// gc_manifest.file_path
-    pub file_path: String,
-    /// gc_manifest.expiration
-    pub expiration: NaiveDateTime,
-}
-
-// Garbage Collection API
-impl MetadataDb {
-    /// Inserts or updates the GC manifest for the given file IDs.
-    /// If a file ID already exists, it updates the expiration time.
-    /// The expiration time is set to the current time plus the given duration.
-    /// If the file ID does not exist, it inserts a new row.
-    pub async fn upsert_gc_manifest(
-        &self,
-        location_id: LocationId,
-        file_ids: &[FileId],
-        duration: Duration,
-    ) -> Result<(), Error> {
-        let interval = PgInterval {
-            microseconds: (duration.as_micros() as u64) as i64,
-            ..Default::default()
-        };
-
-        let sql = "
-            INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
-            SELECT $1
-                  , file.id
-                  , file_metadata.file_name
-                  , CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + $3
-               FROM UNNEST ($2) AS file(id)
-         INNER JOIN file_metadata ON file_metadata.id = file.id
-        ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration;
-        ";
-        sqlx::query(sql)
-            .bind(location_id)
-            .bind(file_ids.iter().map(|id| **id).collect::<Vec<_>>())
-            .bind(interval)
-            .execute(&*self.pool)
-            .await
-            .map_err(Error::Database)?;
-
-        Ok(())
-    }
-
-    pub fn stream_expired_files<'a>(
-        &'a self,
-        location_id: LocationId,
-    ) -> BoxStream<'a, Result<GcManifestRow, Error>> {
-        let sql = "
-        SELECT location_id
-             , file_id
-             , file_path
-             , expiration
-          FROM gc_manifest
-         WHERE location_id = $1
-               AND expiration < CURRENT_TIMESTAMP AT TIME ZONE 'UTC';
-        ";
-
-        sqlx::query_as(sql)
-            .bind(location_id)
-            .fetch(&*self.pool)
-            .map_err(Error::Database)
-            .boxed()
-    }
-}
 
 /// Private module for sealed trait pattern
 ///

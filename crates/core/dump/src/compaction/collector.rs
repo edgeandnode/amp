@@ -7,7 +7,7 @@ use std::{
 
 use common::catalog::physical::PhysicalTable;
 use futures::{StreamExt, TryStreamExt, stream};
-use metadata_db::{GcManifestRow, MetadataDb, files::FileId};
+use metadata_db::{MetadataDb, files::FileId, gc::GcManifestRow};
 use object_store::{Error as ObjectStoreError, path::Path};
 
 use crate::{
@@ -72,23 +72,22 @@ impl Collector {
 
         let location_id = self.table.location_id();
 
-        let found_file_ids_to_paths: BTreeMap<FileId, Path> = self
-            .metadata_db
-            .stream_expired_files(location_id)
-            .map_err(CollectorError::file_stream_error)
-            .map(|manifest_row| {
-                let GcManifestRow {
-                    file_id,
-                    file_path: file_name,
-                    ..
-                } = manifest_row?;
+        let found_file_ids_to_paths: BTreeMap<FileId, Path> =
+            metadata_db::gc::stream_expired(&self.metadata_db, location_id)
+                .map_err(CollectorError::file_stream_error)
+                .map(|manifest_row| {
+                    let GcManifestRow {
+                        file_id,
+                        file_path: file_name,
+                        ..
+                    } = manifest_row?;
 
-                // Use relative path (table path + filename), not the absolute URL path
-                let path = self.table.path().child(file_name.as_str());
-                Ok::<_, CollectorError>((file_id, path))
-            })
-            .try_collect()
-            .await?;
+                    // Use relative path (table path + filename), not the absolute URL path
+                    let path = self.table.path().child(file_name.as_str());
+                    Ok::<_, CollectorError>((file_id, path))
+                })
+                .try_collect()
+                .await?;
 
         tracing::debug!("Expired files found: {}", found_file_ids_to_paths.len());
 
