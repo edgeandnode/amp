@@ -5,7 +5,7 @@ use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
-        Generation, extract_footer_bytes_from_file,
+        FileName, Generation, extract_footer_bytes_from_file,
         parquet::{
             GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
         },
@@ -18,7 +18,6 @@ use metadata_db::{
     files::{FileId, FooterBytes},
 };
 use object_store::{ObjectMeta, buffered::BufWriter};
-use rand::RngCore as _;
 use tracing::{debug, instrument, trace};
 use url::Url;
 
@@ -38,7 +37,6 @@ pub async fn commit_metadata(
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
-    let file_name = common::metadata::FileName::new_unchecked(file_name);
     let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db::files::register(
         metadata_db,
@@ -62,7 +60,7 @@ pub async fn commit_metadata(
 
 pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
-    filename: String,
+    filename: FileName,
     table: Arc<PhysicalTable>,
     max_row_group_bytes: usize,
 }
@@ -74,11 +72,7 @@ impl ParquetFileWriter {
         start: BlockNum,
         max_row_group_bytes: usize,
     ) -> Result<ParquetFileWriter, BoxError> {
-        let filename = {
-            // Pad `start` to 9 digits for lexicographical sorting.
-            // Add a 64-bit hex value from a crytpo RNG to avoid name conflicts from chain reorgs.
-            format!("{:09}-{:016x}.parquet", start, rand::rng().next_u64())
-        };
+        let filename = FileName::new_with_random_suffix(start);
         // Use the table's relative path + filename, not the absolute URL path.
         // The object store already has the base prefix, so we only need the relative path.
         let file_path = table.path().child(filename.as_str());
