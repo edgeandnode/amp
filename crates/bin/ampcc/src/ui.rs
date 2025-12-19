@@ -899,10 +899,8 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
             .style(Theme::status_error());
         f.render_widget(text, area);
     } else if let Some(manifest) = &app.current_manifest {
-        let json_str =
-            serde_json::to_string_pretty(manifest).unwrap_or_else(|_| "Invalid JSON".to_string());
-        let highlighted = highlight_json(&json_str);
-        let line_count = highlighted.len();
+        let lines = format_manifest(manifest);
+        let line_count = lines.len();
 
         // Update content length for scroll bounds
         app.manifest_content_length = line_count;
@@ -910,7 +908,7 @@ fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
         // Update scroll state with content length
         app.manifest_scroll_state = app.manifest_scroll_state.content_length(line_count);
 
-        let text = Paragraph::new(highlighted)
+        let text = Paragraph::new(lines)
             .block(block)
             .scroll((app.manifest_scroll, 0));
         f.render_widget(text, area);
@@ -970,6 +968,184 @@ fn draw_inspect(f: &mut Frame, app: &mut App, area: Rect) {
             .style(Theme::text_secondary());
         f.render_widget(content, area);
     }
+}
+
+/// Remove common leading whitespace from SQL strings.
+fn dedent_sql(sql: &str) -> String {
+    let lines: Vec<&str> = sql.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let min_indent = lines
+        .iter()
+        .skip(1)
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    let mut result = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            result.push(line.trim());
+        } else if line.trim().is_empty() {
+            result.push("");
+        } else if let Some(trimmed) = line.get(min_indent..) {
+            result.push(trimmed);
+        } else {
+            result.push(line.trim());
+        }
+    }
+    result.join("\n").trim().to_string()
+}
+
+/// Format JSON manifest into readable lines.
+fn format_manifest(manifest: &serde_json::Value) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    const SEPARATOR: &str = "────────────────────────────────────";
+
+    // Kind
+    if let Some(kind) = manifest.get("kind").and_then(|v| v.as_str()) {
+        lines.push(Line::from(vec![
+            Span::styled("Kind: ", Theme::text_secondary()),
+            Span::styled(kind.to_string(), Theme::text_primary()),
+        ]));
+    }
+
+    // Start Block (optional)
+    if let Some(start_block) = manifest.get("start_block").and_then(|v| v.as_u64()) {
+        lines.push(Line::from(vec![
+            Span::styled("Start Block: ", Theme::text_secondary()),
+            Span::styled(start_block.to_string(), Theme::text_primary()),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Dependencies
+    lines.push(Line::from(vec![Span::styled(
+        "Dependencies:",
+        Theme::text_primary().add_modifier(Modifier::BOLD),
+    )]));
+
+    if let Some(deps) = manifest.get("dependencies").and_then(|v| v.as_object()) {
+        if deps.is_empty() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("(none)", Theme::text_secondary()),
+            ]));
+        } else {
+            for (alias, reference) in deps {
+                let ref_str = reference.as_str().unwrap_or("unknown");
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(alias.clone(), Theme::text_primary()),
+                    Span::styled(" → ", Theme::text_secondary()),
+                    Span::styled(ref_str.to_string(), Theme::version_tag()),
+                ]));
+            }
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("(none)", Theme::text_secondary()),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Tables
+    lines.push(Line::from(vec![Span::styled(
+        "Tables:",
+        Theme::text_primary().add_modifier(Modifier::BOLD),
+    )]));
+
+    if let Some(tables) = manifest.get("tables").and_then(|v| v.as_object()) {
+        if tables.is_empty() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("(none)", Theme::text_secondary()),
+            ]));
+        } else {
+            for (table_name, table_def) in tables {
+                let network = table_def
+                    .get("network")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+
+                // Table header with name and network
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("▸ ", Theme::text_secondary()),
+                    Span::styled(
+                        table_name.clone(),
+                        Theme::border_focused().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" (", Theme::text_secondary()),
+                    Span::styled(network.to_string(), Theme::type_annotation()),
+                    Span::styled(")", Theme::text_secondary()),
+                ]));
+
+                // SQL query
+                if let Some(sql) = table_def
+                    .get("input")
+                    .and_then(|v| v.get("sql"))
+                    .and_then(|v| v.as_str())
+                {
+                    let dedented_sql = dedent_sql(sql);
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(SEPARATOR, Theme::text_secondary()),
+                    ]));
+                    for sql_line in dedented_sql.lines() {
+                        lines.push(Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled(sql_line.to_string(), Theme::text_primary()),
+                        ]));
+                    }
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(SEPARATOR, Theme::text_secondary()),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("(none)", Theme::text_secondary()),
+        ]));
+    }
+
+    // Functions
+    lines.push(Line::from(vec![Span::styled(
+        "Functions:",
+        Theme::text_primary().add_modifier(Modifier::BOLD),
+    )]));
+
+    if let Some(functions) = manifest.get("functions").and_then(|v| v.as_object()) {
+        if functions.is_empty() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("(none)", Theme::text_secondary()),
+            ]));
+        } else {
+            for func_name in functions.keys() {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("▸ ", Theme::text_secondary()),
+                    Span::styled(func_name.clone(), Theme::text_primary()),
+                ]));
+            }
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("(none)", Theme::text_secondary()),
+        ]));
+    }
+
+    lines
 }
 
 /// Format inspect result into styled lines.
