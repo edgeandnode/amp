@@ -476,9 +476,34 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 && y < sidebar_area.y + sidebar_area.height
                             {
                                 // Clicked in sidebar - determine which section
-                                // For simplicity, default to Datasets for now
-                                // A more complete implementation would calculate section boundaries
-                                if !app.active_pane.is_sidebar_section() {
+                                if app.is_local() {
+                                    let sidebar_chunks = Layout::default()
+                                        .direction(Direction::Vertical)
+                                        .constraints([
+                                            Constraint::Percentage(50), // Datasets
+                                            Constraint::Percentage(25), // Jobs
+                                            Constraint::Percentage(25), // Workers
+                                        ])
+                                        .split(sidebar_area);
+
+                                    let datasets_area = sidebar_chunks[0];
+                                    let jobs_area = sidebar_chunks[1];
+                                    let workers_area = sidebar_chunks[2];
+
+                                    if y >= datasets_area.y
+                                        && y < datasets_area.y + datasets_area.height
+                                    {
+                                        app.active_pane = ActivePane::Datasets;
+                                    } else if y >= jobs_area.y && y < jobs_area.y + jobs_area.height
+                                    {
+                                        app.active_pane = ActivePane::Jobs;
+                                    } else if y >= workers_area.y
+                                        && y < workers_area.y + workers_area.height
+                                    {
+                                        app.active_pane = ActivePane::Workers;
+                                    }
+                                } else {
+                                    // Registry mode - only Datasets pane in sidebar
                                     app.active_pane = ActivePane::Datasets;
                                 }
                             } else if x >= content_area.x
@@ -486,7 +511,36 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 && y >= content_area.y
                                 && y < content_area.y + content_area.height
                             {
-                                app.active_pane = ActivePane::Detail;
+                                // Clicked in content area
+                                match app.content_view {
+                                    ContentView::Dataset => {
+                                        let content_chunks = Layout::default()
+                                            .direction(Direction::Vertical)
+                                            .constraints([
+                                                Constraint::Percentage(60), // Manifest
+                                                Constraint::Percentage(40), // Schema
+                                            ])
+                                            .split(content_area);
+
+                                        let manifest_area = content_chunks[0];
+                                        let schema_area = content_chunks[1];
+
+                                        if y >= manifest_area.y
+                                            && y < manifest_area.y + manifest_area.height
+                                        {
+                                            app.active_pane = ActivePane::Manifest;
+                                        } else if y >= schema_area.y
+                                            && y < schema_area.y + schema_area.height
+                                        {
+                                            app.active_pane = ActivePane::Schema;
+                                        }
+                                    }
+                                    ContentView::Job(_)
+                                    | ContentView::Worker(_)
+                                    | ContentView::None => {
+                                        app.active_pane = ActivePane::Detail;
+                                    }
+                                }
                             }
                         }
                     }
