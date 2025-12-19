@@ -9,7 +9,7 @@ use crate::{BoxError, Dataset};
 ///
 /// This trait provides the minimal interface required for SQL catalog building,
 /// abstracting over the dataset store implementation.
-pub trait DatasetAccess {
+pub trait DatasetAccess: Send + Sync + 'static {
     /// Resolve a dataset reference to a hash reference.
     ///
     /// This method resolves a dataset reference (which may contain a version, "latest", etc.)

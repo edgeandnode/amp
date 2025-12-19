@@ -57,6 +57,12 @@ pub enum CatalogForSqlError {
     /// exists in the dataset definition but has no physical parquet files.
     #[error("Table '{table}' has not been synced")]
     TableNotSynced { table: String },
+
+    /// Failed during catalog resolution.
+    ///
+    /// This wraps errors from the core resolution logic.
+    #[error("Catalog resolution failed")]
+    Resolution(#[source] BoxError),
 }
 
 impl CatalogForSqlError {
@@ -174,11 +180,17 @@ pub enum PlanningCtxForSqlError {
     /// dataset does not support eth_call (not an EVM RPC dataset or no provider configured).
     #[error("Function 'eth_call' not available for dataset '{reference}'")]
     EthCallNotAvailable { reference: HashReference },
+
+    /// Failed during catalog resolution.
+    ///
+    /// This wraps errors from the core resolution logic.
+    #[error("Catalog resolution failed")]
+    Resolution(#[source] BoxError),
 }
 
-/// Errors specific to catalog_for_sql_with_deps operations
+/// Errors specific to catalog_for_derived_table operations
 ///
-/// This error type is used exclusively by `catalog_for_sql_with_deps()` to create
+/// This error type is used exclusively by `catalog_for_derived_table()` to create
 /// a physical catalog for SQL query execution with pre-resolved dependencies.
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::large_enum_variant)]

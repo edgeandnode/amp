@@ -4028,6 +4028,7 @@ dependencies = [
 name = "datasets-derived"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "common",
  "datafusion",
  "datasets-common",
