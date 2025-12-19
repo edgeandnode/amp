@@ -65,15 +65,13 @@ pub async fn dump_internal(
         .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
         .build();
     for table in dataset.resolved_tables(dataset_ref.clone().into()) {
-        let db = metadata_db.clone();
         // Always reuse existing physical tables in test scenarios (fresh = false)
         let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(metadata_db.clone(), &data_store, &table).await? {
+            match PhysicalTable::get_active(data_store.clone(), table.clone()).await? {
                 Some(physical_table) => physical_table,
                 None => {
                     common::catalog::physical::register_new_table_revision(
-                        db,
-                        &data_store,
+                        data_store.clone(),
                         hash_reference.clone(),
                         table,
                     )
@@ -81,9 +79,10 @@ pub async fn dump_internal(
                 }
             }
             .into();
+        let cached_store = common::CachedStore::from_parts(data_store.clone(), cache.clone());
         let compactor = AmpCompactor::start(
             metadata_db.clone(),
-            cache.clone(),
+            cached_store,
             opts.clone(),
             physical_table.clone(),
             None,
@@ -156,8 +155,11 @@ pub async fn dump_dataset(
 /// all registered files in the metadata database actually exist in the object
 /// store, and that no extra files are present. This helps detect data corruption
 /// or synchronization issues between metadata and storage.
-pub async fn check_table_consistency(table: &Arc<PhysicalTable>) -> Result<(), BoxError> {
-    consistency_check(table).await.map_err(Into::into)
+pub async fn check_table_consistency(
+    table: &Arc<PhysicalTable>,
+    store: &Store,
+) -> Result<(), BoxError> {
+    consistency_check(table, store).await.map_err(Into::into)
 }
 
 /// Restore dataset snapshot from previously saved snapshot files.
@@ -174,7 +176,6 @@ pub async fn check_table_consistency(table: &Arc<PhysicalTable>) -> Result<(), B
 pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
     dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
     data_store: &Store,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
@@ -218,7 +219,7 @@ pub async fn restore_dataset_snapshot(
         );
 
         // Load the PhysicalTable using get_active (it was just marked active by restore)
-        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, &table)
+        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
             .await?
             .ok_or_else(|| {
                 format!(
@@ -357,7 +358,6 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
 pub async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
     data_store: &Store,
 ) -> Result<Catalog, BoxError> {
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")
@@ -371,7 +371,7 @@ pub async fn catalog_for_dataset(
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in dataset.resolved_tables(dataset_ref.into()) {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
-        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, &table)
+        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
             .await?
             .unwrap();
         tables.push(physical_table.into());

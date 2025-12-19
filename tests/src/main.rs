@@ -154,8 +154,8 @@ async fn main() {
                     .await
                     .expect("Failed to load config"),
             );
-            let data_store =
-                Store::new(config.data_store_url.clone()).expect("Failed to create data store");
+            let data_store = Store::new(sysdb.conn_pool().clone(), config.data_store_url.clone())
+                .expect("Failed to create data store");
 
             let dataset_store = {
                 let provider_configs_store = ProviderConfigsStore::new(
@@ -302,24 +302,18 @@ async fn bless(
 
     tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
-        test_helpers::restore_dataset_snapshot(
-            ampctl,
-            &dataset_store,
-            &metadata_db,
-            &data_store,
-            &dep,
-        )
-        .await
-        .map_err(|err| {
-            format!(
-                "Failed to restore dependency '{}' for dataset '{}': {}",
-                dep, dataset, err
-            )
-        })?;
+        test_helpers::restore_dataset_snapshot(ampctl, &dataset_store, &data_store, &dep)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to restore dependency '{}' for dataset '{}': {}",
+                    dep, dataset, err
+                )
+            })?;
     }
 
     // Clear existing dataset data if it exists
-    let store = data_store.as_inner();
+    let store = data_store.as_datafusion_object_store();
     let path = object_store::path::Path::parse(dataset.name())
         .map_err(|err| format!("Invalid dataset name '{}': {}", dataset.name(), err))?;
 
@@ -366,12 +360,14 @@ async fn bless(
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");
     for physical_table in physical_tables {
-        consistency_check(&physical_table).await.map_err(|err| {
-            format!(
-                "Consistency check failed for dataset '{}': {}",
-                dataset, err
-            )
-        })?;
+        consistency_check(&physical_table, &data_store)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Consistency check failed for dataset '{}': {}",
+                    dataset, err
+                )
+            })?;
     }
 
     Ok(())

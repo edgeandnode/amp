@@ -342,7 +342,10 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
-        let data_store = Store::new(config.data_store_url.clone())?;
+        let data_store = Store::new(
+            metadata_db.conn_pool().clone(),
+            config.data_store_url.clone(),
+        )?;
 
         // Create shared DatasetStore instance (used by both server and worker)
         let dataset_store = {

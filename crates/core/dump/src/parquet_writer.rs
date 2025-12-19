@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::{
-    BlockNum, BoxError, Timestamp,
+    BoxError, Store, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
@@ -11,7 +11,10 @@ use common::{
         },
         segments::BlockRange,
     },
-    parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
+    parquet::{
+        arrow::AsyncArrowWriter, errors::ParquetError,
+        file::properties::WriterProperties as ParquetWriterProperties, format::KeyValue,
+    },
 };
 use metadata_db::{
     LocationId, MetadataDb,
@@ -20,8 +23,6 @@ use metadata_db::{
 use object_store::{ObjectMeta, buffered::BufWriter};
 use tracing::{debug, instrument, trace};
 use url::Url;
-
-use crate::WriterProperties;
 
 pub async fn commit_metadata(
     metadata_db: &MetadataDb,
@@ -59,6 +60,7 @@ pub async fn commit_metadata(
 }
 
 pub struct ParquetFileWriter {
+    store: Store,
     writer: AsyncArrowWriter<BufWriter>,
     filename: FileName,
     table: Arc<PhysicalTable>,
@@ -67,19 +69,16 @@ pub struct ParquetFileWriter {
 
 impl ParquetFileWriter {
     pub fn new(
+        store: Store,
+        writer: BufWriter,
+        filename: FileName,
         table: Arc<PhysicalTable>,
-        opts: &WriterProperties,
-        start: BlockNum,
         max_row_group_bytes: usize,
-    ) -> Result<ParquetFileWriter, BoxError> {
-        let filename = FileName::new_with_random_suffix(start);
-        // Use the table's relative path + filename, not the absolute URL path.
-        // The object store already has the base prefix, so we only need the relative path.
-        let file_path = table.path().child(filename.as_str());
-        let object_writer = BufWriter::new(table.object_store(), file_path);
-        let writer =
-            AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.parquet.clone()))?;
-        Ok(ParquetFileWriter {
+        prop: ParquetWriterProperties,
+    ) -> Result<Self, BoxError> {
+        let writer = AsyncArrowWriter::try_new(writer, table.schema(), Some(prop))?;
+        Ok(Self {
+            store,
             writer,
             filename,
             table,
@@ -148,12 +147,12 @@ impl ParquetFileWriter {
             meta.num_rows,
         );
 
-        // Use relative path (table path + filename), not the absolute URL path
-        let location = self.table.path().child(self.filename.as_str());
-        let object_meta = self.table.object_store().head(&location).await?;
+        let object_meta = self
+            .store
+            .head_revision_file_in_object_store(self.table.path(), &self.filename)
+            .await?;
 
-        let footer =
-            extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
+        let footer = extract_footer_bytes_from_file(&self.store, &object_meta).await?;
 
         let location_id = self.table.location_id();
         let url = self.table.url().clone();

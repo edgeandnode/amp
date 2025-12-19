@@ -28,7 +28,6 @@ use datafusion::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
-use foyer::CacheBuilder;
 use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
@@ -36,7 +35,7 @@ use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, CachedParquetData, ParquetFooterCache, arrow,
+    BlockNum, BoxError, Store, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -48,6 +47,7 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::TableReference,
+    store::CachedStore,
     utils::error_with_causes,
 };
 
@@ -125,10 +125,10 @@ pub struct QueryEnv {
 
     // Existing fields
     pub isolate_pool: IsolatePool,
-    pub parquet_footer_cache: ParquetFooterCache,
 
     // Per-query memory limit configuration
     pub query_max_mem_mb: usize,
+    pub parquet_cache_size_mb: u64,
 }
 
 /// Creates a QueryEnv with specified memory and cache configuration
@@ -164,20 +164,14 @@ pub fn create_query_env(
     let runtime_env = runtime_config.build()?;
     let isolate_pool = IsolatePool::new();
 
-    // Create ParquetMetaData footer cache with the configured memory limit
-    let cache_size_bytes = parquet_cache_size_mb * 1024 * 1024;
-    let parquet_footer_cache = CacheBuilder::new(cache_size_bytes as usize)
-        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
-        .build();
-
     Ok(QueryEnv {
         global_memory_pool: runtime_env.memory_pool,
         disk_manager: runtime_env.disk_manager,
         cache_manager: runtime_env.cache_manager,
         object_store_registry: runtime_env.object_store_registry,
         isolate_pool,
-        parquet_footer_cache,
         query_max_mem_mb,
+        parquet_cache_size_mb,
     })
 }
 
@@ -189,12 +183,14 @@ pub struct QueryContext {
     catalog: CatalogSnapshot,
     /// Per-query memory pool (if per-query limits are enabled)
     tiered_memory_pool: Arc<crate::memory_pool::TieredMemoryPool>,
+    store: CachedStore,
 }
 
 impl QueryContext {
     pub async fn for_catalog(
         catalog: Catalog,
         env: QueryEnv,
+        store: Store,
         ignore_canonical_segments: bool,
     ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
@@ -226,14 +222,14 @@ impl QueryContext {
             opts.execution.parquet.pushdown_filters = true;
         }
 
+        // Create cached store with parquet metadata caching
+        let store = CachedStore::new(store, env.parquet_cache_size_mb);
+
         // Create a catalog snapshot with canonical chain locked in
-        let catalog_snapshot = CatalogSnapshot::from_catalog(
-            catalog,
-            ignore_canonical_segments,
-            env.parquet_footer_cache.clone(),
-        )
-        .await
-        .map_err(Error::DatasetError)?;
+        let catalog_snapshot =
+            CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, store.clone())
+                .await
+                .map_err(Error::DatasetError)?;
 
         let tiered_memory_pool: Arc<TieredMemoryPool> = {
             let per_query_bytes = env.query_max_mem_mb * 1024 * 1024;
@@ -250,6 +246,7 @@ impl QueryContext {
             session_config,
             catalog: catalog_snapshot,
             tiered_memory_pool,
+            store,
         })
     }
 
@@ -284,7 +281,8 @@ impl QueryContext {
         let ctx = SessionContext::new_with_state(state);
 
         for table in self.catalog.table_snapshots() {
-            register_table(&ctx, table.clone()).map_err(|e| Error::DatasetError(e.into()))?;
+            register_table(&ctx, table.clone(), &self.store)
+                .map_err(|err| Error::DatasetError(err.into()))?;
         }
 
         self.register_udfs(&ctx);
@@ -412,7 +410,11 @@ fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
-fn register_table(ctx: &SessionContext, table: Arc<TableSnapshot>) -> Result<(), DataFusionError> {
+fn register_table(
+    ctx: &SessionContext,
+    table: Arc<TableSnapshot>,
+    store: &Store,
+) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
     create_catalog_schema(ctx, table.physical_table().catalog_schema().to_string());
 
@@ -422,7 +424,7 @@ fn register_table(ctx: &SessionContext, table: Arc<TableSnapshot>) -> Result<(),
     // The only segment of the `table.url()` that matters here is the schema and bucket name.
     ctx.register_object_store(
         table.physical_table().url(),
-        table.physical_table().object_store(),
+        store.as_datafusion_object_store().clone(),
     );
 
     ctx.register_table(table_ref, table)?;

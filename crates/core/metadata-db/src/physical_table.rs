@@ -102,7 +102,7 @@ where
 /// Each table can have multiple locations, but only one should be marked as active.
 /// This function returns the active location for querying.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_active_physical_table<'c, E>(
+pub async fn get_active<'c, E>(
     exe: E,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,

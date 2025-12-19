@@ -1,3 +1,4 @@
+use common::Store;
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
@@ -19,7 +20,7 @@ async fn evm_rpc_single_dump() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -47,7 +48,7 @@ async fn eth_beacon_single_dump() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -75,7 +76,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -103,7 +104,7 @@ async fn evm_rpc_base_single_dump() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -131,7 +132,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -159,7 +160,7 @@ async fn eth_firehose_single_dump() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -187,7 +188,7 @@ async fn base_firehose_single_dump() {
     //* Then
     // Validate table consistency
     for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table)
+        test_helpers::check_table_consistency(table, test.data_store())
             .await
             .expect("Table consistency check failed");
     }
@@ -206,6 +207,11 @@ struct TestCtx {
 }
 
 impl TestCtx {
+    /// Get the data store from the daemon server.
+    fn data_store(&self) -> &Store {
+        self.ctx.daemon_server().data_store()
+    }
+
     /// Set up a new test context for dump testing.
     ///
     /// Creates a test environment with the specified dataset manifest,
@@ -256,16 +262,19 @@ impl TestCtx {
         let tables = test_helpers::restore_dataset_snapshot(
             &ampctl,
             self.ctx.daemon_controller().dataset_store(),
-            self.ctx.daemon_controller().metadata_db(),
             self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )
         .await
         .expect("Failed to restore snapshot dataset");
 
-        SnapshotContext::from_tables(self.ctx.daemon_server().config(), tables)
-            .await
-            .expect("Failed to create reference snapshot")
+        SnapshotContext::from_tables(
+            self.ctx.daemon_server().config(),
+            self.ctx.daemon_server().data_store().clone(),
+            tables,
+        )
+        .await
+        .expect("Failed to create reference snapshot")
     }
 
     /// Dump dataset and create snapshot from dumped tables.
@@ -281,8 +290,12 @@ impl TestCtx {
         .await
         .expect("Failed to dump dataset");
 
-        SnapshotContext::from_tables(self.ctx.daemon_server().config(), dumped_tables)
-            .await
-            .expect("Failed to create dumped snapshot")
+        SnapshotContext::from_tables(
+            self.ctx.daemon_server().config(),
+            self.ctx.daemon_server().data_store().clone(),
+            dumped_tables,
+        )
+        .await
+        .expect("Failed to create dumped snapshot")
     }
 }

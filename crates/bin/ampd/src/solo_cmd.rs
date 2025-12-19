@@ -24,7 +24,8 @@ pub async fn run(
         .await
         .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
-    let data_store = Store::new(config.data_store_url.clone()).map_err(Error::DataStoreCreation)?;
+    let data_store = Store::new(metadata_db.clone(), config.data_store_url.clone())
+        .map_err(Error::DataStoreCreation)?;
 
     let dataset_store = {
         let provider_configs_store = ProviderConfigsStore::new(

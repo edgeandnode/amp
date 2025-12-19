@@ -19,13 +19,13 @@ use datafusion::{
 use datafusion_datasource::compute_all_files_statistics;
 use datasets_common::{hash_reference::HashReference, name::Name, table_name::TableName};
 use futures::{Stream, StreamExt, TryStreamExt, stream, stream::BoxStream};
-use metadata_db::{LocationId, MetadataDb};
+use metadata_db::LocationId;
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    BlockNum, BoxError, Dataset, LogicalCatalog, ParquetFooterCache, ResolvedTable,
+    BlockNum, BoxError, Dataset, LogicalCatalog, ResolvedTable,
     catalog::reader::AmpReaderFactory,
     metadata::{
         FileMetadata, amp_metadata_from_parquet_file,
@@ -33,7 +33,7 @@ use crate::{
         segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
     },
     sql::TableReference,
-    store::Store,
+    store::{CachedStore, Store},
 };
 
 /// Path delimiter used in object store paths.
@@ -74,8 +74,9 @@ impl Catalog {
         let mut earliest = None;
         for table in &self.tables {
             // Create a snapshot to get synced range
-            let dummy_cache = foyer::CacheBuilder::new(1).build();
-            let snapshot = table.snapshot(false, dummy_cache).await?;
+            // Use empty cache (0 bytes) since we're only checking metadata
+            let dummy_cached_store = CachedStore::new(table.store.clone(), 0);
+            let snapshot = table.snapshot(false, dummy_cached_store).await?;
             let synced_range = snapshot.synced_range();
             match (earliest, &synced_range) {
                 (None, Some(range)) => earliest = Some(range.start()),
@@ -96,12 +97,12 @@ impl CatalogSnapshot {
     pub async fn from_catalog(
         catalog: Catalog,
         ignore_canonical_segments: bool,
-        parquet_footer_cache: ParquetFooterCache,
+        store: CachedStore,
     ) -> Result<Self, BoxError> {
         let mut table_snapshots = Vec::new();
         for physical_table in &catalog.tables {
             let snapshot = physical_table
-                .snapshot(ignore_canonical_segments, parquet_footer_cache.clone())
+                .snapshot(ignore_canonical_segments, store.clone())
                 .await?;
             table_snapshots.push(Arc::new(snapshot));
         }
@@ -147,131 +148,39 @@ impl CatalogSnapshot {
 /// table. Only active revisions are used for query execution.
 #[tracing::instrument(skip_all, fields(table = %table), err)]
 pub async fn register_new_table_revision(
-    metadata_db: MetadataDb,
-    data_store: &Store,
+    store: Store,
     dataset: HashReference,
     table: ResolvedTable,
 ) -> Result<PhysicalTable, RegisterNewTableRevisionError> {
     let revision_id = Uuid::now_v7();
     let path = PhyTableRevisionPath::new(dataset.name(), table.name(), revision_id);
-    let url = PhyTableUrl::new(data_store.url(), &path);
+    let url = PhyTableUrl::new(store.url(), &path);
 
-    let mut tx = metadata_db
-        .begin_txn()
+    let location_id = store
+        .register_table_revision(&dataset, table.name(), &path)
         .await
-        .map_err(RegisterNewTableRevisionError::TransactionBegin)?;
-
-    let location_id = metadata_db::physical_table::register(
-        &mut tx,
-        dataset.namespace(),
-        dataset.name(),
-        dataset.hash(),
-        table.name(),
-        &path,
-        false,
-    )
-    .await
-    .map_err(RegisterNewTableRevisionError::RegisterPhysicalTable)?;
-
-    metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, dataset.hash(), table.name())
-        .await
-        .map_err(RegisterNewTableRevisionError::MarkInactive)?;
-
-    metadata_db::physical_table::mark_active_by_id(
-        &mut tx,
-        location_id,
-        dataset.hash(),
-        table.name(),
-    )
-    .await
-    .map_err(RegisterNewTableRevisionError::MarkActive)?;
-
-    tx.commit()
-        .await
-        .map_err(RegisterNewTableRevisionError::TransactionCommit)?;
+        .map_err(RegisterNewTableRevisionError)?;
 
     tracing::info!("Registered new revision at: {}", url);
-
-    let object_store = data_store.as_inner().clone();
 
     Ok(PhysicalTable {
         table,
         url,
         path,
         location_id,
-        metadata_db,
-        object_store,
+        store,
     })
 }
 
-/// Errors that occur when registering a new revision for a physical table
+/// Failed to register and activate a new physical table revision
+///
+/// This error occurs when the Store fails to atomically register and activate
+/// a new table revision in the metadata database.
 ///
 /// This error type is used by `register_new_table_revision()`.
 #[derive(Debug, thiserror::Error)]
-pub enum RegisterNewTableRevisionError {
-    /// Failed to begin transaction
-    ///
-    /// This error occurs when the database connection fails to start a transaction,
-    /// typically due to connection issues, database unavailability, or permission problems.
-    ///
-    /// Possible causes:
-    /// - Database connection lost or not established
-    /// - Insufficient database permissions to create transactions
-    /// - Database server overloaded or unavailable
-    /// - Connection pool exhausted
-    #[error("Failed to begin transaction")]
-    TransactionBegin(#[source] metadata_db::Error),
-
-    /// Failed to register physical table location in metadata database
-    ///
-    /// This occurs when the metadata database rejects the registration of the new
-    /// physical table location. Registration is idempotent - if the URL already exists,
-    /// the existing location ID is returned.
-    ///
-    /// Possible causes:
-    /// - Database constraint violation (e.g., invalid foreign key references)
-    /// - Database connection lost during operation
-    /// - Insufficient permissions to insert into physical_tables table
-    #[error("Failed to register physical table in metadata database")]
-    RegisterPhysicalTable(#[source] metadata_db::Error),
-
-    /// Failed to mark existing active revisions as inactive
-    ///
-    /// This occurs when attempting to deactivate all currently active revisions for
-    /// the table before activating the new revision.
-    ///
-    /// Possible causes:
-    /// - Database connection lost during update operation
-    /// - Database constraint violation during status update
-    /// - Concurrent modification conflict
-    #[error("Failed to mark existing physical tables as inactive")]
-    MarkInactive(#[source] metadata_db::Error),
-
-    /// Failed to mark new physical table revision as active
-    ///
-    /// This occurs when attempting to activate the newly created revision after
-    /// successfully deactivating existing revisions.
-    ///
-    /// Possible causes:
-    /// - Database connection lost during update operation
-    /// - Database constraint violation during status update
-    /// - Concurrent modification conflict
-    #[error("Failed to mark new physical table as active")]
-    MarkActive(#[source] metadata_db::Error),
-
-    /// Failed to commit transaction after successful database operations
-    ///
-    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
-    /// The operation is safe to retry from the beginning as no partial state was persisted.
-    ///
-    /// Possible causes:
-    /// - Database connection lost during commit
-    /// - Transaction conflict with concurrent operations (serialization failure)
-    /// - Database constraint violation detected at commit time
-    /// - Database running out of disk space or resources
-    #[error("Failed to commit transaction")]
-    TransactionCommit(#[source] metadata_db::Error),
-}
+#[error("Failed to register and activate new table revision")]
+pub struct RegisterNewTableRevisionError(#[source] pub crate::store::RegisterTableRevisionError);
 
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
@@ -287,10 +196,8 @@ pub struct PhysicalTable {
 
     /// Location ID in the metadata database.
     location_id: LocationId,
-    /// Metadata database to use for this table.
-    metadata_db: MetadataDb,
-    /// Object store for accessing the data files.
-    object_store: Arc<dyn ObjectStore>,
+    /// Data store for accessing metadata database and object storage.
+    store: Store,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -340,8 +247,7 @@ impl PhysicalTable {
     /// partway through, the revision will be marked as active but with incomplete file metadata.
     /// Only the physical table registration (steps 3-4) is transactional.
     pub async fn restore_latest_revision(
-        metadata_db: MetadataDb,
-        data_store: Store,
+        store: Store,
         dataset: &HashReference,
         table: &ResolvedTable,
     ) -> Result<Option<Self>, RestoreLatestRevisionError> {
@@ -349,71 +255,36 @@ impl PhysicalTable {
 
         tracing::debug!("Restoring latest revision in prefix {}", table_path);
 
-        let Some(path) = find_table_latest_revision(data_store.as_inner(), &table_path)
+        let Some(path) = store
+            .find_latest_table_revision_in_object_store(&table_path)
             .await
             .map_err(RestoreLatestRevisionError::FindLatestRevision)?
         else {
             return Ok(None);
         };
 
-        let url = PhyTableUrl::new(data_store.url(), &path);
+        let url = PhyTableUrl::new(store.url(), &path);
 
-        let mut tx = metadata_db
-            .begin_txn()
+        let location_id = store
+            .register_table_revision(dataset, table.name(), &path)
             .await
-            .map_err(RestoreLatestRevisionError::TransactionBegin)?;
+            .map_err(RestoreLatestRevisionError::RegisterRevision)?;
 
-        // Register the physical table location (idempotent)
-        let location_id = metadata_db::physical_table::register(
-            &mut tx,
-            dataset.namespace(),
-            dataset.name(),
-            dataset.hash(),
-            table.name(),
-            &path,
-            false,
-        )
-        .await
-        .map_err(RestoreLatestRevisionError::RegisterPhysicalTable)?;
-
-        // Mark all other revisions as inactive, and this one as active
-        metadata_db::physical_table::mark_inactive_by_table_id(
-            &mut tx,
-            dataset.hash(),
-            table.name(),
-        )
-        .await
-        .map_err(RestoreLatestRevisionError::MarkInactive)?;
-        metadata_db::physical_table::mark_active_by_id(
-            &mut tx,
-            location_id,
-            dataset.hash(),
-            table.name(),
-        )
-        .await
-        .map_err(RestoreLatestRevisionError::MarkActive)?;
-
-        tx.commit()
-            .await
-            .map_err(RestoreLatestRevisionError::TransactionCommit)?;
-
-        let mut files = data_store
-            .as_inner()
-            .list(Some(&path))
-            .try_collect::<Vec<_>>()
+        let files = store
+            .list_revision_files_in_object_store(&path)
             .await
             .map_err(RestoreLatestRevisionError::ListFiles)?;
-        files.sort_unstable_by(|a, b| a.location.cmp(&b.location));
 
         // Process files in parallel using buffered stream
         const CONCURRENT_METADATA_FETCHES: usize = 16;
 
+        let object_store = store.clone();
         let mut file_stream = stream::iter(files.into_iter())
             .map(|object_meta| {
-                let object_store = data_store.as_inner().clone();
+                let store = object_store.clone();
                 async move {
                     let (file_name, amp_meta, footer) =
-                        amp_metadata_from_parquet_file(&object_meta, object_store)
+                        amp_metadata_from_parquet_file(&store, &object_meta)
                             .await
                             .map_err(RestoreLatestRevisionError::ReadParquetMetadata)?;
 
@@ -443,19 +314,19 @@ impl PhysicalTable {
         while let Some(result) = file_stream.next().await {
             let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
                 result?;
-            metadata_db::files::register(
-                &metadata_db,
-                location_id,
-                url.inner(),
-                file_name,
-                object_size,
-                object_e_tag,
-                object_version,
-                parquet_meta_json,
-                &footer,
-            )
-            .await
-            .map_err(RestoreLatestRevisionError::RegisterFile)?;
+            store
+                .register_file(
+                    location_id,
+                    url.inner(),
+                    &file_name,
+                    object_size,
+                    object_e_tag,
+                    object_version,
+                    parquet_meta_json,
+                    &footer,
+                )
+                .await
+                .map_err(|err| RestoreLatestRevisionError::RegisterFile(err.0))?;
         }
 
         Ok(Some(Self {
@@ -463,47 +334,37 @@ impl PhysicalTable {
             url,
             path,
             location_id,
-            metadata_db,
-            object_store: data_store.as_inner().clone(),
+            store,
         }))
     }
 
-    /// Attempt to get the active revision of a table.
-    pub async fn get_active(
-        metadata_db: MetadataDb,
-        store: &Store,
-        table: &ResolvedTable,
-    ) -> Result<Option<Self>, BoxError> {
+    /// Gets the active revision of a table from the metadata database.
+    ///
+    /// Returns the PhysicalTable if an active revision exists, or None if no active
+    /// revision is found in the metadata database.
+    pub async fn get_active(store: Store, table: ResolvedTable) -> Result<Option<Self>, BoxError> {
         let manifest_hash = table.dataset().manifest_hash();
         let table_name = table.name();
 
-        let Some(physical_table) = metadata_db::physical_table::get_active_physical_table(
-            &metadata_db,
-            manifest_hash,
-            table_name,
-        )
-        .await?
+        let Some(db_row) = store
+            .get_active_table_revision(manifest_hash, table_name)
+            .await?
         else {
             return Ok(None);
         };
 
-        // Convert database path to PhyTableRevisionPath
-        let path: PhyTableRevisionPath = physical_table.path.into();
-
-        // Construct full URL from store base URL and revision path
+        let path = db_row.path.into();
         let url = PhyTableUrl::new(store.url(), &path);
-        let object_store = store.as_inner().clone();
+        let location_id = db_row.id;
 
         Ok(Some(Self {
-            table: table.clone(),
+            table,
             url,
             path,
-            location_id: physical_table.id,
-            metadata_db,
-            object_store,
+            location_id,
+            store,
         }))
     }
-
     /// Truncate this table by deleting all dump files making up the table
     pub async fn truncate(&self) -> Result<(), BoxError> {
         let file_locations: Vec<Path> = self
@@ -511,21 +372,9 @@ impl PhysicalTable {
             .map_ok(|m| m.object_meta.location)
             .try_collect()
             .await?;
-        let num_files = file_locations.len();
-        let locations = Box::pin(stream::iter(file_locations.into_iter().map(Ok)));
-        let deleted = self
-            .object_store
-            .delete_stream(locations)
-            .try_collect::<Vec<Path>>()
+        self.store
+            .delete_files_in_object_store(file_locations)
             .await?;
-        if deleted.len() != num_files {
-            return Err(format!(
-                "expected to delete {} files, but deleted {}",
-                num_files,
-                deleted.len()
-            )
-            .into());
-        }
         Ok(())
     }
 }
@@ -605,10 +454,6 @@ impl PhysicalTable {
         self.table.network()
     }
 
-    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        Arc::clone(&self.object_store)
-    }
-
     pub fn table(&self) -> &ResolvedTable {
         &self.table
     }
@@ -621,8 +466,11 @@ impl PhysicalTable {
     /// List all files in this physical table's storage location.
     ///
     /// Returns a stream of object metadata for each file in the table's directory.
-    pub fn list_files(&self) -> BoxStream<'_, Result<ObjectMeta, object_store::Error>> {
-        self.object_store.list(Some(&self.path))
+    pub fn list_files(
+        &self,
+    ) -> BoxStream<'_, Result<ObjectMeta, crate::store::StreamRevisionFilesInObjectStoreError>>
+    {
+        self.store.stream_revision_files_in_object_store(&self.path)
     }
 
     pub async fn missing_ranges(
@@ -677,7 +525,7 @@ impl PhysicalTable {
     pub async fn snapshot(
         &self,
         ignore_canonical_segments: bool,
-        parquet_footer_cache: ParquetFooterCache,
+        store: CachedStore,
     ) -> Result<TableSnapshot, BoxError> {
         let canonical_segments = if ignore_canonical_segments {
             self.segments().await?
@@ -689,12 +537,10 @@ impl PhysicalTable {
                 .collect()
         };
 
-        // Create a reader factory with the cache
+        // Create a reader factory with the cached store
         let reader_factory_with_cache = AmpReaderFactory {
             location_id: self.location_id,
-            metadata_db: self.metadata_db.clone(),
-            object_store: Arc::clone(&self.object_store),
-            parquet_footer_cache,
+            store,
             schema: self.schema(),
         };
 
@@ -712,7 +558,8 @@ impl PhysicalTable {
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         let table_path = self.path.as_object_store_path().clone();
-        metadata_db::files::stream_by_location_id_with_details(&self.metadata_db, self.location_id)
+        self.store
+            .stream_file_metadata(self.location_id)
             .map(move |row| FileMetadata::from_row_with_table_path(row?, &table_path))
     }
 }
@@ -911,34 +758,6 @@ pub struct ListRevisionsError(#[source] pub object_store::Error);
 ///
 /// Lexicographic comparison works correctly for UUIDv7 revisions since they are
 /// time-ordered by design. The latest UUID will sort last lexicographically.
-pub async fn find_table_latest_revision<S>(
-    store: &S,
-    path: &PhyTablePath,
-) -> Result<Option<PhyTableRevisionPath>, FindLatestRevisionError>
-where
-    S: ObjectStore + ?Sized,
-{
-    let list_result = store
-        .list_with_delimiter(Some(path))
-        .await
-        .map_err(FindLatestRevisionError)?;
-
-    let latest_revision_path = list_result
-        .common_prefixes
-        .into_iter()
-        .filter_map(|rev| rev.as_ref().parse::<PhyTableRevisionPath>().ok())
-        .max_by(|a, b| a.as_str().cmp(b.as_str()));
-
-    Ok(latest_revision_path)
-}
-
-/// Error when finding the latest revision from object store
-///
-/// This error type is used by `find_table_latest_revision()`.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to find latest revision from object store")]
-pub struct FindLatestRevisionError(#[source] pub object_store::Error);
-
 async fn round_robin(
     files: impl Stream<Item = Result<PartitionedFile, BoxError>> + Send,
     files_len: usize,
@@ -963,7 +782,14 @@ pub enum RestoreLatestRevisionError {
     /// This occurs when the object store cannot be queried for existing revisions,
     /// typically due to network issues, permission errors, or storage unavailability.
     #[error("Failed to find latest revision from object store")]
-    FindLatestRevision(#[source] FindLatestRevisionError),
+    FindLatestRevision(#[source] crate::store::FindLatestTableRevisionInObjectStoreError),
+
+    /// Failed to register revision in metadata database
+    ///
+    /// This occurs when the metadata database transaction for registering the
+    /// physical table and marking it as active fails.
+    #[error("Failed to register revision in metadata database")]
+    RegisterRevision(#[source] crate::store::RegisterTableRevisionError),
 
     /// Failed to begin transaction for marking table active
     #[error("Failed to begin transaction")]
@@ -989,7 +815,7 @@ pub enum RestoreLatestRevisionError {
 
     /// Failed to list files in the restored revision
     #[error("Failed to list files in restored revision")]
-    ListFiles(#[source] object_store::Error),
+    ListFiles(#[source] crate::store::ListRevisionFilesInObjectStoreError),
 
     /// Failed to read Amp metadata from parquet file
     ///

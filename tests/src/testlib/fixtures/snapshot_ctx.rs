@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use common::{
-    BoxError, LogicalCatalog, QueryContext,
+    BoxError, LogicalCatalog, QueryContext, Store,
     catalog::physical::{Catalog, PhysicalTable},
 };
 use server::config::Config;
@@ -33,11 +33,13 @@ impl SnapshotContext {
     /// from dataset snapshot reference data or fresh ETL extraction pipeline dumps.
     pub async fn from_tables(
         config: &Config,
+        store: Store,
         tables: Vec<Arc<PhysicalTable>>,
     ) -> Result<Self, BoxError> {
         let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
         let catalog = Catalog::new(tables, logical);
-        let query_ctx = QueryContext::for_catalog(catalog, config.make_query_env()?, false).await?;
+        let query_ctx =
+            QueryContext::for_catalog(catalog, config.make_query_env()?, store, false).await?;
 
         Ok(Self { query_ctx })
     }

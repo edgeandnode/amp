@@ -70,7 +70,7 @@ pub(super) async fn new(
     for table in dataset.resolved_tables(reference.to_reference().into()) {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(ctx.metadata_db.clone(), &ctx.data_store, &table)
+            match PhysicalTable::get_active(ctx.data_store.clone(), table.clone())
                 .await
                 .map_err(JobInitError::GetActivePhysicalTable)?
             {
@@ -78,8 +78,7 @@ pub(super) async fn new(
                 Some(pt) => pt,
                 // Create new table (initial attempt)
                 None => common::catalog::physical::register_new_table_revision(
-                    ctx.metadata_db.clone(),
-                    &ctx.data_store,
+                    ctx.data_store.clone(),
                     reference.clone(),
                     table,
                 )
@@ -88,9 +87,13 @@ pub(super) async fn new(
             }
             .into();
 
+        let cached_store = common::CachedStore::from_parts(
+            ctx.data_store.clone(),
+            job_ctx.parquet_footer_cache.clone(),
+        );
         let compactor = AmpCompactor::start(
             ctx.metadata_db.clone(),
-            job_ctx.parquet_footer_cache.clone(),
+            cached_store,
             opts.clone(),
             physical_table.clone(),
             metrics.clone(),

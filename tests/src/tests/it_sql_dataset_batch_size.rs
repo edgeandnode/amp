@@ -11,7 +11,6 @@ use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
 };
-use futures::StreamExt;
 use monitoring::logging;
 
 use crate::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
@@ -157,7 +156,6 @@ impl TestCtx {
         test_helpers::catalog_for_dataset(
             dataset_name,
             self.ctx.daemon_server().dataset_store(),
-            self.ctx.daemon_server().metadata_db(),
             self.ctx.daemon_server().data_store(),
         )
         .await
@@ -184,7 +182,10 @@ impl TestCtx {
         opts_mut.partition = SegmentSizeLimit::new(100, 0, 0, 0, Generation::default(), 10);
         let cache = self.cache.clone();
         let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
-        let mut task = AmpCompactor::start(metadata_db, cache, opts.clone(), table.clone(), None);
+        let data_store = self.ctx.daemon_server().data_store().clone();
+        let cached_store = common::CachedStore::from_parts(data_store, cache);
+        let mut task =
+            AmpCompactor::start(metadata_db, cached_store, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
@@ -212,7 +213,10 @@ impl TestCtx {
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, 0, Generation::default(), 1.5);
         let cache = self.cache.clone();
         let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
-        let mut task = AmpCompactor::start(metadata_db, cache, opts.clone(), table.clone(), None);
+        let data_store = self.ctx.daemon_server().data_store().clone();
+        let cached_store = common::CachedStore::from_parts(data_store, cache);
+        let mut task =
+            AmpCompactor::start(metadata_db, cached_store, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
@@ -227,14 +231,15 @@ impl TestCtx {
             .find(|t| t.table_name() == table)
             .unwrap();
 
-        let objs = table
-            .object_store()
-            .list(Some(table.path()))
-            .collect::<Vec<_>>()
-            .await;
+        let objs = self
+            .ctx
+            .daemon_worker()
+            .data_store()
+            .list_revision_files_in_object_store(table.path())
+            .await
+            .unwrap();
 
         objs.into_iter()
-            .filter_map(|res| res.ok())
             .filter_map(|obj| obj.location.filename().map(String::from))
             .inspect(|file| tracing::debug!(file = %file, "Found file in object store"))
             .collect()

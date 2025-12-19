@@ -69,7 +69,6 @@ pub struct Service {
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
-    metadata_db: MetadataDb,
 }
 
 impl Service {
@@ -92,7 +91,6 @@ impl Service {
             dataset_store,
             notification_multiplexer,
             metrics,
-            metadata_db,
         })
     }
 
@@ -106,7 +104,6 @@ impl Service {
             .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
         let catalog = catalog_for_sql(
             &self.dataset_store,
-            &self.metadata_db,
             &self.data_store,
             &query,
             self.env.clone(),
@@ -161,9 +158,14 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false)
-                .await
-                .map_err(Error::CoreError)?;
+            let ctx = QueryContext::for_catalog(
+                catalog,
+                self.env.clone(),
+                self.data_store.clone(),
+                false,
+            )
+            .await
+            .map_err(Error::CoreError)?;
             let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
 
             let block_range = ctx
@@ -216,11 +218,10 @@ impl Service {
             };
 
             let query = StreamingQuery::spawn(
-                self.metadata_db.clone(),
                 self.env.clone(),
                 catalog,
                 dataset_store,
-                &self.data_store,
+                self.data_store.clone(),
                 plan,
                 earliest_block,
                 None,

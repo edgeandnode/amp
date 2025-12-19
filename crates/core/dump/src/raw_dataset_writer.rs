@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, RawTableRows,
+    BlockNum, BoxError, RawTableRows, Store,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::{Generation, segments::BlockRange},
+    metadata::{FileName, Generation, segments::BlockRange},
 };
 use datasets_common::table_name::TableName;
 use metadata_db::MetadataDb;
@@ -21,7 +21,6 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 /// Only used for raw datasets.
 pub struct RawDatasetWriter {
     writers: BTreeMap<TableName, RawTableWriter>,
-
     metadata_db: MetadataDb,
 }
 
@@ -31,6 +30,7 @@ impl RawDatasetWriter {
     pub fn new(
         catalog: Catalog,
         metadata_db: MetadataDb,
+        store: Store,
         opts: Arc<WriterProperties>,
         missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
         compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
@@ -44,6 +44,7 @@ impl RawDatasetWriter {
             let compactor = Arc::clone(compactors_by_table.get(table_name).unwrap());
             let writer = RawTableWriter::new(
                 table.clone(),
+                store.clone(),
                 compactor,
                 opts.clone(),
                 ranges,
@@ -113,6 +114,7 @@ impl RawDatasetWriter {
 
 struct RawTableWriter {
     table: Arc<PhysicalTable>,
+    store: Store,
     opts: Arc<WriterProperties>,
 
     /// The ranges of block numbers that this writer is responsible for.
@@ -130,6 +132,7 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
+        store: Store,
         compactor: Arc<AmpCompactor>,
         opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
@@ -138,17 +141,24 @@ impl RawTableWriter {
         let mut ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
         ranges_to_write.reverse();
         let current_file = match ranges_to_write.last() {
-            Some(range) => Some(ParquetFileWriter::new(
-                table.clone(),
-                opts.as_ref(),
-                *range.start(),
-                opts.max_row_group_bytes,
-            )?),
+            Some(range) => {
+                let filename = FileName::new_with_random_suffix(*range.start());
+                let buf_writer = store.create_revision_file_writer(table.path(), &filename);
+                Some(ParquetFileWriter::new(
+                    store.clone(),
+                    buf_writer,
+                    filename,
+                    table.clone(),
+                    opts.max_row_group_bytes,
+                    opts.parquet.clone(),
+                )?)
+            }
             None => None,
         };
 
         Ok(Self {
             table,
+            store,
             opts,
             ranges_to_write,
             current_file,
@@ -180,11 +190,17 @@ impl RawTableWriter {
                 .ranges_to_write
                 .last()
                 .map(|range| {
+                    let filename = FileName::new_with_random_suffix(*range.start());
+                    let buf_writer = self
+                        .store
+                        .create_revision_file_writer(self.table.path(), &filename);
                     ParquetFileWriter::new(
+                        self.store.clone(),
+                        buf_writer,
+                        filename,
                         self.table.clone(),
-                        self.opts.as_ref(),
-                        *range.start(),
                         self.opts.max_row_group_bytes,
+                        self.opts.parquet.clone(),
                     )
                 })
                 .transpose()?;
@@ -231,11 +247,17 @@ impl RawTableWriter {
             // The current range was partially written, so we need to split it.
             let range = self.ranges_to_write.pop().unwrap();
             self.ranges_to_write.push(block_num..=*range.end());
+            let filename = FileName::new_with_random_suffix(block_num);
+            let buf_writer = self
+                .store
+                .create_revision_file_writer(self.table.path(), &filename);
             let new_file = Some(ParquetFileWriter::new(
+                self.store.clone(),
+                buf_writer,
+                filename,
                 self.table.clone(),
-                self.opts.as_ref(),
-                block_num,
                 self.opts.max_row_group_bytes,
+                self.opts.parquet.clone(),
             )?);
             self.current_file = new_file;
         }
