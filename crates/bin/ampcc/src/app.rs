@@ -49,9 +49,9 @@ impl ActivePane {
                 }
             }
             ActivePane::Jobs => ActivePane::Workers,
-            ActivePane::Workers => ActivePane::Detail,
+            ActivePane::Workers => ActivePane::Manifest,
             ActivePane::Manifest => ActivePane::Schema,
-            ActivePane::Schema => ActivePane::Header,
+            ActivePane::Schema => ActivePane::Detail,
             ActivePane::Detail => ActivePane::Header,
         }
     }
