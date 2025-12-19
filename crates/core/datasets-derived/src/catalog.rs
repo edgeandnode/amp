@@ -104,7 +104,7 @@ impl SchemaResolver for PreResolvedResolver<'_> {
 #[derive(Debug, thiserror::Error)]
 pub enum PreResolvedError {
     /// Schema string could not be parsed as a valid alias.
-    #[error("invalid alias format: {0}")]
+    #[error("invalid alias format")]
     InvalidAlias(#[source] DepAliasError),
 
     /// Dependency alias was not found in the dependencies map.
