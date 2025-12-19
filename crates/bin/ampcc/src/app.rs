@@ -76,14 +76,6 @@ impl ActivePane {
             ActivePane::Detail => ActivePane::Workers,
         }
     }
-
-    /// Check if this pane is one of the sidebar sections.
-    pub fn is_sidebar_section(self) -> bool {
-        matches!(
-            self,
-            ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers
-        )
-    }
 }
 
 /// What content is displayed in the detail pane.
