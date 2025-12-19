@@ -125,64 +125,6 @@ pub trait SchemaResolver: Send + Sync {
 }
 
 // ============================================================================
-// Dynamic Resolver
-// ============================================================================
-
-/// Resolves schema strings dynamically via a dataset store.
-///
-/// This resolver is used for user queries where datasets are referenced by
-/// name and optionally version (e.g., `"namespace/dataset"` or `"namespace/dataset@v1.0.0"`).
-///
-/// The schema string is parsed as a [`PartialReference`] and then resolved
-/// via the store's `resolve_revision` method.
-pub struct RegistrySchemaResolver<'a, S> {
-    store: &'a S,
-}
-
-impl<'a, S> RegistrySchemaResolver<'a, S> {
-    /// Creates a new registry schema resolver using the given store.
-    pub fn new(store: &'a S) -> Self {
-        Self { store }
-    }
-}
-
-#[async_trait]
-impl<S> SchemaResolver for RegistrySchemaResolver<'_, S>
-where
-    S: DatasetAccess + Sync,
-{
-    type Error = RegistryResolveError;
-
-    async fn resolve(&self, schema: &str) -> Result<HashReference, Self::Error> {
-        let partial: PartialReference = schema
-            .parse()
-            .map_err(RegistryResolveError::InvalidReference)?;
-        let reference: Reference = partial.into();
-        self.store
-            .resolve_revision(&reference)
-            .await
-            .map_err(RegistryResolveError::StoreError)?
-            .ok_or_else(|| RegistryResolveError::NotFound(reference))
-    }
-}
-
-/// Errors from registry schema resolution.
-#[derive(Debug, thiserror::Error)]
-pub enum RegistryResolveError {
-    /// Schema string could not be parsed as a valid reference.
-    #[error("invalid reference format: {0}")]
-    InvalidReference(#[source] PartialReferenceError),
-
-    /// Store returned an error during resolution.
-    #[error("store error: {0}")]
-    StoreError(#[source] BoxError),
-
-    /// Dataset was not found.
-    #[error("dataset not found: {0}")]
-    NotFound(Reference),
-}
-
-// ============================================================================
 // Resolve Errors
 // ============================================================================
 
@@ -417,6 +359,64 @@ where
             .chain(udfs.into_values().flat_map(|m| m.into_values()))
             .collect(),
     })
+}
+
+// ============================================================================
+// Registry Schema Resolver
+// ============================================================================
+
+/// Resolves schema strings dynamically via a dataset store.
+///
+/// This resolver is used for user queries where datasets are referenced by
+/// name and optionally version (e.g., `"namespace/dataset"` or `"namespace/dataset@v1.0.0"`).
+///
+/// The schema string is parsed as a [`PartialReference`] and then resolved
+/// via the store's `resolve_revision` method.
+pub struct RegistrySchemaResolver<'a, S> {
+    store: &'a S,
+}
+
+impl<'a, S> RegistrySchemaResolver<'a, S> {
+    /// Creates a new registry schema resolver using the given store.
+    pub fn new(store: &'a S) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl<S> SchemaResolver for RegistrySchemaResolver<'_, S>
+where
+    S: DatasetAccess + Sync,
+{
+    type Error = RegistryResolveError;
+
+    async fn resolve(&self, schema: &str) -> Result<HashReference, Self::Error> {
+        let partial: PartialReference = schema
+            .parse()
+            .map_err(RegistryResolveError::InvalidReference)?;
+        let reference: Reference = partial.into();
+        self.store
+            .resolve_revision(&reference)
+            .await
+            .map_err(RegistryResolveError::StoreError)?
+            .ok_or_else(|| RegistryResolveError::NotFound(reference))
+    }
+}
+
+/// Errors from registry schema resolution.
+#[derive(Debug, thiserror::Error)]
+pub enum RegistryResolveError {
+    /// Schema string could not be parsed as a valid reference.
+    #[error("invalid reference format: {0}")]
+    InvalidReference(#[source] PartialReferenceError),
+
+    /// Store returned an error during resolution.
+    #[error("store error: {0}")]
+    StoreError(#[source] BoxError),
+
+    /// Dataset was not found.
+    #[error("dataset not found: {0}")]
+    NotFound(Reference),
 }
 
 #[cfg(test)]
