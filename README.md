@@ -30,7 +30,7 @@ ampup build --pr 123
 ampup build --branch develop
 ```
 
-For more details and advanced options, see the [ampup README](ampup/README.md).
+For more details and advanced options, see the [ampup README](crates/bin/ampup/README.md).
 
 ### Installation via Nix
 
@@ -123,7 +123,7 @@ curl -X POST http://localhost:1603 --data 'select * from "my_namespace/eth_rpc".
 ```
 
 The Arrow Flight server requires a specialized client. We currently have a Python client,
-see docs for that [here](https://github.com/edgeandnode/amp/tree/main/python).
+see docs for that [here](https://github.com/edgeandnode/amp-python).
 
 > **Note:**
 >
