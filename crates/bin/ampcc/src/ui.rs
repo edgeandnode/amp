@@ -995,7 +995,7 @@ fn format_inspect_result(inspect: &InspectResult) -> Vec<Line<'static>> {
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(format!("{:<24}", col.name), Theme::text_primary()),
-                Span::styled(format!("{:<20}", col.arrow_type), Theme::type_annotation()),
+                Span::styled(format!("{:<32}", col.arrow_type), Theme::type_annotation()),
                 Span::styled(nullable_str.to_string(), Theme::constraint()),
             ]));
         }
