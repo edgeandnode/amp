@@ -200,6 +200,12 @@ pub async fn new(
                         .await
                         .map_err(RuntimeError::Reconciliation)?;
                 }
+
+                // 5. Shutdown signal
+                _ = shutdown_signal() => {
+                    tracing::info!(node_id=%worker.node_id, "Shutdown signal received, stopping worker");
+                    return Ok(());
+                }
             }
         }
     };
@@ -546,4 +552,27 @@ async fn listen_for_job_notifications_with_retry(
 #[inline]
 fn with_policy() -> ExponentialBuilder {
     ExponentialBuilder::default()
+}
+
+/// Returns a future that completes when a shutdown signal is received.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to install SIGINT handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+        tokio::select! {
+            _ = sigint.recv() => tracing::info!(signal="SIGINT", "shutdown signal"),
+            _ = sigterm.recv() => tracing::info!(signal="SIGTERM", "shutdown signal"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+        tracing::info!("shutdown signal");
+    }
 }

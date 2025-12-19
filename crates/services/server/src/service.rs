@@ -11,7 +11,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, store::Store, utils::shutdown_signal};
+use common::{BoxError, store::Store};
 use datafusion::error::DataFusionError;
 use dataset_store::DatasetStore;
 use futures::FutureExt;
@@ -234,4 +234,27 @@ pub enum JsonlInitError {
     /// - System call to retrieve address fails
     #[error("failed to get JSONL server local address: {0}")]
     LocalAddr(#[source] std::io::Error),
+}
+
+/// Returns a future that completes when a shutdown signal is received.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to install SIGINT handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+        tokio::select! {
+            _ = sigint.recv() => tracing::info!(signal="SIGINT", "shutdown signal"),
+            _ = sigterm.recv() => tracing::info!(signal="SIGTERM", "shutdown signal"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+        tracing::info!("shutdown signal");
+    }
 }
