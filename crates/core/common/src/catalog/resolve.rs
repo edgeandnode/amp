@@ -407,11 +407,11 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryResolveError {
     /// Schema string could not be parsed as a valid reference.
-    #[error("invalid reference format: {0}")]
+    #[error("invalid reference format")]
     InvalidReference(#[source] PartialReferenceError),
 
     /// Store returned an error during resolution.
-    #[error("store error: {0}")]
+    #[error("store error")]
     StoreError(#[source] BoxError),
 
     /// Dataset was not found.

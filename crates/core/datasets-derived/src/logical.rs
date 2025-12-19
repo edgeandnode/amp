@@ -643,7 +643,7 @@ pub enum ManifestValidationError {
     /// Catalog resolution failed
     ///
     /// This occurs when the core catalog resolution logic fails.
-    #[error("Catalog resolution failed: {0}")]
+    #[error("Catalog resolution failed")]
     CatalogResolution(#[source] PlanningCtxForSqlTablesWithDepsError),
 
     /// Non-incremental SQL operation in table query
