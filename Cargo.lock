@@ -11882,6 +11882,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "amp-client",
+ "amp-object-store",
  "ampctl",
  "arrow-flight",
  "backon",

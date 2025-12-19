@@ -106,7 +106,7 @@ pub struct Ctx {
     pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: DatasetStore,
-    pub data_store: Arc<DataStore>,
+    pub data_store: DataStore,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     /// Optional job-specific metrics registry

@@ -21,7 +21,7 @@ use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRun
 pub struct DaemonWorker {
     config: Config,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     node_id: NodeId,
 
@@ -36,7 +36,7 @@ impl DaemonWorker {
     pub async fn new(
         config: Arc<config::Config>,
         metadata_db: MetadataDb,
-        data_store: Arc<Store>,
+        data_store: Store,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         node_id: NodeId,
@@ -84,7 +84,7 @@ impl DaemonWorker {
     }
 
     /// Get a reference to the data store.
-    pub fn data_store(&self) -> &Arc<Store> {
+    pub fn data_store(&self) -> &Store {
         &self.data_store
     }
 

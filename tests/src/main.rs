@@ -154,19 +154,24 @@ async fn main() {
                     .await
                     .expect("Failed to load config"),
             );
-            let data_store = Arc::new(
-                Store::new(config.data_store_url.clone()).expect("Failed to create data store"),
-            );
-            let providers_store = Store::new(config.providers_store_url.clone())
-                .expect("Failed to create providers store");
-            let manifests_store = Store::new(config.manifests_store_url.clone())
-                .expect("Failed to create manifests store");
+            let data_store =
+                Store::new(config.data_store_url.clone()).expect("Failed to create data store");
 
             let dataset_store = {
-                let provider_configs_store =
-                    ProviderConfigsStore::new(providers_store.as_inner().clone());
-                let dataset_manifests_store =
-                    DatasetManifestsStore::new(manifests_store.as_inner().clone());
+                let provider_configs_store = ProviderConfigsStore::new(
+                    amp_object_store::new_with_prefix(
+                        &config.providers_store_url,
+                        config.providers_store_url.path(),
+                    )
+                    .expect("Failed to create provider configs store"),
+                );
+                let dataset_manifests_store = DatasetManifestsStore::new(
+                    amp_object_store::new_with_prefix(
+                        &config.manifests_store_url,
+                        config.manifests_store_url.path(),
+                    )
+                    .expect("Failed to create manifests store"),
+                );
                 DatasetStore::new(
                     sysdb.conn_pool().clone(),
                     provider_configs_store,
@@ -267,7 +272,7 @@ async fn bless(
     ampctl: &Ampctl,
     dataset_store: DatasetStore,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {

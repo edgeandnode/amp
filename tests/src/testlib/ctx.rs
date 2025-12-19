@@ -342,9 +342,7 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
-        let data_store = Arc::new(Store::new(config.data_store_url.clone())?);
-        let providers_store = Store::new(config.providers_store_url.clone())?;
-        let manifests_store = Store::new(config.manifests_store_url.clone())?;
+        let data_store = Store::new(config.data_store_url.clone())?;
 
         // Create shared DatasetStore instance (used by both server and worker)
         let dataset_store = {
@@ -352,9 +350,15 @@ impl TestCtxBuilder {
                 DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
             };
             let provider_configs_store =
-                ProviderConfigsStore::new(providers_store.as_inner().clone());
+                ProviderConfigsStore::new(amp_object_store::new_with_prefix(
+                    &config.providers_store_url,
+                    config.providers_store_url.path(),
+                )?);
             let dataset_manifests_store =
-                DatasetManifestsStore::new(manifests_store.as_inner().clone());
+                DatasetManifestsStore::new(amp_object_store::new_with_prefix(
+                    &config.manifests_store_url,
+                    config.manifests_store_url.path(),
+                )?);
             DatasetStore::new(
                 metadata_db.conn_pool().clone(),
                 provider_configs_store,

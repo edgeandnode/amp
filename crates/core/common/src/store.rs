@@ -17,7 +17,7 @@ use object_store::ObjectStore;
 /// - Can be extended with helper functions.
 #[derive(Debug, Clone)]
 pub struct Store {
-    url: ObjectStoreUrl,
+    url: Arc<ObjectStoreUrl>,
     inner: Arc<dyn ObjectStore>,
 }
 
@@ -33,7 +33,10 @@ impl Store {
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
     pub fn new(url: ObjectStoreUrl) -> Result<Self, ObjectStoreCreationError> {
         let inner: Arc<dyn ObjectStore> = amp_object_store::new_with_prefix(&url, url.path())?;
-        Ok(Self { url, inner })
+        Ok(Self {
+            url: Arc::new(url),
+            inner,
+        })
     }
 
     pub fn url(&self) -> &url::Url {

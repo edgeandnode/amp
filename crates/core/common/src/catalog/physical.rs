@@ -341,7 +341,7 @@ impl PhysicalTable {
     /// Only the physical table registration (steps 3-4) is transactional.
     pub async fn restore_latest_revision(
         metadata_db: MetadataDb,
-        data_store: Arc<Store>,
+        data_store: Store,
         dataset: &HashReference,
         table: &ResolvedTable,
     ) -> Result<Option<Self>, RestoreLatestRevisionError> {

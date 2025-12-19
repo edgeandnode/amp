@@ -33,7 +33,7 @@ impl DaemonController {
     pub async fn new(
         config: Arc<config::Config>,
         metadata_db: metadata_db::MetadataDb,
-        data_store: Arc<Store>,
+        data_store: Store,
         dataset_store: dataset_store::DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
