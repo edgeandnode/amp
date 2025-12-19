@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 use common::BoxError;
 
 use super::{AmpCli, ContractArtifact};
-use crate::testlib::helpers::{forge, git};
+use crate::testlib::{
+    config::resolve_package_source_dir,
+    helpers::{forge, git},
+};
 
 /// Dataset package fixture for managing dataset operations.
 ///
@@ -31,11 +34,14 @@ impl DatasetPackage {
     /// Create a new DatasetPackage instance.
     ///
     /// Takes a dataset name and optional config file path. The dataset path
-    /// is automatically constructed as absolute path using CARGO_MANIFEST_DIR.
+    /// is automatically resolved from the packages fixture directories.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the package directory cannot be found in the fixture directories.
     pub fn new(name: &str, config: Option<&str>) -> Self {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("datasets")
-            .join(name);
+        let path = resolve_package_source_dir(Path::new(name))
+            .unwrap_or_else(|| panic!("Package '{}' not found in fixture directories", name));
         Self {
             name: name.to_string(),
             path,
@@ -158,10 +164,13 @@ impl DatasetPackageBuilder {
     }
 
     /// Build the DatasetPackage.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the package directory cannot be found in the fixture directories.
     pub fn build(self) -> DatasetPackage {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("datasets")
-            .join(&self.name);
+        let path = resolve_package_source_dir(Path::new(&self.name))
+            .unwrap_or_else(|| panic!("Package '{}' not found in fixture directories", self.name));
         let contracts_dir = self.contracts_subdir.map(|subdir| path.join(subdir));
         DatasetPackage {
             name: self.name,

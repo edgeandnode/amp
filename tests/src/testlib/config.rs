@@ -34,6 +34,13 @@
 //!
 //! Use `resolve_snapshot_source_dir()` to find dataset snapshot directories.
 //!
+//! ## Dataset Packages (directory trees)
+//! **Source directories searched (in order):**
+//! - `tests/config/packages/`
+//! - `config/packages/`
+//!
+//! Use `resolve_package_source_dir()` to find dataset package directories.
+//!
 //! # Fixture Resolution Process
 //!
 //! When resolving fixtures, this module uses a search algorithm:
@@ -59,6 +66,9 @@ const PROVIDERS_FIXTURE_DIRS: [&str; 2] = ["tests/config/providers", "config/pro
 /// Source directories to search for dataset snapshot data
 const SNAPSHOTS_FIXTURE_DIRS: [&str; 2] = ["tests/config/snapshots", "config/snapshots"];
 
+/// Source directories to search for dataset packages
+const PACKAGES_FIXTURE_DIRS: [&str; 2] = ["tests/config/packages", "config/packages"];
+
 /// Resolve dataset manifest source file from fixture directories.
 ///
 /// Searches the predefined dataset manifest fixture directories for the specified file.
@@ -78,6 +88,13 @@ pub(super) fn resolve_provider_config_source_file(name: &Path) -> Option<PathBuf
 /// Searches the predefined snapshot fixture directories for the specified directory.
 pub(super) fn resolve_snapshot_source_dir(name: &Path) -> Option<PathBuf> {
     resolve_fixture_source_dir(&SNAPSHOTS_FIXTURE_DIRS, name)
+}
+
+/// Resolve dataset package source directory from fixture directories.
+///
+/// Searches the predefined package fixture directories for the specified package.
+pub(super) fn resolve_package_source_dir(name: &Path) -> Option<PathBuf> {
+    resolve_fixture_source_dir(&PACKAGES_FIXTURE_DIRS, name)
 }
 
 /// Resolves the absolute path to a file by searching through known fixture directories.
