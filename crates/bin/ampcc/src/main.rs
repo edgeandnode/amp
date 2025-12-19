@@ -185,6 +185,9 @@ async fn run_app<B: ratatui::backend::Backend>(
                         InputMode::Normal => {
                             match key.code {
                                 KeyCode::Char('q') => app.quit(),
+                                KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
+                                    app.quit()
+                                }
 
                                 // Source switching
                                 KeyCode::Char('1') => {
