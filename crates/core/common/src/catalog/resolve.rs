@@ -8,7 +8,7 @@
 //!
 //! Two resolver implementations are provided:
 //!
-//! - [`DynamicResolver`]: Resolves dataset references dynamically via a store.
+//! - [`RegistrySchemaResolver`]: Resolves dataset references dynamically via a store.
 //!   Used for user queries where datasets are referenced by name/version.
 //!
 //! - For pre-resolved dependencies (derived datasets), see the `datasets-derived` crate
@@ -135,40 +135,40 @@ pub trait SchemaResolver: Send + Sync {
 ///
 /// The schema string is parsed as a [`PartialReference`] and then resolved
 /// via the store's `resolve_revision` method.
-pub struct DynamicResolver<'a, S> {
+pub struct RegistrySchemaResolver<'a, S> {
     store: &'a S,
 }
 
-impl<'a, S> DynamicResolver<'a, S> {
-    /// Creates a new dynamic resolver using the given store.
+impl<'a, S> RegistrySchemaResolver<'a, S> {
+    /// Creates a new registry schema resolver using the given store.
     pub fn new(store: &'a S) -> Self {
         Self { store }
     }
 }
 
 #[async_trait]
-impl<S> SchemaResolver for DynamicResolver<'_, S>
+impl<S> SchemaResolver for RegistrySchemaResolver<'_, S>
 where
     S: DatasetAccess + Sync,
 {
-    type Error = DynamicResolveError;
+    type Error = RegistryResolveError;
 
     async fn resolve(&self, schema: &str) -> Result<HashReference, Self::Error> {
         let partial: PartialReference = schema
             .parse()
-            .map_err(DynamicResolveError::InvalidReference)?;
+            .map_err(RegistryResolveError::InvalidReference)?;
         let reference: Reference = partial.into();
         self.store
             .resolve_revision(&reference)
             .await
-            .map_err(DynamicResolveError::StoreError)?
-            .ok_or_else(|| DynamicResolveError::NotFound(reference))
+            .map_err(RegistryResolveError::StoreError)?
+            .ok_or_else(|| RegistryResolveError::NotFound(reference))
     }
 }
 
-/// Errors from dynamic schema resolution.
+/// Errors from registry schema resolution.
 #[derive(Debug, thiserror::Error)]
-pub enum DynamicResolveError {
+pub enum RegistryResolveError {
     /// Schema string could not be parsed as a valid reference.
     #[error("invalid reference format: {0}")]
     InvalidReference(#[source] PartialReferenceError),

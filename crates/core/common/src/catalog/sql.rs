@@ -40,7 +40,7 @@ use super::{
     dataset_access::DatasetAccess,
     errors::{CatalogForSqlError, PlanningCtxForSqlError},
     physical::{Catalog, PhysicalTable},
-    resolve::{DynamicResolver, SelfReferences, resolve_logical_catalog},
+    resolve::{RegistrySchemaResolver, SelfReferences, resolve_logical_catalog},
 };
 use crate::{
     PlanningContext, Store,
@@ -88,8 +88,8 @@ pub async fn catalog_for_sql(
         .map(|r| r.into_parts())
         .collect();
 
-    // Resolve using the dynamic resolver
-    let resolver = DynamicResolver::new(dataset_store);
+    // Resolve using the registry schema resolver
+    let resolver = RegistrySchemaResolver::new(dataset_store);
     let logical_catalog = resolve_logical_catalog(
         dataset_store,
         &resolver,
@@ -195,8 +195,8 @@ pub async fn planning_ctx_for_sql(
         .map(|r| r.into_parts())
         .collect();
 
-    // Resolve using the dynamic resolver
-    let resolver = DynamicResolver::new(store);
+    // Resolve using the registry schema resolver
+    let resolver = RegistrySchemaResolver::new(store);
     let catalog = resolve_logical_catalog(
         store,
         &resolver,
