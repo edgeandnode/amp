@@ -15,7 +15,7 @@ pub struct Ctx {
     pub dataset_store: DatasetStore,
     pub scheduler: Arc<dyn Scheduler>,
     /// Object store for output data (used by dataset restore handler)
-    pub data_store: Arc<Store>,
+    pub data_store: Store,
     /// Build information (version, git SHA, etc.)
     pub build_info: BuildInfo,
 }

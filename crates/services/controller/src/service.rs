@@ -32,7 +32,7 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     at: SocketAddr,

@@ -40,7 +40,7 @@ use super::fixtures::SnapshotContext;
 pub async fn dump_internal(
     config: WorkerConfig,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     dataset_ref: Reference,
     end_block: EndBlock,
@@ -132,7 +132,7 @@ pub async fn dump_internal(
 pub async fn dump_dataset(
     config: WorkerConfig,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     dataset: Reference,
     end_block: u64,

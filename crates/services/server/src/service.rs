@@ -30,7 +30,7 @@ use crate::{config::Config, flight, jsonl};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,

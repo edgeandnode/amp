@@ -65,7 +65,7 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -75,7 +75,7 @@ pub struct Service {
 impl Service {
     pub async fn create(
         config: Arc<Config>,
-        data_store: Arc<Store>,
+        data_store: Store,
         metadata_db: MetadataDb,
         dataset_store: DatasetStore,
         meter: Option<Meter>,

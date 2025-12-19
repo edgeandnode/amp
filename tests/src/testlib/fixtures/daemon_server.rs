@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonServer {
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Arc<Store>,
+    data_store: Store,
     dataset_store: DatasetStore,
     server_addrs: BoundAddrs,
 
@@ -38,7 +38,7 @@ impl DaemonServer {
     pub async fn new(
         config: Arc<config::Config>,
         metadb: MetadataDb,
-        data_store: Arc<Store>,
+        data_store: Store,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         enable_flight: bool,
@@ -93,7 +93,7 @@ impl DaemonServer {
     }
 
     /// Get a reference to the data store.
-    pub fn data_store(&self) -> &Arc<Store> {
+    pub fn data_store(&self) -> &Store {
         &self.data_store
     }
 

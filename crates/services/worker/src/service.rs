@@ -49,7 +49,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub async fn new(
     config: Config,
     metadata_db: MetadataDb,
-    data_store: Arc<DataStore>,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
@@ -219,7 +219,7 @@ pub(crate) struct WorkerJobCtx {
     pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: DatasetStore,
-    pub data_store: Arc<DataStore>,
+    pub data_store: DataStore,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,
     pub parquet_footer_cache: ParquetFooterCache,
