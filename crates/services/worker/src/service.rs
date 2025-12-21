@@ -254,7 +254,7 @@ impl Worker {
         action: JobAction,
     ) -> Result<(), NotificationError> {
         match action {
-            JobAction::Start => {
+            JobAction::Start | JobAction::Resume => {
                 // Load the job from the queue (retry on failure)
                 let job = self.queue.get_job(job_id).await.map_err(|err| {
                     NotificationError::StartActionFailed {

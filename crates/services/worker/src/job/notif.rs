@@ -27,6 +27,15 @@ impl Notification {
             action: Action::Stop,
         }
     }
+
+    /// Create a new resume action
+    #[must_use]
+    pub fn resume(job_id: JobId) -> Self {
+        Self {
+            job_id,
+            action: Action::Resume,
+        }
+    }
 }
 
 /// Job notification actions
@@ -44,6 +53,11 @@ pub enum Action {
     /// Stop the job: mark the job as stopped and release the locations by deleting
     /// the row from the `jobs` table.
     Stop,
+
+    /// Resume the job
+    ///
+    /// Resume the job: Fetch the job from the Metadata DB job queue and resume the job
+    Resume,
 }
 
 impl Action {
@@ -53,6 +67,7 @@ impl Action {
         match self {
             Self::Start => "START",
             Self::Stop => "STOP",
+            Self::Resume => "RESUME",
         }
     }
 }
@@ -70,6 +85,7 @@ impl std::str::FromStr for Action {
         match s {
             s if s.eq_ignore_ascii_case("START") => Ok(Self::Start),
             s if s.eq_ignore_ascii_case("STOP") => Ok(Self::Stop),
+            s if s.eq_ignore_ascii_case("RESUME") => Ok(Self::Resume),
             _ => Err(format!("Invalid action variant: {s}").into()),
         }
     }
