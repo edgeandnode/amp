@@ -94,7 +94,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
-use datasets_common::table_name::TableName;
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use monitoring::logging;
@@ -110,8 +110,10 @@ use crate::{
 };
 
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
+#[instrument(skip_all, err)]
 pub async fn dump(
     ctx: Ctx,
+    dataset_reference: &HashReference,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     end: EndBlock,
@@ -120,22 +122,14 @@ pub async fn dump(
         return Ok(());
     }
 
+    let dump_start_time = Instant::now();
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
 
-    // Check that all tables belong to the same dataset.
-    let dataset = {
-        let ds = tables[0].0.table().dataset();
-        for (table, _) in tables {
-            if table.dataset().manifest_hash != ds.manifest_hash {
-                return Err(Error::MixedDatasets {
-                    table_ref: table.table_ref().to_string(),
-                    expected_hash: ds.manifest_hash.to_string(),
-                    actual_hash: table.dataset().manifest_hash.to_string(),
-                });
-            }
-        }
-        ds
-    };
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(dataset_reference)
+        .await
+        .map_err(Error::GetDataset)?;
 
     let logical = LogicalCatalog::from_tables(tables.iter().map(|(t, _)| t.table()));
     let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
@@ -151,176 +145,14 @@ pub async fn dump(
     }
 
     let metrics = ctx.metrics.clone();
-    dump_impl(
-        ctx,
-        max_writers,
-        catalog,
-        tables,
-        parquet_opts,
-        end,
-        metrics,
-        dataset.finalized_blocks_only,
-    )
-    .await?;
-
-    tracing::info!("dump completed successfully");
-
-    Ok(())
-}
-
-/// Errors that occur during raw dataset dump operations
-///
-/// This error type is used by the `dump()` function to report issues encountered
-/// when dumping raw datasets to Parquet files.
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Tables from different datasets cannot be dumped together
-    ///
-    /// This occurs when attempting to dump multiple tables that belong to different
-    /// datasets (identified by different manifest hashes). All tables in a single
-    /// dump operation must belong to the same dataset.
-    ///
-    /// Common causes:
-    /// - Incorrectly grouping tables from multiple datasets in API calls
-    /// - Dataset manifest hash mismatch due to version conflicts
-    /// - Configuration error specifying wrong table combinations
-    ///
-    /// To fix: Ensure all tables being dumped share the same manifest hash.
-    #[error(
-        "Table '{table_ref}' belongs to dataset '{actual_hash}' but expected '{expected_hash}'"
-    )]
-    MixedDatasets {
-        table_ref: String,
-        expected_hash: String,
-        actual_hash: String,
-    },
-
-    /// Failed consistency check for table
-    ///
-    /// This occurs when the consistency check detects issues between metadata database
-    /// and object store for a table. Common causes:
-    /// - Missing registered files (data corruption)
-    /// - Object store connectivity issues
-    /// - Metadata database query failures
-    ///
-    /// The table must pass consistency checks before dump can proceed.
-    #[error("Consistency check failed for table '{table_name}'")]
-    ConsistencyCheck {
-        table_name: String,
-        #[source]
-        source: crate::check::ConsistencyError,
-    },
-
-    /// Failed to get blockchain client for dataset
-    ///
-    /// This occurs when the dump implementation cannot obtain a blockchain client
-    /// for the dataset's provider. Common causes:
-    /// - Provider configuration not found
-    /// - Invalid provider configuration
-    /// - Manifest not registered in metadata database
-    /// - Network connectivity issues to provider
-    #[error("Failed to get blockchain client for dataset")]
-    GetClient(#[source] dataset_store::GetClientError),
-
-    /// Failed to resolve end block number
-    ///
-    /// This occurs when resolving the end block (absolute or relative) against
-    /// the blockchain's latest block fails. Common causes:
-    /// - Blockchain client connectivity issues (when fetching latest block)
-    /// - Invalid end block configuration (end < start)
-    /// - RPC provider returning invalid block numbers
-    /// - Provider temporarily unavailable
-    #[error("Failed to resolve end block")]
-    ResolveEndBlock(#[source] crate::block_ranges::ResolutionError),
-
-    /// Failed to get latest block number from blockchain client
-    ///
-    /// This occurs when querying the blockchain provider for the latest block fails.
-    /// Common causes:
-    /// - Network connectivity issues
-    /// - RPC provider rate limiting
-    /// - Provider temporarily unavailable
-    /// - Invalid provider credentials
-    #[error("Failed to get latest block number")]
-    LatestBlock(#[source] BoxError),
-
-    /// Failed to get missing block ranges for table
-    ///
-    /// This occurs when querying the metadata database for unprocessed block ranges
-    /// fails. The metadata database tracks which block ranges have been successfully
-    /// dumped to prevent redundant work.
-    ///
-    /// Common causes:
-    /// - Metadata database connectivity issues
-    /// - Corrupted file metadata
-    /// - Database query timeout
-    #[error("Failed to get missing block ranges for table")]
-    MissingRanges(#[source] BoxError),
-
-    /// Failed to dump block ranges
-    ///
-    /// This occurs when the parallel dump of block ranges fails. This wraps errors
-    /// from partition tasks that process subsets of the block ranges.
-    ///
-    /// Common causes:
-    /// - Block streaming failures from blockchain client
-    /// - Parquet file writing errors
-    /// - Metadata database update failures
-    /// - Object store connectivity issues
-    /// - Partition task panics or cancellations
-    #[error("Failed to dump block ranges")]
-    DumpRanges(#[source] DumpRangesError),
-}
-
-/// Errors that occur during parallel dump of block ranges
-///
-/// This error type is used by the `dump_ranges()` function when partitioning
-/// and processing block ranges across multiple parallel workers.
-#[derive(Debug, thiserror::Error)]
-pub enum DumpRangesError {
-    /// A partition task execution failed
-    ///
-    /// This occurs when one of the parallel partition tasks fails during execution
-    /// or panics unexpectedly. When a partition task fails, all other running
-    /// partitions are terminated to prevent partial dumps.
-    ///
-    /// Common causes:
-    /// - Block streaming failures from blockchain client
-    /// - Parquet file writing errors
-    /// - Metadata database update failures
-    /// - Object store connectivity issues
-    /// - RawDatasetWriter initialization failures
-    /// - Partition task panics (assertion failures, unwrap on None/Err, stack overflow)
-    ///
-    /// Note: The `TryWaitAllError` type cannot use `#[source]` due to Rust trait system
-    /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
-    #[error("Partition task failed: {0}")]
-    PartitionTaskError(crate::tasks::TryWaitAllError<common::BoxError>),
-}
-
-/// Dumps a raw dataset by extracting blockchain data from specified block ranges
-/// and writing it to partitioned Parquet files.
-///
-/// Returns `Ok(())` on successful completion or an error if any partition fails.
-/// On failure, all running partitions are terminated to prevent partial dumps.
-#[instrument(skip_all, err)]
-#[expect(clippy::too_many_arguments)]
-async fn dump_impl(
-    ctx: Ctx,
-    max_writers: u16,
-    catalog: Catalog,
-    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
-    parquet_opts: Arc<WriterProperties>,
-    end: EndBlock,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-    finalized_blocks_only: bool,
-) -> Result<(), Error> {
-    let dump_start_time = Instant::now();
-    let dataset = tables[0].0.dataset();
+    let finalized_blocks_only = dataset.finalized_blocks_only;
 
     let mut client = ctx
         .dataset_store
-        .get_client(dataset.manifest_hash(), metrics.as_ref().map(|m| m.meter()))
+        .get_client(
+            dataset_reference.hash(),
+            metrics.as_ref().map(|m| m.meter()),
+        )
         .await
         .map_err(Error::GetClient)?;
 
@@ -421,8 +253,7 @@ async fn dump_impl(
             metrics.as_ref(),
             tables,
         )
-        .await
-        .map_err(Error::DumpRanges)?;
+        .await?;
     }
 
     // Record dump duration on successful completion
@@ -435,7 +266,111 @@ async fn dump_impl(
         }
     }
 
+    tracing::info!("dump completed successfully");
+
     Ok(())
+}
+
+/// Errors that occur during raw dataset dump operations
+///
+/// This error type is used by the `dump()` function to report issues encountered
+/// when dumping raw datasets to Parquet files.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to get dataset from dataset store
+    ///
+    /// This occurs when retrieving the dataset instance from the dataset store fails.
+    /// The dataset store loads dataset manifests and parses them into Dataset instances.
+    ///
+    /// Common causes:
+    /// - Dataset not found in metadata database
+    /// - Manifest file not accessible in object store
+    /// - Invalid or corrupted manifest content
+    /// - Manifest parsing errors
+    /// - Missing required manifest fields
+    #[error("Failed to get dataset")]
+    GetDataset(#[source] dataset_store::GetDatasetError),
+
+    /// Failed consistency check for table
+    ///
+    /// This occurs when the consistency check detects issues between metadata database
+    /// and object store for a table. Common causes:
+    /// - Missing registered files (data corruption)
+    /// - Object store connectivity issues
+    /// - Metadata database query failures
+    ///
+    /// The table must pass consistency checks before dump can proceed.
+    #[error("Consistency check failed for table '{table_name}'")]
+    ConsistencyCheck {
+        table_name: String,
+        #[source]
+        source: crate::check::ConsistencyError,
+    },
+
+    /// Failed to get blockchain client for dataset
+    ///
+    /// This occurs when the dump implementation cannot obtain a blockchain client
+    /// for the dataset's provider. Common causes:
+    /// - Provider configuration not found
+    /// - Invalid provider configuration
+    /// - Manifest not registered in metadata database
+    /// - Network connectivity issues to provider
+    #[error("Failed to get blockchain client for dataset")]
+    GetClient(#[source] dataset_store::GetClientError),
+
+    /// Failed to resolve end block number
+    ///
+    /// This occurs when resolving the end block (absolute or relative) against
+    /// the blockchain's latest block fails. Common causes:
+    /// - Blockchain client connectivity issues (when fetching latest block)
+    /// - Invalid end block configuration (end < start)
+    /// - RPC provider returning invalid block numbers
+    /// - Provider temporarily unavailable
+    #[error("Failed to resolve end block")]
+    ResolveEndBlock(#[source] crate::block_ranges::ResolutionError),
+
+    /// Failed to get latest block number from blockchain client
+    ///
+    /// This occurs when querying the blockchain provider for the latest block fails.
+    /// Common causes:
+    /// - Network connectivity issues
+    /// - RPC provider rate limiting
+    /// - Provider temporarily unavailable
+    /// - Invalid provider credentials
+    #[error("Failed to get latest block number")]
+    LatestBlock(#[source] BoxError),
+
+    /// Failed to get missing block ranges for table
+    ///
+    /// This occurs when querying the metadata database for unprocessed block ranges
+    /// fails. The metadata database tracks which block ranges have been successfully
+    /// dumped to prevent redundant work.
+    ///
+    /// Common causes:
+    /// - Metadata database connectivity issues
+    /// - Corrupted file metadata
+    /// - Database query timeout
+    #[error("Failed to get missing block ranges for table")]
+    MissingRanges(#[source] BoxError),
+
+    /// A partition task execution failed
+    ///
+    /// This occurs when one of the parallel partition tasks fails during execution
+    /// or panics unexpectedly. When a partition task fails, all other running
+    /// partitions are terminated to prevent partial dumps.
+    ///
+    /// Common causes:
+    /// - Block streaming failures from blockchain client
+    /// - Parquet file writing errors
+    /// - Metadata database update failures
+    /// - Object store connectivity issues
+    /// - RawDatasetWriter initialization failures
+    /// - Partition task panics (assertion failures, unwrap on None/Err, stack overflow)
+    ///
+    /// Note: The `TryWaitAllError` type cannot use `#[source]` due to Rust trait system
+    /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
+    #[error("Partition task failed: {0}")]
+    PartitionTask(TryWaitAllError<BoxError>),
 }
 
 /// Dumps block ranges by partitioning them across multiple parallel workers.
@@ -452,7 +387,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     metrics: Option<&Arc<metrics::MetricsRegistry>>,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
-) -> Result<(), DumpRangesError> {
+) -> Result<(), Error> {
     tracing::info!(
         "dumping ranges {}",
         missing_dataset_ranges
@@ -526,7 +461,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             }
         }
 
-        return Err(DumpRangesError::PartitionTaskError(err));
+        return Err(Error::PartitionTask(err));
     }
 
     Ok(())
