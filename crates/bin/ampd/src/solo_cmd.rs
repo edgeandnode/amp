@@ -1,11 +1,11 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use amp_config::Config as CommonConfig;
-use amp_object_store::ObjectStoreCreationError;
-use common::{BoxError, store::Store};
-use dataset_store::{
+use amp_dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
+use amp_object_store::ObjectStoreCreationError;
+use common::{BoxError, store::Store};
 use monitoring::telemetry::metrics::Meter;
 
 use crate::{controller_cmd, server_cmd, worker_cmd};

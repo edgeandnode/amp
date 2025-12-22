@@ -1,11 +1,11 @@
 //! Manifests get by ID handler
 
+use amp_dataset_store::{GetManifestError, manifests::ManifestContent};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use dataset_store::manifests::ManifestContent;
 use datasets_common::hash::Hash;
 use monitoring::logging;
 use serde_json::value::RawValue as JsonRawValue;
@@ -88,7 +88,7 @@ pub async fn handler(
             );
             return Err(Error::NotFound { hash }.into());
         }
-        Err(dataset_store::GetManifestError::MetadataDbQueryPath(err)) => {
+        Err(GetManifestError::MetadataDbQueryPath(err)) => {
             tracing::error!(
                 manifest_hash=%hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -96,7 +96,7 @@ pub async fn handler(
             );
             return Err(Error::MetadataDbQueryError(err).into());
         }
-        Err(dataset_store::GetManifestError::ObjectStoreError(err)) => {
+        Err(GetManifestError::ObjectStoreError(err)) => {
             tracing::error!(
                 manifest_hash=%hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -173,7 +173,7 @@ pub enum Error {
     /// - Network errors prevent reading from remote storage
     /// - File corruption or invalid data in the object store
     #[error("failed to read manifest from object store: {0}")]
-    ObjectStoreReadError(#[source] dataset_store::manifests::GetError),
+    ObjectStoreReadError(#[source] amp_dataset_store::manifests::GetError),
 }
 
 impl IntoErrorResponse for Error {

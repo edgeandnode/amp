@@ -24,7 +24,7 @@ pub struct ProviderInfo {
     /// The type of provider (e.g., "evm-rpc", "firehose")
     #[serde_as(as = "serde_with::DisplayFromStr")]
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub kind: dataset_store::DatasetKind,
+    pub kind: amp_dataset_store::DatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub network: NonEmptyString,
@@ -33,11 +33,11 @@ pub struct ProviderInfo {
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
-impl TryFrom<(String, dataset_store::providers::ProviderConfig)> for ProviderInfo {
+impl TryFrom<(String, amp_dataset_store::providers::ProviderConfig)> for ProviderInfo {
     type Error = serde_json::Error;
 
     fn try_from(
-        (name, config): (String, dataset_store::providers::ProviderConfig),
+        (name, config): (String, amp_dataset_store::providers::ProviderConfig),
     ) -> Result<Self, Self::Error> {
         // SAFETY: Provider names from the dataset store are guaranteed to be non-empty
         // as they are validated during provider registration and storage.

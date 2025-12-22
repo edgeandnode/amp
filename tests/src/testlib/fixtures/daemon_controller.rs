@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonController {
     config: Arc<Config>,
     metadata_db: metadata_db::MetadataDb,
-    dataset_store: dataset_store::DatasetStore,
+    dataset_store: amp_dataset_store::DatasetStore,
     admin_api_addr: SocketAddr,
 
     _task: JoinHandle<BoxResult<()>>,
@@ -34,7 +34,7 @@ impl DaemonController {
         config: Arc<amp_config::Config>,
         metadata_db: metadata_db::MetadataDb,
         data_store: Store,
-        dataset_store: dataset_store::DatasetStore,
+        dataset_store: amp_dataset_store::DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
         // Convert common config to controller config
@@ -76,7 +76,7 @@ impl DaemonController {
     }
 
     /// Get a reference to the dataset store.
-    pub fn dataset_store(&self) -> &dataset_store::DatasetStore {
+    pub fn dataset_store(&self) -> &amp_dataset_store::DatasetStore {
         &self.dataset_store
     }
 

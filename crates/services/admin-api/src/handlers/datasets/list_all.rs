@@ -136,7 +136,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list all datasets: {0}")]
-    ListAllDatasets(#[source] dataset_store::ListAllDatasetsError),
+    ListAllDatasets(#[source] amp_dataset_store::ListAllDatasetsError),
 }
 
 impl IntoErrorResponse for Error {

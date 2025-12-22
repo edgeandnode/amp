@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
+use amp_dataset_store::{DatasetStore, GetDatasetError};
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
     HandshakeResponse, PutResult, SchemaAsIpc, Ticket,
@@ -40,7 +41,6 @@ use common::{
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
-use dataset_store::{DatasetStore, GetDatasetError};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,

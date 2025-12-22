@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use amp_config::{Addrs, Config as CommonConfig};
-use amp_object_store::ObjectStoreCreationError;
-use common::{BoxError, store::Store};
-use dataset_store::{
+use amp_dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
+use amp_object_store::ObjectStoreCreationError;
+use common::{BoxError, store::Store};
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 

@@ -10,7 +10,7 @@ axum.workspace = true
 common = { path = "../../core/common" }
 amp-config = { path = "../../config" }
 datafusion.workspace = true
-dataset-store = { path = "../../core/dataset-store" }
+amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }

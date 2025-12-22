@@ -87,7 +87,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list all manifests: {0}")]
-    ListAllManifests(#[source] dataset_store::ListAllManifestsError),
+    ListAllManifests(#[source] amp_dataset_store::ListAllManifestsError),
 }
 
 impl IntoErrorResponse for Error {

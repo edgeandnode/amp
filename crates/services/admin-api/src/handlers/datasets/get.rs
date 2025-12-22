@@ -96,8 +96,10 @@ pub async fn handler(
         .get_manifest(reference.hash())
         .await
         .map_err(|err| match err {
-            dataset_store::GetManifestError::MetadataDbQueryPath(_) => Error::GetManifestPath(err),
-            dataset_store::GetManifestError::ObjectStoreError(_) => Error::ReadManifest(err),
+            amp_dataset_store::GetManifestError::MetadataDbQueryPath(_) => {
+                Error::GetManifestPath(err)
+            }
+            amp_dataset_store::GetManifestError::ObjectStoreError(_) => Error::ReadManifest(err),
         })?
         .ok_or_else(|| Error::NotFound {
             namespace: namespace.clone(),
@@ -168,7 +170,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during revision resolution
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
     /// Failed to query manifest path from metadata database
     ///
     /// This occurs when:
@@ -176,7 +178,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to query manifest path: {0}")]
-    GetManifestPath(#[source] dataset_store::GetManifestError),
+    GetManifestPath(#[source] amp_dataset_store::GetManifestError),
     /// Failed to read manifest from object store
     ///
     /// This occurs when:
@@ -185,7 +187,7 @@ pub enum Error {
     /// - Permissions issues accessing object store
     /// - Network errors
     #[error("Failed to read manifest from object store: {0}")]
-    ReadManifest(#[source] dataset_store::GetManifestError),
+    ReadManifest(#[source] amp_dataset_store::GetManifestError),
     /// Failed to parse manifest JSON
     ///
     /// This occurs when:
@@ -193,7 +195,7 @@ pub enum Error {
     /// - Manifest structure doesn't match expected schema
     /// - Required fields are missing
     #[error("Failed to parse manifest: {0}")]
-    ParseManifest(#[source] dataset_store::ManifestParseError),
+    ParseManifest(#[source] amp_dataset_store::ManifestParseError),
 }
 
 impl IntoErrorResponse for Error {

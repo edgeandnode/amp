@@ -1,11 +1,11 @@
 //! Provider create handler
 
+use amp_dataset_store::providers::{ProviderConfig, RegisterError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use dataset_store::providers::{ProviderConfig, RegisterError};
 use monitoring::logging;
 
 use super::{convert, provider_info::ProviderInfo};

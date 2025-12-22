@@ -137,7 +137,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve latest revision: {0}")]
-    ResolveLatestRevision(#[source] dataset_store::ResolveRevisionError),
+    ResolveLatestRevision(#[source] amp_dataset_store::ResolveRevisionError),
     /// Failed to resolve the version revision
     ///
     /// This occurs when:
@@ -145,7 +145,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve version revision: {0}")]
-    ResolveVersionRevision(#[source] dataset_store::ResolveRevisionError),
+    ResolveVersionRevision(#[source] amp_dataset_store::ResolveRevisionError),
     /// Cannot delete the version currently tagged as "latest"
     ///
     /// This occurs when:
@@ -160,7 +160,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during deletion
     #[error("Failed to delete version tag: {0}")]
-    DeleteVersionTag(#[source] dataset_store::DeleteVersionTagError),
+    DeleteVersionTag(#[source] amp_dataset_store::DeleteVersionTagError),
 }
 
 impl IntoErrorResponse for Error {
