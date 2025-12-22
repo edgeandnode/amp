@@ -50,7 +50,7 @@ pub async fn dump_tables(
 ) -> Result<(), Error> {
     if kind.is_raw() {
         // Raw datasets (EvmRpc, EthBeacon, Firehose)
-        raw_dataset::dump(ctx, tables, max_writers, end)
+        raw_dataset::dump(ctx, dataset, tables, max_writers, end)
             .await
             .map_err(Error::RawDatasetDump)?;
     } else {
