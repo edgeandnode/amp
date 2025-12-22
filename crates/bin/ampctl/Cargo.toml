@@ -20,7 +20,7 @@ anyhow.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }
 console = "0.16.1"
-dataset-store = { path = "../../core/dataset-store" }
+amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 eth-beacon-datasets = { path = "../../extractors/eth-beacon" }

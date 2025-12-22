@@ -184,7 +184,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list version tags: {0}")]
-    ListVersionTags(#[source] dataset_store::ListVersionTagsError),
+    ListVersionTags(#[source] amp_dataset_store::ListVersionTagsError),
 
     /// Dataset store operation error when resolving revision
     ///
@@ -193,7 +193,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
 }
 
 impl IntoErrorResponse for Error {

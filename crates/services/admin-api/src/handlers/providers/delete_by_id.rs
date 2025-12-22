@@ -1,10 +1,10 @@
 //! Providers delete handler
 
+use amp_dataset_store::providers::DeleteError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use dataset_store::providers::DeleteError;
 use monitoring::logging;
 
 use crate::{

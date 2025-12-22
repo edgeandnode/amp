@@ -220,7 +220,7 @@ pub enum Error {
     /// - Manifest not registered in metadata database
     /// - Network connectivity issues to provider
     #[error("Failed to get blockchain client for dataset")]
-    GetClient(#[source] dataset_store::GetClientError),
+    GetClient(#[source] amp_dataset_store::GetClientError),
 
     /// Failed to resolve end block number
     ///

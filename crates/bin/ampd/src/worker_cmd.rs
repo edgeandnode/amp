@@ -1,9 +1,9 @@
+use amp_dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use amp_object_store::ObjectStoreCreationError;
 use common::store::Store;
 use config::Config;
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
 use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
 

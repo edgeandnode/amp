@@ -9,7 +9,7 @@ async-stream.workspace = true
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 datafusion.workspace = true
-dataset-store = { path = "../dataset-store" }
+amp-dataset-store = { path = "../dataset-store" }
 datasets-derived = { path = "../datasets-derived" }
 datasets-common = { path = "../datasets-common" }
 futures.workspace = true
