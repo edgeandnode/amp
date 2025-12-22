@@ -1,5 +1,6 @@
 //! Manifests delete by ID handler
 
+use amp_dataset_store::DeleteManifestError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -87,14 +88,14 @@ pub async fn handler(
                 "successfully deleted manifest"
             );
         }
-        Err(dataset_store::DeleteManifestError::ManifestLinked) => {
+        Err(DeleteManifestError::ManifestLinked) => {
             tracing::debug!(
                 manifest_hash = %hash,
                 "manifest is linked to datasets, cannot delete"
             );
             return Err(Error::ManifestLinked { hash }.into());
         }
-        Err(dataset_store::DeleteManifestError::TransactionBegin(err)) => {
+        Err(DeleteManifestError::TransactionBegin(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -102,7 +103,7 @@ pub async fn handler(
             );
             return Err(Error::TransactionBeginError(err).into());
         }
-        Err(dataset_store::DeleteManifestError::MetadataDbCheckLinks(err)) => {
+        Err(DeleteManifestError::MetadataDbCheckLinks(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -110,7 +111,7 @@ pub async fn handler(
             );
             return Err(Error::CheckLinksError(err).into());
         }
-        Err(dataset_store::DeleteManifestError::MetadataDbDelete(err)) => {
+        Err(DeleteManifestError::MetadataDbDelete(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -118,7 +119,7 @@ pub async fn handler(
             );
             return Err(Error::MetadataDbDeleteError(err).into());
         }
-        Err(dataset_store::DeleteManifestError::ObjectStoreError(err)) => {
+        Err(DeleteManifestError::ObjectStoreError(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -126,7 +127,7 @@ pub async fn handler(
             );
             return Err(Error::ObjectStoreDeleteError(err).into());
         }
-        Err(dataset_store::DeleteManifestError::TransactionCommit(err)) => {
+        Err(DeleteManifestError::TransactionCommit(err)) => {
             tracing::error!(
                 manifest_hash = %hash,
                 error = %err, error_source = logging::error_source(&err),
@@ -198,7 +199,7 @@ pub enum Error {
     /// - Network errors prevent deletion from remote storage
     /// - File does not exist in object store (non-critical if DB delete succeeded)
     #[error("failed to delete manifest from object store: {0}")]
-    ObjectStoreDeleteError(#[source] dataset_store::manifests::DeleteError),
+    ObjectStoreDeleteError(#[source] amp_dataset_store::manifests::DeleteError),
 
     /// Failed to commit transaction
     ///

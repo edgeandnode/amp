@@ -110,8 +110,8 @@ pub struct Dataset {
     pub version: Version,
 }
 
-impl From<dataset_store::DatasetTag> for Dataset {
-    fn from(tag: dataset_store::DatasetTag) -> Self {
+impl From<amp_dataset_store::DatasetTag> for Dataset {
+    fn from(tag: amp_dataset_store::DatasetTag) -> Self {
         Self {
             namespace: tag.namespace,
             name: tag.name,
@@ -151,7 +151,7 @@ pub enum Error {
     /// - SQL query to retrieve dataset tags fails
     /// - Database schema inconsistencies prevent tag retrieval
     #[error("failed to list dataset tags: {0}")]
-    ListDatasetTags(#[source] dataset_store::ListDatasetsUsingManifestError),
+    ListDatasetTags(#[source] amp_dataset_store::ListDatasetsUsingManifestError),
 }
 
 impl IntoErrorResponse for Error {
@@ -160,10 +160,10 @@ impl IntoErrorResponse for Error {
             Error::InvalidHash(_) => "INVALID_HASH",
             Error::ManifestNotFound { .. } => "MANIFEST_NOT_FOUND",
             Error::ListDatasetTags(err) => match err {
-                dataset_store::ListDatasetsUsingManifestError::MetadataDbQueryPath(_) => {
+                amp_dataset_store::ListDatasetsUsingManifestError::MetadataDbQueryPath(_) => {
                     "QUERY_MANIFEST_PATH_ERROR"
                 }
-                dataset_store::ListDatasetsUsingManifestError::MetadataDbListTags(_) => {
+                amp_dataset_store::ListDatasetsUsingManifestError::MetadataDbListTags(_) => {
                     "LIST_DATASET_TAGS_ERROR"
                 }
             },

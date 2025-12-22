@@ -1,5 +1,5 @@
 [package]
-name = "dataset-store"
+name = "amp-dataset-store"
 edition.workspace = true
 version.workspace = true
 license-file.workspace = true

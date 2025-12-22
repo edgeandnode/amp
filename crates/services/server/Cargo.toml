@@ -13,7 +13,7 @@ bincode.workspace = true
 bytes.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
-dataset-store = { path = "../../core/dataset-store" }
+amp-dataset-store = { path = "../../core/dataset-store" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }

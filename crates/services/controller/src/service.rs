@@ -1,6 +1,7 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
+use amp_dataset_store::DatasetStore;
 use axum::{
     Router,
     http::StatusCode,
@@ -8,7 +9,6 @@ use axum::{
     serve::{Listener as _, ListenerExt as _},
 };
 use common::{BoxError, store::Store};
-use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;

@@ -24,7 +24,7 @@
 
 use std::path::PathBuf;
 
-use dataset_store::DatasetKind;
+use amp_dataset_store::DatasetKind;
 use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use monitoring::logging;
 
@@ -96,7 +96,7 @@ where
     let kind = kind.into();
 
     let dataset_bytes = match kind {
-        dataset_store::DatasetKind::EvmRpc => {
+        DatasetKind::EvmRpc => {
             let tables = evm_rpc_datasets::tables::all(&network)
                 .iter()
                 .map(|table| {
@@ -114,7 +114,7 @@ where
             };
             serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
-        dataset_store::DatasetKind::Solana => {
+        DatasetKind::Solana => {
             let tables = solana_datasets::tables::all(&network)
                 .iter()
                 .map(|table| {
@@ -132,7 +132,7 @@ where
             };
             serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
-        dataset_store::DatasetKind::EthBeacon => {
+        DatasetKind::EthBeacon => {
             let tables = eth_beacon_datasets::all_tables(network.clone())
                 .iter()
                 .map(|table| {
@@ -150,7 +150,7 @@ where
             };
             serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
-        dataset_store::DatasetKind::Firehose => {
+        DatasetKind::Firehose => {
             let tables = firehose_datasets::evm::tables::all(&network)
                 .iter()
                 .map(|table| {
@@ -169,7 +169,7 @@ where
             };
             serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
         }
-        dataset_store::DatasetKind::Derived => {
+        DatasetKind::Derived => {
             return Err(Error::DerivedNotSupported);
         }
     };

@@ -9,6 +9,7 @@ pub mod git;
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use amp_dataset_store::{DatasetKind, DatasetStore};
 use common::{
     BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache, Store,
     arrow::array::RecordBatch,
@@ -17,7 +18,6 @@ use common::{
     sql,
     sql_str::SqlStr,
 };
-use dataset_store::{DatasetKind, DatasetStore};
 use datasets_common::{reference::Reference, table_name::TableName};
 use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
 use metadata_db::{MetadataDb, notification_multiplexer};

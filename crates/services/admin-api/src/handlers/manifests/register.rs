@@ -1,11 +1,11 @@
 //! Manifests register handler
 
+use amp_dataset_store::DatasetKind;
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use dataset_store::DatasetKind;
 use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
@@ -150,10 +150,10 @@ pub async fn handler(
             "failed to register manifest"
         );
         return Err(match err {
-            dataset_store::RegisterManifestError::ManifestStorage(e) => {
+            amp_dataset_store::RegisterManifestError::ManifestStorage(e) => {
                 Error::ObjectStoreWriteError(e)
             }
-            dataset_store::RegisterManifestError::MetadataRegistration(e) => {
+            amp_dataset_store::RegisterManifestError::MetadataRegistration(e) => {
                 Error::MetadataDbError(e)
             }
         }
@@ -227,7 +227,7 @@ pub enum Error {
     /// - Storage quota is exceeded
     /// - Network errors prevent writing to remote storage
     #[error("failed to write manifest to object store: {0}")]
-    ObjectStoreWriteError(#[source] dataset_store::StoreError),
+    ObjectStoreWriteError(#[source] amp_dataset_store::StoreError),
 
     /// Failed to register manifest in metadata database
     ///
