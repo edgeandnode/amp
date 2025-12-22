@@ -59,6 +59,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
             get(jobs::get_by_id::handler).delete(jobs::delete_by_id::handler),
         )
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
+        .route("/jobs/{id}/resume", put(jobs::resume::handler))
         .route(
             "/manifests",
             get(manifests::list_all::handler)

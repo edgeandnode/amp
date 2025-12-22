@@ -31,6 +31,13 @@ fn job_stop(id: &JobId) -> String {
     format!("jobs/{id}/stop")
 }
 
+/// Build URL path for resuming a job.
+///
+/// PUT `/jobs/{id}/resume`
+fn job_resume(id: &JobId) -> String {
+    format!("jobs/{id}/resume")
+}
+
 /// Build URL path for deleting a job by ID.
 ///
 /// DELETE `/jobs/{id}`
@@ -222,6 +229,88 @@ impl<'a> JobsClient<'a> {
                     .await
                     .unwrap_or_else(|_| String::from("Failed to read response body"));
                 Err(StopError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
+    /// Resume a stopped job by ID.
+    ///
+    /// PUTs to `/jobs/{id}/resume` endpoint.
+    ///
+    /// This operation is idempotent - resuming a job that's already in a scheduled or running state returns success (200).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StopError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(job_id = %id))]
+    pub async fn resume(&self, id: &JobId) -> Result<(), ResumeError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&job_resume(id))
+            .expect("valid URL");
+
+        tracing::debug!("Sending PUT request to resume job");
+
+        let response = self
+            .client
+            .http()
+            .put(url.as_str())
+            .send()
+            .await
+            .map_err(|err| ResumeError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                tracing::debug!("Job stop request processed successfully");
+                Ok(())
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    ResumeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    ResumeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_JOB_ID" => Err(ResumeError::InvalidJobId(error_response.into())),
+                    "JOB_NOT_FOUND" => Err(ResumeError::NotFound(error_response.into())),
+                    "STOP_JOB_ERROR" => Err(ResumeError::ResumeJobError(error_response.into())),
+                    "UNEXPECTED_STATE_CONFLICT" => {
+                        Err(ResumeError::UnexpectedStateConflict(error_response.into()))
+                    }
+                    _ => Err(ResumeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(ResumeError::UnexpectedResponse {
                     status: status.as_u16(),
                     message: text,
                 })
@@ -664,6 +753,47 @@ pub enum StopError {
     /// - Database constraint violations are encountered
     #[error("failed to stop job")]
     StopJobError(#[source] ApiError),
+
+    /// Unexpected state conflict during stop operation (500, UNEXPECTED_STATE_CONFLICT)
+    ///
+    /// This indicates an internal inconsistency in the state machine.
+    /// It should not occur under normal operation and indicates a bug.
+    #[error("unexpected state conflict")]
+    UnexpectedStateConflict(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when resuming a job.
+#[derive(Debug, thiserror::Error)]
+pub enum ResumeError {
+    /// The job ID in the URL path is invalid (400, INVALID_JOB_ID)
+    ///
+    /// This occurs when the ID cannot be parsed as a valid JobId.
+    #[error("invalid job ID")]
+    InvalidJobId(#[source] ApiError),
+
+    /// Job not found (404, JOB_NOT_FOUND)
+    ///
+    /// This occurs when the job ID is valid but no job
+    /// record exists with that ID in the metadata database.
+    #[error("job not found")]
+    NotFound(#[source] ApiError),
+
+    /// Database error during stop operation (500, STOP_JOB_ERROR)
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during the transaction
+    /// - Transaction conflicts or deadlocks occur
+    /// - Database constraint violations are encountered
+    #[error("failed to stop job")]
+    ResumeJobError(#[source] ApiError),
 
     /// Unexpected state conflict during stop operation (500, UNEXPECTED_STATE_CONFLICT)
     ///

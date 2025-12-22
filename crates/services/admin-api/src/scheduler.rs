@@ -64,6 +64,9 @@ pub trait SchedulerJobs: Send + Sync {
     /// Stop a running job
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError>;
 
+    /// Resume a stopped job
+    async fn resume_job(&self, job_id: JobId) -> Result<(), ResumeJobError>;
+
     /// Get a job by its ID
     async fn get_job(&self, job_id: JobId) -> Result<Option<Job>, GetJobError>;
 
@@ -240,6 +243,79 @@ pub enum StopJobError {
     /// - Database notification system encounters an error
     /// - Connection is lost during notification
     #[error("failed to send stop notification")]
+    SendNotification(#[source] metadata_db::Error),
+}
+
+/// Errors that can occur when resuming a job
+#[derive(Debug, thiserror::Error)]
+pub enum ResumeJobError {
+    /// Job not found
+    ///
+    /// This occurs when:
+    /// - No job exists with the specified ID in the database
+    /// - The job was deleted after the resume request was initiated
+    #[error("job not found")]
+    JobNotFound,
+
+    /// Job is already in a scheduled, running state
+    ///
+    /// This occurs when:
+    /// - Job was previously resumed by another request
+    /// - Job is already in a scheduled, running state
+    #[error("job is already in scheduled or running state: {status}")]
+    JobAlreadyRunning { status: JobStatus },
+
+    /// Job state conflict - cannot resume from current state
+    ///
+    /// This occurs when:
+    /// - Job is in an unexpected state that doesn't allow resuming
+    /// - Concurrent state modifications created an invalid transition
+    #[error("cannot resume job from current state: {current_status}")]
+    StateConflict { current_status: JobStatus },
+
+    /// Failed to begin transaction for resume operation
+    ///
+    /// This occurs when:
+    /// - Database connection pool is exhausted
+    /// - Database connection fails or is lost
+    /// - Transaction initialization encounters an error
+    #[error("failed to begin transaction")]
+    BeginTransaction(#[source] metadata_db::Error),
+
+    /// Failed to retrieve job information during resume operation
+    ///
+    /// This occurs when:
+    /// - Database query fails during job lookup
+    /// - Connection is lost during the transaction
+    /// - Query execution encounters an error
+    #[error("failed to get job")]
+    GetJob(#[source] metadata_db::Error),
+
+    /// Failed to update job status to scheduled
+    ///
+    /// This occurs when:
+    /// - Database update operation fails
+    /// - Transaction encounters a constraint violation
+    /// - Connection is lost during status update
+    #[error("failed to update job status")]
+    UpdateJobStatus(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction for resume operation
+    ///
+    /// This occurs when:
+    /// - Transaction commit fails due to conflicts
+    /// - Connection is lost before commit completes
+    /// - Database encounters an error during commit
+    #[error("failed to commit transaction")]
+    CommitTransaction(#[source] metadata_db::Error),
+
+    /// Failed to send resume notification to worker
+    ///
+    /// This occurs when:
+    /// - Worker notification channel fails
+    /// - Database notification system encounters an error
+    /// - Connection is lost during notification
+    #[error("failed to send resume notification")]
     SendNotification(#[source] metadata_db::Error),
 }
 

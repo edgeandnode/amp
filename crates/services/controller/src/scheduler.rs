@@ -28,8 +28,8 @@ use std::time::Duration;
 
 use admin_api::scheduler::{
     DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsByDatasetError,
-    ListJobsError, ListWorkersError, ScheduleJobError, SchedulerJobs, SchedulerWorkers,
-    StopJobError,
+    ListJobsError, ListWorkersError, ResumeJobError, ScheduleJobError, SchedulerJobs,
+    SchedulerWorkers, StopJobError,
 };
 use async_trait::async_trait;
 use dataset_store::DatasetKind;
@@ -196,6 +196,64 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Resume a stopped job with transactional guarantees
+    ///
+    /// Fetches the job, validates its state, updates it to scheduled, and notifies the
+    /// worker within a single database transaction for atomicity.
+    async fn resume_job_impl(&self, job_id: JobId) -> Result<(), ResumeJobError> {
+        // Begin a transaction to ensure atomicity
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(ResumeJobError::BeginTransaction)?;
+
+        // Fetch the job to get its node_id and validate it exists
+        let job = metadata_db::jobs::get_by_id(&mut tx, &job_id)
+            .await
+            .map_err(ResumeJobError::GetJob)?
+            .ok_or(ResumeJobError::JobNotFound)?;
+
+        // Attempt to resume the job
+        metadata_db::jobs::request_resume(&mut tx, &job_id)
+            .await
+            .map_err(|err| match err {
+                MetadataDbError::JobStatusUpdate(JobStatusUpdateError::NotFound) => {
+                    ResumeJobError::JobNotFound
+                }
+                MetadataDbError::JobStatusUpdate(JobStatusUpdateError::StateConflict {
+                    actual,
+                    ..
+                }) => match actual.into() {
+                    JobStatus::Scheduled | JobStatus::Running => {
+                        ResumeJobError::JobAlreadyRunning {
+                            status: actual.into(),
+                        }
+                    }
+                    _ => ResumeJobError::StateConflict {
+                        current_status: actual.into(),
+                    },
+                },
+                other => ResumeJobError::UpdateJobStatus(other),
+            })?;
+
+        // Notify the worker about the resume request (within the transaction)
+        metadata_db::workers::send_job_notif(
+            &mut tx,
+            job.node_id,
+            &JobNotification::resume(job_id),
+        )
+        .await
+        .map_err(ResumeJobError::SendNotification)?;
+
+        // Commit the transaction
+        tx.commit()
+            .await
+            .map_err(ResumeJobError::CommitTransaction)?;
+
+        Ok(())
+    }
+
     /// Reconcile failed jobs by retrying them with exponential backoff
     ///
     /// This method:
@@ -279,6 +337,10 @@ impl SchedulerJobs for Scheduler {
 
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError> {
         self.stop_job_impl(job_id).await
+    }
+
+    async fn resume_job(&self, job_id: JobId) -> Result<(), ResumeJobError> {
+        self.resume_job_impl(job_id).await
     }
 
     async fn get_job(&self, job_id: JobId) -> Result<Option<Job>, GetJobError> {

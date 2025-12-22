@@ -79,6 +79,44 @@ where
     }
 }
 
+/// Update job status to Scheduled
+///
+/// This function will only update the job status if it's currently in a valid state
+/// to be resumed (Stopped). If the job is already scheduled, this is
+/// considered success (idempotent behavior). If the job is in a running or scheduled state, this returns a conflict error.
+///
+/// Returns an error if the job doesn't exist, is in a terminal state, or if there's a database error.
+///
+/// **Note:** This function does not send notifications. The caller is responsible for
+/// calling `send_job_notification` after successful status update if worker notification
+/// is required.
+#[tracing::instrument(skip(exe), err)]
+pub async fn request_resume<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    // Try to update job status
+    match sql::update_status_if_any_state(
+        exe,
+        job_id.into(),
+        &[JobStatus::Stopped],
+        JobStatus::Scheduled,
+    )
+    .await
+    {
+        Ok(()) => Ok(()),
+        // Check if the job is already scheduled (idempotent behavior)
+        Err(JobStatusUpdateError::StateConflict {
+            actual: JobStatus::Scheduled,
+            ..
+        }) => Ok(()),
+        Err(err) => Err(Error::JobStatusUpdate(err)),
+    }
+}
+
 /// List jobs with cursor-based pagination support, optionally filtered by status
 ///
 /// Uses cursor-based pagination where `last_job_id` is the ID of the last job

@@ -3,6 +3,7 @@
 pub mod inspect;
 pub mod list;
 pub mod prune;
+pub mod resume;
 pub mod rm;
 pub mod stop;
 
@@ -23,6 +24,10 @@ pub enum Commands {
     #[command(after_help = include_str!("job/stop__after_help.md"))]
     Stop(stop::Args),
 
+    /// Resume a stopped job
+    #[command(after_help = include_str!("job/resume__after_help.md"))]
+    Resume(resume::Args),
+
     /// Remove job(s) by identifier or status filter
     #[command(alias = "remove")]
     #[command(after_help = include_str!("job/rm__after_help.md"))]
@@ -39,6 +44,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::List(args) => list::run(args).await?,
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Stop(args) => stop::run(args).await?,
+        Commands::Resume(args) => resume::run(args).await?,
         Commands::Rm(args) => rm::run(args).await?,
         Commands::Prune(args) => prune::run(args).await?,
     }
