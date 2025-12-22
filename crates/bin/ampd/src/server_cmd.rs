@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use amp_config::{Addrs, Config as CommonConfig};
 use amp_object_store::ObjectStoreCreationError;
 use common::{BoxError, store::Store};
-use config::{Addrs, Config as CommonConfig};
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -102,7 +102,7 @@ pub enum Error {
     /// This occurs when the server cannot establish a connection to the
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<config::ConfigError>),
+    MetadataDbConnection(#[source] Box<amp_config::ConfigError>),
 
     /// Failed to create data store
     ///

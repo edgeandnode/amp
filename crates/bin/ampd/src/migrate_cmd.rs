@@ -1,4 +1,4 @@
-use config::Config;
+use amp_config::Config;
 
 pub async fn run(config: Config) -> Result<(), Error> {
     let url = config

@@ -1,4 +1,4 @@
-use config::BuildInfo;
+use amp_config::BuildInfo;
 
 /// Controller-specific configuration
 ///

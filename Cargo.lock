@@ -28,10 +28,10 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin-api"
 version = "0.1.0"
 dependencies = [
+ "amp-config",
  "async-trait",
  "axum 0.8.7",
  "common",
- "config",
  "datafusion",
  "dataset-store",
  "datasets-common",
@@ -922,6 +922,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-config"
+version = "0.1.0"
+dependencies = [
+ "amp-object-store",
+ "common",
+ "datafusion",
+ "dump",
+ "figment",
+ "fs-err",
+ "metadata-db",
+ "metadata-db-postgres",
+ "monitoring",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "amp-object-store"
 version = "0.1.0"
 dependencies = [
@@ -992,10 +1010,10 @@ dependencies = [
 name = "ampd"
 version = "0.1.0"
 dependencies = [
+ "amp-config",
  "amp-object-store",
  "clap",
  "common",
- "config",
  "console-subscriber",
  "controller",
  "dataset-store",
@@ -2688,24 +2706,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "config"
-version = "0.1.0"
-dependencies = [
- "amp-object-store",
- "common",
- "datafusion",
- "dump",
- "figment",
- "fs-err",
- "metadata-db",
- "metadata-db-postgres",
- "monitoring",
- "serde",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2845,10 +2845,10 @@ name = "controller"
 version = "0.1.0"
 dependencies = [
  "admin-api",
+ "amp-config",
  "async-trait",
  "axum 0.8.7",
  "common",
- "config",
  "dataset-store",
  "datasets-common",
  "dump",
@@ -11882,6 +11882,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "amp-client",
+ "amp-config",
  "amp-object-store",
  "ampctl",
  "arrow-flight",
@@ -11889,7 +11890,6 @@ dependencies = [
  "clap",
  "color-backtrace",
  "common",
- "config",
  "controller",
  "ctor",
  "dataset-store",
@@ -13591,10 +13591,10 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 name = "worker"
 version = "0.1.0"
 dependencies = [
+ "amp-config",
  "backon",
  "chrono",
  "common",
- "config",
  "dataset-store",
  "datasets-common",
  "dump",
