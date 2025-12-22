@@ -64,7 +64,10 @@
 //!   2. **Retrieval phase**: `HashReference` → `get_dataset()` → `Dataset`
 //! - **Pre-resolved deps**: Functions with deps receive `HashReference` and skip phase 1
 
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
+};
 
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
@@ -72,7 +75,6 @@ use datasets_common::{
     reference::Reference,
 };
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::MetadataDb;
 
 use super::{
     dataset_access::DatasetAccess,
@@ -111,7 +113,6 @@ use crate::{
 /// 4. Constructs physical catalog for query execution
 pub async fn catalog_for_sql(
     dataset_store: &impl DatasetAccess,
-    metadata_db: &MetadataDb,
     data_store: &Store,
     query: &Statement,
     env: QueryEnv,
@@ -128,7 +129,7 @@ pub async fn catalog_for_sql(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, table)
+        let physical_table = PhysicalTable::get_active(data_store.clone(), table.clone())
             .await
             .map_err(|err| CatalogForSqlError::PhysicalTableRetrieval {
                 table: table.to_string(),
@@ -137,7 +138,7 @@ pub async fn catalog_for_sql(
             .ok_or_else(|| CatalogForSqlError::TableNotSynced {
                 table: table.to_string(),
             })?;
-        tables.push(physical_table.into());
+        tables.push(Arc::new(physical_table));
     }
 
     Ok(Catalog::new(tables, logical_catalog))

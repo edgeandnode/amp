@@ -90,7 +90,7 @@ use std::{
 };
 
 use common::{
-    BlockNum, BlockStreamer, BoxError, LogicalCatalog,
+    BlockNum, BlockStreamer, BoxError, LogicalCatalog, Store,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
@@ -136,7 +136,7 @@ pub async fn dump(
 
     // Ensure consistency before starting the dump procedure.
     for (table, _) in tables {
-        consistency_check(table)
+        consistency_check(table, &ctx.data_store)
             .await
             .map_err(|err| Error::ConsistencyCheck {
                 table_name: table.table_name().to_string(),
@@ -419,6 +419,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
         .map(|(i, ranges)| DumpPartition {
             block_streamer: client.clone(),
             metadata_db: ctx.metadata_db.clone(),
+            data_store: ctx.data_store.clone(),
             catalog: catalog.clone(),
             ranges,
             parquet_opts: parquet_opts.clone(),
@@ -557,6 +558,8 @@ struct DumpPartition<S: BlockStreamer> {
     block_streamer: S,
     /// The metadata database
     metadata_db: MetadataDb,
+    /// The data store for object storage operations
+    data_store: Store,
     /// The tables to write to
     catalog: Catalog,
     /// The block ranges to scan
@@ -632,6 +635,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         let mut writer = RawDatasetWriter::new(
             self.catalog.clone(),
             self.metadata_db.clone(),
+            self.data_store.clone(),
             self.parquet_opts.clone(),
             missing_ranges_by_table,
             self.compactors_by_table.clone(),

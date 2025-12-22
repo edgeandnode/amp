@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use common::catalog::physical::PhysicalTable;
+use common::{Store, catalog::physical::PhysicalTable, store::DeleteFilesStreamError};
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::{MetadataDb, files::FileId, gc::GcManifestRow};
 use object_store::{Error as ObjectStoreError, path::Path};
@@ -36,6 +36,7 @@ impl<'a> From<&'a ParquetConfig> for CollectorProperties {
 #[derive(Clone)]
 pub struct Collector {
     metadata_db: MetadataDb,
+    store: Store,
     table: Arc<PhysicalTable>,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -54,15 +55,17 @@ impl Debug for Collector {
 impl Collector {
     pub fn new(
         metadata_db: MetadataDb,
+        store: Store,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         Collector {
+            metadata_db,
+            store,
             table,
             props,
             metrics,
-            metadata_db,
         }
     }
 
@@ -122,9 +125,9 @@ impl Collector {
             );
         }
 
-        let object_store = self.table.object_store();
+        let store = self.store.clone();
         let mut delete_stream =
-            object_store.delete_stream(stream::iter(paths_to_remove).map(Ok).boxed());
+            store.delete_files_stream(stream::iter(paths_to_remove).map(Ok).boxed());
 
         let mut files_deleted = 0;
         let mut files_not_found = 0;
@@ -138,21 +141,21 @@ impl Collector {
                         metrics.inc_files_deleted(1, table_name.clone().to_string());
                     }
                 }
-                Err(ObjectStoreError::NotFound { path, .. }) => {
+                Err(DeleteFilesStreamError(ObjectStoreError::NotFound { path, .. })) => {
                     tracing::debug!("Expired file not found: {}", path);
                     files_not_found += 1;
                     if let Some(metrics) = &self.metrics {
                         metrics.inc_files_not_found(1, table_name.to_string());
                     }
                 }
-                Err(e) => {
+                Err(DeleteFilesStreamError(err)) => {
                     tracing::debug!("Expired files deleted: {}", files_deleted);
                     tracing::debug!("Expired files not found: {}", files_not_found);
                     if let Some(metrics) = &self.metrics {
                         metrics.inc_failed_collections(table_name.to_string());
                     }
 
-                    return Err(e)?;
+                    return Err(err.into());
                 }
             }
         }

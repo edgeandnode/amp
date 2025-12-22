@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    catalog::physical::PhysicalTable, metadata::FileName, query_context::Error as QueryError,
+    Store, catalog::physical::PhysicalTable, metadata::FileName, query_context::Error as QueryError,
 };
 use futures::TryStreamExt as _;
 use metadata_db::LocationId;
@@ -29,7 +29,10 @@ use object_store::ObjectMeta;
 ///
 /// ⚠️ **Warning**: This function has side effects - it deletes orphaned files from object store.
 /// These deletions are logged at `WARN` level before execution.
-pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyError> {
+pub async fn consistency_check(
+    table: &PhysicalTable,
+    store: &Store,
+) -> Result<(), ConsistencyError> {
     // See also: metadata-consistency
 
     let location_id = table.location_id();
@@ -43,8 +46,6 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
         })?;
 
     let registered_files: BTreeSet<FileName> = files.into_iter().map(|m| m.file_name).collect();
-
-    let store = table.object_store();
 
     let stored_files: BTreeMap<FileName, ObjectMeta> = table
         .list_files()
@@ -73,13 +74,14 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyE
             // This file was written by a dump job, but it is not present in the metadata DB,
             // so it is an orphaned file. Delete it.
             tracing::warn!("Deleting orphaned file: {}", object_meta.location);
-            store.delete(&object_meta.location).await.map_err(|err| {
-                ConsistencyError::DeleteOrphanedFile {
+            store
+                .delete_file_in_object_store(&object_meta.location)
+                .await
+                .map_err(|err| ConsistencyError::DeleteOrphanedFile {
                     location_id,
                     filename: filename.to_string(),
-                    source: err,
-                }
-            })?;
+                    source: err.0,
+                })?;
         }
     }
 
@@ -133,7 +135,7 @@ pub enum ConsistencyError {
     ListObjectStore {
         location_id: LocationId,
         #[source]
-        source: object_store::Error,
+        source: common::store::StreamRevisionFilesInObjectStoreError,
     },
 
     /// Failed to delete orphaned file from object store

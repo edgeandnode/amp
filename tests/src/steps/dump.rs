@@ -37,10 +37,11 @@ impl Step {
         );
 
         let result: Result<(), BoxError> = async {
+            let data_store = ctx.daemon_worker().data_store().clone();
             let physical_tables = test_helpers::dump_dataset(
                 ctx.daemon_worker().config().clone(),
                 ctx.daemon_worker().metadata_db().clone(),
-                ctx.daemon_worker().data_store().clone(),
+                data_store.clone(),
                 ctx.daemon_worker().dataset_store().clone(),
                 self.dataset.clone(),
                 self.end,
@@ -48,7 +49,7 @@ impl Step {
             .await?;
 
             for table in physical_tables {
-                test_helpers::check_table_consistency(&table).await?;
+                test_helpers::check_table_consistency(&table, &data_store).await?;
             }
 
             Ok(())

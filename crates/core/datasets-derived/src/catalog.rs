@@ -41,13 +41,11 @@ use datasets_common::{
     table_name::TableName,
 };
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::MetadataDb;
 
 use crate::manifest::Function;
 
 pub async fn catalog_for_sql_with_deps(
     store: &impl DatasetAccess,
-    metadata_db: &MetadataDb,
     data_store: &Store,
     query: &Statement,
     env: &QueryEnv,
@@ -61,7 +59,6 @@ pub async fn catalog_for_sql_with_deps(
 
     get_physical_catalog_with_deps(
         store,
-        metadata_db,
         data_store,
         table_refs,
         func_refs,
@@ -73,11 +70,9 @@ pub async fn catalog_for_sql_with_deps(
     .map_err(CatalogForSqlWithDepsError::GetPhysicalCatalogWithDeps)
 }
 
-#[expect(clippy::too_many_arguments)]
 async fn get_physical_catalog_with_deps(
     dataset_store: &impl DatasetAccess,
-    metadata_db: &MetadataDb,
-    data_store: &common::store::Store,
+    data_store: &Store,
     table_refs: impl IntoIterator<Item = TableReference<DepAlias>>,
     function_refs: impl IntoIterator<Item = FunctionReference<DepAliasOrSelfRef>>,
     env: &QueryEnv,
@@ -97,7 +92,7 @@ async fn get_physical_catalog_with_deps(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(metadata_db.clone(), data_store, table)
+        let physical_table = PhysicalTable::get_active(data_store.clone(), table.clone())
             .await
             .map_err(
                 |err| GetPhysicalCatalogWithDepsError::PhysicalTableRetrieval {

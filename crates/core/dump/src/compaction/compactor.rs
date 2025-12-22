@@ -9,9 +9,9 @@ use std::{
 };
 
 use common::{
-    BlockNum, ParquetFooterCache,
+    BlockNum, CachedStore,
     catalog::physical::PhysicalTable,
-    metadata::{SegmentSize, segments::BlockRange},
+    metadata::{FileName, SegmentSize, segments::BlockRange},
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
@@ -52,8 +52,8 @@ impl<'a> From<&'a ParquetConfig> for CompactorProperties {
 #[derive(Clone)]
 pub struct Compactor {
     metadata_db: MetadataDb,
+    store: CachedStore,
     table: Arc<PhysicalTable>,
-    cache: ParquetFooterCache,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
 }
@@ -83,15 +83,15 @@ impl Display for Compactor {
 impl Compactor {
     pub fn new(
         metadata_db: MetadataDb,
-        cache: ParquetFooterCache,
+        store: CachedStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         Compactor {
             metadata_db,
+            store,
             table,
-            cache,
             props,
             metrics,
         }
@@ -105,14 +105,15 @@ impl Compactor {
 
         let snapshot = self
             .table
-            .snapshot(false, self.cache.clone())
+            .snapshot(false, self.store.clone())
             .await
             .map_err(CompactorError::chain_error)?;
         let props = self.props.clone();
         let table_name = self.table.table_name();
 
-        let mut comapction_futures_stream = if let Some(plan) = CompactionPlan::from_snapshot(
+        let mut compaction_futures_stream = if let Some(plan) = CompactionPlan::from_snapshot(
             self.metadata_db.clone(),
+            self.store.clone(),
             props,
             &snapshot,
             &self.metrics,
@@ -132,7 +133,7 @@ impl Compactor {
             return Ok(self);
         };
 
-        while let Some(res) = comapction_futures_stream.next().await {
+        while let Some(res) = compaction_futures_stream.next().await {
             match res {
                 Ok(block_num) => {
                     tracing::info!(
@@ -164,6 +165,7 @@ impl Compactor {
 
 pub struct CompactionGroup {
     metadata_db: MetadataDb,
+    store: CachedStore,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
     pub(super) size: SegmentSize,
@@ -185,12 +187,14 @@ impl Debug for CompactionGroup {
 impl CompactionGroup {
     pub fn new_empty(
         metadata_db: MetadataDb,
+        store: CachedStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
     ) -> Self {
         CompactionGroup {
             metadata_db,
+            store,
             props,
             metrics,
             size: SegmentSize::default(),
@@ -233,11 +237,18 @@ impl CompactionGroup {
             }
         };
 
+        let filename = FileName::new_with_random_suffix(range.start());
+        let buf_writer = self
+            .store
+            .as_store()
+            .create_revision_file_writer(self.table.path(), &filename);
         let mut writer = ParquetFileWriter::new(
+            self.store.as_store(),
+            buf_writer,
+            filename,
             Arc::clone(&self.table),
-            &self.props,
-            range.start(),
             self.props.max_row_group_bytes,
+            self.props.parquet.clone(),
         )
         .map_err(CompactorError::create_writer_error(&self.props))?;
 

@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::parquet::{
-    arrow::{
-        arrow_reader::ArrowReaderOptions,
-        async_reader::{AsyncFileReader, ParquetObjectReader},
-    },
+    arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
     errors::ParquetError,
     file::metadata::{ParquetMetaData, ParquetMetaDataWriter},
 };
@@ -12,7 +9,7 @@ use metadata_db::{
     LocationId,
     files::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes},
 };
-use object_store::{ObjectMeta, ObjectStore, path::Path};
+use object_store::{ObjectMeta, path::Path};
 use tracing::instrument;
 
 mod file_name;
@@ -25,7 +22,7 @@ pub use self::{
     file_name::FileName,
     size::{Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt},
 };
-use crate::BoxError;
+use crate::{BoxError, Store};
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -84,24 +81,24 @@ impl FileMetadata {
     }
 }
 
-#[instrument(skip(object_meta, object_store), err)]
+#[instrument(skip(object_meta, store), err)]
 pub async fn extract_footer_bytes_from_file(
+    store: &Store,
     object_meta: &ObjectMeta,
-    object_store: Arc<dyn ObjectStore>,
 ) -> Result<FooterBytes, ParquetError> {
-    let parquet_metadata = extract_parquet_metadata_from_file(object_meta, object_store).await?;
+    let parquet_metadata = extract_parquet_metadata_from_file(store, object_meta).await?;
     let mut footer_bytes = Vec::new();
 
     ParquetMetaDataWriter::new(&mut footer_bytes, &parquet_metadata).finish()?;
     Ok(footer_bytes)
 }
 
-#[instrument(skip(object_meta, object_store), err)]
+#[instrument(skip(object_meta, store), err)]
 pub async fn amp_metadata_from_parquet_file(
+    store: &Store,
     object_meta: &ObjectMeta,
-    object_store: Arc<dyn ObjectStore>,
 ) -> Result<(FileName, ParquetMeta, FooterBytes), BoxError> {
-    let parquet_metadata = extract_parquet_metadata_from_file(object_meta, object_store).await?;
+    let parquet_metadata = extract_parquet_metadata_from_file(store, object_meta).await?;
 
     let file_metadata = parquet_metadata.file_metadata();
 
@@ -149,13 +146,14 @@ pub async fn amp_metadata_from_parquet_file(
 }
 
 async fn extract_parquet_metadata_from_file(
+    store: &Store,
     object_meta: &ObjectMeta,
-    object_store: Arc<dyn ObjectStore>,
 ) -> Result<Arc<ParquetMetaData>, ParquetError> {
-    let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
+    let mut reader = store
+        .create_revision_file_reader(object_meta.location.clone())
+        .with_file_size(object_meta.size)
         .with_preload_column_index(true)
-        .with_preload_offset_index(true)
-        .with_file_size(object_meta.size);
+        .with_preload_offset_index(true);
 
     let options = ArrowReaderOptions::default().with_page_index(true);
     reader.get_metadata(Some(&options)).await

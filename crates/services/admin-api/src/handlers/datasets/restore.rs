@@ -117,12 +117,10 @@ pub async fn handler(
         tracing::debug!(dataset_reference=%reference, table_name=%table.name(), "restoring table");
 
         let data_store = ctx.data_store.clone();
-        let metadata_db = ctx.metadata_db.clone();
         let dataset_reference_clone = hash_reference.clone();
 
         let task = tokio::spawn(async move {
             let physical_table = PhysicalTable::restore_latest_revision(
-                metadata_db,
                 data_store,
                 &dataset_reference_clone,
                 &table,

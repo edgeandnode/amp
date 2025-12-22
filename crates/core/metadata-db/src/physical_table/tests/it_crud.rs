@@ -256,13 +256,12 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     .expect("Failed to insert location for other table");
 
     //* When - Get locations for first table
-    let active_location1 = physical_table::get_active_physical_table(&mut conn, &hash, &table_name)
+    let active_location1 = physical_table::get_active(&mut conn, &hash, &table_name)
         .await
         .expect("Failed to get active locations for table 1");
-    let active_location2 =
-        physical_table::get_active_physical_table(&mut conn, &hash, &table2_name)
-            .await
-            .expect("Failed to get active locations for table 2");
+    let active_location2 = physical_table::get_active(&mut conn, &hash, &table2_name)
+        .await
+        .expect("Failed to get active locations for table 2");
 
     //* Then
     assert!(

@@ -26,7 +26,7 @@ use datasets_common::{
 use datasets_derived::DerivedDatasetKind;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
-use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
+use metadata_db::{LocationId, NotificationMultiplexerHandle};
 use tokio::{
     sync::{mpsc, watch},
     time::MissedTickBehavior,
@@ -178,6 +178,7 @@ impl StreamingQueryHandle {
 /// stream.
 pub struct StreamingQuery {
     query_env: QueryEnv,
+    data_store: Store,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -204,11 +205,10 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     #[expect(clippy::too_many_arguments)]
     pub async fn spawn(
-        metadata_db: MetadataDb,
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
-        data_store: &Store,
+        data_store: Store,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -244,20 +244,15 @@ impl StreamingQuery {
             .iter()
             .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
             .collect();
-        let blocks_table = resolve_blocks_table(
-            metadata_db,
-            dataset_store,
-            data_store,
-            src_datasets,
-            network,
-        )
-        .await?;
+        let blocks_table =
+            resolve_blocks_table(dataset_store, data_store.clone(), src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
             .transpose()?;
         let streaming_query = Self {
             query_env,
+            data_store,
             catalog,
             plan,
             tx,
@@ -290,9 +285,13 @@ impl StreamingQuery {
             self.table_updates.changed().await;
 
             // The table snapshots to execute the microbatch against.
-            let ctx =
-                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
-                    .await?;
+            let ctx = QueryContext::for_catalog(
+                self.catalog.clone(),
+                self.query_env.clone(),
+                self.data_store.clone(),
+                false,
+            )
+            .await?;
 
             // Get the next execution range
             let Some(MicrobatchRange { range, direction }) =
@@ -383,7 +382,13 @@ impl StreamingQuery {
                     LogicalCatalog::from_tables(std::iter::once(self.blocks_table.table()));
                 Catalog::new(vec![self.blocks_table.clone()], logical)
             };
-            QueryContext::for_catalog(catalog, self.query_env.clone(), false).await?
+            QueryContext::for_catalog(
+                catalog,
+                self.query_env.clone(),
+                self.data_store.clone(),
+                false,
+            )
+            .await?
         };
 
         // The latest common watermark across the source tables.
@@ -525,7 +530,8 @@ impl StreamingQuery {
                 ctx.catalog().physical_tables().cloned().collect(),
                 ctx.catalog().logical().clone(),
             );
-            QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
+            QueryContext::for_catalog(catalog, ctx.env.clone(), self.data_store.clone(), true)
+                .await?
         };
 
         let mut min_fork_block_num = prev_watermark.number;
@@ -694,11 +700,10 @@ pub fn keep_alive_stream<'a>(
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
-#[tracing::instrument(skip(metadata_db, dataset_store, data_store), err)]
+#[tracing::instrument(skip(dataset_store, data_store), err)]
 async fn resolve_blocks_table(
-    metadata_db: MetadataDb,
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: Store,
     root_datasets: BTreeMap<Hash, Arc<Dataset>>,
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {
@@ -723,13 +728,13 @@ async fn resolve_blocks_table(
             ))
         })?;
 
-    PhysicalTable::get_active(metadata_db, data_store, &table)
+    let table_name = table.name().clone();
+    PhysicalTable::get_active(data_store, table)
         .await?
         .ok_or_else(|| {
             BoxError::from(format!(
                 "table '{}.{}' has not been synced",
-                manifest_hash,
-                table.name()
+                manifest_hash, table_name
             ))
         })
 }

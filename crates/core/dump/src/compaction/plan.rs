@@ -7,6 +7,7 @@ use std::{
 };
 
 use common::{
+    CachedStore,
     catalog::{
         physical::{PhysicalTable, TableSnapshot},
         reader::AmpReaderFactory,
@@ -109,6 +110,8 @@ impl CompactionFile {
 pub struct CompactionPlan<'a> {
     /// The metadata database for committing compaction results.
     metadata_db: MetadataDb,
+    /// The data store for object storage operations.
+    store: CachedStore,
     /// Stream of files to be considered for compaction.
     files: BoxStream<'a, CompactionResult<CompactionFile>>,
     /// Compaction properties configuring the compaction algorithm
@@ -135,6 +138,7 @@ impl<'a> CompactionPlan<'a> {
     #[tracing::instrument(skip_all)]
     pub fn from_snapshot(
         metadata_db: MetadataDb,
+        store: CachedStore,
         opts: Arc<WriterProperties>,
         table: &'a TableSnapshot,
         metrics: &Option<Arc<MetricsRegistry>>,
@@ -162,6 +166,7 @@ impl<'a> CompactionPlan<'a> {
             .boxed();
         let current_group = CompactionGroup::new_empty(
             metadata_db.clone(),
+            store.clone(),
             opts.clone(),
             table.physical_table().clone(),
             metrics.clone(),
@@ -173,6 +178,7 @@ impl<'a> CompactionPlan<'a> {
             metrics: metrics.as_ref().cloned(),
             table: table.physical_table().clone(),
             metadata_db,
+            store,
             current_group,
             current_file: None,
             current_candidate: None,
@@ -211,6 +217,7 @@ impl<'a> Stream for CompactionPlan<'a> {
                         this.current_file = Some(candidate);
                         this.current_group = CompactionGroup::new_empty(
                             this.metadata_db.clone(),
+                            this.store.clone(),
                             this.opts.clone(),
                             this.table.clone(),
                             this.metrics.clone(),
@@ -224,6 +231,7 @@ impl<'a> Stream for CompactionPlan<'a> {
                             &mut this.current_group,
                             CompactionGroup::new_empty(
                                 this.metadata_db.clone(),
+                                this.store.clone(),
                                 this.opts.clone(),
                                 this.table.clone(),
                                 this.metrics.clone(),
@@ -264,6 +272,7 @@ impl<'a> Stream for CompactionPlan<'a> {
                                 &mut this.current_group,
                                 CompactionGroup::new_empty(
                                     this.metadata_db.clone(),
+                                    this.store.clone(),
                                     this.opts.clone(),
                                     this.table.clone(),
                                     this.metrics.clone(),

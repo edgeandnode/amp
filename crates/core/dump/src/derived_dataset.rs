@@ -99,7 +99,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::{Generation, segments::ResumeWatermark},
+    metadata::{FileName, Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
 use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
@@ -138,7 +138,7 @@ pub async fn dump(
 
     // Pre-check all tables for consistency before spawning tasks
     for (table, _) in tables {
-        consistency_check(table)
+        consistency_check(table, &ctx.data_store)
             .await
             .map_err(|err| Error::ConsistencyCheck {
                 table_name: table.table_name().to_string(),
@@ -357,7 +357,6 @@ async fn dump_table(
 
     let catalog = catalog_for_sql_with_deps(
         &ctx.dataset_store,
-        &ctx.metadata_db,
         &ctx.data_store,
         &query,
         &env,
@@ -395,8 +394,13 @@ async fn dump_table(
 
             let resolved = end
                 .resolve(start, async {
-                    let query_ctx =
-                        QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
+                    let query_ctx = QueryContext::for_catalog(
+                        catalog.clone(),
+                        env.clone(),
+                        ctx.data_store.clone(),
+                        false,
+                    )
+                    .await?;
                     query_ctx
                         .max_end_block(&plan.clone().attach_to(&query_ctx)?)
                         .await
@@ -484,11 +488,10 @@ async fn dump_sql_query(
     let keep_alive_interval = ctx.config.keep_alive_interval;
     let mut stream = {
         StreamingQuery::spawn(
-            ctx.metadata_db.clone(),
             env.clone(),
             catalog.clone(),
             &ctx.dataset_store,
-            &ctx.data_store,
+            ctx.data_store.clone(),
             query,
             start,
             end,
@@ -503,11 +506,17 @@ async fn dump_sql_query(
     };
 
     let mut microbatch_start = start;
+    let mut filename = FileName::new_with_random_suffix(microbatch_start);
+    let mut buf_writer = ctx
+        .data_store
+        .create_revision_file_writer(physical_table.path(), &filename);
     let mut writer = ParquetFileWriter::new(
+        ctx.data_store.clone(),
+        buf_writer,
+        filename,
         physical_table.clone(),
-        opts,
-        microbatch_start,
         opts.max_row_group_bytes,
+        opts.parquet.clone(),
     )?;
 
     let table_name = physical_table.table_name();
@@ -560,11 +569,17 @@ async fn dump_sql_query(
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
+                filename = FileName::new_with_random_suffix(microbatch_start);
+                buf_writer = ctx
+                    .data_store
+                    .create_revision_file_writer(physical_table.path(), &filename);
                 writer = ParquetFileWriter::new(
+                    ctx.data_store.clone(),
+                    buf_writer,
+                    filename,
                     physical_table.clone(),
-                    opts,
-                    microbatch_start,
                     opts.max_row_group_bytes,
+                    opts.parquet.clone(),
                 )?;
 
                 if let Some(ref metrics) = metrics {
