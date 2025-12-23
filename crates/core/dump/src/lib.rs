@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetKind, DatasetStore};
-use common::{
-    catalog::physical::PhysicalTable,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
-};
+use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use datasets_common::hash_reference::HashReference;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
@@ -33,7 +30,7 @@ pub use self::{
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
 };
 use crate::{
-    compaction::{AmpCompactor, CollectorProperties, CompactorProperties, SegmentSizeLimit},
+    compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},
     config::Config,
     metrics::MetricsRegistry,
 };
@@ -43,19 +40,19 @@ pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
     kind: DatasetKind,
-    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,
+    writer: impl Into<Option<metadata_db::JobId>>,
 ) -> Result<(), Error> {
     if kind.is_raw() {
         // Raw datasets (EvmRpc, EthBeacon, Firehose)
-        raw_dataset::dump(ctx, dataset, tables, max_writers, end)
+        raw_dataset::dump(ctx, dataset, max_writers, end, writer)
             .await
             .map_err(Error::RawDatasetDump)?;
     } else {
         // Derived datasets
-        derived_dataset::dump(ctx, dataset, tables, microbatch_max_interval, end)
+        derived_dataset::dump(ctx, dataset, microbatch_max_interval, end, writer)
             .await
             .map_err(Error::DerivedDatasetDump)?;
     }

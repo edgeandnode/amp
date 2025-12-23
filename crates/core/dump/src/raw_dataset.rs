@@ -115,13 +115,11 @@ use crate::{
 pub async fn dump(
     ctx: Ctx,
     dataset_reference: &HashReference,
-    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     max_writers: u16,
     end: EndBlock,
+    writer: impl Into<Option<metadata_db::JobId>>,
 ) -> Result<(), Error> {
-    if tables.is_empty() {
-        return Ok(());
-    }
+    let writer = writer.into();
 
     let dump_start_time = Instant::now();
     let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
@@ -132,11 +130,57 @@ pub async fn dump(
         .await
         .map_err(Error::GetDataset)?;
 
+    // Initialize physical tables and compactors
+    let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
+    for table in dataset.resolved_tables(dataset_reference.to_reference().into()) {
+        // Try to get existing active physical table (handles retry case)
+        let physical_table: Arc<PhysicalTable> =
+            match PhysicalTable::get_active(ctx.data_store.clone(), table.clone())
+                .await
+                .map_err(Error::GetActivePhysicalTable)?
+            {
+                // Reuse existing table (retry scenario)
+                Some(pt) => pt,
+                // Create new table (initial attempt)
+                None => common::catalog::physical::register_new_table_revision(
+                    ctx.data_store.clone(),
+                    dataset_reference.clone(),
+                    table,
+                )
+                .await
+                .map_err(Error::RegisterNewPhysicalTable)?,
+            }
+            .into();
+
+        let compactor = AmpCompactor::start(
+            ctx.metadata_db.clone(),
+            ctx.data_store.clone(),
+            parquet_opts.clone(),
+            physical_table.clone(),
+            ctx.metrics.clone(),
+        )
+        .into();
+
+        tables.push((physical_table, compactor));
+    }
+
+    if tables.is_empty() {
+        return Ok(());
+    }
+
+    // Assign job writer if provided (locks tables to job)
+    if let Some(writer) = writer {
+        let location_ids: Vec<_> = tables.iter().map(|(pt, _)| pt.location_id()).collect();
+        metadata_db::physical_table::assign_job_writer(&ctx.metadata_db, &location_ids, writer)
+            .await
+            .map_err(Error::AssignJobWriter)?;
+    }
+
     let logical = LogicalCatalog::from_tables(tables.iter().map(|(t, _)| t.table()));
     let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
 
     // Ensure consistency before starting the dump procedure.
-    for (table, _) in tables {
+    for (table, _) in &tables {
         consistency_check(table, &ctx.data_store)
             .await
             .map_err(|err| Error::ConsistencyCheck {
@@ -204,7 +248,7 @@ pub async fn dump(
 
         let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> = Default::default();
 
-        for (table, compactor) in tables {
+        for (table, compactor) in &tables {
             let end = match end {
                 None => latest_block,
                 Some(end) => BlockNum::min(end, latest_block),
@@ -252,7 +296,7 @@ pub async fn dump(
             missing_ranges_by_table,
             compactors_by_table,
             metrics.as_ref(),
-            tables,
+            &tables,
         )
         .await?;
     }
@@ -260,7 +304,7 @@ pub async fn dump(
     // Record dump duration on successful completion
     if let Some(ref metrics) = metrics {
         let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-        for (table, _compactor) in tables {
+        for (table, _compactor) in &tables {
             let table_name = table.table_name().to_string();
             let job_id = table_name.clone();
             metrics.record_dump_duration(duration_millis, table_name, job_id);
@@ -292,6 +336,31 @@ pub enum Error {
     /// - Missing required manifest fields
     #[error("Failed to get dataset")]
     GetDataset(#[source] amp_dataset_store::GetDatasetError),
+
+    /// Failed to get active physical table
+    ///
+    /// This error occurs when querying for an active physical table fails.
+    /// This typically happens due to database connection issues.
+    ///
+    /// Note: This wraps BoxError because PhysicalTable::get_active currently
+    /// returns BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to get active physical table")]
+    GetActivePhysicalTable(#[source] BoxError),
+
+    /// Failed to register physical table revision
+    ///
+    /// This error occurs when registering a new physical table revision fails,
+    /// typically due to storage configuration issues, database connection problems,
+    /// or invalid URL construction.
+    #[error("Failed to register new physical table")]
+    RegisterNewPhysicalTable(#[source] common::catalog::physical::RegisterNewTableRevisionError),
+
+    /// Failed to assign job writer
+    ///
+    /// This error occurs when assigning the job as the writer for physical
+    /// table locations fails, typically due to database connection issues.
+    #[error("Failed to assign job writer")]
+    AssignJobWriter(#[source] metadata_db::Error),
 
     /// Failed consistency check for table
     ///
