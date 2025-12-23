@@ -15,9 +15,10 @@
 //! - End block: `--end-block` flag (optional) - "latest", block number, or negative offset
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use admin_client::datasets::NodeSelector;
 use datasets_common::reference::Reference;
 use dump::EndBlock;
-use worker::{job::JobId, node_id::NodeId};
+use worker::job::JobId;
 
 use crate::args::GlobalArgs;
 
@@ -62,8 +63,8 @@ pub struct Args {
     /// If not specified, a worker will be selected randomly from available workers.
     ///
     /// The worker must be active (has sent heartbeats recently) for the deployment to succeed.
-    #[arg(long, value_parser = clap::value_parser!(NodeId))]
-    pub worker_id: Option<NodeId>,
+    #[arg(long, value_parser = clap::value_parser!(NodeSelector))]
+    pub worker_id: Option<NodeSelector>,
 }
 
 /// Result of a dataset deployment operation.
@@ -125,7 +126,7 @@ async fn deploy_dataset(
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
-    worker_id: Option<NodeId>,
+    worker_id: Option<NodeSelector>,
 ) -> Result<JobId, Error> {
     let client = global.build_client().map_err(Error::ClientBuild)?;
     let job_id = client

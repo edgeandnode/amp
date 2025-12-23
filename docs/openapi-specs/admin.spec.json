@@ -1781,7 +1781,7 @@
               "string",
               "null"
             ],
-            "description": "Optional worker ID to assign the job to\n\nIf specified, the job will be assigned to this specific worker.\nIf not specified, a worker will be selected randomly from available workers.\n\nThe worker must be active (has sent heartbeats recently) for the deployment to succeed."
+            "description": "Optional worker selector - either an exact worker ID or a glob pattern.\n\nExamples:\n- `\"worker-node-0\"` - assigns to the specific worker with ID \"worker-node-0\"\n- `\"worker-eth-*\"` - randomly selects from workers matching the pattern\n\nIf not specified, a worker will be selected randomly from all available workers.\nIf a glob pattern is provided, one matching worker will be randomly selected\nThe worker must be active (has sent heartbeats recently) for the deployment to succeed."
           }
         }
       },
