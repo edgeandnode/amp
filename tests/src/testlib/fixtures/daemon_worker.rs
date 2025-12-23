@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use common::{BoxError, store::Store};
+use amp_data_store::DataStore;
+use common::BoxError;
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
@@ -21,7 +22,7 @@ use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRun
 pub struct DaemonWorker {
     config: Config,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     node_id: NodeId,
 
@@ -36,7 +37,7 @@ impl DaemonWorker {
     pub async fn new(
         config: Arc<config::Config>,
         metadata_db: MetadataDb,
-        data_store: Store,
+        data_store: DataStore,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         node_id: NodeId,
@@ -84,7 +85,7 @@ impl DaemonWorker {
     }
 
     /// Get a reference to the data store.
-    pub fn data_store(&self) -> &Store {
+    pub fn data_store(&self) -> &DataStore {
         &self.data_store
     }
 

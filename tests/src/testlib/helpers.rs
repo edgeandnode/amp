@@ -9,8 +9,9 @@ pub mod git;
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use amp_data_store::DataStore;
 use common::{
-    BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache, Store,
+    BoxError, LogicalCatalog,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -40,7 +41,7 @@ use super::fixtures::SnapshotContext;
 pub async fn dump_internal(
     config: WorkerConfig,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     dataset_ref: Reference,
     end_block: EndBlock,
@@ -61,9 +62,6 @@ pub async fn dump_internal(
     let mut tables = Vec::with_capacity(dataset.tables.len());
 
     let opts = dump::parquet_opts(&config.parquet);
-    let cache = ParquetFooterCache::builder(opts.cache_size_mb)
-        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
-        .build();
     for table in dataset.resolved_tables(dataset_ref.clone().into()) {
         // Always reuse existing physical tables in test scenarios (fresh = false)
         let physical_table: Arc<PhysicalTable> =
@@ -79,10 +77,9 @@ pub async fn dump_internal(
                 }
             }
             .into();
-        let cached_store = common::CachedStore::from_parts(data_store.clone(), cache.clone());
         let compactor = AmpCompactor::start(
             metadata_db.clone(),
-            cached_store,
+            data_store.clone(),
             opts.clone(),
             physical_table.clone(),
             None,
@@ -131,7 +128,7 @@ pub async fn dump_internal(
 pub async fn dump_dataset(
     config: WorkerConfig,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     dataset: Reference,
     end_block: u64,
@@ -157,7 +154,7 @@ pub async fn dump_dataset(
 /// or synchronization issues between metadata and storage.
 pub async fn check_table_consistency(
     table: &Arc<PhysicalTable>,
-    store: &Store,
+    store: &DataStore,
 ) -> Result<(), BoxError> {
     consistency_check(table, store).await.map_err(Into::into)
 }
@@ -176,7 +173,7 @@ pub async fn check_table_consistency(
 pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     // 1. Restore via Admin API (indexes files into metadata DB)
@@ -358,7 +355,7 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
 pub async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: &DataStore,
 ) -> Result<Catalog, BoxError> {
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")
         .parse()

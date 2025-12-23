@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use amp_data_store::{DataStore, file_name::FileName};
 use datafusion::parquet::{
     arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
     errors::ParquetError,
@@ -12,17 +13,15 @@ use metadata_db::{
 use object_store::{ObjectMeta, path::Path};
 use tracing::instrument;
 
-mod file_name;
 pub mod parquet;
 pub mod segments;
 mod size;
 
 use self::parquet::{PARQUET_METADATA_KEY, ParquetMeta};
-pub use self::{
-    file_name::FileName,
-    size::{Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt},
+pub use self::size::{
+    Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt,
 };
-use crate::{BoxError, Store};
+use crate::BoxError;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -83,7 +82,7 @@ impl FileMetadata {
 
 #[instrument(skip(object_meta, store), err)]
 pub async fn extract_footer_bytes_from_file(
-    store: &Store,
+    store: &DataStore,
     object_meta: &ObjectMeta,
 ) -> Result<FooterBytes, ParquetError> {
     let parquet_metadata = extract_parquet_metadata_from_file(store, object_meta).await?;
@@ -95,7 +94,7 @@ pub async fn extract_footer_bytes_from_file(
 
 #[instrument(skip(object_meta, store), err)]
 pub async fn amp_metadata_from_parquet_file(
-    store: &Store,
+    store: &DataStore,
     object_meta: &ObjectMeta,
 ) -> Result<(FileName, ParquetMeta, FooterBytes), BoxError> {
     let parquet_metadata = extract_parquet_metadata_from_file(store, object_meta).await?;
@@ -146,7 +145,7 @@ pub async fn amp_metadata_from_parquet_file(
 }
 
 async fn extract_parquet_metadata_from_file(
-    store: &Store,
+    store: &DataStore,
     object_meta: &ObjectMeta,
 ) -> Result<Arc<ParquetMetaData>, ParquetError> {
     let mut reader = store

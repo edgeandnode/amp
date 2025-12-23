@@ -18,12 +18,10 @@
 //!
 //! See also: metadata-consistency
 
+use amp_data_store::file_name::FileName;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Timestamp,
-    metadata::{file_name::FileName, segments::BlockRange},
-};
+use crate::{Timestamp, metadata::segments::BlockRange};
 
 pub const PARQUET_METADATA_KEY: &str = "nozzle_metadata";
 pub const PARENT_FILE_ID_METADATA_KEY: &str = "parent_file_ids";

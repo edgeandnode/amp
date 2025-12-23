@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+amp-data-store = { path = "../../core/data-store" }
 arrow-flight.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true

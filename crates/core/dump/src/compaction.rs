@@ -11,8 +11,9 @@ use std::{
 };
 
 pub use algorithm::{CompactionAlgorithm, SegmentSizeLimit};
+use amp_data_store::DataStore;
 pub use collector::{Collector, CollectorProperties};
-use common::{CachedStore, Timestamp, catalog::physical::PhysicalTable};
+use common::{Timestamp, catalog::physical::PhysicalTable};
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;
@@ -89,7 +90,7 @@ pub struct AmpCollectorInnerTask {
 impl AmpCollectorInnerTask {
     pub fn new(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
@@ -103,7 +104,7 @@ impl AmpCollectorInnerTask {
         );
         let collector = Collector::new(
             metadata_db,
-            store.as_store(),
+            store,
             props.clone(),
             table.clone(),
             metrics.clone(),
@@ -124,7 +125,7 @@ impl AmpCollectorInnerTask {
 
     fn start(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
@@ -262,7 +263,7 @@ impl AmpCompactorTask {
 
     pub fn start(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
@@ -289,7 +290,7 @@ impl AmpCompactorTask {
 impl AmpCompactor {
     pub fn start(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,

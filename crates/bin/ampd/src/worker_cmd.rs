@@ -1,5 +1,5 @@
+use amp_data_store::DataStore;
 use amp_object_store::ObjectStoreCreationError;
-use common::store::Store;
 use config::Config;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
@@ -13,8 +13,12 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
         .await
         .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
-    let data_store = Store::new(metadata_db.clone(), config.data_store_url.clone())
-        .map_err(Error::DataStoreCreation)?;
+    let data_store = DataStore::new(
+        metadata_db.clone(),
+        config.data_store_url.clone(),
+        config.parquet.cache_size_mb,
+    )
+    .map_err(Error::DataStoreCreation)?;
 
     let dataset_store = {
         let provider_configs_store = ProviderConfigsStore::new(

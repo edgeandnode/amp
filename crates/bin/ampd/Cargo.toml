@@ -14,6 +14,7 @@ console-subscriber = ["dep:console-subscriber"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
+amp-data-store = { path = "../../core/data-store" }
 amp-object-store = { path = "../../core/object-store" }
 clap.workspace = true
 common = { path = "../../core/common" }

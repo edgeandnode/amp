@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
+use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BoxError, Store, Timestamp,
+    BoxError, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
-        FileName, Generation, extract_footer_bytes_from_file,
+        Generation, extract_footer_bytes_from_file,
         parquet::{
             GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
         },
@@ -60,7 +61,7 @@ pub async fn commit_metadata(
 }
 
 pub struct ParquetFileWriter {
-    store: Store,
+    store: DataStore,
     writer: AsyncArrowWriter<BufWriter>,
     filename: FileName,
     table: Arc<PhysicalTable>,
@@ -69,7 +70,7 @@ pub struct ParquetFileWriter {
 
 impl ParquetFileWriter {
     pub fn new(
-        store: Store,
+        store: DataStore,
         writer: BufWriter,
         filename: FileName,
         table: Arc<PhysicalTable>,

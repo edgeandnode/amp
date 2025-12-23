@@ -1,4 +1,5 @@
-use crate::BlockNum;
+/// Block number type alias.
+pub type BlockNum = u64;
 
 /// A validated file name for parquet files.
 ///

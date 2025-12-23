@@ -1,5 +1,6 @@
 use std::{ops::Range, sync::Arc};
 
+use amp_data_store::{CachedParquetData, DataStore};
 use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -18,15 +19,12 @@ use datafusion::{
 use futures::future::BoxFuture;
 use metadata_db::{LocationId, files::FileId};
 
-use crate::{
-    BoxError,
-    store::{CachedParquetData, CachedStore},
-};
+use crate::BoxError;
 
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {
     pub location_id: LocationId,
-    pub store: CachedStore,
+    pub store: DataStore,
     pub schema: SchemaRef,
 }
 
@@ -35,7 +33,7 @@ impl AmpReaderFactory {
         self.store
             .get_cached_parquet_metadata(file, self.schema.clone())
             .await
-            .map_err(|e| e.into())
+            .map_err(|err| -> BoxError { err.into() })
     }
 }
 
@@ -81,7 +79,7 @@ pub struct AmpReader {
     pub file_id: FileId,
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
-    pub store: CachedStore,
+    pub store: DataStore,
     pub schema: SchemaRef,
 }
 
@@ -114,7 +112,9 @@ impl AsyncFileReader for AmpReader {
                 .get_cached_parquet_metadata(file_id, schema)
                 .await
                 .map(|cached| cached.metadata)
-                .map_err(|err| ParquetError::External(err.into()))
+                .map_err(|err: amp_data_store::GetCachedMetadataError| {
+                    ParquetError::External(err.into())
+                })
         })
     }
 }

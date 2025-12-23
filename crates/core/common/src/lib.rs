@@ -10,7 +10,6 @@ pub mod planning_context;
 pub mod query_context;
 pub mod sql;
 pub mod sql_str;
-pub mod store;
 pub mod stream_helpers;
 pub mod utils;
 
@@ -29,14 +28,11 @@ use datafusion::arrow::{
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
-pub use foyer::Cache;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
-use metadata_db::files::FileId;
 pub use planning_context::{DetachedLogicalPlan, PlanningContext};
 pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
-pub use store::{CachedStore, Store};
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;
@@ -58,9 +54,6 @@ pub type EvmAddressArrayType = FixedSizeBinaryArray;
 
 /// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
-
-pub use store::CachedParquetData;
-pub type ParquetFooterCache = Cache<FileId, CachedParquetData>;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Timestamp(pub Duration);

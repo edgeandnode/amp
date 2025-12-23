@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{
-    Store, catalog::physical::PhysicalTable, metadata::FileName, query_context::Error as QueryError,
-};
+use amp_data_store::{DataStore, file_name::FileName};
+use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
 use futures::TryStreamExt as _;
 use metadata_db::LocationId;
 use object_store::ObjectMeta;
@@ -31,7 +30,7 @@ use object_store::ObjectMeta;
 /// These deletions are logged at `WARN` level before execution.
 pub async fn consistency_check(
     table: &PhysicalTable,
-    store: &Store,
+    store: &DataStore,
 ) -> Result<(), ConsistencyError> {
     // See also: metadata-consistency
 
@@ -135,7 +134,7 @@ pub enum ConsistencyError {
     ListObjectStore {
         location_id: LocationId,
         #[source]
-        source: common::store::StreamRevisionFilesInObjectStoreError,
+        source: amp_data_store::StreamRevisionFilesInObjectStoreError,
     },
 
     /// Failed to delete orphaned file from object store

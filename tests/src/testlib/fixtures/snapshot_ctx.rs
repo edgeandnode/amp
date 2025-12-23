@@ -11,8 +11,9 @@
 
 use std::sync::Arc;
 
+use amp_data_store::DataStore;
 use common::{
-    BoxError, LogicalCatalog, QueryContext, Store,
+    BoxError, LogicalCatalog, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
 };
 use server::config::Config;
@@ -33,7 +34,7 @@ impl SnapshotContext {
     /// from dataset snapshot reference data or fresh ETL extraction pipeline dumps.
     pub async fn from_tables(
         config: &Config,
-        store: Store,
+        store: DataStore,
         tables: Vec<Arc<PhysicalTable>>,
     ) -> Result<Self, BoxError> {
         let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));

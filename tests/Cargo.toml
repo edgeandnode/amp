@@ -13,6 +13,7 @@ name = "tests"
 [dependencies]
 alloy.workspace = true
 amp-client = { path = "../crates/clients/flight" }
+amp-data-store = { path = "../crates/core/data-store" }
 amp-object-store = { path = "../crates/core/object-store" }
 ampctl = { path = "../crates/bin/ampctl" }
 arrow-flight.workspace = true

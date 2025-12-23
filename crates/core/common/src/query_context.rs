@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+use amp_data_store::DataStore;
 use arrow::{array::ArrayRef, compute::concat_batches};
 use axum::response::IntoResponse;
 use datafusion::{
@@ -32,10 +33,10 @@ use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
 use thiserror::Error;
-use tracing::{debug, field, instrument};
+use tracing::{field, instrument};
 
 use crate::{
-    BlockNum, BoxError, Store, arrow,
+    BlockNum, BoxError, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -47,7 +48,6 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::TableReference,
-    store::CachedStore,
     utils::error_with_causes,
 };
 
@@ -128,7 +128,6 @@ pub struct QueryEnv {
 
     // Per-query memory limit configuration
     pub query_max_mem_mb: usize,
-    pub parquet_cache_size_mb: u64,
 }
 
 /// Creates a QueryEnv with specified memory and cache configuration
@@ -139,7 +138,6 @@ pub fn create_query_env(
     max_mem_mb: usize,
     query_max_mem_mb: usize,
     spill_location: &[PathBuf],
-    parquet_cache_size_mb: u64,
 ) -> Result<QueryEnv, DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
@@ -171,7 +169,6 @@ pub fn create_query_env(
         object_store_registry: runtime_env.object_store_registry,
         isolate_pool,
         query_max_mem_mb,
-        parquet_cache_size_mb,
     })
 }
 
@@ -182,15 +179,15 @@ pub struct QueryContext {
     session_config: SessionConfig,
     catalog: CatalogSnapshot,
     /// Per-query memory pool (if per-query limits are enabled)
-    tiered_memory_pool: Arc<crate::memory_pool::TieredMemoryPool>,
-    store: CachedStore,
+    tiered_memory_pool: Arc<TieredMemoryPool>,
+    store: DataStore,
 }
 
 impl QueryContext {
     pub async fn for_catalog(
         catalog: Catalog,
         env: QueryEnv,
-        store: Store,
+        store: DataStore,
         ignore_canonical_segments: bool,
     ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
@@ -221,9 +218,6 @@ impl QueryContext {
         if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
             opts.execution.parquet.pushdown_filters = true;
         }
-
-        // Create cached store with parquet metadata caching
-        let store = CachedStore::new(store, env.parquet_cache_size_mb);
 
         // Create a catalog snapshot with canonical chain locked in
         let catalog_snapshot =
@@ -413,7 +407,7 @@ fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
 fn register_table(
     ctx: &SessionContext,
     table: Arc<TableSnapshot>,
-    store: &Store,
+    store: &DataStore,
 ) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
     create_catalog_schema(ctx, table.physical_table().catalog_schema().to_string());
@@ -467,7 +461,7 @@ async fn execute_plan(
     use datafusion::physical_plan::execute_stream;
 
     read_only_check(&plan)?;
-    debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
+    tracing::debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
     if logical_optimize {
         plan = ctx.state().optimize(&plan).map_err(Error::PlanningError)?;
@@ -483,7 +477,7 @@ async fn execute_plan(
 
     forbid_duplicate_field_names(&physical_plan, &plan).map_err(Error::PlanningError)?;
 
-    debug!("physical plan: {}", print_physical_plan(&*physical_plan));
+    tracing::debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     match is_explain {
         false => execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError),
