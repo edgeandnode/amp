@@ -30,7 +30,8 @@
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_config::Config;
-use common::{BoxError, store::Store};
+use amp_data_store::DataStore;
+use common::BoxError;
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
@@ -342,9 +343,10 @@ impl TestCtxBuilder {
         let config =
             Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
 
-        let data_store = Store::new(
+        let data_store = DataStore::new(
             metadata_db.conn_pool().clone(),
             config.data_store_url.clone(),
+            config.parquet.cache_size_mb,
         )?;
 
         // Create shared DatasetStore instance (used by both server and worker)

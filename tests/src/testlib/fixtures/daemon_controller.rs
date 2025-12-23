@@ -6,8 +6,11 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, BoxResult, store::Store};
+use amp_data_store::DataStore;
+use amp_dataset_store::DatasetStore;
+use common::{BoxError, BoxResult};
 use controller::config::Config;
+use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 
@@ -32,9 +35,9 @@ impl DaemonController {
     /// The controller will be automatically shut down when the fixture is dropped.
     pub async fn new(
         config: Arc<amp_config::Config>,
-        metadata_db: metadata_db::MetadataDb,
-        data_store: Store,
-        dataset_store: amp_dataset_store::DatasetStore,
+        metadata_db: MetadataDb,
+        data_store: DataStore,
+        dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
         // Convert common config to controller config
@@ -71,12 +74,12 @@ impl DaemonController {
     }
 
     /// Get a reference to the metadata database.
-    pub fn metadata_db(&self) -> &metadata_db::MetadataDb {
+    pub fn metadata_db(&self) -> &MetadataDb {
         &self.metadata_db
     }
 
     /// Get a reference to the dataset store.
-    pub fn dataset_store(&self) -> &amp_dataset_store::DatasetStore {
+    pub fn dataset_store(&self) -> &DatasetStore {
         &self.dataset_store
     }
 

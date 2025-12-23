@@ -87,13 +87,9 @@ pub(super) async fn new(
             }
             .into();
 
-        let cached_store = common::CachedStore::from_parts(
-            ctx.data_store.clone(),
-            job_ctx.parquet_footer_cache.clone(),
-        );
         let compactor = AmpCompactor::start(
             ctx.metadata_db.clone(),
-            cached_store,
+            ctx.data_store.clone(),
             opts.clone(),
             physical_table.clone(),
             metrics.clone(),

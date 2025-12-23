@@ -89,8 +89,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use amp_data_store::DataStore;
 use common::{
-    BlockNum, BlockStreamer, BoxError, LogicalCatalog, Store,
+    BlockNum, BlockStreamer, BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
@@ -567,7 +568,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The metadata database
     metadata_db: MetadataDb,
     /// The data store for object storage operations
-    data_store: Store,
+    data_store: DataStore,
     /// The tables to write to
     catalog: Catalog,
     /// The block ranges to scan

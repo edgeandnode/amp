@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
+use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetStore, GetDatasetError};
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
@@ -35,7 +36,6 @@ use common::{
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
     sql_str::SqlStr,
-    store::Store,
     utils::error_with_causes,
 };
 use datafusion::{
@@ -52,7 +52,7 @@ use prost::Message as _;
 use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status, service::Routes};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::{
     config::Config, metrics::MetricsRegistry,
@@ -65,7 +65,7 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -74,7 +74,7 @@ pub struct Service {
 impl Service {
     pub async fn create(
         config: Arc<Config>,
-        data_store: Store,
+        data_store: DataStore,
         metadata_db: MetadataDb,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
@@ -236,7 +236,7 @@ impl Service {
 
             let stream = QueryResultStream::Incremental {
                 stream: query
-                    .as_stream()
+                    .into_stream()
                     .map_err(|err| Error::StreamingExecutionError(err.to_string()))
                     .boxed(),
                 schema,
@@ -367,7 +367,7 @@ impl Service {
             .parse::<SqlStr>()
             .map_err(|err| Error::InvalidQuery(err.to_string()))?;
 
-        debug!("SQL query: {}", sql_str);
+        tracing::debug!("SQL query: {}", sql_str);
 
         let stream = self
             .execute_query(

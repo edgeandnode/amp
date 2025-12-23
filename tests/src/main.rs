@@ -48,12 +48,13 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use amp_config::Config;
+use amp_data_store::DataStore;
 use amp_dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
 };
 use clap::Parser;
-use common::{BoxError, Store};
+use common::BoxError;
 use datasets_common::reference::Reference;
 use dump::consistency_check;
 use fs_err as fs;
@@ -153,8 +154,12 @@ async fn main() {
                     .await
                     .expect("Failed to load config"),
             );
-            let data_store = Store::new(sysdb.conn_pool().clone(), config.data_store_url.clone())
-                .expect("Failed to create data store");
+            let data_store = DataStore::new(
+                sysdb.conn_pool().clone(),
+                config.data_store_url.clone(),
+                config.parquet.cache_size_mb,
+            )
+            .expect("Failed to create data store");
 
             let dataset_store = {
                 let provider_configs_store = ProviderConfigsStore::new(
@@ -267,7 +272,7 @@ async fn main() {
 async fn bless(
     ampctl: &Ampctl,
     dataset_store: DatasetStore,
-    data_store: Store,
+    data_store: DataStore,
     dataset: Reference,
     end: u64,
 ) -> Result<(), BoxError> {
@@ -321,7 +326,7 @@ async fn bless(
                 .delete_stream(path_stream)
                 .try_collect::<Vec<_>>()
                 .await
-                .map_err(|err| {
+                .map_err(|err: object_store::Error| {
                     format!(
                         "Failed to clear existing data for dataset '{}': {}",
                         dataset, err

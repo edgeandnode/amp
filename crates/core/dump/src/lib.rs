@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetKind, DatasetStore};
 use common::{
     catalog::physical::PhysicalTable,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
-    store::Store as DataStore,
 };
 use datasets_common::hash_reference::HashReference;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};

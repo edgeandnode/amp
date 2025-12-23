@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+amp-data-store = { path = "../../core/data-store" }
 backon.workspace = true
 chrono.workspace = true
 common = { path = "../../core/common" }

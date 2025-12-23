@@ -7,10 +7,11 @@ use std::{
 };
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
+use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
     BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
-    QueryContext, SPECIAL_BLOCK_NUM, Store,
+    QueryContext, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -33,7 +34,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{Instrument, debug, instrument};
+use tracing::{Instrument, instrument};
 
 /// Awaits any update for tables in a query context catalog.
 struct TableUpdates {
@@ -143,7 +144,7 @@ pub struct StreamingQueryHandle {
 }
 
 impl StreamingQueryHandle {
-    pub fn as_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
+    pub fn into_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
         let data_stream = MessageStreamWithBlockComplete::new(ReceiverStream::new(self.rx).map(Ok));
 
         let join = self.join_handle;
@@ -178,7 +179,7 @@ impl StreamingQueryHandle {
 /// stream.
 pub struct StreamingQuery {
     query_env: QueryEnv,
-    data_store: Store,
+    data_store: DataStore,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -208,7 +209,7 @@ impl StreamingQuery {
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
-        data_store: Store,
+        data_store: DataStore,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -394,7 +395,7 @@ impl StreamingQuery {
         // The latest common watermark across the source tables.
         let Some(common_watermark) = self.latest_src_watermark(&blocks_ctx, chains).await? else {
             // No common watermark across source tables.
-            debug!("no common watermark found");
+            tracing::debug!("no common watermark found");
             return Ok(None);
         };
 
@@ -404,7 +405,7 @@ impl StreamingQuery {
         }
 
         let Some(direction) = self.next_microbatch_start(&blocks_ctx).await? else {
-            debug!("no next microbatch start found");
+            tracing::debug!("no next microbatch start found");
             return Ok(None);
         };
         let start = direction.segment_start();
@@ -412,7 +413,7 @@ impl StreamingQuery {
             .next_microbatch_end(&blocks_ctx, start, common_watermark)
             .await?
         else {
-            debug!("no next microbatch end found");
+            tracing::debug!("no next microbatch end found");
             return Ok(None);
         };
         Ok(Some(MicrobatchRange {
@@ -624,7 +625,7 @@ impl StreamingQuery {
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         if results.num_rows() == 0 {
-            debug!("blocks table missing block {} {:?}", number, hash);
+            tracing::debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
         let get_hash_value = |column_name: &str| -> Option<BlockHash> {
@@ -666,7 +667,7 @@ pub fn keep_alive_stream<'a>(
     schema: SchemaRef,
     keep_alive_interval: u64,
 ) -> BoxStream<'a, Result<RecordBatch, DataFusionError>> {
-    let period = tokio::time::Duration::from_secs(keep_alive_interval);
+    let period = Duration::from_secs(keep_alive_interval);
     let mut keep_alive_interval = tokio::time::interval(period);
 
     let missed_tick_behavior = MissedTickBehavior::Delay;
@@ -703,7 +704,7 @@ pub fn keep_alive_stream<'a>(
 #[tracing::instrument(skip(dataset_store, data_store), err)]
 async fn resolve_blocks_table(
     dataset_store: &DatasetStore,
-    data_store: Store,
+    data_store: DataStore,
     root_datasets: BTreeMap<Hash, Arc<Dataset>>,
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {

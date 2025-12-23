@@ -6,8 +6,8 @@ use std::{
     task::{Context, Poll},
 };
 
+use amp_data_store::DataStore;
 use common::{
-    CachedStore,
     catalog::{
         physical::{PhysicalTable, TableSnapshot},
         reader::AmpReaderFactory,
@@ -111,7 +111,7 @@ pub struct CompactionPlan<'a> {
     /// The metadata database for committing compaction results.
     metadata_db: MetadataDb,
     /// The data store for object storage operations.
-    store: CachedStore,
+    store: DataStore,
     /// Stream of files to be considered for compaction.
     files: BoxStream<'a, CompactionResult<CompactionFile>>,
     /// Compaction properties configuring the compaction algorithm
@@ -138,7 +138,7 @@ impl<'a> CompactionPlan<'a> {
     #[tracing::instrument(skip_all)]
     pub fn from_snapshot(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         opts: Arc<WriterProperties>,
         table: &'a TableSnapshot,
         metrics: &Option<Arc<MetricsRegistry>>,
