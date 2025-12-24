@@ -163,7 +163,7 @@ async fn download_of1_car_file(
 
     let download_url = of1_car_download_url(epoch);
 
-    let action = match std::fs::metadata(dest).map(|meta| meta.len()) {
+    let action = match fs_err::metadata(dest).map(|meta| meta.len()) {
         Ok(0) => DownloadAction::Download,
         Ok(local_file_size) => {
             // Get the actual file size from the server to determine if we need to resume.

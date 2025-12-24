@@ -2649,6 +2649,7 @@ dependencies = [
  "itertools 0.14.0",
  "js-runtime",
  "metadata-db",
+ "monitoring",
  "object_store",
  "rand 0.9.2",
  "regex",
@@ -6651,7 +6652,6 @@ name = "monitoring"
 version = "0.1.0"
 dependencies = [
  "cargo_metadata",
- "common",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
