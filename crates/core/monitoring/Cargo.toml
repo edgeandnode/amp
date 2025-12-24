@@ -5,7 +5,6 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-common = { path = "../common" }
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
