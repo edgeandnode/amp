@@ -216,18 +216,48 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
                             yield block;
                         }
                         Err(e) => {
+                            let error_source = monitoring::logging::error_source(e.as_ref());
                             // Progressively more severe logging and longer retry interval.
-                            if num_retries < DEBUG_RETRY_LIMIT {
-                                num_retries += 1;
-                                tracing::debug!(block = %current_block, error = %e, "Block streaming failed, retrying");
-                                tokio::time::sleep(DEBUG_RETRY_DELAY).await;
-                            } else if num_retries < WARN_RETRY_LIMIT {
-                                num_retries += 1;
-                                tracing::warn!(block = %current_block, error = %e, "Block streaming failed, retrying");
-                                tokio::time::sleep(WARN_RETRY_DELAY).await;
-                            } else {
-                                tracing::error!(block = %current_block, error = %e, "Block streaming failed, retrying");
-                                tokio::time::sleep(ERROR_RETRY_DELAY).await;
+                            match num_retries {
+                                0 => {
+                                    // First error, make sure it is visible in info (default) logs.
+                                    num_retries += 1;
+                                    tracing::info!(
+                                        block = %current_block,
+                                        error = %e,
+                                        error_source,
+                                        "Block streaming failed, retrying"
+                                    );
+                                    tokio::time::sleep(DEBUG_RETRY_DELAY).await;
+                                }
+                                1..DEBUG_RETRY_LIMIT => {
+                                    num_retries += 1;
+                                    tracing::debug!(
+                                        block = %current_block,
+                                        error = %e,
+                                        error_source,
+                                        "Block streaming failed, retrying");
+                                    tokio::time::sleep(DEBUG_RETRY_DELAY).await;
+                                }
+                                DEBUG_RETRY_LIMIT..WARN_RETRY_LIMIT => {
+                                    num_retries += 1;
+                                    tracing::warn!(
+                                        block = %current_block,
+                                        error = %e,
+                                        error_source,
+                                        "Block streaming failed, retrying"
+                                    );
+                                    tokio::time::sleep(WARN_RETRY_DELAY).await;
+                                }
+                                _ => {
+                                    tracing::error!(
+                                        block = %current_block,
+                                        error = %e,
+                                        error_source,
+                                        "Block streaming failed, retrying"
+                                    );
+                                    tokio::time::sleep(ERROR_RETRY_DELAY).await;
+                                }
                             }
                             current_block = start + blocks_sent;
                             continue 'retry;
