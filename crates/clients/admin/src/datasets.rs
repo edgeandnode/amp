@@ -9,7 +9,7 @@ use datasets_common::{
 use dump::EndBlock;
 use monitoring::logging;
 use serde_json::value::RawValue;
-use worker::{job::JobId, node_id::NodeId};
+use worker::job::JobId;
 
 use super::{
     Client,
@@ -242,7 +242,7 @@ impl<'a> DatasetsClient<'a> {
         dataset_ref: &Reference,
         end_block: Option<EndBlock>,
         parallelism: u16,
-        worker_id: Option<NodeId>,
+        worker_id: Option<NodeSelector>,
     ) -> Result<JobId, DeployError> {
         let namespace = dataset_ref.namespace();
         let name = dataset_ref.name();
@@ -1105,7 +1105,7 @@ struct DeployRequest {
     end_block: Option<EndBlock>,
     parallelism: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
-    worker_id: Option<NodeId>,
+    worker_id: Option<NodeSelector>,
 }
 
 /// Input type for dataset registration manifest parameter.
@@ -1795,4 +1795,101 @@ pub enum ListJobsError {
     /// Unexpected response from the API
     #[error("unexpected response with status {status_code}")]
     UnexpectedResponse { status_code: u16 },
+}
+
+use worker::node_id::{InvalidIdError, NodeId, validate_node_id};
+
+/// A glob pattern for matching worker node IDs by prefix
+///
+/// Matches any node ID that starts with the pattern prefix.
+/// Created by parsing a string ending with `*` (e.g., `"worker-eth-*"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeIdGlob(String);
+
+impl serde::Serialize for NodeIdGlob {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        format!("{}*", self.0).serialize(serializer)
+    }
+}
+
+impl std::str::FromStr for NodeIdGlob {
+    type Err = InvalidGlobError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some(prefix) = s.strip_suffix('*') else {
+            return Err(InvalidGlobError(s.to_string()));
+        };
+        validate_node_id(prefix)?;
+
+        Ok(NodeIdGlob(prefix.to_string()))
+    }
+}
+
+/// Error returned when a glob pattern is invalid.
+#[derive(Debug, thiserror::Error)]
+#[error("glob pattern must end with '*', got '{0}'")]
+pub struct InvalidGlobError(String);
+
+impl From<InvalidIdError> for InvalidGlobError {
+    fn from(e: InvalidIdError) -> Self {
+        InvalidGlobError(e.to_string())
+    }
+}
+
+/// Selector for targeting worker nodes by exact ID or glob pattern
+///
+/// Used to specify which worker(s) should handle a job deployment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeSelector {
+    /// Match a specific worker by exact node ID
+    Exact(NodeId),
+    /// Match workers whose IDs start with the glob prefix
+    Glob(NodeIdGlob),
+}
+
+impl serde::Serialize for NodeSelector {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            NodeSelector::Exact(node_id) => node_id.serialize(serializer),
+            NodeSelector::Glob(glob) => glob.serialize(serializer),
+        }
+    }
+}
+
+impl std::str::FromStr for NodeSelector {
+    type Err = NodeSelectorParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.ends_with('*') {
+            let glob = NodeIdGlob::from_str(s).map_err(NodeSelectorParseError::InvalidGlob)?;
+            Ok(NodeSelector::Glob(glob))
+        } else {
+            let node_id = s
+                .parse::<NodeId>()
+                .map_err(NodeSelectorParseError::InvalidNodeId)?;
+            Ok(NodeSelector::Exact(node_id))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NodeSelectorParseError {
+    /// The string is not a valid node ID
+    ///
+    /// This occurs when the input doesn't end with `*` and fails node ID validation.
+    #[error("invalid node ID")]
+    InvalidNodeId(#[source] InvalidIdError),
+
+    /// The glob pattern prefix is invalid
+    ///
+    /// This occurs when the input ends with `*` but the prefix portion
+    /// fails node ID validation rules.
+    #[error("invalid glob pattern")]
+    InvalidGlob(#[source] InvalidGlobError),
 }

@@ -32,7 +32,7 @@ use dump::EndBlock;
 use metadata_db::Worker;
 use worker::{
     job::{Job, JobId, JobStatus},
-    node_id::NodeId,
+    node_id::{InvalidIdError, NodeId, validate_node_id},
 };
 
 /// Combined trait for scheduler functionality
@@ -58,7 +58,7 @@ pub trait SchedulerJobs: Send + Sync {
         dataset_kind: DatasetKind,
         end_block: EndBlock,
         max_writers: u16,
-        worker_id: Option<NodeId>,
+        worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError>;
 
     /// Stop a running job
@@ -167,6 +167,15 @@ pub enum ScheduleJobError {
     /// - Connection is lost during notification
     #[error("failed to notify worker: {0}")]
     NotifyWorker(#[source] metadata_db::Error),
+
+    /// No active workers match the glob pattern
+    ///
+    /// This occurs when:
+    /// - No workers are registered in the system
+    /// - No workers are active (have sent heartbeats recently)
+    /// - No workers match the glob pattern
+    #[error("no active workers match pattern '{0}'")]
+    NoMatchingWorkers(NodeIdGlob),
 }
 
 /// Errors that can occur when stopping a job
@@ -332,3 +341,197 @@ pub struct ListWorkersError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct GetWorkerError(#[source] pub metadata_db::Error);
+
+/// A glob pattern for matching worker node IDs by prefix
+///
+/// Matches any node ID that starts with the pattern prefix.
+/// Created by parsing a string ending with `*` (e.g., `"worker-eth-*"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeIdGlob(String);
+
+impl serde::Serialize for NodeIdGlob {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        format!("{}*", self.0).serialize(serializer)
+    }
+}
+
+impl std::str::FromStr for NodeIdGlob {
+    type Err = InvalidGlobError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // If the string ends with '*', remove it and validate the prefix
+        let Some(prefix) = s.strip_suffix('*') else {
+            return Err(InvalidGlobError(s.to_string()));
+        };
+        validate_node_id(prefix)?;
+
+        Ok(NodeIdGlob(prefix.to_string()))
+    }
+}
+
+impl std::fmt::Display for NodeIdGlob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}*", self.0)
+    }
+}
+
+impl NodeIdGlob {
+    /// Returns true if the given string starts with this glob's prefix
+    pub fn matches_str(&self, s: &str) -> bool {
+        s.starts_with(&self.0)
+    }
+}
+
+/// Error returned when a glob pattern is invalid.
+#[derive(Debug, thiserror::Error)]
+#[error("glob pattern must end with '*', got '{0}'")]
+pub struct InvalidGlobError(String);
+
+impl From<InvalidIdError> for InvalidGlobError {
+    fn from(e: InvalidIdError) -> Self {
+        InvalidGlobError(e.to_string())
+    }
+}
+
+/// Selector for targeting worker nodes by exact ID or glob pattern
+///
+/// Used to specify which worker(s) should handle a job deployment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeSelector {
+    /// Match a specific worker by exact node ID
+    Exact(NodeId),
+    /// Match workers whose IDs start with the glob prefix
+    Glob(NodeIdGlob),
+}
+
+impl serde::Serialize for NodeSelector {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            NodeSelector::Exact(node_id) => node_id.serialize(serializer),
+            NodeSelector::Glob(glob) => glob.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for NodeSelector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let val = String::deserialize(deserializer)?;
+        val.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl std::str::FromStr for NodeSelector {
+    type Err = NodeSelectorParseError;
+
+    // If the string ends with '*', parse it as a glob pattern
+    // Otherwise, parse it as a node ID
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.ends_with('*') {
+            let glob = NodeIdGlob::from_str(s).map_err(NodeSelectorParseError::InvalidGlob)?;
+            Ok(NodeSelector::Glob(glob))
+        } else {
+            let node_id = s
+                .parse::<NodeId>()
+                .map_err(NodeSelectorParseError::InvalidNodeId)?;
+            Ok(NodeSelector::Exact(node_id))
+        }
+    }
+}
+
+/// Errors that occur when parsing a node selector string
+#[derive(Debug, thiserror::Error)]
+pub enum NodeSelectorParseError {
+    /// The string is not a valid node ID
+    ///
+    /// This occurs when the input doesn't end with `*` and fails node ID validation.
+    #[error("invalid node ID")]
+    InvalidNodeId(#[source] InvalidIdError),
+
+    /// The glob pattern prefix is invalid
+    ///
+    /// This occurs when the input ends with `*` but the prefix portion
+    /// fails node ID validation rules.
+    #[error("invalid glob pattern: '{0}'")]
+    InvalidGlob(#[source] InvalidGlobError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod glob_or_node_id {
+        use super::*;
+
+        #[test]
+        fn parse_exact_node_id() {
+            let result: NodeSelector = "worker-01".parse().unwrap();
+            assert!(matches!(result, NodeSelector::Exact(_)));
+
+            if let NodeSelector::Exact(node_id) = result {
+                assert_eq!(node_id.as_str(), "worker-01");
+            }
+        }
+
+        #[test]
+        fn parse_glob_with_asterisk() {
+            let result: NodeSelector = "worker-*".parse().unwrap();
+            assert!(matches!(result, NodeSelector::Glob(_)));
+        }
+
+        #[test]
+        fn parse_invalid_glob_pattern() {
+            let result: Result<NodeSelector, _> = "[invalid".parse();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn parse_invalid_node_id() {
+            // Starts with number - invalid as NodeId, no glob chars
+            let result: Result<NodeSelector, _> = "123-worker".parse();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn glob_matches_node_id() {
+            let glob: NodeSelector = "worker-raw-eth-*".parse().unwrap();
+
+            if let NodeSelector::Glob(ref g) = glob {
+                assert!(g.matches_str("worker-raw-eth-mainnet"));
+                assert!(g.matches_str("worker-raw-eth-l2s"));
+                assert!(!g.matches_str("worker-other"));
+                assert!(!g.matches_str("worker-raw-eth")); // No trailing chars
+            } else {
+                panic!("Expected Glob variant");
+            }
+        }
+
+        #[test]
+        fn glob_equality() {
+            let glob1: NodeSelector = "worker-*".parse().unwrap();
+            let glob2: NodeSelector = "worker-*".parse().unwrap();
+
+            assert_eq!(glob1, glob2);
+        }
+
+        #[test]
+        fn deserialize_exact() {
+            let result: NodeSelector = serde_json::from_str(r#""worker-01""#).unwrap();
+            assert!(matches!(result, NodeSelector::Exact(_)));
+        }
+
+        #[test]
+        fn deserialize_glob() {
+            let result: NodeSelector = serde_json::from_str(r#""worker-*""#).unwrap();
+            assert!(matches!(result, NodeSelector::Glob(_)));
+        }
+    }
+}

@@ -119,7 +119,7 @@ impl<'de> serde::Deserialize<'de> for NodeId {
 /// - Must start with a letter
 /// - Can only contain alphanumeric characters, underscores, hyphens, and dots
 /// - Must not be empty
-fn validate_node_id(id: &str) -> Result<(), InvalidIdError> {
+pub fn validate_node_id(id: &str) -> Result<(), InvalidIdError> {
     if id.is_empty() {
         return Err(InvalidIdError {
             id: id.to_string(),
@@ -175,7 +175,7 @@ impl<'a> From<&'a NodeId> for metadata_db::WorkerNodeId<'a> {
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid worker ID '{id}': {reason}")]
 pub struct InvalidIdError {
-    id: String,
+    pub id: String,
     #[source]
-    reason: Box<dyn std::error::Error + Send + Sync>,
+    pub reason: Box<dyn std::error::Error + Send + Sync>,
 }
