@@ -2,8 +2,6 @@
 //!
 //! This module uses The Graph's official color palette for consistent branding.
 
-use std::sync::LazyLock;
-
 use admin_client::{jobs::JobInfo, workers::WorkerDetailResponse};
 use ratatui::{
     Frame,
@@ -14,7 +12,6 @@ use ratatui::{
         Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
     },
 };
-use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
 use crate::app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
 
@@ -178,10 +175,6 @@ impl Theme {
         Style::default().fg(Self::NEBULA_PINK)
     }
 }
-
-/// Lazily initialized syntax highlighting resources.
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
-static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// ASCII art logo for splash screen (displayed when Header pane is focused).
 const AMP_LOGO: &str = r#"
@@ -644,38 +637,6 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-/// Highlight JSON with syntax coloring using syntect.
-/// Returns a vector of Lines with colored spans.
-fn highlight_json(json_str: &str) -> Vec<Line<'static>> {
-    let syntax = SYNTAX_SET
-        .find_syntax_by_extension("json")
-        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
-    let theme = &THEME_SET.themes["base16-ocean.dark"];
-    let mut highlighter = HighlightLines::new(syntax, theme);
-
-    let mut lines = Vec::new();
-    for line in json_str.lines() {
-        match highlighter.highlight_line(line, &SYNTAX_SET) {
-            Ok(ranges) => {
-                let spans: Vec<Span<'static>> = ranges
-                    .into_iter()
-                    .map(|(style, text)| {
-                        // Convert syntect style to ratatui style
-                        let ratatui_style = syntect_tui::translate_style(style).unwrap_or_default();
-                        Span::styled(text.to_string(), ratatui_style)
-                    })
-                    .collect();
-                lines.push(Line::from(spans));
-            }
-            Err(_) => {
-                // Fallback to plain text on error
-                lines.push(Line::from(line.to_string()));
-            }
-        }
-    }
-    lines
-}
-
 /// Draw the content pane based on ContentView.
 fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
     match &app.content_view {
@@ -717,6 +678,57 @@ fn draw_empty_content(f: &mut Frame, area: Rect) {
         .alignment(Alignment::Center);
 
     f.render_widget(text, area);
+}
+
+/// Format job descriptor fields as readable lines (generic key-value display).
+fn format_descriptor_lines(descriptor: &serde_json::Value) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    format_json_value(descriptor, &mut lines, 1);
+    lines
+}
+
+/// Format JSON value as key-value lines.
+fn format_json_value(value: &serde_json::Value, lines: &mut Vec<Line<'static>>, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map {
+                match val {
+                    serde_json::Value::Object(_) => {
+                        lines.push(Line::from(Span::styled(
+                            format!("{}{}", prefix, key),
+                            Theme::text_secondary(),
+                        )));
+                        format_json_value(val, lines, indent + 1);
+                    }
+                    _ => {
+                        let val_str = json_value_to_string(val);
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("{}{}: ", prefix, key), Theme::text_secondary()),
+                            Span::styled(val_str, Theme::text_primary()),
+                        ]));
+                    }
+                }
+            }
+        }
+        _ => {
+            lines.push(Line::from(Span::styled(
+                json_value_to_string(value),
+                Theme::text_primary(),
+            )));
+        }
+    }
+}
+
+/// Convert a JSON value to a display string.
+fn json_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        _ => value.to_string(),
+    }
 }
 
 /// Draw job detail view.
@@ -768,11 +780,8 @@ fn draw_job_detail(f: &mut Frame, app: &mut App, job: JobInfo, area: Rect) {
     )));
     lines.push(Line::from(""));
 
-    // Descriptor JSON with syntax highlighting
-    let descriptor_str = serde_json::to_string_pretty(&job.descriptor)
-        .unwrap_or_else(|_| "Invalid JSON".to_string());
-    let highlighted = highlight_json(&descriptor_str);
-    lines.extend(highlighted);
+    // Descriptor fields in clean format
+    lines.extend(format_descriptor_lines(&job.descriptor));
 
     // Update content length for scroll bounds
     app.detail_content_length = lines.len();
