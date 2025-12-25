@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use config::ParquetConfig;
+use amp_config::ParquetConfig;
 
 use crate::info::WorkerInfo;
 

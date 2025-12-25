@@ -1,6 +1,6 @@
+use amp_config::Config;
 use amp_object_store::ObjectStoreCreationError;
 use common::store::Store;
-use config::Config;
 use dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
@@ -65,7 +65,7 @@ pub enum Error {
     /// This occurs when the worker cannot establish a connection to the
     /// PostgreSQL metadata database.
     #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<config::ConfigError>),
+    MetadataDbConnection(#[source] Box<amp_config::ConfigError>),
 
     /// Failed to create data store
     ///

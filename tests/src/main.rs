@@ -47,9 +47,9 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use amp_config::Config;
 use clap::Parser;
 use common::{BoxError, Store};
-use config::Config;
 use dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,

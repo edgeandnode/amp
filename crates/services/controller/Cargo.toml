@@ -9,7 +9,7 @@ admin-api = { path = "../admin-api" }
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
-config = { path = "../../config" }
+amp-config = { path = "../../config" }
 dataset-store = { version = "0.1.0", path = "../../core/dataset-store" }
 datasets-common = { version = "0.1.0", path = "../../core/datasets-common" }
 dump = { version = "0.1.0", path = "../../core/dump" }
