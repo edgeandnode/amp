@@ -1,4 +1,4 @@
-use common::Store;
+use amp_data_store::DataStore;
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
@@ -208,7 +208,7 @@ struct TestCtx {
 
 impl TestCtx {
     /// Get the data store from the daemon server.
-    fn data_store(&self) -> &Store {
+    fn data_store(&self) -> &DataStore {
         self.ctx.daemon_server().data_store()
     }
 

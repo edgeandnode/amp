@@ -314,7 +314,6 @@ impl Config {
             self.max_mem_mb,
             self.query_max_mem_mb,
             &self.spill_location,
-            self.parquet.cache_size_mb,
         )
     }
 

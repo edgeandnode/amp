@@ -1,7 +1,7 @@
 //! Service context
 use std::sync::Arc;
 
-use common::store::Store;
+use amp_data_store::DataStore;
 use config::BuildInfo;
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
@@ -15,7 +15,7 @@ pub struct Ctx {
     pub dataset_store: DatasetStore,
     pub scheduler: Arc<dyn Scheduler>,
     /// Object store for output data (used by dataset restore handler)
-    pub data_store: Store,
+    pub data_store: DataStore,
     /// Build information (version, git SHA, etc.)
     pub build_info: BuildInfo,
 }

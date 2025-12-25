@@ -8,10 +8,11 @@ use std::{
     time::Duration,
 };
 
+use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BlockNum, CachedStore,
+    BlockNum,
     catalog::physical::PhysicalTable,
-    metadata::{FileName, SegmentSize, segments::BlockRange},
+    metadata::{SegmentSize, segments::BlockRange},
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
@@ -52,7 +53,7 @@ impl<'a> From<&'a ParquetConfig> for CompactorProperties {
 #[derive(Clone)]
 pub struct Compactor {
     metadata_db: MetadataDb,
-    store: CachedStore,
+    store: DataStore,
     table: Arc<PhysicalTable>,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -83,7 +84,7 @@ impl Display for Compactor {
 impl Compactor {
     pub fn new(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
@@ -165,7 +166,7 @@ impl Compactor {
 
 pub struct CompactionGroup {
     metadata_db: MetadataDb,
-    store: CachedStore,
+    store: DataStore,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
     pub(super) size: SegmentSize,
@@ -187,7 +188,7 @@ impl Debug for CompactionGroup {
 impl CompactionGroup {
     pub fn new_empty(
         metadata_db: MetadataDb,
-        store: CachedStore,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
@@ -240,10 +241,9 @@ impl CompactionGroup {
         let filename = FileName::new_with_random_suffix(range.start());
         let buf_writer = self
             .store
-            .as_store()
             .create_revision_file_writer(self.table.path(), &filename);
         let mut writer = ParquetFileWriter::new(
-            self.store.as_store(),
+            self.store,
             buf_writer,
             filename,
             Arc::clone(&self.table),
@@ -346,7 +346,7 @@ impl ParquetFileWriterOutput {
     async fn commit_metadata(&self, metadata_db: &MetadataDb) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
         let file_name = self.object_meta.location.filename().unwrap().to_string();
-        let file_name = common::metadata::FileName::new_unchecked(file_name);
+        let file_name = FileName::new_unchecked(file_name);
         let object_size = self.object_meta.size;
         let object_e_tag = self.object_meta.e_tag.clone();
         let object_version = self.object_meta.version.clone();

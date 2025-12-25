@@ -6,7 +6,8 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use common::{BoxError, store::Store};
+use amp_data_store::DataStore;
+use common::BoxError;
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
@@ -21,7 +22,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonServer {
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     server_addrs: BoundAddrs,
 
@@ -38,7 +39,7 @@ impl DaemonServer {
     pub async fn new(
         config: Arc<config::Config>,
         metadb: MetadataDb,
-        data_store: Store,
+        data_store: DataStore,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         enable_flight: bool,
@@ -93,7 +94,7 @@ impl DaemonServer {
     }
 
     /// Get a reference to the data store.
-    pub fn data_store(&self) -> &Store {
+    pub fn data_store(&self) -> &DataStore {
         &self.data_store
     }
 
@@ -151,6 +152,5 @@ fn server_config_from_common(config: &config::Config) -> Config {
         max_mem_mb: config.max_mem_mb,
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
-        parquet_cache_size_mb: config.parquet.cache_size_mb,
     }
 }

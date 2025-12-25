@@ -69,6 +69,7 @@ use std::{
     sync::Arc,
 };
 
+use amp_data_store::DataStore;
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
     func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, partial_reference::PartialReference,
@@ -83,7 +84,7 @@ use super::{
     physical::{Catalog, PhysicalTable},
 };
 use crate::{
-    PlanningContext, ResolvedTable, Store,
+    PlanningContext, ResolvedTable,
     query_context::QueryEnv,
     sql::{
         FunctionReference, TableReference, resolve_function_references, resolve_table_references,
@@ -113,7 +114,7 @@ use crate::{
 /// 4. Constructs physical catalog for query execution
 pub async fn catalog_for_sql(
     dataset_store: &impl DatasetAccess,
-    data_store: &Store,
+    data_store: &DataStore,
     query: &Statement,
     env: QueryEnv,
 ) -> Result<Catalog, CatalogForSqlError> {

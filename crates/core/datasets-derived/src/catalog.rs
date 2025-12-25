@@ -15,8 +15,9 @@ use std::{
     sync::Arc,
 };
 
+use amp_data_store::DataStore;
 use common::{
-    BoxError, PlanningContext, ResolvedTable, Store,
+    BoxError, PlanningContext, ResolvedTable,
     catalog::{
         dataset_access::DatasetAccess,
         logical::LogicalCatalog,
@@ -46,7 +47,7 @@ use crate::manifest::Function;
 
 pub async fn catalog_for_sql_with_deps(
     store: &impl DatasetAccess,
-    data_store: &Store,
+    data_store: &DataStore,
     query: &Statement,
     env: &QueryEnv,
     dependencies: &BTreeMap<DepAlias, HashReference>,
@@ -72,7 +73,7 @@ pub async fn catalog_for_sql_with_deps(
 
 async fn get_physical_catalog_with_deps(
     dataset_store: &impl DatasetAccess,
-    data_store: &Store,
+    data_store: &DataStore,
     table_refs: impl IntoIterator<Item = TableReference<DepAlias>>,
     function_refs: impl IntoIterator<Item = FunctionReference<DepAliasOrSelfRef>>,
     env: &QueryEnv,

@@ -6,6 +6,7 @@ license-file.workspace = true
 
 [dependencies]
 admin-api = { path = "../admin-api" }
+amp-data-store = { path = "../../core/data-store" }
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }

@@ -16,8 +16,6 @@ pub struct Config {
     pub query_max_mem_mb: usize,
     /// Paths for DataFusion temporary files for spill-to-disk
     pub spill_location: Vec<PathBuf>,
-    /// Parquet metadata cache size (in MB)
-    pub parquet_cache_size_mb: u64,
 }
 
 impl Config {
@@ -32,7 +30,6 @@ impl Config {
             self.max_mem_mb,
             self.query_max_mem_mb,
             &self.spill_location,
-            self.parquet_cache_size_mb,
         )
     }
 }

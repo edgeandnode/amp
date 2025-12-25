@@ -1,7 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 
+use amp_data_store::DataStore;
 use amp_object_store::ObjectStoreCreationError;
-use common::{BoxError, store::Store};
+use common::BoxError;
 use config::Config as CommonConfig;
 use controller::config::Config;
 use dataset_store::{
@@ -16,8 +17,12 @@ pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> 
         .await
         .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
-    let data_store = Store::new(metadata_db.clone(), config.data_store_url.clone())
-        .map_err(Error::DataStoreCreation)?;
+    let data_store = DataStore::new(
+        metadata_db.clone(),
+        config.data_store_url.clone(),
+        config.parquet.cache_size_mb,
+    )
+    .map_err(Error::DataStoreCreation)?;
 
     let dataset_store = {
         let provider_configs_store = ProviderConfigsStore::new(

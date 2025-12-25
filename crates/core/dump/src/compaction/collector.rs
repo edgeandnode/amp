@@ -5,8 +5,9 @@ use std::{
     time::Duration,
 };
 
-use common::{Store, catalog::physical::PhysicalTable, store::DeleteFilesStreamError};
-use futures::{StreamExt, TryStreamExt, stream};
+use amp_data_store::{DataStore, DeleteFilesStreamError};
+use common::catalog::physical::PhysicalTable;
+use futures::{StreamExt as _, TryStreamExt as _, stream};
 use metadata_db::{MetadataDb, files::FileId, gc::GcManifestRow};
 use object_store::{Error as ObjectStoreError, path::Path};
 
@@ -36,7 +37,7 @@ impl<'a> From<&'a ParquetConfig> for CollectorProperties {
 #[derive(Clone)]
 pub struct Collector {
     metadata_db: MetadataDb,
-    store: Store,
+    store: DataStore,
     table: Arc<PhysicalTable>,
     props: Arc<WriterProperties>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -55,7 +56,7 @@ impl Debug for Collector {
 impl Collector {
     pub fn new(
         metadata_db: MetadataDb,
-        store: Store,
+        store: DataStore,
         props: Arc<WriterProperties>,
         table: Arc<PhysicalTable>,
         metrics: Option<Arc<MetricsRegistry>>,
