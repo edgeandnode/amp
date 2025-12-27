@@ -72,6 +72,7 @@ const AMP_CRATES: &[&str] = &[
     "ampd",
     "ampsync",
     "ampup",
+    "ampup_gen_release_manifest",
     "arrow_to_postgres",
     "auth_http",
     "common",

@@ -3,6 +3,7 @@ pub mod commands;
 pub mod config;
 pub mod github;
 pub mod install;
+pub mod manifest;
 pub mod platform;
 pub mod shell;
 pub mod updater;
