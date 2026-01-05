@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
  *
  * To regenerate the manifest, run:
  * ```bash
- * cargo run --release -p ampctl -- gen-manifest --kind evm-rpc --name anvil --network anvil --start-block 0 > typescript/amp/test/fixtures/anvil.json
+ * cargo run --release -p ampctl -- manifest generate --kind evm-rpc --network anvil --start-block 0 > typescript/amp/test/fixtures/anvil.json
  * ```
  */
 import anvilManifest from "../fixtures/anvil.json" with { type: "json" }

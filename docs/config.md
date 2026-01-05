@@ -120,35 +120,34 @@ Details for the raw datasets currently implemented:
 
 ### Generating Raw Dataset Manifests
 
-The `ampctl gen-manifest` command provides a convenient way to generate manifest JSON files for raw datasets. These manifests define the schema and configuration that will be used during extraction.
+The `ampctl manifest generate` command provides a convenient way to generate manifest JSON files for raw datasets. These manifests define the schema and configuration that will be used during extraction.
 
 #### Usage
 
 ```bash
 # Generate manifest for EVM RPC dataset
-ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet
+ampctl manifest generate --network mainnet --kind evm-rpc
 
 # Generate manifest for EVM RPC dataset with custom start block
-ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet --start-block 1000000
+ampctl manifest generate --network mainnet --kind evm-rpc --start-block 1000000
 
 # Generate manifest for Firehose dataset
-ampctl gen-manifest --network mainnet --kind firehose --name eth_firehose
+ampctl manifest generate --network mainnet --kind firehose
 
 # Output to file
-ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet -o ./manifests_dir/eth_mainnet.json
+ampctl manifest generate --network mainnet --kind evm-rpc -o ./manifests_dir/eth_mainnet.json
 
 # Output to directory (will create ./manifests/evm-rpc.json)
-ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet -o ./manifests/
+ampctl manifest generate --network mainnet --kind evm-rpc -o ./manifests/
 
 # Only include finalized blocks
-ampctl gen-manifest --network mainnet --kind evm-rpc --name eth_mainnet --finalized-blocks-only
+ampctl manifest generate --network mainnet --kind evm-rpc --finalized-blocks-only
 ```
 
 #### Parameters
 
 - `--network`: Network name (e.g., mainnet, goerli, polygon, anvil)
 - `--kind`: Dataset type (evm-rpc, firehose, eth-beacon)
-- `--name`: Dataset name (must be a valid dataset identifier, without namespace)
 - `--out` (or `-o`): Optional output file or directory path. If a directory is specified, the file will be named `{kind}.json`. If not specified, the manifest is printed to stdout.
 - `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc, firehose, and eth-beacon datasets.
 - `--finalized-blocks-only`: Only include finalized block data (flag, defaults to false)

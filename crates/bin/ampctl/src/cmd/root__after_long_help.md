@@ -5,10 +5,10 @@ Environment Variables:
 
 Examples:
     # Run with debug logging to see detailed operation flow
-    AMP_LOG=debug ampctl reg-manifest edgeandnode/eth@1.0.0 ./manifest.json
+    AMP_LOG=debug ampctl manifest register edgeandnode/eth@1.0.0 ./manifest.json
 
     # Run with minimal logging (errors only)
-    AMP_LOG=error ampctl reg-manifest edgeandnode/eth@1.0.0 s3://manifests/eth.json
+    AMP_LOG=error ampctl manifest register edgeandnode/eth@1.0.0 s3://manifests/eth.json
 
     # Run with trace logging for maximum verbosity
-    AMP_LOG=trace ampctl reg-manifest graph/mainnet@2.0.0 gs://data/manifest.json
+    AMP_LOG=trace ampctl manifest register graph/mainnet@2.0.0 gs://data/manifest.json
