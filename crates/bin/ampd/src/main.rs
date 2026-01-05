@@ -25,7 +25,8 @@ struct Args {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 enum Command {
-    #[command(alias = "dev", hide = true)]
+    /// Run Amp in local development mode with all services
+    #[command(alias = "dev")]
     Solo {
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
@@ -37,6 +38,7 @@ enum Command {
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
     },
+    /// Run query server (Arrow Flight, JSON Lines)
     Server {
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
@@ -45,11 +47,13 @@ enum Command {
         #[arg(long, env = "JSONL_SERVER")]
         jsonl_server: bool,
     },
+    /// Run a distributed worker node
     Worker {
         /// The node id of the worker.
         #[arg(long, env = "AMP_NODE_ID")]
         node_id: String,
     },
+    /// Run the controller with Admin API
     Controller,
     /// Run migrations on the metadata database
     Migrate,
