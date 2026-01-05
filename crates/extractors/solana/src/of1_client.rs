@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use backon::{ExponentialBuilder, Retryable};
 use common::BoxResult;
 use futures::{Stream, StreamExt};
 use solana_clock::{Epoch, Slot};
@@ -14,8 +15,6 @@ pub use yellowstone_faithful_car_parser as car_parser;
 use crate::{metrics, rpc_client};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
-
-const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// Maps epoch to a list of oneshot senders to notify when the download is complete.
 type PendingMessageMap = HashMap<Epoch, Vec<tokio::sync::oneshot::Sender<bool>>>;
@@ -106,48 +105,54 @@ pub(crate) async fn car_file_manager(
                         downloaders.push(tokio::spawn(async move {
                             let dest = car_directory.join(local_car_filename(epoch));
 
-                            'retry: loop {
-                                let fut = ensure_car_file_exists(
+                            let result = (|| async {
+                                ensure_car_file_exists(
                                     epoch,
                                     &reqwest,
                                     &dest,
                                     &provider,
                                     &network,
                                     metrics.clone()
-                                );
-                                match fut.await {
-                                    Ok(_) => {
-                                        // CAR file is ready for use.
-                                        tracing::debug!(%epoch, "CAR file is ready");
-                                        let mut guard = pending_msgs.lock().unwrap();
-                                        let pending = guard.remove(&epoch).expect("epoch previously inserted");
-                                        for tx in pending {
-                                            tx.send(true).ok();
-                                        }
-                                        break 'retry;
-                                    },
-                                    Err(FileDownloadError::Http(404)) => {
-                                        // No more CAR files available.
-                                        tracing::debug!(%epoch, "no CAR file available (404)");
-                                        let mut guard = pending_msgs.lock().unwrap();
-                                        let pending = guard.remove(&epoch).expect("epoch previously inserted");
-                                        for tx in pending {
-                                            tx.send(false).ok();
-                                        }
-                                        break 'retry;
-                                    },
-                                    Err(error) => {
-                                        tracing::debug!(
-                                            %epoch,
-                                            %error,
-                                            "CAR file download failed, retrying in {DOWNLOAD_RETRY_DELAY:?}"
-                                        );
-                                        if let Some(m) = metrics.as_ref() {
-                                            m.record_of1_car_download_error(epoch, &provider, &network);
-                                        }
-                                        tokio::time::sleep(DOWNLOAD_RETRY_DELAY).await;
-                                    },
+                                ).await
+                            })
+                            .retry(ExponentialBuilder::default().without_max_times())
+                            .sleep(tokio::time::sleep)
+                            // Only retry on errors that are not HTTP 404, since that indicates
+                            // that the CAR file for the gives epoch does not exist.
+                            .when(|e| !matches!(e, FileDownloadError::Http(code) if *code == 404))
+                            .notify(|error: &FileDownloadError, delay: Duration| {
+                                if let Some(m) = metrics.as_ref() {
+                                    m.record_of1_car_download_error(epoch, &provider, &network);
                                 }
+                                tracing::debug!(
+                                    %epoch,
+                                    %error,
+                                    "CAR file download failed, retrying in {delay:?}"
+                                );
+                            }).await;
+
+                            match result {
+                                Ok(_) => {
+                                    // CAR file is ready for use.
+                                    tracing::debug!(%epoch, "CAR file is ready");
+                                    let mut guard = pending_msgs.lock().unwrap();
+                                    let pending = guard.remove(&epoch).expect("epoch previously inserted");
+                                    for tx in pending {
+                                        tx.send(true).ok();
+                                    }
+                                },
+                                Err(FileDownloadError::Http(404)) => {
+                                    // No more CAR files available.
+                                    tracing::debug!(%epoch, "no CAR file available (404)");
+                                    let mut guard = pending_msgs.lock().unwrap();
+                                    let pending = guard.remove(&epoch).expect("epoch previously inserted");
+                                    for tx in pending {
+                                        tx.send(false).ok();
+                                    }
+                                },
+                                _ => {
+                                    unreachable!("all other errors should be retried indefinitely");
+                                },
                             }
                         }));
                     }
