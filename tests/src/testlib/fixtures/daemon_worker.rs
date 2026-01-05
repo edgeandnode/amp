@@ -34,7 +34,7 @@ impl DaemonWorker {
     /// Starts a Amp worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
-        config: Arc<config::Config>,
+        config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         data_store: Store,
         dataset_store: DatasetStore,
@@ -102,7 +102,7 @@ impl Drop for DaemonWorker {
 }
 
 /// Convert config::Config to worker::config::Config for tests
-fn worker_config_from_common(config: &config::Config) -> Config {
+fn worker_config_from_common(config: &amp_config::Config) -> Config {
     Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,

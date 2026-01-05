@@ -1,5 +1,5 @@
 [package]
-name = "config"
+name = "amp-config"
 edition.workspace = true
 version.workspace = true
 license-file.workspace = true
