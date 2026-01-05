@@ -266,6 +266,7 @@ pub async fn dump(
         }
     }
 
+    client.wait_for_cleanup().await.map_err(Error::Cleanup)?;
     tracing::info!("dump completed successfully");
 
     Ok(())
@@ -371,6 +372,13 @@ pub enum Error {
     /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
     #[error("Partition task failed: {0}")]
     PartitionTask(TryWaitAllError<BoxError>),
+
+    /// Failure during blockchain client cleanup
+    ///
+    /// At the end of the dump process, the blockchain client may need to perform
+    /// cleanup operations, some of which could fail. This error indicates such a failure.
+    #[error("Failed to perform blockchain client cleanup: {0}")]
+    Cleanup(#[source] BoxError),
 }
 
 /// Dumps block ranges by partitioning them across multiple parallel workers.

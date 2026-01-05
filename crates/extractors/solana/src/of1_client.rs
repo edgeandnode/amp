@@ -1,17 +1,32 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use common::BoxResult;
 use futures::{Stream, StreamExt};
-use solana_clock::Slot;
+use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
-pub use yellowstone_faithful_car_parser as of1_car_parser;
+pub use yellowstone_faithful_car_parser as car_parser;
 
 use crate::{metrics, rpc_client};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
+
+const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// Maps epoch to a list of oneshot senders to notify when the download is complete.
+type PendingMessageMap = HashMap<Epoch, Vec<tokio::sync::oneshot::Sender<bool>>>;
+
+/// Maps epoch to the number of interested block streams. Each block stream will request
+/// a file it wants to work with (CarManagerMessage::DownloadFile) and notify this task
+/// when done (CarManagerMessage::FileProcessed). When the interest count reaches zero,
+/// the file can be deleted.
+///
+/// NOTE: The interest data type should match max dump parallelism data type.
+type FileInterestMap = HashMap<Epoch, u16>;
 
 #[derive(Debug, Default)]
 pub(crate) struct DecodedBlock {
@@ -31,22 +46,165 @@ pub(crate) struct DecodedBlock {
     pub(crate) block_rewards: Vec<solana_storage_proto::confirmed_block::Rewards>,
 }
 
+pub(crate) enum CarManagerMessage {
+    /// Request to download the CAR file for the given epoch. The oneshot sender will be
+    /// notified when the download is complete. The boolean indicates whether the file
+    /// was successfully downloaded (true) or if no file is available (false).
+    DownloadFile((Epoch, tokio::sync::oneshot::Sender<bool>)),
+    /// Notification that the CAR file for the given epoch has been processed and can
+    /// be deleted if no other streams are interested in it.
+    FileProcessed(Epoch),
+}
+
+pub(crate) async fn car_file_manager(
+    car_directory: PathBuf,
+    mut car_manager_rx: tokio::sync::mpsc::Receiver<CarManagerMessage>,
+    provider: String,
+    network: String,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+) {
+    let mut downloaders = futures::stream::FuturesUnordered::new();
+    let reqwest = Arc::new(reqwest::Client::new());
+    let pending_msgs = Arc::new(Mutex::new(PendingMessageMap::new()));
+    let file_interests = Arc::new(Mutex::new(FileInterestMap::new()));
+
+    loop {
+        tokio::select! {
+            msg = car_manager_rx.recv() => {
+                let Some(msg) = msg else {
+                    tracing::debug!("CAR file manager channel closed, shutting down");
+                    return;
+                };
+                match msg {
+                    CarManagerMessage::DownloadFile((epoch, done_tx)) => {
+                        tracing::debug!(%epoch, "received CAR file download message");
+                        file_interests
+                            .lock()
+                            .unwrap()
+                            .entry(epoch)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+
+                        {
+                            let mut guard = pending_msgs.lock().unwrap();
+                            let entry = guard.entry(epoch).or_default();
+                            entry.push(done_tx);
+
+                            if entry.len() > 1 {
+                                // A download is already in progress for this epoch.
+                                continue;
+                            }
+                        }
+
+                        let reqwest = Arc::clone(&reqwest);
+                        let pending_msgs = Arc::clone(&pending_msgs);
+                        let car_directory = car_directory.clone();
+                        let provider = provider.clone();
+                        let network = network.clone();
+                        let metrics = metrics.clone();
+
+                        downloaders.push(tokio::spawn(async move {
+                            let dest = car_directory.join(local_car_filename(epoch));
+
+                            'retry: loop {
+                                let fut = ensure_car_file_exists(
+                                    epoch,
+                                    &reqwest,
+                                    &dest,
+                                    &provider,
+                                    &network,
+                                    metrics.clone()
+                                );
+                                match fut.await {
+                                    Ok(_) => {
+                                        // CAR file is ready for use.
+                                        tracing::debug!(%epoch, "CAR file is ready");
+                                        let mut guard = pending_msgs.lock().unwrap();
+                                        let pending = guard.remove(&epoch).expect("epoch previously inserted");
+                                        for tx in pending {
+                                            tx.send(true).ok();
+                                        }
+                                        break 'retry;
+                                    },
+                                    Err(FileDownloadError::Http(404)) => {
+                                        // No more CAR files available.
+                                        tracing::debug!(%epoch, "no CAR file available (404)");
+                                        let mut guard = pending_msgs.lock().unwrap();
+                                        let pending = guard.remove(&epoch).expect("epoch previously inserted");
+                                        for tx in pending {
+                                            tx.send(false).ok();
+                                        }
+                                        break 'retry;
+                                    },
+                                    Err(error) => {
+                                        tracing::debug!(
+                                            %epoch,
+                                            %error,
+                                            "CAR file download failed, retrying in {DOWNLOAD_RETRY_DELAY:?}"
+                                        );
+                                        if let Some(m) = metrics.as_ref() {
+                                            m.record_of1_car_download_error(epoch, &provider, &network);
+                                        }
+                                        tokio::time::sleep(DOWNLOAD_RETRY_DELAY).await;
+                                    },
+                                }
+                            }
+                        }));
+                    }
+                    CarManagerMessage::FileProcessed(epoch) => {
+                        tracing::debug!(%epoch, "received CAR file processed message");
+                        let count = {
+                            let mut guard = file_interests.lock().unwrap();
+                            let count = guard.get_mut(&epoch).expect("epoch previously inserted");
+                            *count -= 1;
+                            *count
+                        };
+
+                        if count == 0 {
+                            // No more interested streams, delete the file.
+                            let dest = car_directory.join(local_car_filename(epoch));
+                            match tokio::fs::remove_file(&dest).await {
+                                Ok(_) => {
+                                    tracing::debug!(%epoch, "deleted processed CAR file");
+                                }
+                                // `ErrorKind::NotFound` is expected to occur for epochs that did
+                                // not have a CAR file to begin with, since we still track interest
+                                // in them.
+                                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                                    tracing::debug!(%epoch, %error, "failed to delete CAR file");
+                                }
+                                _ => {}
+                            }
+
+                            let mut guard = file_interests.lock().unwrap();
+                            guard.remove(&epoch);
+                        }
+                    }
+                }
+            }
+            // Drive the download tasks to completion.
+            Some(_) = downloaders.next() => {}
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn stream(
     start: solana_clock::Slot,
     end: solana_clock::Slot,
-    of1_car_directory: PathBuf,
+    car_directory: PathBuf,
+    // The receiver part should never be dropped as the manager task ends only after all
+    // streams are done.
+    car_manager_tx: tokio::sync::mpsc::Sender<CarManagerMessage>,
     solana_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     get_block_config: rpc_client::rpc_config::RpcBlockConfig,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    provider: String,
-    network: String,
 ) -> impl Stream<Item = BoxResult<DecodedBlock>> {
     async_stream::stream! {
         let mut epoch = start / solana_clock::DEFAULT_SLOTS_PER_EPOCH;
 
         // Pre-fetch the initial previous block hash via JSON-RPC so that we don't have to
-        // (potentially) read multiple Old Faithful CAR files to find it.
+        // (potentially) read multiple CAR files to find it.
         let mut prev_blockhash = if start == 0 {
             [0u8; 32]
         } else {
@@ -59,10 +217,14 @@ pub(crate) fn stream(
                 match resp {
                     // Found the parent block, extract its blockhash.
                     Ok(block) => {
-                        break bs58::decode(block.blockhash)
-                            .into_vec()?
-                            .try_into()
-                            .expect("blockhash is 32 bytes");
+                        let block = match bs58::decode(block.blockhash).into_vec() {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                yield Err(e.into());
+                                return;
+                            }
+                        };
+                        break block.try_into().expect("blockhash is 32 bytes");
                     }
                     // Parent block is missing, try the previous slot.
                     Err(e) if rpc_client::is_block_missing_err(&e) => {
@@ -82,40 +244,59 @@ pub(crate) fn stream(
             }
         };
 
-        let reqwest_client = reqwest::Client::new();
+        // Download historical data via CAR files.
+        loop {
+            tracing::debug!(epoch, "processing historical epoch");
+            let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+            let msg = CarManagerMessage::DownloadFile((epoch, done_tx));
+            car_manager_tx.send(msg).await.expect("receiver not dropped");
+            match done_rx.await {
+                Ok(downloaded) if !downloaded => {
+                    // No more CAR files available.
+                    car_manager_tx
+                        .send(CarManagerMessage::FileProcessed(epoch))
+                        .await
+                        .expect("receiver not dropped");
+                    return;
+                },
+                Err(e) => {
+                    car_manager_tx
+                        .send(CarManagerMessage::FileProcessed(epoch))
+                        .await
+                        .expect("receiver not dropped");
+                    yield Err(e.into());
+                    return;
+                }
+                _ => {}
+            }
 
-        // Download historical data via Old Faithful archive CAR files.
-        'epochs: loop {
-            tracing::debug!(epoch, "processing Old Faithful CAR file");
-            let local_filename = format!("epoch-{}.car", epoch);
-            let epoch_car_file_path = of1_car_directory.join(local_filename);
-            if let Err(e) = download_of1_car_file(
-                epoch,
-                &reqwest_client,
-                &epoch_car_file_path,
-                metrics.clone(),
-                &provider,
-                &network,
-            ).await {
-                if let FileDownloadError::Http(404) = e {
-                    // No more epoch CAR files available.
-                    break 'epochs;
-                } else {
-                    tracing::debug!("failed to download Old Faithful CAR file");
+            let dest = car_directory.join(local_car_filename(epoch));
 
-                    if let Some(metrics) = &metrics {
-                        metrics.record_of1_car_download_error(epoch, &provider, &network);
-                    }
-
+            let buf_reader = match tokio::fs::File::open(&dest).await.map(tokio::io::BufReader::new) {
+                Ok(reader) => reader,
+                Err(e) => {
+                    car_manager_tx
+                        .send(CarManagerMessage::FileProcessed(epoch))
+                        .await
+                        .expect("receiver not dropped");
                     yield Err(e.into());
                     return;
                 }
             };
+            let mut node_reader = car_parser::node::NodeReader::new(buf_reader);
 
-            let buf_reader = tokio::fs::File::open(&epoch_car_file_path).await.map(tokio::io::BufReader::new)?;
-            let mut node_reader = of1_car_parser::node::NodeReader::new(buf_reader);
-
-            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await? {
+            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await.transpose() {
+                let block = match block {
+                    Ok(block) => block,
+                    Err(e) => {
+                        car_manager_tx
+                            .send(CarManagerMessage::FileProcessed(epoch))
+                            .await
+                            .expect("receiver not dropped");
+                        yield Err(e);
+                        return;
+                    }
+                };
                 prev_blockhash = block.blockhash;
 
                 if block.slot < start {
@@ -123,36 +304,48 @@ pub(crate) fn stream(
                     continue;
                 }
 
-                if block.slot > end {
-                    // Reached the end of the requested range.
-                    return;
+                match block.slot.cmp(&end) {
+                    std::cmp::Ordering::Less => {
+                        yield Ok(block);
+                    },
+                    std::cmp::Ordering::Equal => {
+                        car_manager_tx
+                            .send(CarManagerMessage::FileProcessed(epoch))
+                            .await
+                            .expect("receiver not dropped");
+                        yield Ok(block);
+                        return;
+                    },
+                    std::cmp::Ordering::Greater => {
+                        car_manager_tx
+                            .send(CarManagerMessage::FileProcessed(epoch))
+                            .await
+                            .expect("receiver not dropped");
+                        return;
+                    },
                 }
-
-                yield Ok(block);
             }
 
-            tracing::debug!(%epoch, "deleting processed Old Faithful CAR file");
-            if let Err(e) = tokio::fs::remove_file(epoch_car_file_path).await
-                && e.kind() != std::io::ErrorKind::NotFound {
-                    yield Err(e.into());
-                    return;
-            }
+            car_manager_tx
+                .send(CarManagerMessage::FileProcessed(epoch))
+                .await
+                .expect("receiver not dropped");
 
             epoch += 1;
         }
     }
 }
 
-/// Downloads the Old Faithful CAR file for the given epoch into the specified output directory.
+/// Ensures that the entire CAR file for the given epoch exists at the specified destination path.
 ///
 /// If the file was partially downloaded before, the download will resume from where it left off.
-async fn download_of1_car_file(
+async fn ensure_car_file_exists(
     epoch: solana_clock::Epoch,
-    reqwest_client: &reqwest::Client,
+    reqwest: &reqwest::Client,
     dest: &Path,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
     provider: &str,
     network: &str,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), FileDownloadError> {
     enum DownloadAction {
         Download,
@@ -161,13 +354,13 @@ async fn download_of1_car_file(
         Skip,
     }
 
-    let download_url = of1_car_download_url(epoch);
+    let download_url = car_download_url(epoch);
 
     let action = match fs_err::metadata(dest).map(|meta| meta.len()) {
         Ok(0) => DownloadAction::Download,
         Ok(local_file_size) => {
             // Get the actual file size from the server to determine if we need to resume.
-            let head_response = reqwest_client.head(&download_url).send().await?;
+            let head_response = reqwest.head(&download_url).send().await?;
 
             if head_response.status() != reqwest::StatusCode::OK {
                 return Err(FileDownloadError::Http(head_response.status().as_u16()));
@@ -201,13 +394,13 @@ async fn download_of1_car_file(
 
     match action {
         DownloadAction::Download => {
-            tracing::debug!(%download_url, "downloading Old Faithful CAR file");
+            tracing::debug!(%download_url, "downloading CAR file");
         }
         DownloadAction::Resume(download_offset) => {
             tracing::debug!(
                 %download_url,
                 %download_offset,
-                "resuming Old Faithful CAR file download"
+                "resuming CAR file download"
             );
             let range_header = format!("bytes={download_offset}-");
             let range_header_value =
@@ -217,14 +410,14 @@ async fn download_of1_car_file(
         DownloadAction::Restart => {
             tracing::debug!(
                 %download_url,
-                "local Old Faithful CAR file is larger than remote file, restarting download"
+                "local CAR file is larger than remote file, restarting download"
             );
             tokio::fs::remove_file(&dest).await?;
         }
         DownloadAction::Skip => {
             tracing::debug!(
                 %download_url,
-                "local Old Faithful CAR file already fully downloaded, skipping"
+                "local CAR file already fully downloaded, skipping download"
             );
             return Ok(());
         }
@@ -232,11 +425,7 @@ async fn download_of1_car_file(
 
     let start = std::time::Instant::now();
 
-    let response = reqwest_client
-        .get(download_url)
-        .headers(headers)
-        .send()
-        .await?;
+    let response = reqwest.get(download_url).headers(headers).send().await?;
 
     let status = response.status();
     if !status.is_success() {
@@ -261,27 +450,18 @@ async fn download_of1_car_file(
     let mut bytes_downloaded = 0u64;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-
         file.write_all(&chunk).await?;
-
         bytes_downloaded += chunk.len() as u64;
 
-        if let Some(ref metrics) = metrics {
-            metrics.record_of1_car_download_bytes(chunk.len() as u64, epoch, provider, network);
+        if let Some(m) = metrics.as_ref() {
+            m.record_of1_car_download_bytes(chunk.len() as u64, epoch, provider, network);
         }
     }
 
     let duration = start.elapsed().as_secs_f64();
-
-    tracing::debug!(
-        %epoch,
-        %bytes_downloaded,
-        duration_secs = %duration,
-        "downloaded Old Faithful CAR file"
-    );
-
-    if let Some(ref metrics) = metrics {
-        metrics.record_of1_car_download(duration, epoch, provider, network);
+    tracing::debug!(%epoch, %bytes_downloaded, duration_secs = %duration, "downloaded CAR file");
+    if let Some(m) = metrics.as_ref() {
+        m.record_of1_car_download(duration, epoch, provider, network);
     }
 
     Ok(())
@@ -309,7 +489,7 @@ enum FileDownloadError {
 /// Inspired by the Old Faithful CAR parser example:
 /// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
 async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
-    node_reader: &mut of1_car_parser::node::NodeReader<R>,
+    node_reader: &mut car_parser::node::NodeReader<R>,
     prev_blockhash: [u8; 32],
 ) -> BoxResult<Option<DecodedBlock>> {
     // TODO: Could this be executed while downloading the block? As in, read from a stream and
@@ -317,11 +497,11 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
 
     // Once we reach `Node::Block`, the node map will contain all of the nodes needed to reassemble
     // that block.
-    let mut nodes = of1_car_parser::node::Nodes::read_until_block(node_reader).await?;
+    let mut nodes = car_parser::node::Nodes::read_until_block(node_reader).await?;
 
     let block = match nodes.nodes.pop() {
-        Some((_, of1_car_parser::node::Node::Block(block))) => block,
-        None | Some((_, of1_car_parser::node::Node::Epoch(_))) => return Ok(None),
+        Some((_, car_parser::node::Node::Block(block))) => block,
+        None | Some((_, car_parser::node::Node::Epoch(_))) => return Ok(None),
         Some((cid, node)) => {
             let err = format!(
                 "unexpected node while reading block: kind={:?}, cid={}",
@@ -336,12 +516,12 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     let mut transactions_meta = Vec::new();
 
     for entry_cid in &block.entries {
-        let Some(of1_car_parser::node::Node::Entry(entry)) = nodes.nodes.get(entry_cid) else {
+        let Some(car_parser::node::Node::Entry(entry)) = nodes.nodes.get(entry_cid) else {
             let err = format!("expected entry node for cid {entry_cid}");
             return Err(err.into());
         };
         for tx_cid in &entry.transactions {
-            let Some(of1_car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
+            let Some(car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
                 let err = format!("expected transaction node for cid {tx_cid}");
                 return Err(err.into());
             };
@@ -359,7 +539,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
 
     let last_entry_cid = block.entries.last().expect("at least one entry");
     let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
-    let of1_car_parser::node::Node::Entry(last_entry) = last_entry_node else {
+    let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
         let err = format!("expected entry node for cid {last_entry_cid}");
         return Err(err.into());
     };
@@ -390,6 +570,10 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
 /// Generates the Old Faithful CAR download URL for the given epoch.
 ///
 /// Reference: <https://docs.old-faithful.net/references/of1-files>.
-fn of1_car_download_url(epoch: solana_clock::Epoch) -> String {
+fn car_download_url(epoch: solana_clock::Epoch) -> String {
     format!("{OLD_FAITHFUL_ARCHIVE_URL}/{epoch}/epoch-{epoch}.car")
+}
+
+fn local_car_filename(epoch: Epoch) -> String {
+    format!("epoch-{epoch}.car")
 }
