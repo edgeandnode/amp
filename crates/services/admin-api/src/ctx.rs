@@ -2,8 +2,8 @@
 use std::sync::Arc;
 
 use amp_config::BuildInfo;
+use amp_dataset_store::DatasetStore;
 use common::store::Store;
-use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 
 use crate::scheduler::Scheduler;

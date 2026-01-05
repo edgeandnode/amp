@@ -243,7 +243,7 @@ pub enum Error {
     ///
     /// The manifest is required to determine table definitions and SQL queries.
     #[error("Failed to get derived manifest")]
-    GetDerivedManifest(#[source] dataset_store::GetDerivedManifestError),
+    GetDerivedManifest(#[source] amp_dataset_store::GetDerivedManifestError),
 
     /// Failed to dump individual table
     ///

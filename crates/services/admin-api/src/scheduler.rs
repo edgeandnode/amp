@@ -23,8 +23,8 @@
 //! - Worker information queries
 //! - Worker status retrieval
 
+use amp_dataset_store::DatasetKind;
 use async_trait::async_trait;
-use dataset_store::DatasetKind;
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };

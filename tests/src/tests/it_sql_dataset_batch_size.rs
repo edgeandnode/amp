@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 
+use amp_dataset_store::DatasetStore;
 use common::{BoxError, ParquetFooterCache, metadata::Generation};
-use dataset_store::DatasetStore;
 use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},

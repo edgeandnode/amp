@@ -1,8 +1,8 @@
+use amp_dataset_store::DeleteManifestError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use dataset_store::DeleteManifestError;
 use datasets_common::{name::Name, namespace::Namespace};
 use futures::stream::{FuturesUnordered, StreamExt};
 use monitoring::logging;
@@ -178,7 +178,7 @@ pub enum Error {
     /// - Failed to delete dataset manifest links from database
     /// - Database connection or transaction issues
     #[error("Failed to unlink dataset manifests: {0}")]
-    UnlinkDatasetManifests(#[source] dataset_store::UnlinkDatasetManifestsError),
+    UnlinkDatasetManifests(#[source] amp_dataset_store::UnlinkDatasetManifestsError),
 }
 
 impl IntoErrorResponse for Error {

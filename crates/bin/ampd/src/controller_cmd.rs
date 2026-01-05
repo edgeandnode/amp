@@ -1,12 +1,12 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use amp_config::Config as CommonConfig;
+use amp_dataset_store::{
+    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
+};
 use amp_object_store::ObjectStoreCreationError;
 use common::{BoxError, store::Store};
 use controller::config::Config;
-use dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
 use monitoring::telemetry::metrics::Meter;
 
 /// Run the controller service (Admin API server)

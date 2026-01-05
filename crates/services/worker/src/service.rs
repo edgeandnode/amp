@@ -1,8 +1,8 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
+use amp_dataset_store::DatasetStore;
 use backon::{ExponentialBuilder, Retryable};
 use common::{CachedParquetData, ParquetFooterCache, store::Store as DataStore};
-use dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,

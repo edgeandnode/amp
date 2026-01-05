@@ -349,7 +349,7 @@ impl TestCtxBuilder {
 
         // Create shared DatasetStore instance (used by both server and worker)
         let dataset_store = {
-            use dataset_store::{
+            use amp_dataset_store::{
                 DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
             };
             let provider_configs_store =

@@ -25,7 +25,7 @@ common = { path = "../crates/core/common" }
 amp-config = { path = "../crates/config" }
 controller = { path = "../crates/services/controller" }
 ctor = "0.5.0"
-dataset-store = { path = "../crates/core/dataset-store" }
+amp-dataset-store = { path = "../crates/core/dataset-store" }
 datasets-common = { path = "../crates/core/datasets-common" }
 datasets-derived = { path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true

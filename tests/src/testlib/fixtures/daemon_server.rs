@@ -6,8 +6,8 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use amp_dataset_store::DatasetStore;
 use common::{BoxError, store::Store};
-use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{config::Config, service::BoundAddrs};

@@ -48,12 +48,12 @@
 use std::{path::PathBuf, sync::Arc};
 
 use amp_config::Config;
-use clap::Parser;
-use common::{BoxError, Store};
-use dataset_store::{
+use amp_dataset_store::{
     DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
     providers::ProviderConfigsStore,
 };
+use clap::Parser;
+use common::{BoxError, Store};
 use datasets_common::reference::Reference;
 use dump::consistency_check;
 use fs_err as fs;

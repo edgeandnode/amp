@@ -144,7 +144,7 @@ pub enum JobInitError {
     FetchDataset {
         reference: HashReference,
         #[source]
-        source: dataset_store::GetDatasetError,
+        source: amp_dataset_store::GetDatasetError,
     },
 
     /// Failed to get or create active physical table

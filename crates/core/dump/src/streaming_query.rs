@@ -7,6 +7,7 @@ use std::{
 };
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
+use amp_dataset_store::DatasetStore;
 use common::{
     BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
     QueryContext, SPECIAL_BLOCK_NUM, Store,
@@ -19,7 +20,6 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use dataset_store::DatasetStore;
 use datasets_common::{
     hash::Hash, name::Name, partial_reference::PartialReference, revision::Revision,
 };

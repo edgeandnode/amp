@@ -5,6 +5,7 @@
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
+use amp_dataset_store::DatasetStore;
 use axum::{
     Router,
     http::StatusCode,
@@ -13,7 +14,6 @@ use axum::{
 };
 use common::{BoxError, store::Store};
 use datafusion::error::DataFusionError;
-use dataset_store::DatasetStore;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry::metrics::Meter};

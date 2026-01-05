@@ -238,7 +238,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
 
     /// Dataset store operation error when loading dataset
     ///
@@ -247,7 +247,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Invalid dataset structure
     #[error("Failed to load dataset: {0}")]
-    GetDataset(#[source] dataset_store::GetDatasetError),
+    GetDataset(#[source] amp_dataset_store::GetDatasetError),
 
     /// Failed to restore table from storage
     ///
