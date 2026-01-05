@@ -116,11 +116,11 @@
   query: |
     SELECT COUNT(*) as high_value_addresses
     FROM (
-      SELECT t.to, SUM(t.value) as total_value
+      SELECT t.to, SUM(CAST(t.value AS DECIMAL(38, 0))) as total_value
       FROM eth_rpc.transactions t
-      WHERE t.to IS NOT NULL AND t.value > 0
+      WHERE t.to IS NOT NULL AND CAST(t.value AS DECIMAL(38, 0)) > 0
       GROUP BY t.to
-      HAVING SUM(t.value) > 1000000000000000000
+      HAVING SUM(CAST(t.value AS DECIMAL(38, 0))) > 1000000000000000000
     ) as high_value
   results: |
     [
@@ -132,14 +132,14 @@
   # Find transactions that sent more ETH than the average for their block
   query: |
     WITH block_averages AS (
-      SELECT block_num, AVG(value) as avg_value
+      SELECT block_num, AVG(CAST(value AS DECIMAL(38, 0))) as avg_value
       FROM eth_rpc.transactions
       GROUP BY block_num
     )
     SELECT COUNT(*) as above_avg_transactions
     FROM eth_rpc.transactions t
     INNER JOIN block_averages ba ON t.block_num = ba.block_num
-    WHERE t.value > ba.avg_value
+    WHERE CAST(t.value AS DECIMAL(38, 0)) > ba.avg_value
   results: |
     [
       {"above_avg_transactions": 2}
@@ -154,10 +154,10 @@
       SELECT 
         tx_hash,
         value,
-        ROW_NUMBER() OVER (ORDER BY value DESC) as value_rank
+        ROW_NUMBER() OVER (ORDER BY CAST(value AS DECIMAL(38, 0)) DESC) as value_rank
       FROM eth_rpc.transactions
-      WHERE value > 0
-      ORDER BY value DESC
+      WHERE CAST(value AS DECIMAL(38, 0)) > 0
+      ORDER BY CAST(value AS DECIMAL(38, 0)) DESC
       LIMIT 10
     ) ranked_txs
   results: |
@@ -185,7 +185,7 @@
       SELECT 
         block_num,
         COUNT(*) as tx_count,
-        SUM(value) as total_value,
+        SUM(CAST(value AS DECIMAL(38, 0))) as total_value,
         AVG(gas_used) as avg_gas
       FROM eth_rpc.transactions
       GROUP BY block_num

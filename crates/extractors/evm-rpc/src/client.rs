@@ -593,18 +593,7 @@ fn rpc_to_rows(
         );
         return Err(err.into());
     }
-    let tx_receipt_pairs = block
-        .transactions
-        .clone()
-        .into_transactions()
-        .zip(receipts)
-        .filter(|(_, receipt)| {
-            // Filter out failed transactions.
-            match receipt.inner.inner.inner.receipt.status {
-                alloy::consensus::Eip658Value::Eip658(status) => status,
-                alloy::consensus::Eip658Value::PostState(fixed_bytes) => !fixed_bytes.is_zero(),
-            }
-        });
+    let tx_receipt_pairs = block.transactions.clone().into_transactions().zip(receipts);
 
     let header = rpc_header_to_row(block.header.clone())?;
     let mut logs = Vec::new();
@@ -770,7 +759,7 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("gas_price", e.into()))?,
         gas_limit: tx.gas_limit(),
-        value: i128::try_from(tx.value()).map_err(|e| ToRowError::Overflow("value", e.into()))?,
+        value: tx.value().to_string(),
         input: tx.input().to_vec(),
         v: if sig.v() { vec![1] } else { vec![] },
         r: sig.r().to_be_bytes_vec(),
