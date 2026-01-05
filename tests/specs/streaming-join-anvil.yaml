@@ -7,7 +7,7 @@
 
 # Mine initial blocks (anvil starts with block 0)
 - name: mine_initial
-  mine: 3
+  anvil_mine: 3
 
 # Dump to make data available (must happen before registering stream)
 - name: dump_initial
@@ -35,7 +35,7 @@
 
 # Mine more blocks
 - name: mine_more
-  mine: 2
+  anvil_mine: 2
 
 # Dump new blocks
 - name: dump_more

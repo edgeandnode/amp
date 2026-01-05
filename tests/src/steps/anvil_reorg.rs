@@ -15,7 +15,7 @@ pub struct Step {
     /// The name of this test step.
     pub name: String,
     /// The depth of the reorganization (number of blocks to replace).
-    pub reorg: u64,
+    pub anvil_reorg: u64,
 }
 
 impl Step {
@@ -24,11 +24,14 @@ impl Step {
     /// Uses the Anvil fixture from the test context to trigger a reorg.
     /// Requires that the test context was configured with Anvil support.
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
-        tracing::debug!("Triggering reorg with depth {}", self.reorg);
+        tracing::debug!("Triggering reorg with depth {}", self.anvil_reorg);
 
-        ctx.anvil().reorg(self.reorg).await?;
+        ctx.anvil().reorg(self.anvil_reorg).await?;
 
-        tracing::info!("Successfully triggered reorg with depth {}", self.reorg);
+        tracing::info!(
+            "Successfully triggered reorg with depth {}",
+            self.anvil_reorg
+        );
         Ok(())
     }
 }

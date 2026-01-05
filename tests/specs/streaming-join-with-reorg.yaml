@@ -14,7 +14,7 @@
 
 # Mine initial blocks (anvil starts with block 0)
 - name: mine_initial
-  mine: 5
+  anvil_mine: 5
 
 # Dump to make data available
 - name: dump_initial
@@ -44,11 +44,11 @@
 
 # Trigger reorg - removes last 2 blocks (4 and 5)
 - name: trigger_reorg
-  reorg: 2
+  anvil_reorg: 2
 
 # Mine new blocks on the reorganized chain
 - name: mine_after_reorg
-  mine: 3
+  anvil_mine: 3
 
 # Dump the reorganized chain state
 - name: dump_after_reorg

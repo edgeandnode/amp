@@ -15,7 +15,7 @@ pub struct Step {
     /// The name of this test step.
     pub name: String,
     /// The number of blocks to mine.
-    pub mine: u64,
+    pub anvil_mine: u64,
 }
 
 impl Step {
@@ -24,11 +24,11 @@ impl Step {
     /// Uses the Anvil fixture from the test context to mine blocks.
     /// Requires that the test context was configured with Anvil support.
     pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
-        tracing::debug!("Mining {} blocks", self.mine);
+        tracing::debug!("Mining {} blocks", self.anvil_mine);
 
-        ctx.anvil().mine(self.mine).await?;
+        ctx.anvil().mine(self.anvil_mine).await?;
 
-        tracing::info!("Successfully mined {} blocks", self.mine);
+        tracing::info!("Successfully mined {} blocks", self.anvil_mine);
         Ok(())
     }
 }
