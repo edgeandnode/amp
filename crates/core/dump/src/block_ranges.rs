@@ -55,11 +55,7 @@ impl EndBlock {
     /// * `Ok(ResolvedEndBlock)` - Successfully resolved end block
     /// * `Err(_)` - If resolution fails or validation fails
     #[instrument(skip(get_latest), err)]
-    pub async fn resolve<F>(
-        &self,
-        start: BlockNum,
-        get_latest: F,
-    ) -> Result<ResolvedEndBlock, ResolutionError>
+    pub async fn resolve<F>(&self, get_latest: F) -> Result<ResolvedEndBlock, ResolutionError>
     where
         F: Future<Output = Result<Option<BlockNum>, BoxError>>,
     {
@@ -76,9 +72,6 @@ impl EndBlock {
             }
             EndBlock::Absolute(n) => {
                 let block = *n;
-                if block < start {
-                    return Err(ResolutionError::invalid_end_block(start, block));
-                }
                 Ok(ResolvedEndBlock::Block(block))
             }
             EndBlock::LatestMinus(offset) => {
@@ -88,8 +81,7 @@ impl EndBlock {
                 match latest {
                     Some(latest_block) => {
                         // Subtract offset from latest (offset is always positive)
-                        let resolved =
-                            resolve_relative(start, Some(-(*offset as i64)), latest_block)?;
+                        let resolved = resolve_relative(Some(-(*offset as i64)), latest_block)?;
                         Ok(ResolvedEndBlock::Block(resolved))
                     }
                     None => Ok(ResolvedEndBlock::NoDataAvailable),
@@ -164,7 +156,6 @@ impl<'de> serde::Deserialize<'de> for EndBlock {
 ///
 /// Returns an error if the resolved end block is less than the start block.
 pub fn resolve_relative(
-    start: BlockNum,
     end: Option<i64>,
     latest_block: BlockNum,
 ) -> Result<BlockNum, ResolutionError> {
@@ -173,60 +164,35 @@ pub fn resolve_relative(
         Some(n) if n >= 0 => n as BlockNum,
         Some(n) => (latest_block as i64 + n) as BlockNum,
     };
-    if end < start {
-        return Err(ResolutionError::invalid_end_block(start, end));
-    }
     Ok(end)
 }
 
 /// Errors that can occur when resolving a block range
 #[derive(Debug, thiserror::Error)]
 pub enum ResolutionError {
-    /// The end block is less than the start block
-    #[error("end block ({end_block}) is less than start block ({start_block})")]
-    InvalidEndBlock {
-        start_block: BlockNum,
-        end_block: BlockNum,
-    },
     /// Failed to fetch the latest block number
     #[error("failed to fetch latest block: {0}")]
     FetchLatestFailed(String),
 }
 
-impl ResolutionError {
-    fn invalid_end_block(start_block: BlockNum, end_block: BlockNum) -> Self {
-        Self::InvalidEndBlock {
-            start_block,
-            end_block,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{EndBlock, ResolutionError, ResolvedEndBlock, resolve_relative};
+    use super::{EndBlock, ResolvedEndBlock, resolve_relative};
 
     #[test]
     fn resolve_block_range_variants() {
         //* Params
         let latest_block = 100;
         let test_cases = [
-            (50, None, Ok(100)),
-            (100, Some(150), Ok(150)),
-            // Overlapped (end < start)
-            (
-                70,
-                Some(-50),
-                Err(ResolutionError::invalid_end_block(70, 50)),
-            ),
+            (None, 100),      // No end specified, defaults to latest
+            (Some(150), 150), // Absolute end block
+            (Some(-50), 50),  // Relative end block (latest - 50)
         ];
 
         //* Test
-        for (start_block, end_block, expected) in test_cases {
-            match resolve_relative(start_block, end_block, latest_block) {
-                Ok(result) => assert_eq!(expected.unwrap(), result),
-                Err(_) => assert!(expected.is_err()),
-            }
+        for (end_block, expected) in test_cases {
+            let result = resolve_relative(end_block, latest_block).unwrap();
+            assert_eq!(expected, result);
         }
     }
 
@@ -254,7 +220,7 @@ mod tests {
     async fn end_block_resolve_none() {
         let end_block = EndBlock::None;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Continuous);
@@ -264,7 +230,7 @@ mod tests {
     async fn end_block_resolve_latest() {
         let end_block = EndBlock::Latest;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(100));
@@ -274,7 +240,7 @@ mod tests {
     async fn end_block_resolve_absolute() {
         let end_block = EndBlock::Absolute(100);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(200)) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(Some(200)) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(100));
@@ -284,26 +250,17 @@ mod tests {
     async fn end_block_resolve_latest_minus() {
         let end_block = EndBlock::LatestMinus(50);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(50));
     }
 
     #[tokio::test]
-    async fn end_block_resolve_absolute_validation() {
-        let end_block = EndBlock::Absolute(10);
-        let result = end_block
-            .resolve(50, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
     async fn end_block_resolve_latest_no_data() {
         let end_block = EndBlock::Latest;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(None) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::NoDataAvailable);
@@ -313,7 +270,7 @@ mod tests {
     async fn end_block_resolve_latest_minus_no_data() {
         let end_block = EndBlock::LatestMinus(50);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .resolve(async { Ok::<Option<u64>, common::BoxError>(None) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::NoDataAvailable);

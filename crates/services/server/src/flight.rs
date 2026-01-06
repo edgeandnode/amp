@@ -37,15 +37,10 @@ use common::{
     store::Store,
     utils::error_with_causes,
 };
-use datafusion::{
-    common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
-};
+use datafusion::{common::DFSchema, error::DataFusionError};
 use dataset_store::{DatasetStore, GetDatasetError};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
-use futures::{
-    Stream, StreamExt as _, TryStreamExt,
-    stream::{self, BoxStream},
-};
+use futures::{Stream, StreamExt as _, TryStreamExt, stream::BoxStream};
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use prost::Message as _;
@@ -200,30 +195,13 @@ impl Service {
                 )));
             }
 
-            // As an optimization, start the stream from the minimum start block across all tables.
-            // Otherwise starting from `0` would spend time scanning ranges known to be empty.
-            let earliest_block = catalog
-                .earliest_block()
-                .await
-                .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;
-
-            // If no tables are synced, we return an empty stream.
-            let Some(earliest_block) = earliest_block else {
-                let empty_stream = RecordBatchStreamAdapter::new(schema.clone(), stream::empty());
-                return Ok(QueryResultStream::NonIncremental {
-                    stream: Box::pin(empty_stream),
-                    schema,
-                    block_range: None,
-                });
-            };
-
             let query = StreamingQuery::spawn(
                 self.env.clone(),
                 catalog,
                 dataset_store,
                 self.data_store.clone(),
                 plan,
-                earliest_block,
+                0,
                 None,
                 resume_watermark,
                 &self.notification_multiplexer,

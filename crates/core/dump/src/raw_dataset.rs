@@ -161,7 +161,7 @@ pub async fn dump(
 
     let start = dataset.start_block.unwrap_or(0);
     let resolved = end
-        .resolve(start, client.latest_block(finalized_blocks_only))
+        .resolve(client.latest_block(finalized_blocks_only))
         .await
         .map_err(Error::ResolveEndBlock)?;
 

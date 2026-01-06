@@ -387,24 +387,10 @@ async fn dump_table(
                 return Err(format!("syncing table {table_name} is not supported: {err}",).into());
             }
 
-            // If at least one dependency has no data, default to block 0.
-            // This is fine as the `StreamingQuery` will ultimately just wait for data to be available.
-            let dependency_earliest_block = catalog.earliest_block().await?.unwrap_or(0);
-
-            // If derived dataset has a start_block, validate it
-            if let Some(dataset_start_block) = &manifest_start_block
-                && dataset_start_block < &dependency_earliest_block
-            {
-                return Err(Error::StartBlockBeforeDependencies {
-                    dataset_start_block: *dataset_start_block,
-                    dependency_earliest_block,
-                }
-                .into());
-            }
-            let start = manifest_start_block.unwrap_or(dependency_earliest_block);
+            let start = manifest_start_block.unwrap_or(0);
 
             let resolved = end
-                .resolve(start, async {
+                .resolve(async {
                     let query_ctx = QueryContext::for_catalog(
                         catalog.clone(),
                         env.clone(),
