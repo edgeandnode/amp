@@ -1,5 +1,7 @@
 //! Test step for dumping dataset data to storage.
 
+use std::time::Duration;
+
 use common::BoxError;
 use datasets_common::reference::Reference;
 
@@ -37,19 +39,24 @@ impl Step {
         );
 
         let result: Result<(), BoxError> = async {
-            let data_store = ctx.daemon_worker().data_store().clone();
-            let physical_tables = test_helpers::dump_dataset(
-                ctx.daemon_worker().config().clone(),
-                ctx.daemon_worker().metadata_db().clone(),
-                data_store.clone(),
-                ctx.daemon_worker().dataset_store().clone(),
-                self.dataset.clone(),
-                self.end,
-            )
-            .await?;
+            let ampctl = ctx.new_ampctl();
 
+            test_helpers::deploy_and_wait(
+                &ampctl,
+                &self.dataset,
+                Some(self.end),
+                Duration::from_secs(30),
+            )
+            .await
+            .expect("Failed to dump dataset via worker");
+
+            let data_store = ctx.daemon_server().data_store();
+            let dataset_store = ctx.daemon_server().dataset_store();
+            let physical_tables =
+                test_helpers::load_physical_tables(dataset_store, data_store, &self.dataset)
+                    .await?;
             for table in physical_tables {
-                test_helpers::check_table_consistency(&table, &data_store).await?;
+                test_helpers::check_table_consistency(&table, data_store).await?;
             }
 
             Ok(())
