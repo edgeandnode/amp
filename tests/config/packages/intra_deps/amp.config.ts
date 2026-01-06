@@ -14,12 +14,12 @@ export default defineDataset(() => ({
     },
     // derived table -- Added aa prefix, it should be dumped after zz_blocks_base
     aa_blocks_derived: {
-      sql: "SELECT block_num, gas_limit, gas_used, miner, hash, parent_hash FROM intra_deps.zz_blocks_base",
+      sql: "SELECT block_num, gas_limit, gas_used, miner, hash, parent_hash FROM self.zz_blocks_base",
       network: "mainnet",
     },
     // derived table -- Added mm prefix, it should be dumped after aa_blocks_derived
     mm_blocks_derived: {
-      sql: "SELECT block_num, miner, hash, parent_hash FROM intra_deps.aa_blocks_derived",
+      sql: "SELECT block_num, miner, hash, parent_hash FROM self.aa_blocks_derived",
       network: "mainnet",
     },
   },

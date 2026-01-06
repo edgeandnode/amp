@@ -102,11 +102,10 @@ use common::{
     metadata::{FileName, Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
-use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
+use datasets_common::{deps::alias::DepAlias, hash::Hash, hash_reference::HashReference};
 use datasets_derived::{
-    Manifest as DerivedManifest,
-    catalog::{catalog_for_derived_table, self_refs_from_manifest},
-    manifest::TableInput,
+    Manifest as DerivedManifest, catalog::catalog_for_derived_table,
+    logical::dataset as derived_dataset, manifest::TableInput,
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
@@ -153,6 +152,7 @@ pub async fn dump(
 
     let opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
+    let manifest_hash = dataset.hash().clone();
     for (table, compactor) in tables {
         let ctx = ctx.clone();
         let env = env.clone();
@@ -161,6 +161,7 @@ pub async fn dump(
         let opts = opts.clone();
         let metrics = ctx.metrics.clone();
         let manifest = manifest.clone();
+        let manifest_hash = manifest_hash.clone();
 
         join_set.spawn(
             async move {
@@ -169,6 +170,7 @@ pub async fn dump(
                 dump_table(
                     ctx,
                     &manifest,
+                    &manifest_hash,
                     env.clone(),
                     table.clone(),
                     compactor,
@@ -295,6 +297,7 @@ pub enum Error {
 async fn dump_table(
     ctx: Ctx,
     manifest: &DerivedManifest,
+    manifest_hash: &Hash,
     env: QueryEnv,
     table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
@@ -324,6 +327,14 @@ async fn dump_table(
 
     // Parse the SQL query
     let query = common::sql::parse(query_sql)?;
+
+    // Create self-dataset for self-table references using the actual manifest hash
+    // so that PhysicalTable::get_active() can find synced self-referenced tables
+    let self_dataset = {
+        let dataset = derived_dataset(manifest_hash.clone(), (*manifest).clone())
+            .map_err(|e| format!("Failed to create self-dataset: {e}"))?;
+        Arc::new(dataset)
+    };
 
     // Resolve all dependencies from the manifest to HashReference
     // This ensures SQL schema references map to the exact dataset versions
@@ -363,7 +374,7 @@ async fn dump_table(
         &query,
         &env,
         &dependencies,
-        self_refs_from_manifest(manifest),
+        Some(self_dataset),
     )
     .await?;
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
@@ -376,11 +387,9 @@ async fn dump_table(
                 return Err(format!("syncing table {table_name} is not supported: {err}",).into());
             }
 
-            let Some(dependency_earliest_block) = catalog.earliest_block().await? else {
-                // If the dependencies have synced nothing, we have nothing to do.
-                tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
-                return Ok::<(), BoxError>(());
-            };
+            // If at least one dependency has no data, default to block 0.
+            // This is fine as the `StreamingQuery` will ultimately just wait for data to be available.
+            let dependency_earliest_block = catalog.earliest_block().await?.unwrap_or(0);
 
             // If derived dataset has a start_block, validate it
             if let Some(dataset_start_block) = &manifest_start_block

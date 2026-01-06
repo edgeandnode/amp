@@ -1,4 +1,7 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -6,7 +9,7 @@ use axum::{
     http::StatusCode,
 };
 use common::{
-    BoxError,
+    BoxError, Dataset, Table as LogicalTable,
     plan_visitors::prepend_special_block_num_field,
     query_context::Error as QueryContextError,
     sql::{
@@ -14,6 +17,7 @@ use common::{
         TableReference, resolve_function_references, resolve_table_references,
     },
     sql_str::SqlStr,
+    utils::dfs,
 };
 use datafusion::sql::parser::Statement;
 use dataset_store::GetDatasetError;
@@ -23,13 +27,14 @@ use datasets_common::{
         reference::{DepReference, HashOrVersion},
     },
     func_name::FuncName,
+    hash::Hash,
     hash_reference::HashReference,
     table_name::TableName,
 };
 use datasets_derived::{
+    DerivedDatasetKind,
     catalog::{
         PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
-        self_refs_from_functions,
     },
     manifest::{Function, TableSchema},
 };
@@ -45,10 +50,62 @@ use crate::{
 type TableReferencesMap = BTreeMap<
     TableName,
     (
-        Vec<TableReference<DepAlias>>,
+        Vec<TableReference<DepAliasOrSelfRef>>,
         Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
+
+/// Extracts self-table dependencies from table references.
+///
+/// Returns a map from each table name to the set of other table names it references
+/// via `self.table_name` syntax.
+fn extract_self_dependencies(
+    references: &TableReferencesMap,
+    all_table_names: &BTreeSet<TableName>,
+) -> BTreeMap<TableName, Vec<TableName>> {
+    references
+        .iter()
+        .map(|(table_name, (table_refs, _))| {
+            let deps: Vec<TableName> = table_refs
+                .iter()
+                .filter_map(|table_ref| match table_ref {
+                    TableReference::Partial { schema, table }
+                        if schema.as_ref().is_self()
+                            && table.as_ref() != table_name
+                            && all_table_names.contains(table.as_ref()) =>
+                    {
+                        Some(table.as_ref().clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            (table_name.clone(), deps)
+        })
+        .collect()
+}
+
+/// Sorts tables by dependencies using topological ordering.
+///
+/// Returns tables in order such that dependencies come before dependents.
+fn sort_tables_by_dependencies(
+    deps: BTreeMap<TableName, Vec<TableName>>,
+) -> Result<Vec<TableName>, Vec<TableName>> {
+    let nodes: BTreeSet<&TableName> = deps.keys().collect();
+    let mut ordered: Vec<TableName> = Vec::new();
+    let mut visited: BTreeSet<&TableName> = BTreeSet::new();
+    let mut visiting: BTreeSet<&TableName> = BTreeSet::new();
+
+    for node in nodes {
+        if !visited.contains(node)
+            && let Err(err) = dfs(node, &deps, &mut ordered, &mut visited, &mut visiting)
+        {
+            // Return cycle error with the node that caused it
+            return Err(vec![err.node]);
+        }
+    }
+
+    Ok(ordered)
+}
 
 /// Handler for the `POST /schema` endpoint
 ///
@@ -215,9 +272,9 @@ pub async fn handler(
                 source: err,
             })?;
 
-            // Extract table references from the statement
+            // Extract table references from the statement (supports both external deps and self-references)
             let table_refs =
-                resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
+                resolve_table_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| match &err {
                     ResolveTableReferencesError::InvalidTableName { .. } => {
                         Error::InvalidTableName(err)
                     }
@@ -268,24 +325,117 @@ pub async fn handler(
         (statements, references)
     };
 
-    // Create planning context using resolved dependencies
-    let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
-        &ctx.dataset_store,
-        references,
-        dependencies,
-        self_refs_from_functions(&functions),
-        IsolatePool::dummy(), // For schema validation only (no JS execution)
-    )
-    .await
-    .map_err(|err| match &err {
+    // Sort tables by self-dependencies (topological order)
+    // This handles both self-table references and the trivial case (no self-refs)
+    let all_table_names: BTreeSet<TableName> = statements.keys().cloned().collect();
+    let self_deps = extract_self_dependencies(&references, &all_table_names);
+    let sorted_names = sort_tables_by_dependencies(self_deps)
+        .map_err(|tables| Error::CircularTableDependency { tables })?;
+
+    // Process tables iteratively, building up self-tables as we go
+    let mut schemas = BTreeMap::new();
+    let mut inferred_tables: Vec<LogicalTable> = Vec::new();
+
+    for table_name in sorted_names {
+        // Get statement and references for this table
+        // These should always exist since they come from the same source as sorted_names
+        let Some(stmt) = statements.get(&table_name) else {
+            continue; // Skip if not found (shouldn't happen)
+        };
+        let Some((table_refs, func_refs)) = references.get(&table_name) else {
+            continue; // Skip if not found (shouldn't happen)
+        };
+
+        // Build self-refs from functions and already-inferred tables
+        let self_refs = dummy_dataset(&functions, &inferred_tables);
+
+        // Build planning context for just this table
+        let single_table_refs: TableReferencesMap =
+            [(table_name.clone(), (table_refs.clone(), func_refs.clone()))]
+                .into_iter()
+                .collect();
+
+        let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
+            &ctx.dataset_store,
+            single_table_refs,
+            dependencies.clone(),
+            self_refs,
+            IsolatePool::dummy(),
+        )
+        .await
+        .map_err(map_planning_ctx_error)?;
+
+        // Infer schema using the planning context
+        let (schema, networks) =
+            infer_table_schema(&planning_ctx, &table_name, stmt.clone()).await?;
+
+        // Add to inferred tables for next iteration (with dummy network for schema)
+        inferred_tables.push(LogicalTable::new(
+            table_name.clone(),
+            schema.arrow.clone().into(),
+            networks.first().cloned().unwrap_or_default(),
+            vec![],
+        ));
+
+        schemas.insert(table_name, TableSchemaWithNetworks { schema, networks });
+    }
+
+    Ok(Json(SchemaResponse { schemas }))
+}
+
+/// Helper function to infer schema for a single table.
+async fn infer_table_schema(
+    planning_ctx: &common::PlanningContext,
+    table_name: &TableName,
+    stmt: Statement,
+) -> Result<(TableSchema, Vec<String>), Error> {
+    let plan = planning_ctx
+        .plan_sql(stmt.clone())
+        .await
+        .map_err(|err| Error::SchemaInference {
+            table_name: table_name.clone(),
+            source: err,
+        })?;
+
+    // Return error if query is non-incremental
+    plan.is_incremental()
+        .map_err(|err| Error::NonIncrementalQuery {
+            table_name: table_name.clone(),
+            source: err,
+        })?;
+
+    // Infer schema using the planning context
+    let schema =
+        planning_ctx
+            .sql_output_schema(stmt)
+            .await
+            .map_err(|err| Error::SchemaInference {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
+
+    // Prepend the special block number field
+    let schema = prepend_special_block_num_field(&schema);
+
+    // Extract networks from all tables in the catalog
+    let mut networks: Vec<String> = planning_ctx
+        .catalog()
+        .iter()
+        .map(|t| t.table().network().to_string())
+        .collect();
+    networks.sort();
+    networks.dedup();
+
+    Ok((schema.into(), networks))
+}
+
+/// Helper function to map PlanningCtxForSqlTablesWithDepsError to Error.
+fn map_planning_ctx_error(err: PlanningCtxForSqlTablesWithDepsError) -> Error {
+    match &err {
         PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
             Error::UnqualifiedTable(err)
         }
         PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { source, .. } => {
-            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-            // (and other error types) map to Error::GetDataset for HTTP 500.
             if source
                 .downcast_ref::<GetDatasetError>()
                 .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
@@ -296,10 +446,6 @@ pub async fn handler(
             }
         }
         PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { source, .. } => {
-            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-            // (and other error types) map to Error::GetDataset for HTTP 500.
             if source
                 .downcast_ref::<GetDatasetError>()
                 .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
@@ -338,7 +484,9 @@ pub async fn handler(
                 | ResolveError::SelfFunctionNotFound { .. } => {
                     Error::FunctionNotFoundInDataset(err)
                 }
-                ResolveError::TableNotFound { .. } => Error::TableNotFoundInDataset(err),
+                ResolveError::TableNotFound { .. } | ResolveError::SelfTableNotFound { .. } => {
+                    Error::TableNotFoundInDataset(err)
+                }
                 ResolveError::EthCallNotAvailable { .. } => Error::EthCallNotAvailable(err),
                 ResolveError::DatasetLoad { source, .. } => {
                     if source
@@ -354,57 +502,45 @@ pub async fn handler(
                 _ => Error::CatalogResolution(err),
             }
         }
-    })?;
-
-    // Infer schema for each table and extract networks
-    let mut schemas = BTreeMap::new();
-    for (table_name, stmt) in statements {
-        let plan =
-            planning_ctx
-                .plan_sql(stmt.clone())
-                .await
-                .map_err(|err| Error::SchemaInference {
-                    table_name: table_name.clone(),
-                    source: err,
-                })?;
-        // Return error if query is non-incremental
-        plan.is_incremental()
-            .map_err(|err| Error::NonIncrementalQuery {
-                table_name: table_name.clone(),
-                source: err,
-            })?;
-        // Infer schema using the planning context
-        let schema =
-            planning_ctx
-                .sql_output_schema(stmt)
-                .await
-                .map_err(|err| Error::SchemaInference {
-                    table_name: table_name.clone(),
-                    source: err,
-                })?;
-
-        // Prepend the special block number field
-        let schema = prepend_special_block_num_field(&schema);
-
-        // Extract networks from all tables in the catalog
-        let mut networks: Vec<String> = planning_ctx
-            .catalog()
-            .iter()
-            .map(|t| t.table().network().to_string())
-            .collect();
-        networks.sort();
-        networks.dedup();
-
-        schemas.insert(
-            table_name,
-            TableSchemaWithNetworks {
-                schema: schema.into(),
-                networks,
-            },
-        );
     }
+}
 
-    Ok(Json(SchemaResponse { schemas }))
+/// Builds self-dataset for schema inference from functions and already-inferred tables.
+fn dummy_dataset(
+    functions: &BTreeMap<FuncName, Function>,
+    inferred_tables: &[LogicalTable],
+) -> Option<Arc<Dataset>> {
+    use common::catalog::logical::{
+        Function as LogicalFunction, FunctionSource as LogicalFunctionSource,
+    };
+
+    // Convert manifest functions to logical functions
+    let logical_functions: Vec<LogicalFunction> = functions
+        .iter()
+        .map(|(name, f)| LogicalFunction {
+            name: name.as_ref().to_string(),
+            input_types: f.input_types.iter().map(|dt| dt.0.clone()).collect(),
+            output_type: f.output_type.0.clone(),
+            source: LogicalFunctionSource {
+                source: f.source.source.clone(),
+                filename: f.source.filename.clone(),
+            },
+        })
+        .collect();
+
+    // Create a dummy dataset with functions and any already-inferred tables
+    let dummy_hash: Hash = "0".repeat(64).try_into().unwrap();
+    let dataset = Dataset {
+        manifest_hash: dummy_hash,
+        dependencies: BTreeMap::new(),
+        kind: DerivedDatasetKind.to_string(),
+        network: None,
+        start_block: None,
+        finalized_blocks_only: false,
+        tables: inferred_tables.to_vec(),
+        functions: logical_functions,
+    };
+    Some(Arc::new(dataset))
 }
 
 /// Request payload for schema analysis
@@ -509,6 +645,16 @@ enum Error {
         source: BoxError,
     },
 
+    /// Circular table dependency detected
+    ///
+    /// This occurs when tables reference each other via `self.table_name` in a cycle,
+    /// making it impossible to determine the order for schema inference.
+    #[error("Circular dependency detected between tables: {}", tables.iter().map(|t| t.as_ref()).collect::<Vec<_>>().join(" -> "))]
+    CircularTableDependency {
+        /// Table names involved in the cycle
+        tables: Vec<TableName>,
+    },
+
     /// Failed to resolve table references in SQL query
     ///
     /// This occurs when:
@@ -521,7 +667,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -580,7 +726,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Unqualified table reference
@@ -596,7 +742,7 @@ enum Error {
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
     InvalidTableName(
-        #[source] ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        #[source] ResolveTableReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     ),
 
     /// Dataset reference not found
@@ -650,7 +796,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
     },
 
     /// Invalid dependency alias in function reference
@@ -739,6 +885,7 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
             Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
             Error::NonIncrementalQuery { .. } => "NON_INCREMENTAL_QUERY",
+            Error::CircularTableDependency { .. } => "CIRCULAR_TABLE_DEPENDENCY",
             Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
@@ -771,6 +918,7 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
             Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
             Error::NonIncrementalQuery { .. } => StatusCode::BAD_REQUEST,
+            Error::CircularTableDependency { .. } => StatusCode::BAD_REQUEST,
             Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,

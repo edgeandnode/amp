@@ -18,6 +18,7 @@ use common::{
     catalog::{
         dataset_access::DatasetAccess,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
+        resolve::SELF_SCHEMA,
     },
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
@@ -27,7 +28,7 @@ use common::{
 };
 use datafusion::sql::parser;
 use datasets_common::{
-    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
+    deps::alias::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     hash::Hash,
     hash_reference::HashReference,
     table_name::TableName,
@@ -38,7 +39,6 @@ use crate::{
     DerivedDatasetKind, Manifest,
     catalog::{
         PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
-        self_refs_from_manifest,
     },
     manifest::{TableInput, View},
 };
@@ -176,8 +176,16 @@ pub fn sort_tables_by_dependencies(
                         table_deps.push(table.as_ref().clone());
                     }
                 }
+                TableReference::Partial { schema, table }
+                    if schema.as_ref() == SELF_SCHEMA && table.as_ref() != table_name =>
+                {
+                    // Self-reference (self.table_name) to another table in the same dataset
+                    if table_map.contains_key(table.as_ref()) {
+                        table_deps.push(table.as_ref().clone());
+                    }
+                }
                 _ => {
-                    // Reference to external dataset or self-reference, ignore
+                    // Reference to external dataset, ignore for internal dependency sorting
                 }
             }
         }
@@ -288,7 +296,7 @@ pub struct TableDependencySortError {
 type TableReferencesMap = BTreeMap<
     TableName,
     (
-        Vec<TableReference<DepAlias>>,
+        Vec<TableReference<DepAliasOrSelfRef>>,
         Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
@@ -373,22 +381,23 @@ pub async fn validate(
                 source: err,
             })?;
 
-        // Extract table references
-        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
-            ResolveTableReferencesError::InvalidTableName { .. } => {
-                ManifestValidationError::InvalidTableName(err)
-            }
-            ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
-                ManifestValidationError::CatalogQualifiedTableInSql {
+        // Extract table references (supports both external deps and self-references)
+        let table_refs =
+            resolve_table_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| match &err {
+                ResolveTableReferencesError::InvalidTableName { .. } => {
+                    ManifestValidationError::InvalidTableName(err)
+                }
+                ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                    ManifestValidationError::CatalogQualifiedTableInSql {
+                        table_name: table_name.clone(),
+                        source: err,
+                    }
+                }
+                _ => ManifestValidationError::TableReferenceResolution {
                     table_name: table_name.clone(),
                     source: err,
-                }
-            }
-            _ => ManifestValidationError::TableReferenceResolution {
-                table_name: table_name.clone(),
-                source: err,
-            },
-        })?;
+                },
+            })?;
 
         // Extract function references (supports both external deps and self-references)
         let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| {
@@ -408,11 +417,16 @@ pub async fn validate(
     // - Bare function references can be created as UDFs or are assumed to be built-ins
     // - Table references use valid dataset aliases from dependencies
     // - Schema compatibility across dependencies
+    let self_dataset = {
+        // Dummy hash is fine as this is just validation
+        let dummy_hash: Hash = "0".repeat(64).try_into().unwrap();
+        Some(std::sync::Arc::new(dataset(dummy_hash, manifest.clone())?))
+    };
     let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
         store,
         references,
         dependencies,
-        self_refs_from_manifest(manifest),
+        self_dataset,
         IsolatePool::dummy(), // For manifest validation only (no JS execution)
     )
     .await
@@ -525,7 +539,7 @@ pub enum ManifestValidationError {
     TableReferenceResolution {
         table_name: TableName,
         #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -571,7 +585,7 @@ pub enum ManifestValidationError {
     CatalogQualifiedTableInSql {
         table_name: TableName,
         #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Unqualified table reference
@@ -586,7 +600,7 @@ pub enum ManifestValidationError {
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
-    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
+    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasOrSelfRefError>),
 
     /// Dataset reference not found
     ///
@@ -688,4 +702,24 @@ pub enum ManifestValidationError {
         dataset_start_block: BlockNum,
         dependency_earliest_block: BlockNum,
     },
+
+    /// Failed to sort tables by dependencies
+    ///
+    /// This occurs when the topological sort of table dependencies fails,
+    /// typically due to circular dependencies between tables.
+    #[error("Failed to sort tables by dependencies")]
+    SortTableDependencies(#[source] SortTablesByDependenciesError),
+}
+
+impl From<DatasetError> for ManifestValidationError {
+    fn from(err: DatasetError) -> Self {
+        match err {
+            DatasetError::ParseSql { table_name, source } => {
+                ManifestValidationError::InvalidTableSql { table_name, source }
+            }
+            DatasetError::SortTableDependencies(source) => {
+                ManifestValidationError::SortTableDependencies(source)
+            }
+        }
+    }
 }

@@ -40,7 +40,7 @@ use super::{
     dataset_access::DatasetAccess,
     errors::{CatalogForSqlError, PlanningCtxForSqlError},
     physical::{Catalog, PhysicalTable},
-    resolve::{RegistrySchemaResolver, SelfReferences, resolve_logical_catalog},
+    resolve::{RegistrySchemaResolver, resolve_logical_catalog},
 };
 use crate::{
     PlanningContext, Store,
@@ -95,7 +95,7 @@ pub async fn catalog_for_sql(
         &resolver,
         table_refs,
         func_refs,
-        SelfReferences::empty(), // No self-references for user queries
+        None, // No self-references for user queries
         &env.isolate_pool,
     )
     .await
@@ -202,7 +202,7 @@ pub async fn planning_ctx_for_sql(
         &resolver,
         table_refs,
         func_refs,
-        SelfReferences::empty(), // No self-references for user queries
+        None, // No self-references for user queries
         &IsolatePool::dummy(),
     )
     .await
