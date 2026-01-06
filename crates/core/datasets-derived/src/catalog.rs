@@ -10,16 +10,15 @@
 //! dataset dependencies (DepAlias → Hash mappings) for deterministic, reproducible
 //! derived dataset execution.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use common::{
-    BoxError, PlanningContext, Store,
+    BoxError, Dataset, PlanningContext, Store,
     catalog::{
         dataset_access::DatasetAccess,
-        logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
         physical::{Catalog, PhysicalTable},
-        resolve::{SchemaResolver, SelfReferences, resolve_logical_catalog},
+        resolve::{SchemaResolver, resolve_logical_catalog},
     },
     query_context::QueryEnv,
     sql::{
@@ -30,43 +29,10 @@ use common::{
 use datafusion::sql::parser::Statement;
 use datasets_common::{
     deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
-    func_name::FuncName,
     hash_reference::HashReference,
     table_name::TableName,
 };
 use js_runtime::isolate_pool::IsolatePool;
-
-use crate::manifest::Function;
-
-// ============================================================================
-// Self References Helper
-// ============================================================================
-
-/// Creates `SelfReferences` from a derived dataset manifest.
-///
-/// This is used when derived dataset functions need to be resolved via `self.function_name()`
-/// references in SQL.
-pub fn self_refs_from_manifest(manifest: &crate::Manifest) -> SelfReferences {
-    self_refs_from_functions(&manifest.functions)
-}
-
-/// Creates `SelfReferences` from manifest function definitions.
-pub fn self_refs_from_functions(functions: &BTreeMap<FuncName, Function>) -> SelfReferences {
-    let logical_functions: Vec<LogicalFunction> = functions
-        .iter()
-        .map(|(name, f)| LogicalFunction {
-            name: name.as_ref().to_string(),
-            input_types: f.input_types.iter().map(|dt| dt.0.clone()).collect(),
-            output_type: f.output_type.0.clone(),
-            source: LogicalFunctionSource {
-                source: f.source.source.clone(),
-                filename: f.source.filename.clone(),
-            },
-        })
-        .collect();
-
-    SelfReferences::new(logical_functions)
-}
 
 // ============================================================================
 // Pre-Resolved Resolver
@@ -118,10 +84,10 @@ pub async fn catalog_for_derived_table(
     query: &Statement,
     env: &QueryEnv,
     dependencies: &BTreeMap<DepAlias, HashReference>,
-    self_refs: SelfReferences,
+    self_dataset: Option<Arc<Dataset>>,
 ) -> Result<Catalog, CatalogForDerivedTableError> {
     // Extract table and function references from SQL
-    let table_refs: Vec<_> = resolve_table_references::<DepAlias>(query)
+    let table_refs: Vec<_> = resolve_table_references::<DepAliasOrSelfRef>(query)
         .map_err(CatalogForDerivedTableError::TableReferenceResolution)?
         .into_iter()
         .filter_map(|r| r.into_parts())
@@ -140,7 +106,7 @@ pub async fn catalog_for_derived_table(
         &resolver,
         table_refs,
         func_refs,
-        self_refs,
+        self_dataset,
         &env.isolate_pool,
     )
     .await
@@ -170,7 +136,7 @@ pub async fn catalog_for_derived_table(
 type TableReferencesMap = BTreeMap<
     TableName,
     (
-        Vec<TableReference<DepAlias>>,
+        Vec<TableReference<DepAliasOrSelfRef>>,
         Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
@@ -217,14 +183,14 @@ type TableReferencesMap = BTreeMap<
 /// ## Function Handling
 ///
 /// Bare (unqualified) function references are handled as follows:
-/// - If the function is defined in the `self_refs` parameter, a UDF is created for it
+/// - If the function is defined in the `self_dataset` parameter, a UDF is created for it
 /// - If the function is not defined, it's assumed to be a built-in function (logged as debug)
 /// - TODO: Add validation against DataFusion built-in functions to catch typos
 pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
     store: &impl DatasetAccess,
     references: TableReferencesMap,
     dependencies: BTreeMap<DepAlias, HashReference>,
-    self_refs: SelfReferences,
+    self_dataset: Option<Arc<Dataset>>,
     isolate_pool: IsolatePool,
 ) -> Result<PlanningContext, PlanningCtxForSqlTablesWithDepsError> {
     // Check for unqualified tables and flatten refs
@@ -255,7 +221,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
         &resolver,
         table_refs,
         func_refs,
-        self_refs,
+        self_dataset,
         &isolate_pool,
     )
     .await
@@ -417,9 +383,9 @@ pub enum CatalogForDerivedTableError {
     /// - Table references contain invalid identifiers
     /// - Table references have unsupported format (not 1-3 parts)
     /// - Table names don't conform to identifier rules
-    /// - Schema portion fails to parse as DepAlias
+    /// - Schema portion fails to parse as DepAlias or self reference
     #[error("Failed to resolve table references from SQL")]
-    TableReferenceResolution(#[source] ResolveTableReferencesError<DepAliasError>),
+    TableReferenceResolution(#[source] ResolveTableReferencesError<DepAliasOrSelfRefError>),
 
     /// Failed to extract function names from the SQL statement.
     ///

@@ -5,7 +5,6 @@ use monitoring::logging;
 use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
-#[ignore = "The intra-deps resolution functionality is broken. Enable this test once fixed"]
 async fn intra_deps_test() {
     logging::init();
 

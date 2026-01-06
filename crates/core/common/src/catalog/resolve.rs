@@ -20,7 +20,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
+use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{
     func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
     hash::Hash,
@@ -33,78 +33,12 @@ use js_runtime::isolate_pool::IsolatePool;
 
 use super::{
     dataset_access::DatasetAccess,
-    logical::{Dataset, Function, LogicalCatalog},
+    logical::{Dataset, LogicalCatalog},
 };
-use crate::{BoxError, ResolvedTable, js_udf::JsUdf, sql::TableReference};
+use crate::{BoxError, ResolvedTable, sql::TableReference};
 
 /// The schema name used for self-references in derived datasets.
 pub const SELF_SCHEMA: &str = "self";
-
-// ============================================================================
-// Self References
-// ============================================================================
-
-/// Functions available for self-reference resolution in derived datasets.
-///
-/// This type contains the functions needed to resolve `self.function_name()` references
-/// in SQL queries. It can be created from a `Dataset` or directly from function definitions.
-#[derive(Clone)]
-pub struct SelfReferences {
-    functions: Vec<Function>,
-}
-
-impl SelfReferences {
-    /// Creates a new `SelfReferences` from a list of functions.
-    pub fn new(functions: Vec<Function>) -> Self {
-        Self { functions }
-    }
-
-    /// Creates an empty `SelfReferences` with no functions.
-    pub fn empty() -> Self {
-        Self {
-            functions: Vec::new(),
-        }
-    }
-
-    /// Returns true if there are no functions available for self-reference.
-    pub fn is_empty(&self) -> bool {
-        self.functions.is_empty()
-    }
-
-    /// Returns a specific JS function by name.
-    ///
-    /// This implements lazy loading by only instantiating the requested function.
-    pub fn function_by_name(&self, name: &str, isolate_pool: IsolatePool) -> Option<ScalarUDF> {
-        self.functions.iter().find(|f| f.name == name).map(|f| {
-            AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                isolate_pool,
-                SELF_SCHEMA.to_string(),
-                f.source.source.clone(),
-                f.source.filename.clone().into(),
-                f.name.clone().into(),
-                f.input_types.clone(),
-                f.output_type.clone(),
-            )))
-            .into_scalar_udf()
-        })
-    }
-}
-
-impl From<&Dataset> for SelfReferences {
-    fn from(dataset: &Dataset) -> Self {
-        Self {
-            functions: dataset.functions.clone(),
-        }
-    }
-}
-
-impl From<&Arc<Dataset>> for SelfReferences {
-    fn from(dataset: &Arc<Dataset>) -> Self {
-        Self {
-            functions: dataset.functions.clone(),
-        }
-    }
-}
 
 /// Trait for resolving schema strings to hash references.
 ///
@@ -162,9 +96,9 @@ pub enum ResolveError<SE> {
     #[error("self-referenced function '{function}' not found in self dataset")]
     SelfFunctionNotFound { function: FuncName },
 
-    /// Self-reference used but no self dataset provided.
-    #[error("self-reference to function '{function}' but no self dataset provided")]
-    NoSelfDataset { function: FuncName },
+    /// Self-referenced table not found in self dataset.
+    #[error("self-referenced table '{table}' not found in self dataset")]
+    SelfTableNotFound { table: TableName },
 
     /// eth_call function not available for dataset.
     #[error("eth_call not available for dataset {hash}")]
@@ -194,7 +128,7 @@ pub enum ResolveError<SE> {
 /// - `table_refs`: Iterator of (schema, table_name) tuples for qualified table references
 /// - `func_refs`: Iterator of (schema?, function_name) tuples. `None` schema means bare
 ///   function (built-in DataFusion function)
-/// - `self_refs`: Functions for resolving `self.function` references (for derived datasets)
+/// - `self_dataset`: Dataset for resolving `self.function` and `self.table` references
 /// - `isolate_pool`: JavaScript isolate pool for creating UDFs
 ///
 /// # Errors
@@ -205,7 +139,7 @@ pub async fn resolve_logical_catalog<R>(
     resolver: &R,
     table_refs: impl IntoIterator<Item = (String, TableName)>,
     func_refs: impl IntoIterator<Item = (Option<String>, FuncName)>,
-    self_refs: SelfReferences,
+    self_dataset: Option<Arc<Dataset>>,
     isolate_pool: &IsolatePool,
 ) -> Result<LogicalCatalog, ResolveError<R::Error>>
 where
@@ -219,9 +153,31 @@ where
     let mut udfs: BTreeMap<Hash, BTreeMap<String, ScalarUDF>> = BTreeMap::new();
     // Track self-referenced UDFs separately (deduplicated by function name)
     let mut self_udfs: BTreeMap<FuncName, ScalarUDF> = BTreeMap::new();
+    // Track self-referenced tables separately (deduplicated by table name)
+    let mut self_tables: BTreeMap<TableName, ResolvedTable> = BTreeMap::new();
 
     // === Table Resolution ===
     for (schema, table) in table_refs {
+        // Handle self-reference separately
+        if schema == SELF_SCHEMA {
+            // Skip if already resolved (deduplication)
+            if self_tables.contains_key(&table) {
+                continue;
+            }
+
+            // Resolve from self_dataset
+            let resolved = self_dataset
+                .as_ref()
+                .and_then(|d| d.resolved_table_by_name(SELF_SCHEMA, &table))
+                .ok_or_else(|| ResolveError::SelfTableNotFound {
+                    table: table.clone(),
+                })?;
+
+            self_tables.insert(table, resolved);
+            continue;
+        }
+
+        // External dataset reference
         let hash_ref = resolver
             .resolve(&schema)
             .await
@@ -274,22 +230,22 @@ where
             // Bare function - skip (built-in DataFusion function)
             None => continue,
 
-            // Self-reference - resolve from self_refs
+            // Self-reference - resolve from self_dataset
             Some(ref s) if s == SELF_SCHEMA => {
                 // Skip if already resolved (deduplication)
                 if self_udfs.contains_key(&function) {
                     continue;
                 }
 
-                // Check if self-references are available
-                if self_refs.is_empty() {
-                    return Err(ResolveError::NoSelfDataset {
-                        function: function.clone(),
-                    });
-                }
-
-                let udf = self_refs
-                    .function_by_name(function.as_ref(), isolate_pool.clone())
+                let udf = self_dataset
+                    .as_ref()
+                    .and_then(|d| {
+                        d.function_by_name(
+                            SELF_SCHEMA.to_string(),
+                            function.as_ref(),
+                            isolate_pool.clone(),
+                        )
+                    })
                     .ok_or_else(|| ResolveError::SelfFunctionNotFound {
                         function: function.clone(),
                     })?;
@@ -353,7 +309,10 @@ where
     }
 
     Ok(LogicalCatalog {
-        tables: tables.into_values().flat_map(|m| m.into_values()).collect(),
+        tables: self_tables
+            .into_values()
+            .chain(tables.into_values().flat_map(|m| m.into_values()))
+            .collect(),
         udfs: self_udfs
             .into_values()
             .chain(udfs.into_values().flat_map(|m| m.into_values()))

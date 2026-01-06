@@ -79,6 +79,20 @@ impl Dataset {
     pub fn manifest_hash(&self) -> &datasets_common::hash::Hash {
         &self.manifest_hash
     }
+
+    /// Returns a resolved table by name for self-references.
+    pub fn resolved_table_by_name(
+        self: &Arc<Self>,
+        schema: &str,
+        name: &TableName,
+    ) -> Option<ResolvedTable> {
+        let table = self.tables.iter().find(|t| t.name() == name)?;
+        Some(ResolvedTable::new(
+            TableReference::partial(schema.to_string(), name.clone()),
+            table.clone(),
+            self.clone(),
+        ))
+    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]

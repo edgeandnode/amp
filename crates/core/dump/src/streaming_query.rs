@@ -398,11 +398,6 @@ impl StreamingQuery {
             return Ok(None);
         };
 
-        if common_watermark.number < self.start_block {
-            // Common watermark hasn't reached the requested start block yet.
-            return Ok(None);
-        }
-
         let Some(direction) = self.next_microbatch_start(&blocks_ctx).await? else {
             debug!("no next microbatch start found");
             return Ok(None);
@@ -434,7 +429,12 @@ impl StreamingQuery {
         match &self.prev_watermark {
             // start stream
             None => {
-                let block = self.blocks_table_fetch(ctx, self.start_block, None).await?;
+                // As an optimization, start the stream from the minimum start block across all dependent tables.
+                // Unconditionally starting from `0` would spend time scanning ranges known to be empty.
+                let earliest_block = self
+                    .start_block
+                    .max(self.catalog.earliest_block().await?.unwrap_or(0));
+                let block = self.blocks_table_fetch(ctx, earliest_block, None).await?;
                 Ok(block.map(|b| StreamDirection::ForwardFrom(b.into())))
             }
             // continue stream
