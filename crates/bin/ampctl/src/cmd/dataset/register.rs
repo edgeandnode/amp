@@ -46,7 +46,7 @@ use serde_json::value::RawValue;
 
 use crate::{args::GlobalArgs, client::datasets::HashOrManifestJson};
 
-/// Command-line arguments for the `reg-manifest` command.
+/// Command-line arguments for the `manifest register` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
     #[command(flatten)]

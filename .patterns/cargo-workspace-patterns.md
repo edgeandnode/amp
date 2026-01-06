@@ -52,7 +52,7 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 
 **What belongs here:**
 - **`ampd`**: Main CLI application with subcommands (`dump`, `server`, `worker`)
-- **`ampctl`**: Control plane CLI with commands for manifest generation (`gen-manifest`) and registration (`reg-manifest`)
+- **`ampctl`**: Control plane CLI with commands for manifest generation (`manifest generate`) and registration (`manifest register`)
 - **`ampsync`**: Syncing crate that streams data from Apache Arrow `RecordBatch` and inserts into a configured postgres
   database
 

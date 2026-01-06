@@ -28,7 +28,7 @@ use amp_dataset_store::DatasetKind;
 use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use monitoring::logging;
 
-/// Command-line arguments for the `gen-manifest` command.
+/// Command-line arguments for the `manifest generate` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Kind of the dataset (evm-rpc, eth-beacon, firehose).

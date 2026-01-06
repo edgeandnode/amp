@@ -87,7 +87,7 @@ forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localho
 10. Use `ampctl` to generate a manifest. Run in repo root
 
 ```bash
-AMP_CONFIG=config.toml cargo run --bin ampctl -- gen-manifest --network anvil --kind evm-rpc --name anvil -o manifest-schemas/anvil.json
+AMP_CONFIG=config.toml cargo run --bin ampctl -- manifest generate --network anvil --kind evm-rpc -o manifest-schemas/anvil.json
 ```
 
 11. Use `ampd` to dump the dataset
