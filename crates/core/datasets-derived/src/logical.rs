@@ -19,6 +19,7 @@ use common::{
         dataset_access::DatasetAccess,
         logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
     },
+    query_context::Error as QueryContextErr,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
         TableReference, resolve_function_references, resolve_table_references,
@@ -460,9 +461,9 @@ pub async fn validate(
 
         // Plan the SQL query to a logical plan
         let plan = planning_ctx.plan_sql(stmt).await.map_err(|err| {
-            ManifestValidationError::NonIncrementalSql {
+            ManifestValidationError::SqlPlanningError {
                 table_name: table_name.clone(),
-                source: Box::new(err) as BoxError,
+                source: err,
             }
         })?;
 
@@ -643,6 +644,21 @@ pub enum ManifestValidationError {
         table_name: TableName,
         #[source]
         source: BoxError,
+    },
+
+    /// SQL query planning failed
+    ///
+    /// This error occurs when DataFusion fails to create a logical plan from
+    /// the SQL query defined for a derived dataset table. Common causes include:
+    /// - Invalid SQL syntax that passed parsing but failed planning
+    /// - References to non-existent tables or columns
+    /// - Type mismatches in expressions
+    /// - Unsupported SQL features
+    #[error("Failed to plan query for table '{table_name}': {source}")]
+    SqlPlanningError {
+        table_name: TableName,
+        #[source]
+        source: QueryContextErr,
     },
 
     /// Start block before dependencies

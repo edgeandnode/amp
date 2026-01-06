@@ -60,7 +60,7 @@ pub enum Error {
     #[error("invalid plan")]
     InvalidPlan(#[source] DataFusionError),
 
-    #[error("planning error")]
+    #[error("planning error: {0}")]
     PlanningError(#[source] DataFusionError),
 
     #[error("query execution error")]

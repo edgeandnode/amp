@@ -260,6 +260,99 @@ async fn register_with_start_block_equal_to_dependency_succeeds() {
     );
 }
 
+#[tokio::test]
+async fn register_with_nonexistent_column_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_nonexistent_column").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "nonexistent_column"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    // typo: bloock_num instead of block_num
+    let manifest_str = create_manifest_with_sql("SELECT bloock_num, hash FROM eth_firehose.blocks");
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_err(),
+        "registration should fail with nonexistent column"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("No field named bloock_num")
+    )
+}
+
+#[tokio::test]
+async fn register_with_type_mismatch_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_type_mismatch").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "type_mismatch".parse::<Name>().expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    // hash is FixedSizeBinary(32), cannot add integer to it
+    let manifest_str = create_manifest_with_sql("SELECT hash + 1 FROM eth_firehose.blocks");
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_err(),
+        "registration should fail with type mismatch"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Cannot coerce arithmetic expression")
+    )
+}
+
+#[tokio::test]
+async fn register_with_unsupported_sql_feature_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_unsupported_sql").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "unsupported_sql"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    // PIVOT is not supported by DataFusion
+    let manifest_str = create_manifest_with_sql(
+        "SELECT * FROM eth_firehose.transactions PIVOT (SUM(gas_used) FOR type IN (0, 1, 2))",
+    );
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_err(),
+        "registration should fail with unsupported SQL feature"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("feature is not implemented: Unsupported ast node Pivot")
+    )
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: client::Client,
@@ -376,4 +469,32 @@ fn create_test_manifest() -> DerivedDatasetManifest {
     "#};
 
     serde_json::from_str(manifest_json).expect("failed to parse manifest JSON")
+}
+
+/// Creates a manifest with custom SQL for testing SQL planning failures
+fn create_manifest_with_sql(sql: &str) -> String {
+    format!(
+        r#"{{
+        "kind": "manifest",
+        "dependencies": {{
+            "eth_firehose": "_/eth_firehose@0.0.1"
+        }},
+        "tables": {{
+            "test_table": {{
+                "input": {{
+                    "sql": "{sql}"
+                }},
+                "schema": {{
+                    "arrow": {{
+                        "fields": [
+                            {{"name": "_block_num", "type": "UInt64", "nullable": false}}
+                        ]
+                    }}
+                }},
+                "network": "mainnet"
+            }}
+        }},
+        "functions": {{}}
+    }}"#
+    )
 }

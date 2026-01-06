@@ -1212,7 +1212,7 @@ pub enum RegisterError {
     /// This occurs when:
     /// - SQL queries are invalid
     /// - SQL queries reference datasets not declared in dependencies
-    #[error("dependency validation error")]
+    #[error("dependency validation error: {0}")]
     ManifestValidationError(#[source] ApiError),
 
     /// Unsupported dataset kind (400, UNSUPPORTED_DATASET_KIND)
