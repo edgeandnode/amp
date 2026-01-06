@@ -28,7 +28,7 @@ async fn rpc_reorg_prop() {
     for _ in 0..3 {
         test.mine(rng.random_range(1..=3)).await;
         let latest_block_num = test.latest_block().await.block_num;
-        test.dump("anvil_rpc", latest_block_num).await;
+        test.dump("anvil_rpc", Some(latest_block_num)).await;
 
         let blocks0 = test.query_blocks("anvil_rpc", None).await;
         eprintln!("blocks0 = {:#?}", blocks0);
@@ -41,7 +41,7 @@ async fn rpc_reorg_prop() {
         let reorg_depth = u64::min(rng.random_range(1..=3), test.latest_block().await.block_num);
         test.reorg(reorg_depth).await;
         let latest_after_reorg = test.latest_block().await.block_num;
-        test.dump("anvil_rpc", latest_after_reorg).await;
+        test.dump("anvil_rpc", Some(latest_after_reorg)).await;
 
         // no reorg detected, since dumped block height has not increased
         assert_eq!(blocks0, test.query_blocks("anvil_rpc", None).await);
@@ -49,13 +49,13 @@ async fn rpc_reorg_prop() {
         // mine at least one block to detect reorg
         test.mine(rng.random_range(1..=3)).await;
         let latest_after_mine = test.latest_block().await.block_num;
-        test.dump("anvil_rpc", latest_after_mine).await;
+        test.dump("anvil_rpc", Some(latest_after_mine)).await;
 
         // the canonical chain must be resolved in at most reorg_depth dumps
         for _ in 0..reorg_depth {
             test.mine(rng.random_range(0..=3)).await;
             let latest_in_loop = test.latest_block().await.block_num;
-            test.dump("anvil_rpc", latest_in_loop).await;
+            test.dump("anvil_rpc", Some(latest_in_loop)).await;
         }
 
         let latest = test.latest_block().await;
@@ -83,12 +83,12 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
     .await;
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 2).await;
+    test.dump("anvil_rpc", Some(2)).await;
     let blocks0 = test.query_blocks("anvil_rpc", None).await;
 
     test.reorg(1).await;
     test.mine(1).await;
-    test.dump("anvil_rpc", 3).await;
+    test.dump("anvil_rpc", Some(3)).await;
     let blocks1 = test.query_blocks("anvil_rpc", None).await;
 
     // Check that reorgs are fully handled in the same block in which they are detected
@@ -118,27 +118,7 @@ async fn dump_finalized() {
     let last_block = 70;
     test.mine(last_block).await;
 
-    {
-        let worker_config = test.ctx.daemon_worker().config().clone();
-        let metadata_db = test.ctx.daemon_worker().metadata_db().clone();
-        let data_store = test.ctx.daemon_worker().data_store().clone();
-        let dataset_store = test.ctx.daemon_worker().dataset_store().clone();
-        tokio::spawn(async move {
-            let dataset_ref: Reference = "_/anvil_rpc_finalized@0.0.0".parse().unwrap();
-            test_helpers::dump_internal(
-                worker_config,
-                metadata_db,
-                data_store,
-                dataset_store,
-                dataset_ref,
-                dump::EndBlock::None,
-                1,
-                None, // microbatch_max_interval_override
-            )
-            .await
-            .expect("Failed to start continuous dump task");
-        });
-    }
+    test.dump("anvil_rpc_finalized", None).await;
 
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -162,7 +142,7 @@ async fn flight_data_app_metadata() {
     let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
 
     // Test initial block (block 0)
-    test.dump("anvil_rpc", 0).await;
+    test.dump("anvil_rpc", Some(0)).await;
     let mut flight_data = test.flight_metadata_stream(query).await;
 
     // This sleep avoids a race between the first schema message, the flight data message,
@@ -177,7 +157,7 @@ async fn flight_data_app_metadata() {
 
     // Test mining and dumping more blocks
     test.mine(2).await;
-    test.dump("anvil_rpc", 2).await;
+    test.dump("anvil_rpc", Some(2)).await;
 
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
@@ -189,8 +169,8 @@ async fn flight_data_app_metadata() {
     // Test reorg scenario
     test.reorg(1).await;
     test.mine(1).await;
-    test.dump("anvil_rpc", 3).await;
-    test.dump("anvil_rpc", 3).await; // Dump twice to ensure reorg is detected
+    test.dump("anvil_rpc", Some(3)).await;
+    test.dump("anvil_rpc", Some(3)).await; // Dump twice to ensure reorg is detected
 
     let metadata = ReorgTestCtx::pull_flight_metadata(&mut flight_data).await;
     assert_eq!(metadata.len(), 1);
@@ -210,9 +190,9 @@ async fn streaming_reorg_desync() {
     .await;
 
     // Initial dump of all datasets to block 0
-    test.dump("anvil_rpc", 0).await;
-    test.dump("sql_over_anvil_1", 0).await;
-    test.dump("sql_over_anvil_2", 0).await;
+    test.dump("anvil_rpc", Some(0)).await;
+    test.dump("sql_over_anvil_1", Some(0)).await;
+    test.dump("sql_over_anvil_2", Some(0)).await;
 
     // Set up streaming query that unions both SQL datasets
     let streaming_query = r#"
@@ -233,13 +213,13 @@ async fn streaming_reorg_desync() {
 
     // Mine more blocks and cause desync between datasets
     test.mine(2).await;
-    test.dump("anvil_rpc", 2).await;
-    test.dump("sql_over_anvil_1", 2).await; // Only dump one dataset
+    test.dump("anvil_rpc", Some(2)).await;
+    test.dump("sql_over_anvil_1", Some(2)).await; // Only dump one dataset
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 4).await;
-    test.dump("anvil_rpc", 4).await; // Dump twice to ensure reorg detection
-    test.dump("sql_over_anvil_2", 4).await; // Only dump the other dataset
+    test.dump("anvil_rpc", Some(4)).await;
+    test.dump("anvil_rpc", Some(4)).await; // Dump twice to ensure reorg detection
+    test.dump("sql_over_anvil_2", Some(4)).await; // Only dump the other dataset
 
     // At this point, datasets should be out of sync
     assert_ne!(
@@ -249,7 +229,7 @@ async fn streaming_reorg_desync() {
     );
 
     // Resync the first dataset
-    test.dump("sql_over_anvil_1", 4).await;
+    test.dump("sql_over_anvil_1", Some(4)).await;
 
     // Check final stream (should have 8 blocks total: 4 from each dataset after resync)
     check_batch(&mut flight_client, 8).await;
@@ -265,8 +245,8 @@ async fn streaming_reorg_rewind_shallow() {
     .await;
 
     // Initial dump to block 0
-    test.dump("anvil_rpc", 0).await;
-    test.dump("sql_over_anvil_1", 0).await;
+    test.dump("anvil_rpc", Some(0)).await;
+    test.dump("sql_over_anvil_1", Some(0)).await;
 
     // Set up streaming query
     let streaming_query = r#"
@@ -289,8 +269,8 @@ async fn streaming_reorg_rewind_shallow() {
 
     // Mine more blocks and dump
     test.mine(2).await;
-    test.dump("anvil_rpc", 2).await;
-    test.dump("sql_over_anvil_1", 2).await;
+    test.dump("anvil_rpc", Some(2)).await;
+    test.dump("sql_over_anvil_1", Some(2)).await;
 
     // Check stream includes new blocks
     assert_eq!(
@@ -301,9 +281,9 @@ async fn streaming_reorg_rewind_shallow() {
     // Trigger shallow reorg (depth 1)
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 4).await;
-    test.dump("anvil_rpc", 4).await; // Dump twice to ensure reorg detection
-    test.dump("sql_over_anvil_1", 4).await;
+    test.dump("anvil_rpc", Some(4)).await;
+    test.dump("anvil_rpc", Some(4)).await; // Dump twice to ensure reorg detection
+    test.dump("sql_over_anvil_1", Some(4)).await;
 
     // Check stream shows rewind from shallow reorg
     assert_eq!(
@@ -322,8 +302,8 @@ async fn streaming_reorg_rewind_deep() {
     .await;
 
     // Initial dump to block 0
-    test.dump("anvil_rpc", 0).await;
-    test.dump("sql_over_anvil_1", 0).await;
+    test.dump("anvil_rpc", Some(0)).await;
+    test.dump("sql_over_anvil_1", Some(0)).await;
 
     // Set up streaming query
     let streaming_query = r#"
@@ -346,10 +326,10 @@ async fn streaming_reorg_rewind_deep() {
 
     // Mine many blocks and dump incrementally
     test.mine(6).await;
-    test.dump("anvil_rpc", 6).await;
-    test.dump("sql_over_anvil_1", 2).await;
-    test.dump("sql_over_anvil_1", 4).await;
-    test.dump("sql_over_anvil_1", 6).await;
+    test.dump("anvil_rpc", Some(6)).await;
+    test.dump("sql_over_anvil_1", Some(2)).await;
+    test.dump("sql_over_anvil_1", Some(4)).await;
+    test.dump("sql_over_anvil_1", Some(6)).await;
 
     // Check stream includes all new blocks
     assert_eq!(
@@ -360,9 +340,9 @@ async fn streaming_reorg_rewind_deep() {
     // Trigger deep reorg (depth 5)
     test.reorg(5).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 8).await;
-    test.dump("anvil_rpc", 8).await; // Dump twice to ensure reorg detection
-    test.dump("sql_over_anvil_1", 8).await;
+    test.dump("anvil_rpc", Some(8)).await;
+    test.dump("anvil_rpc", Some(8)).await; // Dump twice to ensure reorg detection
+    test.dump("sql_over_anvil_1", Some(8)).await;
 
     // Check stream shows rewind from deep reorg
     assert_eq!(
@@ -446,19 +426,16 @@ impl ReorgTestCtx {
             .expect("Failed to trigger reorg");
     }
 
-    /// Dump dataset up to the specified end block.
-    async fn dump(&self, dataset: &str, end: BlockNum) {
+    /// Dump dataset up to the specified end block via worker/scheduler.
+    ///
+    /// This method exercises the full production code path by scheduling a job
+    /// via the Admin API and waiting for the worker to complete it.
+    async fn dump(&self, dataset: &str, end: Option<BlockNum>) {
+        let ampctl = self.ctx.new_ampctl();
         let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
-        test_helpers::dump_dataset(
-            self.ctx.daemon_worker().config().clone(),
-            self.ctx.daemon_worker().metadata_db().clone(),
-            self.ctx.daemon_worker().data_store().clone(),
-            self.ctx.daemon_worker().dataset_store().clone(),
-            dataset_ref,
-            end,
-        )
-        .await
-        .expect("Failed to dump dataset");
+        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, end, Duration::from_secs(30))
+            .await
+            .expect("Failed to dump dataset");
     }
 
     /// Query blocks from the specified dataset.

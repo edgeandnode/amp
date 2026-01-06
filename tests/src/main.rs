@@ -45,7 +45,7 @@
 //! - **Data Validation**: Comprehensive consistency checks ensure data integrity
 //! - **Error Recovery**: Detailed error messages for troubleshooting
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use amp_config::Config;
 use amp_dataset_store::{
@@ -58,7 +58,6 @@ use datasets_common::reference::Reference;
 use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
-use metadata_db::MetadataDb;
 use monitoring::logging;
 use tests::testlib::{
     fixtures::{Ampctl, DaemonConfigBuilder, DaemonController, MetadataDb as MetadataDbFixture},
@@ -222,10 +221,8 @@ async fn main() {
 
             // Run blessing procedure
             bless(
-                config.clone(),
                 &ampctl,
                 dataset_store.clone(),
-                sysdb.conn_pool().clone(),
                 data_store.clone(),
                 dataset_ref.clone(),
                 end_block,
@@ -268,10 +265,8 @@ async fn main() {
 ///
 /// All errors include context about the specific dataset and operation that failed.
 async fn bless(
-    config: Arc<Config>,
     ampctl: &Ampctl,
     dataset_store: DatasetStore,
-    metadata_db: MetadataDb,
     data_store: Store,
     dataset: Reference,
     end: u64,
@@ -340,25 +335,19 @@ async fn bless(
 
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
-    let worker_config = worker_config_from_common(&config);
-    let physical_tables = test_helpers::dump_dataset(
-        worker_config,
-        metadata_db,
-        data_store.clone(),
-        dataset_store,
-        dataset.clone(),
-        end,
-    )
-    .await
-    .map_err(|err| {
-        format!(
-            "Failed to dump dataset '{}' to block {}: {}",
-            dataset, end, err
-        )
-    })?;
+    test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30))
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to dump dataset '{}' to block {}: {}",
+                dataset, end, err
+            )
+        })?;
 
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");
+    let physical_tables =
+        test_helpers::load_physical_tables(&dataset_store, &data_store, &dataset).await?;
     for physical_table in physical_tables {
         consistency_check(&physical_table, &data_store)
             .await
@@ -371,28 +360,6 @@ async fn bless(
     }
 
     Ok(())
-}
-
-/// Convert config::Config to worker::config::Config
-///
-/// Creates a worker configuration with a dummy WorkerInfo since the blessing
-/// process doesn't need real build information.
-fn worker_config_from_common(config: &Config) -> worker::config::Config {
-    worker::config::Config {
-        microbatch_max_interval: config.microbatch_max_interval,
-        poll_interval: config.poll_interval,
-        keep_alive_interval: config.keep_alive_interval,
-        max_mem_mb: config.max_mem_mb,
-        query_max_mem_mb: config.query_max_mem_mb,
-        spill_location: config.spill_location.clone(),
-        parquet: config.parquet.clone(),
-        worker_info: worker::info::WorkerInfo {
-            version: Some("test".to_string()),
-            commit_sha: None,
-            commit_timestamp: None,
-            build_date: None,
-        },
-    }
 }
 
 /// Resolve test data directory from known standard locations.

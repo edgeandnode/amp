@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, time::Duration};
 
 use alloy::primitives::BlockHash;
 use amp_client::{AmpClient, Cursor};
@@ -6,6 +6,7 @@ use common::{
     BlockNum,
     arrow::array::{FixedSizeBinaryArray, UInt64Array},
 };
+use datasets_common::reference::Reference;
 use futures::StreamExt;
 use monitoring::logging;
 use tokio::task::JoinHandle;
@@ -149,18 +150,16 @@ impl TestCtx {
             .expect("Failed to reorg blocks");
     }
 
-    /// Dump a dataset using amp dump command.
+    /// Dump a dataset via worker/scheduler infrastructure.
+    ///
+    /// This method exercises the full production code path by scheduling a job
+    /// via the Admin API and waiting for the worker to complete it.
     async fn dump(&self, dataset: &str, end: BlockNum) {
-        test_helpers::dump_dataset(
-            self.ctx.daemon_worker().config().clone(),
-            self.ctx.daemon_worker().metadata_db().clone(),
-            self.ctx.daemon_worker().data_store().clone(),
-            self.ctx.daemon_worker().dataset_store().clone(),
-            dataset.parse().expect("failed to parse dataset reference"),
-            end,
-        )
-        .await
-        .expect("Failed to dump dataset");
+        let ampctl = self.ctx.new_ampctl();
+        let dataset_ref: Reference = dataset.parse().expect("failed to parse dataset reference");
+        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, Some(end), Duration::from_secs(30))
+            .await
+            .expect("Failed to dump dataset via worker");
     }
 
     /// Query blocks from the specified dataset.

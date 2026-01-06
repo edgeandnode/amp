@@ -175,6 +175,14 @@ impl Ampctl {
             .map_err(Into::into)
     }
 
+    /// Get the jobs client for job status monitoring.
+    ///
+    /// This provides access to the jobs API for checking job status, stopping jobs,
+    /// and other job management operations.
+    pub fn jobs(&self) -> ampctl::client::jobs::JobsClient<'_> {
+        self.client.jobs()
+    }
+
     /// Deploy a dataset by scheduling a dump job.
     ///
     /// Takes a dataset reference string (namespace/name@version) and optional parameters,

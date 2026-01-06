@@ -13,7 +13,11 @@ use dump::{
 };
 use monitoring::logging;
 
-use crate::testlib::{self, fixtures::DatasetPackage, helpers as test_helpers};
+use crate::testlib::{
+    self,
+    fixtures::{DaemonConfigBuilder, DatasetPackage},
+    helpers as test_helpers,
+};
 
 #[tokio::test]
 async fn sql_dataset_input_batch_size() {
@@ -38,11 +42,10 @@ async fn sql_dataset_input_batch_size() {
         .unwrap();
     let end = start + 3;
 
-    test.dump_dataset("_/eth_rpc@0.0.0", end, 1, None).await;
+    test.dump_dataset("_/eth_rpc@0.0.0", end).await;
 
-    // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
-    test.dump_dataset("_/sql_stream_ds@0.0.0", end, 1, Some(1))
-        .await;
+    // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1 (set in config)
+    test.dump_dataset("_/sql_stream_ds@0.0.0", end).await;
 
     // 4. Get catalog and count files
     let file_count = test.file_count("sql_stream_ds", "even_blocks").await;
@@ -92,7 +95,12 @@ impl TestCtx {
     async fn setup(test_name: &str) -> Self {
         logging::init();
 
+        let config = DaemonConfigBuilder::new()
+            .microbatch_max_interval(1)
+            .build();
+
         let ctx = testlib::ctx::TestCtxBuilder::new(test_name)
+            .with_config(config)
             .with_provider_config("rpc_eth_mainnet")
             .with_dataset_manifests(["eth_rpc"])
             .build()
@@ -126,26 +134,12 @@ impl TestCtx {
     }
 
     /// Dump a dataset using testlib dump_dataset helper.
-    async fn dump_dataset(
-        &self,
-        dataset: &str,
-        end: u64,
-        max_writers: u16,
-        microbatch_max_interval: impl Into<Option<u64>>,
-    ) {
-        let dataset_ref: Reference = dataset.parse().unwrap();
-        test_helpers::dump_internal(
-            self.ctx.daemon_worker().config().clone(),
-            self.ctx.daemon_worker().metadata_db().clone(),
-            self.ctx.daemon_worker().data_store().clone(),
-            self.ctx.daemon_worker().dataset_store().clone(),
-            dataset_ref,
-            dump::EndBlock::Absolute(end), // end_block
-            max_writers,
-            microbatch_max_interval.into(), // microbatch_max_interval_override
-        )
-        .await
-        .expect("Failed to dump dataset");
+    async fn dump_dataset(&self, dataset: &str, end: u64) {
+        let ampctl = self.ctx.new_ampctl();
+        let dataset_ref: Reference = dataset.parse().expect("failed to parse dataset reference");
+        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, Some(end), Duration::from_secs(30))
+            .await
+            .expect("Failed to dump dataset");
     }
 
     /// Create a catalog for the specified dataset.

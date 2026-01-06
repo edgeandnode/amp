@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use common::Store;
 use datasets_common::reference::Reference;
 use monitoring::logging;
@@ -277,23 +279,36 @@ impl TestCtx {
         .expect("Failed to create reference snapshot")
     }
 
-    /// Dump dataset and create snapshot from dumped tables.
+    /// Dump dataset via worker/scheduler and create snapshot from dumped tables.
+    ///
+    /// This method exercises the full production code path by scheduling a job
+    /// via the Admin API and waiting for the worker to complete it.
     async fn dump_and_create_snapshot(&self, block: u64) -> SnapshotContext {
-        let dumped_tables = test_helpers::dump_dataset(
-            self.ctx.daemon_worker().config().clone(),
-            self.ctx.daemon_worker().metadata_db().clone(),
-            self.ctx.daemon_worker().data_store().clone(),
-            self.ctx.daemon_worker().dataset_store().clone(),
-            self.dataset_ref.clone(),
-            block,
+        let ampctl = self.ctx.new_ampctl();
+
+        // Deploy via scheduler/worker
+        test_helpers::deploy_and_wait(
+            &ampctl,
+            &self.dataset_ref,
+            Some(block),
+            Duration::from_secs(60),
         )
         .await
-        .expect("Failed to dump dataset");
+        .expect("Failed to dump dataset via worker");
+
+        // Load physical tables from dataset store
+        let physical_tables = test_helpers::load_physical_tables(
+            self.ctx.daemon_server().dataset_store(),
+            self.ctx.daemon_server().data_store(),
+            &self.dataset_ref,
+        )
+        .await
+        .expect("Failed to load physical tables");
 
         SnapshotContext::from_tables(
             self.ctx.daemon_server().config(),
             self.ctx.daemon_server().data_store().clone(),
-            dumped_tables,
+            physical_tables,
         )
         .await
         .expect("Failed to create dumped snapshot")

@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use datasets_common::reference::Reference;
 use monitoring::logging;
 
 use crate::testlib::{ctx::TestCtxBuilder, fixtures::DatasetPackage, helpers as test_helpers};
@@ -30,18 +31,19 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
 
     // Dump raw dataset (dependency)
     let anvil_ref = "_/anvil_rpc@0.0.0";
-    test_helpers::dump_dataset(
-        test_ctx.daemon_worker().config().clone(),
-        test_ctx.daemon_worker().metadata_db().clone(),
-        test_ctx.daemon_worker().data_store().clone(),
-        test_ctx.daemon_worker().dataset_store().clone(),
-        anvil_ref
-            .parse()
-            .expect("Failed to parse dataset reference"),
-        5,
+    let ampctl = test_ctx.new_ampctl();
+    let anvil_dataset_ref: Reference = anvil_ref
+        .parse()
+        .expect("failed to parse dataset reference");
+
+    test_helpers::deploy_and_wait(
+        &ampctl,
+        &anvil_dataset_ref,
+        Some(5),
+        Duration::from_secs(30),
     )
     .await
-    .expect("Failed to dump anvil_rpc");
+    .expect("Failed to dump dataset anvil_rpc");
 
     // Register derived dataset with 3 tables
     let sql_dataset = DatasetPackage::new("sql_over_anvil_1", Some("amp.config.ts"));
@@ -52,22 +54,18 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
         .expect("Failed to register sql_over_anvil_1");
 
     // Start continuous dump in background
-    let worker_config = test_ctx.daemon_worker().config().clone();
-    let metadata_db = test_ctx.daemon_worker().metadata_db().clone();
-    let data_store = test_ctx.daemon_worker().data_store().clone();
-    let dataset_store = test_ctx.daemon_worker().dataset_store().clone();
+    let ampctl_clone = ampctl.clone();
     let dump_handle = tokio::spawn(async move {
-        test_helpers::dump_dataset(
-            worker_config,
-            metadata_db,
-            data_store,
-            dataset_store,
-            "_/sql_over_anvil_1@0.0.0"
+        test_helpers::deploy_and_wait(
+            &ampctl_clone,
+            &"_/sql_over_anvil_1@0.0.0"
                 .parse()
-                .expect("Failed to parse dataset reference"),
-            u64::MAX,
+                .expect("failed to parse dataset reference"),
+            None,
+            Duration::from_secs(30),
         )
         .await
+        .expect("Failed to dump dataset");
     });
 
     // Wait for dump to start
@@ -81,15 +79,11 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
         .expect("Failed to mine additional blocks");
 
     // Update raw dataset with new blocks
-    test_helpers::dump_dataset(
-        test_ctx.daemon_worker().config().clone(),
-        test_ctx.daemon_worker().metadata_db().clone(),
-        test_ctx.daemon_worker().data_store().clone(),
-        test_ctx.daemon_worker().dataset_store().clone(),
-        anvil_ref
-            .parse()
-            .expect("Failed to parse dataset reference"),
-        8,
+    test_helpers::deploy_and_wait(
+        &ampctl,
+        &anvil_dataset_ref,
+        Some(8),
+        Duration::from_secs(30),
     )
     .await
     .expect("Failed to dump anvil_rpc with new blocks");

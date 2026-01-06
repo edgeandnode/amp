@@ -7,11 +7,11 @@
 pub mod forge;
 pub mod git;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use amp_dataset_store::{DatasetKind, DatasetStore};
+use amp_dataset_store::DatasetStore;
 use common::{
-    BoxError, CachedParquetData, LogicalCatalog, ParquetFooterCache, Store,
+    BoxError, LogicalCatalog, Store,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -19,134 +19,185 @@ use common::{
     sql_str::SqlStr,
 };
 use datasets_common::{reference::Reference, table_name::TableName};
-use dump::{EndBlock, compaction::AmpCompactor, consistency_check};
-use metadata_db::{MetadataDb, notification_multiplexer};
-use worker::config::Config as WorkerConfig;
+use dump::consistency_check;
+use worker::job::JobId;
 
 use super::fixtures::SnapshotContext;
 
-/// Internal dump orchestration function for tests.
+/// Wait for a job to reach a completion state.
 ///
-/// This function orchestrates the full extraction pipeline for a single dataset,
-/// including physical table setup and calling the extraction functions. This
-/// provides test access to the internal dump functionality used by the
-/// worker-based extraction system.
+/// Polls the job status via the Admin API at regular intervals until the job
+/// reaches the appropriate state or the timeout expires.
 ///
-/// Most test code should use the simpler `dump_dataset` function instead.
-/// This function is only exposed for advanced test scenarios that need
-/// fine-grained control over dump parameters (end_block type, max_writers,
-/// microbatch interval).
-#[expect(clippy::too_many_arguments)]
-pub async fn dump_internal(
-    config: WorkerConfig,
-    metadata_db: MetadataDb,
-    data_store: Store,
-    dataset_store: DatasetStore,
-    dataset_ref: Reference,
-    end_block: EndBlock,
-    max_writers: u16,
-    microbatch_max_interval_override: Option<u64>,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let hash_reference = dataset_store
-        .resolve_revision(&dataset_ref)
-        .await?
-        .ok_or_else(|| format!("Dataset '{}' not found", dataset_ref))?;
+/// # Behavior
+///
+/// - **Finalized jobs** (`is_continuous = false`): Waits for terminal states
+///   (COMPLETED, STOPPED, or FAILED)
+/// - **Continuous jobs** (`is_continuous = true`): Returns as soon as the job
+///   reaches RUNNING state, since continuous jobs never complete
+///
+/// # Important
+///
+/// For continuous jobs, returning on RUNNING does **not** guarantee any data
+/// has been processed yet. Tests should either:
+/// - Add an appropriate sleep after this function returns
+/// - Query the dataset to verify expected data exists
+///
+/// # Arguments
+///
+/// * `ampctl` - The Admin API client fixture
+/// * `job_id` - The ID of the job to monitor
+/// * `is_continuous` - If true, return on RUNNING state; if false, wait for terminal state
+/// * `timeout` - Maximum time to wait for the expected state
+/// * `poll_interval` - Time between status checks
+///
+/// # Returns
+///
+/// Returns the `JobInfo` when the job reaches the expected state, or an error
+/// if the timeout expires or the job cannot be found.
+pub async fn wait_for_job_completion(
+    ampctl: &super::fixtures::Ampctl,
+    job_id: JobId,
+    is_continuous: bool,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<ampctl::client::jobs::JobInfo, BoxError> {
+    let start = tokio::time::Instant::now();
 
-    // Get dataset using hash reference
-    let dataset = dataset_store.get_dataset(&hash_reference).await?;
+    loop {
+        let job_info = ampctl
+            .jobs()
+            .get(&job_id)
+            .await?
+            .ok_or_else(|| format!("Job {} not found", job_id))?;
 
-    // Parse dataset kind
-    let kind: DatasetKind = dataset.kind.parse()?;
-
-    let mut tables = Vec::with_capacity(dataset.tables.len());
-
-    let opts = dump::parquet_opts(&config.parquet);
-    let cache = ParquetFooterCache::builder(opts.cache_size_mb)
-        .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
-        .build();
-    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
-        // Always reuse existing physical tables in test scenarios (fresh = false)
-        let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(data_store.clone(), table.clone()).await? {
-                Some(physical_table) => physical_table,
-                None => {
-                    common::catalog::physical::register_new_table_revision(
-                        data_store.clone(),
-                        hash_reference.clone(),
-                        table,
+        match job_info.status.as_str() {
+            "RUNNING" if is_continuous => return Ok(job_info),
+            "COMPLETED" | "STOPPED" | "FAILED" => return Ok(job_info),
+            _ => {
+                if start.elapsed() > timeout {
+                    return Err(format!(
+                        "Timeout waiting for job {} to complete (status: {})",
+                        job_id, job_info.status
                     )
-                    .await?
+                    .into());
                 }
+                tokio::time::sleep(poll_interval).await;
             }
-            .into();
-        let cached_store = common::CachedStore::from_parts(data_store.clone(), cache.clone());
-        let compactor = AmpCompactor::start(
-            metadata_db.clone(),
-            cached_store,
-            opts.clone(),
-            physical_table.clone(),
-            None,
-        )
-        .into();
-        tables.push((physical_table, compactor));
+        }
     }
-
-    let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
-
-    let all_tables: Vec<Arc<PhysicalTable>> = tables.iter().map(|(t, _)| t).cloned().collect();
-
-    let ctx = dump::Ctx {
-        config: config.dump_config(),
-        metadata_db: metadata_db.clone(),
-        dataset_store: dataset_store.clone(),
-        data_store: data_store.clone(),
-        notification_multiplexer: notification_multiplexer.clone(),
-        metrics: None,
-    };
-
-    dump::dump_tables(
-        ctx,
-        &hash_reference,
-        kind,
-        &tables,
-        max_writers,
-        microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-        end_block,
-    )
-    .await?;
-
-    Ok(all_tables)
 }
 
-/// Extract blockchain data from a dataset source and save as Parquet files.
+/// Deploy a dataset via Admin API and wait for job completion.
 ///
-/// This is the primary function for dumping datasets in tests. It runs the full
-/// ETL extraction pipeline for a specified dataset, extracting data from the
-/// configured source (RPC, Firehose, etc.) and saving it as Parquet files.
+/// This function schedules a dataset extraction job via the worker/scheduler
+/// infrastructure and waits for it to complete. It exercises the full production
+/// code path including:
+/// - Job scheduling via the Admin API
+/// - PostgreSQL LISTEN/NOTIFY for job notifications
+/// - Worker job execution
+/// - Job status tracking
 ///
-/// This function uses sensible defaults for test scenarios:
-/// - Dumps only the specified dataset (dependencies are not resolved)
-/// - Uses single-writer mode (max_writers = 1) for deterministic results
-/// - Does not create fresh table revisions (reuses existing when possible)
-pub async fn dump_dataset(
-    config: WorkerConfig,
-    metadata_db: MetadataDb,
-    data_store: Store,
-    dataset_store: DatasetStore,
-    dataset: Reference,
-    end_block: u64,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    dump_internal(
-        config,
-        metadata_db,
-        data_store,
-        dataset_store,
-        dataset,
-        EndBlock::Absolute(end_block), // end_block
-        1,                             // max_writers (single-writer for determinism)
-        None,                          // microbatch_max_interval_override
+/// # Arguments
+///
+/// * `ampctl` - The Admin API client fixture
+/// * `dataset_ref` - Reference to the dataset to deploy (namespace/name@version)
+/// * `end_block` - The block number to extract up to
+/// * `timeout` - Maximum time to wait for job completion
+///
+/// # Returns
+///
+/// Returns the final `JobInfo` when the job completes, or an error if the job
+/// fails, times out, or cannot be scheduled.
+///
+/// # Example
+///
+/// ```ignore
+/// let ampctl = ctx.new_ampctl();
+/// let dataset_ref: Reference = "_/eth_rpc@0.0.0".parse().unwrap();
+///
+/// let job_info = deploy_and_wait(&ampctl, &dataset_ref, 1000, Duration::from_secs(60))
+///     .await
+///     .expect("Failed to deploy dataset");
+///
+/// assert_eq!(job_info.status, "COMPLETED");
+/// ```
+pub async fn deploy_and_wait(
+    ampctl: &super::fixtures::Ampctl,
+    dataset_ref: &Reference,
+    end_block: Option<u64>,
+    timeout: Duration,
+) -> Result<ampctl::client::jobs::JobInfo, BoxError> {
+    let is_continuous = end_block.is_none();
+    let job_id = ampctl
+        .dataset_deploy(
+            &dataset_ref.to_string(),
+            end_block,
+            Some(1), // parallelism
+            None,    // worker_id (auto-select)
+        )
+        .await?;
+
+    wait_for_job_completion(
+        ampctl,
+        job_id,
+        is_continuous,
+        timeout,
+        Duration::from_millis(100),
     )
     .await
+}
+
+/// Load physical tables for a dataset from the data store.
+///
+/// This function resolves a dataset reference to its physical tables, which
+/// represent the actual Parquet file storage locations for each table in the
+/// dataset. Physical tables contain metadata about file paths, schemas, and
+/// block ranges.
+///
+/// # Arguments
+///
+/// * `dataset_store` - The dataset store for resolving dataset metadata
+/// * `data_store` - The object store containing the physical Parquet files
+/// * `dataset_ref` - Reference to the dataset (namespace/name@version)
+///
+/// # Returns
+///
+/// Returns a vector of physical tables, one for each table defined in the
+/// dataset manifest.
+///
+/// # Panics
+///
+/// Panics if:
+/// - The dataset reference cannot be resolved
+/// - The dataset metadata cannot be loaded
+/// - Any physical table is not found in the data store
+pub async fn load_physical_tables(
+    dataset_store: &DatasetStore,
+    data_store: &Store,
+    dataset_ref: &Reference,
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    let hash_ref = dataset_store
+        .resolve_revision(&dataset_ref)
+        .await
+        .expect("Failed to resolve dataset")
+        .expect("Dataset not found");
+
+    let dataset = dataset_store
+        .get_dataset(&hash_ref)
+        .await
+        .expect("Failed to get dataset");
+
+    let mut dumped_tables: Vec<Arc<PhysicalTable>> = Vec::new();
+    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
+            .await
+            .expect("Failed to get physical table")
+            .expect("Physical table not found");
+        dumped_tables.push(physical_table.into());
+    }
+
+    Ok(dumped_tables)
 }
 
 /// Run consistency check on a physical table.
