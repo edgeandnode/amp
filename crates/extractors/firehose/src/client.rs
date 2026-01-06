@@ -253,6 +253,10 @@ impl BlockStreamer for Client {
         }
     }
 
+    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+        Ok(())
+    }
+
     #[instrument(skip(self), err)]
     async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
         let stream = self.blocks(-1, 0, finalized).await?;

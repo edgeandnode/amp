@@ -468,6 +468,10 @@ impl BlockStreamer for JsonRpcClient {
         Ok(block.map(|b| b.header.number))
     }
 
+    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+        Ok(())
+    }
+
     fn provider_name(&self) -> &str {
         &self.provider_name
     }

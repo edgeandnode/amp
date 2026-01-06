@@ -174,6 +174,18 @@ pub trait BlockStreamer: Clone + 'static {
         finalized: bool,
     ) -> impl Future<Output = Result<Option<BlockNum>, BoxError>> + Send;
 
+    /// Waits for any background work and resources associated with this [`BlockStreamer`]
+    /// to be cleaned up.
+    ///
+    /// This should be called once the user no longer needs to create new block streams
+    /// to allow implementations to terminate internal tasks, flush or release network
+    /// connections, and free any other resources.
+    ///
+    /// After requesting cleanup, callers should not call [BlockStreamer::block_stream]
+    /// again on the same instance. Behavior when creating new streams after cleanup is
+    /// implementation-defined and must not be relied on.
+    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), BoxError>> + Send;
+
     fn provider_name(&self) -> &str;
 }
 
@@ -290,6 +302,10 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
             );
         })
         .await
+    }
+
+    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), BoxError>> + Send {
+        self.0.wait_for_cleanup()
     }
 
     fn provider_name(&self) -> &str {

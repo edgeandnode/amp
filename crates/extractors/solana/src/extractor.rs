@@ -9,17 +9,27 @@
 //!
 //! Learn more about the Old Faithful archive here: <https://docs.old-faithful.net/>.
 
-use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
+use std::{
+    num::NonZeroU32,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
-use common::{BlockNum, BlockStreamer, BoxResult, RawDatasetRows};
+use common::{BlockNum, BlockStreamer, BoxError, BoxResult, RawDatasetRows};
 use futures::{Stream, StreamExt};
 use url::Url;
 
 use crate::{metrics, of1_client, rpc_client, tables};
 
+/// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
+struct Of1CarManagerHandles {
+    tx: tokio::sync::mpsc::Sender<of1_client::CarManagerMessage>,
+    jh: tokio::task::JoinHandle<()>,
+}
+
 /// A JSON-RPC based Solana extractor that implements the [`BlockStreamer`] trait.
-#[derive(Clone)]
 pub struct SolanaExtractor {
+    of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     network: String,
@@ -44,7 +54,22 @@ impl SolanaExtractor {
         );
         let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
+        let (of1_car_manager_tx, of1_car_manager_rx) = tokio::sync::mpsc::channel(128);
+        let of1_car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
+            of1_car_directory.clone(),
+            of1_car_manager_rx,
+            provider_name.clone(),
+            network.clone(),
+            metrics.clone(),
+        ));
+
+        let handles = Of1CarManagerHandles {
+            tx: of1_car_manager_tx,
+            jh: of1_car_manager_jh,
+        };
+
         Self {
+            of1_car_manager_handles: Arc::new(Mutex::new(Some(handles))),
             rpc_client: Arc::new(rpc_client),
             metrics,
             network,
@@ -134,6 +159,24 @@ impl SolanaExtractor {
     }
 }
 
+impl Clone for SolanaExtractor {
+    fn clone(&self) -> Self {
+        assert!(
+            self.of1_car_manager_handles.lock().unwrap().is_some(),
+            "cannot clone SolanaExtractor after cleanup"
+        );
+
+        Self {
+            of1_car_manager_handles: self.of1_car_manager_handles.clone(),
+            rpc_client: self.rpc_client.clone(),
+            metrics: self.metrics.clone(),
+            network: self.network.clone(),
+            provider_name: self.provider_name.clone(),
+            of1_car_directory: self.of1_car_directory.clone(),
+        }
+    }
+}
+
 impl BlockStreamer for SolanaExtractor {
     async fn block_stream(
         self,
@@ -149,15 +192,23 @@ impl BlockStreamer for SolanaExtractor {
             commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
         };
 
+        let of1_car_manager_tx = {
+            let guard = self.of1_car_manager_handles.lock().unwrap();
+            guard
+                .as_ref()
+                .expect("new block streams should not start after cleanup")
+                .tx
+                .clone()
+        };
+
         let historical_block_stream = of1_client::stream(
             start,
             end,
             self.of1_car_directory.clone(),
+            of1_car_manager_tx,
             self.rpc_client.clone(),
             get_block_config,
             self.metrics.clone(),
-            self.provider_name.clone(),
-            self.network.clone(),
         );
 
         self.block_stream_impl(start, end, historical_block_stream, get_block_config)
@@ -171,6 +222,30 @@ impl BlockStreamer for SolanaExtractor {
             Err(e) if rpc_client::is_block_missing_err(&e) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+
+    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+        let Self {
+            of1_car_manager_handles,
+            ..
+        } = self;
+
+        let Of1CarManagerHandles { tx, jh } = {
+            let mut guard = of1_car_manager_handles.lock().unwrap();
+            if let Some(handles) = guard.take() {
+                handles
+            } else {
+                // Cleanup already done.
+                return Ok(());
+            }
+        };
+
+        // Drop the extra sender so that the CAR manager task can exit -- assuming all block
+        // streams, which hold clones of the sender, complete before cleanup.
+        drop(tx);
+        let _ = jh.await;
+
+        Ok(())
     }
 
     fn provider_name(&self) -> &str {

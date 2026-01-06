@@ -123,4 +123,8 @@ impl common::BlockStreamer for BeaconClient {
 
         Ok(Some(response.data.message.slot))
     }
+
+    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+        Ok(())
+    }
 }

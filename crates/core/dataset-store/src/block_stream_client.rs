@@ -57,6 +57,15 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
+    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+        match self {
+            Self::EvmRpc(client) => client.wait_for_cleanup().await,
+            Self::Solana(client) => client.wait_for_cleanup().await,
+            Self::EthBeacon(client) => client.wait_for_cleanup().await,
+            Self::Firehose(client) => client.wait_for_cleanup().await,
+        }
+    }
+
     fn provider_name(&self) -> &str {
         match self {
             Self::EvmRpc(client) => client.provider_name(),
