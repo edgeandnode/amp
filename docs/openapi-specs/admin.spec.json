@@ -606,6 +606,87 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/sync-progress": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/sync-progress` endpoint",
+        "description": "Retrieves sync progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns sync progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_SYNC_PROGRESS_ERROR`: Failed to get sync progress from metadata database",
+        "operationId": "get_dataset_sync_progress",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved sync progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{version}": {
       "delete": {
         "tags": [
@@ -2234,6 +2315,42 @@
           "Error"
         ]
       },
+      "SyncProgressResponse": {
+        "type": "object",
+        "description": "API response containing sync progress information for a dataset",
+        "required": [
+          "dataset_namespace",
+          "dataset_name",
+          "revision",
+          "manifest_hash",
+          "tables"
+        ],
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "dataset_namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Resolved manifest hash"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Requested revision"
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableSyncProgress"
+            },
+            "description": "Sync progress for each table in the dataset"
+          }
+        }
+      },
       "TableSchemaWithNetworks": {
         "type": "object",
         "description": "Table schema with associated networks\n\nContains the output schema for a table and the list of networks referenced by its query.",
@@ -2251,6 +2368,62 @@
           },
           "schema": {
             "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
+          }
+        }
+      },
+      "TableSyncProgress": {
+        "type": "object",
+        "description": "Sync progress information for a single table",
+        "required": [
+          "table_name",
+          "files_count",
+          "total_size_bytes"
+        ],
+        "properties": {
+          "current_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Highest block number that has been synced (null if no data yet)"
+          },
+          "files_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of Parquet files written for this table"
+          },
+          "job_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "ID of the writer job (null if no active job)"
+          },
+          "job_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Status of the writer job (null if no active job)"
+          },
+          "start_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lowest block number that has been synced (null if no data yet)"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Name of the table within the dataset"
+          },
+          "total_size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total size of all Parquet files in bytes"
           }
         }
       },
