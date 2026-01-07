@@ -60,8 +60,8 @@ pub(crate) mod sql {
                 pt.table_name,
                 pt.writer AS job_id,
                 j.status AS job_status,
-                COUNT(fm.id) AS files_count,
-                COALESCE(SUM(fm.object_size), 0)::bigint AS total_size_bytes,
+                COUNT(fm.id)::bigint AS files_count,
+                COALESCE(SUM(fm.object_size)::bigint, 0::bigint) AS total_size_bytes,
                 MAX((fm.metadata->'ranges'->0->'numbers'->>'end')::bigint) AS current_block,
                 MIN((fm.metadata->'ranges'->0->'numbers'->>'start')::bigint) AS start_block
             FROM physical_tables pt
