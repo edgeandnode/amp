@@ -26,6 +26,7 @@ use datafusion::{
     scalar::ScalarValue,
 };
 pub use eth_call::EthCall;
+pub use evm_decode_hex::EvmDecodeHex;
 pub use evm_decode_type::EvmDecodeType;
 pub use evm_encode_type::EvmEncodeType;
 pub use evm_function_params::{EvmDecodeParams, EvmEncodeParams};
@@ -49,6 +50,7 @@ use crate::{
 };
 
 mod eth_call;
+mod evm_decode_hex;
 mod evm_decode_type;
 mod evm_encode_type;
 mod evm_function_params;
