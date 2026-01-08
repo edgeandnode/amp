@@ -3,6 +3,22 @@
 Amp provides a number of "built-in" SQL functions that the user can call to manipulate
 the data they are querying.
 
+## `evm_encode_hex`
+
+```sql
+FixedSizeBinary(20) | FixedSizeBinary(32) evm_encode_hex(Utf8 hex_string)
+```
+
+Converts a hex-encoded string to a 20-byte binary value or 32-byte binary value. Accepts addresses with or without the `0x` prefix.
+
+Example:
+
+```sql
+SELECT address
+FROM eth_rpc.logs
+WHERE address = evm_encode_hex('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
+```
+
 ## `evm_decode_log`
 
 ```sql

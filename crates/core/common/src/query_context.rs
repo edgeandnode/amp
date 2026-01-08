@@ -38,7 +38,8 @@ use crate::{
     BlockNum, BoxError, Store, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
-        EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+        EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams, EvmEncodeType,
+        EvmTopic,
     },
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
     metadata::segments::BlockRange,
@@ -450,6 +451,7 @@ pub fn udfs() -> Vec<ScalarUDF> {
         EvmDecodeParams::new().into(),
         EvmEncodeType::new().into(),
         EvmDecodeType::new().into(),
+        EvmEncodeHex::new().into(),
     ]
 }
 
