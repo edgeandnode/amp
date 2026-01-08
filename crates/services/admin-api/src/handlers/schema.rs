@@ -29,6 +29,7 @@ use datasets_common::{
 use datasets_derived::{
     catalog::{
         PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
+        self_refs_from_functions,
     },
     manifest::{Function, TableSchema},
 };
@@ -272,7 +273,7 @@ pub async fn handler(
         &ctx.dataset_store,
         references,
         dependencies,
-        functions,
+        self_refs_from_functions(&functions),
         IsolatePool::dummy(), // For schema validation only (no JS execution)
     )
     .await
@@ -325,6 +326,33 @@ pub async fn handler(
         }
         PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
             Error::EthCallNotAvailable(err)
+        }
+        PlanningCtxForSqlTablesWithDepsError::Resolution(resolve_err) => {
+            use common::catalog::resolve::ResolveError;
+            use datasets_derived::catalog::PreResolvedError;
+            match resolve_err {
+                ResolveError::SchemaResolution(PreResolvedError::AliasNotFound(_)) => {
+                    Error::DependencyAliasNotFound(err)
+                }
+                ResolveError::FunctionNotFound { .. }
+                | ResolveError::SelfFunctionNotFound { .. } => {
+                    Error::FunctionNotFoundInDataset(err)
+                }
+                ResolveError::TableNotFound { .. } => Error::TableNotFoundInDataset(err),
+                ResolveError::EthCallNotAvailable { .. } => Error::EthCallNotAvailable(err),
+                ResolveError::DatasetLoad { source, .. } => {
+                    if source
+                        .downcast_ref::<GetDatasetError>()
+                        .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
+                    {
+                        Error::DatasetNotFound(err)
+                    } else {
+                        Error::GetDataset(err)
+                    }
+                }
+                ResolveError::EthCallCreation { .. } => Error::EthCallUdfCreation(err),
+                _ => Error::CatalogResolution(err),
+            }
         }
     })?;
 
@@ -663,6 +691,12 @@ enum Error {
     #[error(transparent)]
     DependencyAliasNotFound(PlanningCtxForSqlTablesWithDepsError),
 
+    /// Catalog resolution failed
+    ///
+    /// This occurs when the core catalog resolution logic fails.
+    #[error(transparent)]
+    CatalogResolution(PlanningCtxForSqlTablesWithDepsError),
+
     /// Failed to infer schema for table
     ///
     /// This occurs when:
@@ -726,6 +760,7 @@ impl IntoErrorResponse for Error {
             Error::FunctionNotFoundInDataset(_) => "FUNCTION_NOT_FOUND_IN_DATASET",
             Error::EthCallNotAvailable(_) => "ETH_CALL_NOT_AVAILABLE",
             Error::DependencyAliasNotFound(_) => "DEPENDENCY_ALIAS_NOT_FOUND",
+            Error::CatalogResolution(_) => "CATALOG_RESOLUTION",
             Error::SchemaInference { .. } => "SCHEMA_INFERENCE",
         }
     }
@@ -753,6 +788,7 @@ impl IntoErrorResponse for Error {
             Error::FunctionNotFoundInDataset(_) => StatusCode::NOT_FOUND,
             Error::EthCallNotAvailable(_) => StatusCode::NOT_FOUND,
             Error::DependencyAliasNotFound(_) => StatusCode::BAD_REQUEST,
+            Error::CatalogResolution(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SchemaInference { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

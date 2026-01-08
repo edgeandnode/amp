@@ -66,9 +66,12 @@ async fn register_with_missing_dependency_fails() {
     match err {
         RegisterError::ManifestValidationError(api_err) => {
             assert_eq!(api_err.error_code, "MANIFEST_VALIDATION_ERROR");
-            assert_eq!(
-                api_err.error_message,
-                r#"Manifest validation error: Dependency alias not found: In table 'test_table': Dependency alias 'eth_firehose' referenced in table but not provided in dependencies"#,
+            assert!(
+                api_err
+                    .error_message
+                    .contains("dependency alias not found: eth_firehose"),
+                "error message should indicate the missing dependency alias, got: {}",
+                api_err.error_message
             );
         }
         _ => panic!("Expected ManifestValidationError, got: {:?}", err),

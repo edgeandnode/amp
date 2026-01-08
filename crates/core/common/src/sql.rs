@@ -234,6 +234,17 @@ where
             },
         }
     }
+
+    /// Converts to (schema, table) tuple. Returns None for bare references.
+    ///
+    /// This is useful for passing table references to resolution functions
+    /// that work with string-based schemas.
+    pub fn into_parts(self) -> Option<(String, TableName)> {
+        match self {
+            Self::Bare { .. } => None,
+            Self::Partial { schema, table } => Some((schema.to_string(), (*table).clone())),
+        }
+    }
 }
 
 impl<T> TableReference<T>
@@ -624,6 +635,18 @@ where
                 schema: Arc::new(schema.to_string()),
                 function,
             },
+        }
+    }
+
+    /// Converts to (schema?, function) tuple.
+    ///
+    /// Bare functions return None for schema, qualified functions return Some(schema).
+    /// This is useful for passing function references to resolution functions
+    /// that work with string-based schemas.
+    pub fn into_parts(self) -> (Option<String>, FuncName) {
+        match self {
+            Self::Bare { function } => (None, (*function).clone()),
+            Self::Qualified { schema, function } => (Some(schema.to_string()), (*function).clone()),
         }
     }
 }
