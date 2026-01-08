@@ -12,7 +12,7 @@ use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
 pub use yellowstone_faithful_car_parser as car_parser;
 
-use crate::{metrics, rpc_client};
+use crate::{metrics, rpc_client, tables};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
 
@@ -39,7 +39,7 @@ pub(crate) struct DecodedBlock {
     pub(crate) blocktime: u64,
 
     pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas: Vec<solana_storage_proto::confirmed_block::TransactionStatusMeta>,
+    pub(crate) transaction_metas: Vec<tables::transactions::TransactionStatusMeta>,
 
     #[allow(dead_code)]
     pub(crate) block_rewards: Vec<solana_storage_proto::confirmed_block::Rewards>,
@@ -525,7 +525,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             let err = format!("expected entry node for cid {entry_cid}");
             return Err(err.into());
         };
-        for tx_cid in &entry.transactions {
+        for (idx, tx_cid) in entry.transactions.iter().enumerate() {
             let Some(car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
                 let err = format!("expected transaction node for cid {tx_cid}");
                 return Err(err.into());
@@ -535,7 +535,34 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
 
             let (tx, _) = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())?;
-            let tx_meta = prost::Message::decode(&tx_meta_df[..])?;
+            let tx_meta = {
+                let tx_meta = &tx_meta_df[..];
+                // Around epoch 200 transaction meta and block rewards become encoded with bincode
+                // instead of the protobuf scheme. Since there will be (already are as of writing
+                // this comment) more epochs that have bincode encoding for transaction meta,
+                // decoding for it is placed first and eventually (after epoch 200 or so) will
+                // never fail.
+                match bincode::serde::decode_from_slice(tx_meta, bincode::config::standard()) {
+                    Ok((tx_meta_bincode, _)) => tx_meta_bincode,
+                    Err(bincode_err) => match prost::Message::decode(tx_meta) {
+                        Ok(tx_meta_proto) => {
+                            let tx_index = idx.try_into().expect("conversion error");
+                            tables::transactions::TransactionStatusMeta::from_proto_meta(
+                                block.slot,
+                                tx_index,
+                                tx_meta_proto,
+                            )
+                        }
+                        Err(prost_err) => {
+                            let err = format!(
+                                "failed to decode transaction metadata: bincode_err={:?}, prost_err={:?}",
+                                bincode_err, prost_err
+                            );
+                            return Err(err.into());
+                        }
+                    },
+                }
+            };
 
             transactions.push(tx);
             transactions_meta.push(tx_meta);
