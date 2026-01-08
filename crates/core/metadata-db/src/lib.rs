@@ -35,7 +35,7 @@ pub use self::{
             LocationNotification,
         },
     },
-    sync_progress::TableSyncProgress,
+    sync_progress::TableWriterInfo,
     workers::{
         Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},

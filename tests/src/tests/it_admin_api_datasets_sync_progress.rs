@@ -71,30 +71,31 @@ async fn get_sync_progress_with_non_existent_dataset_returns_not_found() {
     assert_eq!(error.error_code, "DATASET_NOT_FOUND");
 }
 
+/// Test that sync progress shows RUNNING status while a job is actively syncing.
 #[tokio::test]
-async fn get_sync_progress_returns_progress_for_running_job() {
+async fn get_sync_progress_shows_running_status() {
     //* Given
     // Use anvil_rpc dataset which connects to the local Anvil instance
-    let ctx = TestCtx::setup_with_anvil("get_sync_progress_running").await;
+    let ctx = TestCtx::setup_with_anvil("get_sync_progress_running_status").await;
 
-    // Mine some blocks so there is data to sync
-    ctx.anvil().mine(10).await.expect("failed to mine blocks");
+    // Mine many blocks so syncing takes time
+    ctx.anvil().mine(100).await.expect("failed to mine blocks");
 
-    // Deploy the dataset to start the sync job
-    ctx.deploy_dataset("_", "anvil_rpc", "0.0.0").await;
+    // Deploy without an end_block so the job keeps running
+    ctx.deploy_dataset("_", "anvil_rpc", "0.0.0", None).await;
 
     // Expected tables from anvil_rpc manifest
     let expected_tables: std::collections::HashSet<&str> =
         ["blocks", "logs", "transactions"].into_iter().collect();
 
-    // Wait for the job to start and sync some data
-    // We poll the sync progress until we see progress or timeout
+    //* When
+    // Poll until we see RUNNING status with some progress
     let start = tokio::time::Instant::now();
     let timeout = tokio::time::Duration::from_secs(30);
 
-    let final_progress: SyncProgressResponse = loop {
+    let running_progress: SyncProgressResponse = loop {
         if start.elapsed() > timeout {
-            panic!("Timeout waiting for sync progress");
+            panic!("Timeout waiting for RUNNING status");
         }
 
         let resp = ctx.get_sync_progress("_", "anvil_rpc", "0.0.0").await;
@@ -116,16 +117,146 @@ async fn get_sync_progress_returns_progress_for_running_job() {
                 }
             }
 
-            // Check if the blocks table has files with block range metadata populated
-            // We specifically wait for current_block to be populated, not just files_count > 0
-            if let Some(blocks_table) = progress
+            // Check if we have a RUNNING job with some data synced
+            let has_running_job = progress
                 .tables
                 .iter()
-                .find(|t| t.table_name == "blocks")
-                .filter(|t| t.files_count > 0 && t.current_block.is_some())
-            {
-                let _ = blocks_table; // used to confirm we found a matching table
+                .any(|t| t.job_status.as_deref() == Some("RUNNING"));
+
+            let has_synced_data = progress
+                .tables
+                .iter()
+                .any(|t| t.files_count > 0 && t.current_block.is_some());
+
+            if has_running_job && has_synced_data {
                 break progress;
+            }
+        } else {
+            println!("Request failed status: {}", resp.status());
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    };
+
+    //* Then
+    // Verify all expected tables are present
+    let actual_tables: std::collections::HashSet<&str> = running_progress
+        .tables
+        .iter()
+        .map(|t| t.table_name.as_str())
+        .collect();
+
+    assert_eq!(
+        actual_tables, expected_tables,
+        "all expected tables should be present in sync progress"
+    );
+
+    // Verify the job is RUNNING
+    for table in &running_progress.tables {
+        assert!(
+            table.job_id.is_some(),
+            "table '{}' should have a job_id",
+            table.table_name
+        );
+
+        let status = table
+            .job_status
+            .as_ref()
+            .unwrap_or_else(|| panic!("table '{}' should have a job_status", table.table_name));
+
+        assert_eq!(
+            status, "RUNNING",
+            "table '{}' job_status should be RUNNING, got '{}'",
+            table.table_name, status
+        );
+    }
+
+    // Verify we have some progress
+    let blocks_table = running_progress
+        .tables
+        .iter()
+        .find(|t| t.table_name == "blocks")
+        .expect("blocks table should exist");
+
+    assert!(
+        blocks_table.current_block.is_some(),
+        "blocks table should have current_block while RUNNING"
+    );
+    assert!(
+        blocks_table.files_count > 0,
+        "blocks table should have at least one file while RUNNING"
+    );
+
+    println!(
+        "Verified RUNNING status with current_block={:?}, files_count={}",
+        blocks_table.current_block, blocks_table.files_count
+    );
+}
+
+/// Test that sync progress shows COMPLETED status when the end block is reached.
+#[tokio::test]
+async fn get_sync_progress_shows_completed_status_when_end_block_reached() {
+    //* Given
+    // Use anvil_rpc dataset which connects to the local Anvil instance
+    let ctx = TestCtx::setup_with_anvil("get_sync_progress_completed_status").await;
+
+    // Mine 10 blocks (1 to 10)
+    ctx.anvil().mine(10).await.expect("failed to mine blocks");
+
+    // Deploy with end_block=10 so the job completes after syncing
+    ctx.deploy_dataset("_", "anvil_rpc", "0.0.0", Some(10))
+        .await;
+
+    // Expected tables from anvil_rpc manifest
+    let expected_tables: std::collections::HashSet<&str> =
+        ["blocks", "logs", "transactions"].into_iter().collect();
+
+    //* When
+    // Poll until we see COMPLETED status
+    let start = tokio::time::Instant::now();
+    let timeout = tokio::time::Duration::from_secs(30);
+
+    let final_progress: SyncProgressResponse = loop {
+        if start.elapsed() > timeout {
+            panic!("Timeout waiting for COMPLETED status");
+        }
+
+        let resp = ctx.get_sync_progress("_", "anvil_rpc", "0.0.0").await;
+        if resp.status() == StatusCode::OK {
+            let progress: SyncProgressResponse = resp.json().await.expect("failed to parse JSON");
+
+            println!(
+                "Sync Progress: {}",
+                serde_json::to_string_pretty(&progress).unwrap()
+            );
+
+            // Check if any job has failed
+            for table in &progress.tables {
+                if table.job_status.as_deref() == Some("FAILED") {
+                    panic!(
+                        "Job failed for table '{}': {:?}",
+                        table.table_name, progress
+                    );
+                }
+            }
+
+            // Check if all tables have completed jobs
+            let all_completed = progress
+                .tables
+                .iter()
+                .all(|t| t.job_status.as_deref() == Some("COMPLETED"));
+
+            if all_completed {
+                // Verify blocks table has data
+                if progress
+                    .tables
+                    .iter()
+                    .find(|t| t.table_name == "blocks")
+                    .filter(|t| t.files_count > 0 && t.current_block.is_some())
+                    .is_some()
+                {
+                    break progress;
+                }
             }
         } else {
             println!("Request failed status: {}", resp.status());
@@ -147,38 +278,33 @@ async fn get_sync_progress_returns_progress_for_running_job() {
         "all expected tables should be present in sync progress"
     );
 
-    // Verify each table has the expected progress data
+    // Verify the job is COMPLETED
     for table in &final_progress.tables {
-        // Every table should have a job assigned
         assert!(
             table.job_id.is_some(),
             "table '{}' should have a job_id",
             table.table_name
         );
 
-        // Every table should have a job status
         let status = table
             .job_status
             .as_ref()
             .unwrap_or_else(|| panic!("table '{}' should have a job_status", table.table_name));
 
-        // Job should be running or completed (not failed, not pending)
-        assert!(
-            status == "RUNNING" || status == "COMPLETED",
-            "table '{}' job_status should be RUNNING or COMPLETED, got '{}'",
-            table.table_name,
-            status
+        assert_eq!(
+            status, "COMPLETED",
+            "table '{}' job_status should be COMPLETED, got '{}'",
+            table.table_name, status
         );
     }
 
-    // Specifically verify the blocks table has complete progress tracking
+    // Verify the blocks table has complete progress tracking
     let blocks_table = final_progress
         .tables
         .iter()
         .find(|t| t.table_name == "blocks")
         .expect("blocks table should exist");
 
-    // Verify block range tracking
     let current_block = blocks_table
         .current_block
         .expect("blocks table should have current_block");
@@ -191,12 +317,8 @@ async fn get_sync_progress_returns_progress_for_running_job() {
         "start_block should be non-negative, got {}",
         start_block
     );
-    assert!(
-        current_block >= start_block,
-        "current_block ({}) should be >= start_block ({})",
-        current_block,
-        start_block
-    );
+    // Since we set end_block to 10, current_block should be 10
+    assert_eq!(current_block, 10, "current_block should be 10");
 
     // Verify file statistics
     assert!(
@@ -209,7 +331,7 @@ async fn get_sync_progress_returns_progress_for_running_job() {
     );
 
     println!(
-        "Sync progress verified: blocks synced from {} to {}, {} files, {} bytes",
+        "Verified COMPLETED status: blocks synced from {} to {}, {} files, {} bytes",
         start_block, current_block, blocks_table.files_count, blocks_table.total_size_bytes
     );
 }
@@ -260,12 +382,18 @@ impl TestCtx {
             .expect("failed to send request")
     }
 
-    async fn deploy_dataset(&self, namespace: &str, name: &str, revision: &str) {
+    async fn deploy_dataset(
+        &self,
+        namespace: &str,
+        name: &str,
+        revision: &str,
+        end_block: Option<u64>,
+    ) {
         let ampctl = self.new_ampctl();
         let reference = format!("{}/{}@{}", namespace, name, revision);
 
         ampctl
-            .dataset_deploy(&reference, None, None, None)
+            .dataset_deploy(&reference, end_block, None, None)
             .await
             .expect("failed to deploy dataset");
     }

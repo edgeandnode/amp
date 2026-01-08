@@ -5,53 +5,45 @@
 
 use crate::{JobStatus, ManifestHash, jobs::JobId, physical_table::TableNameOwned};
 
-/// Get sync progress for all tables in a dataset
+/// Get active tables with writer info for a dataset
 ///
-/// Returns sync progress information for each active table in the dataset,
-/// including the current synced block range, job status, and file statistics.
+/// Returns a list of active tables for the given dataset manifest hash,
+/// along with their writer job information.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_manifest_hash<'c, E>(
+pub async fn get_active_tables_with_writer_info<'c, E>(
     exe: E,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
-) -> Result<Vec<TableSyncProgress>, crate::Error>
+) -> Result<Vec<TableWriterInfo>, crate::Error>
 where
     E: crate::Executor<'c>,
 {
-    sql::get_by_manifest_hash(exe, manifest_hash.into())
+    sql::get_active_tables_with_writer_info(exe, manifest_hash.into())
         .await
         .map_err(crate::Error::Database)
 }
 
-/// Sync progress information for a single table
+/// Writer info for a table
 #[derive(Debug, Clone)]
-pub struct TableSyncProgress {
+pub struct TableWriterInfo {
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
-    /// Highest block number that has been synced
-    pub current_block: Option<i64>,
-    /// Lowest block number that has been synced
-    pub start_block: Option<i64>,
     /// ID of the writer job (if one exists)
     pub job_id: Option<JobId>,
     /// Status of the writer job (if one exists)
     pub job_status: Option<JobStatus>,
-    /// Number of Parquet files written for this table
-    pub files_count: i64,
-    /// Total size of all Parquet files in bytes
-    pub total_size_bytes: i64,
 }
 
 pub(crate) mod sql {
     use sqlx::{Executor, Postgres};
 
-    use super::TableSyncProgress;
+    use super::TableWriterInfo;
     use crate::{JobStatus, ManifestHash, jobs::JobId, physical_table::TableNameOwned};
 
-    /// Query sync progress for all active tables in a dataset
-    pub async fn get_by_manifest_hash<'c, E>(
+    /// Query active tables and their writer info for a dataset
+    pub async fn get_active_tables_with_writer_info<'c, E>(
         exe: E,
         manifest_hash: ManifestHash<'_>,
-    ) -> Result<Vec<TableSyncProgress>, sqlx::Error>
+    ) -> Result<Vec<TableWriterInfo>, sqlx::Error>
     where
         E: Executor<'c, Database = Postgres>,
     {
@@ -59,16 +51,10 @@ pub(crate) mod sql {
             SELECT
                 pt.table_name,
                 pt.writer AS job_id,
-                j.status AS job_status,
-                COUNT(fm.id)::bigint AS files_count,
-                COALESCE(SUM(fm.object_size)::bigint, 0::bigint) AS total_size_bytes,
-                MAX((fm.metadata->'ranges'->0->'numbers'->>'end')::bigint) AS current_block,
-                MIN((fm.metadata->'ranges'->0->'numbers'->>'start')::bigint) AS start_block
+                j.status AS job_status
             FROM physical_tables pt
-            LEFT JOIN file_metadata fm ON fm.location_id = pt.id
             LEFT JOIN jobs j ON pt.writer = j.id
             WHERE pt.manifest_hash = $1 AND pt.active = true
-            GROUP BY pt.table_name, pt.writer, j.status
             ORDER BY pt.table_name
         "#};
 
@@ -77,10 +63,6 @@ pub(crate) mod sql {
             table_name: TableNameOwned,
             job_id: Option<JobId>,
             job_status: Option<JobStatus>,
-            files_count: i64,
-            total_size_bytes: i64,
-            current_block: Option<i64>,
-            start_block: Option<i64>,
         }
 
         let rows: Vec<Row> = sqlx::query_as(query)
@@ -90,14 +72,10 @@ pub(crate) mod sql {
 
         Ok(rows
             .into_iter()
-            .map(|row| TableSyncProgress {
+            .map(|row| TableWriterInfo {
                 table_name: row.table_name,
-                current_block: row.current_block,
-                start_block: row.start_block,
                 job_id: row.job_id,
                 job_status: row.job_status,
-                files_count: row.files_count,
-                total_size_bytes: row.total_size_bytes,
             })
             .collect())
     }
