@@ -173,3 +173,39 @@ Returns:
   }
 ]
 ```
+
+## `parse_units`
+
+```sql
+Utf8 parse_units(Utf8 value, Int64 units)
+```
+
+Converts a decimal/integer string to its smallest unit representation by multiplying by 10^units. This is useful for converting human-readable token amounts to their raw values.
+
+For example:
+
+```sql
+SELECT parse_units('1.5', 18) AS wei
+```
+
+Returns:
+
+```json
+[
+  {
+    "wei": "1500000000000000000"
+  }
+]
+```
+
+More examples:
+
+```sql
+-- Convert 100 USDC (6 decimals) to raw units
+SELECT parse_units('100', 6) AS usdc_raw
+-- Returns: "100000000"
+
+-- Convert a precise ETH amount to wei
+SELECT parse_units('1.376988483056381409', 18) AS wei
+-- Returns: "1376988483056381409"
+```
