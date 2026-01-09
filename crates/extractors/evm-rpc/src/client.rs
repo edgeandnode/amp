@@ -644,15 +644,8 @@ fn rpc_to_rows(
 
     let transactions_row = {
         let total_input_size: usize = transactions.iter().map(|t| t.input.len()).sum();
-        let total_r_size: usize = transactions.iter().map(|tx| tx.r.len()).sum();
-        let total_s_size: usize = transactions.iter().map(|tx| tx.s.len()).sum();
-
-        let mut builder = TransactionRowsBuilder::with_capacity(
-            transactions.len(),
-            total_input_size,
-            total_r_size,
-            total_s_size,
-        );
+        let mut builder =
+            TransactionRowsBuilder::with_capacity(transactions.len(), total_input_size);
         for tx in transactions {
             builder.append(&tx);
         }
@@ -762,8 +755,8 @@ fn rpc_transaction_to_row(
         gas_limit: tx.gas_limit(),
         value: tx.value().to_string(),
         input: tx.input().to_vec(),
-        r: signature.r().to_be_bytes_vec(),
-        s: signature.s().to_be_bytes_vec(),
+        r: signature.r().to_be_bytes::<32>(),
+        s: signature.s().to_be_bytes::<32>(),
         v_parity: signature.v(),
         chain_id,
         receipt_cumulative_gas_used: receipt.inner.inner.cumulative_gas_used(),
