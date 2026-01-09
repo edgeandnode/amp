@@ -40,7 +40,7 @@ use crate::{
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
-        EvmEncodeType, EvmTopic,
+        EvmEncodeType, EvmTopic, ShiftUnits,
     },
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
     metadata::segments::BlockRange,
@@ -447,6 +447,7 @@ pub fn udfs() -> Vec<ScalarUDF> {
         EvmDecodeType::new().into(),
         EvmEncodeHex::new().into(),
         EvmDecodeHex::new().into(),
+        ShiftUnits::new().into(),
     ]
 }
 

@@ -567,3 +567,132 @@
   query: SELECT evm_decode_hex(1)
   failure: |
     failed No function matches the given name and argument types
+- name: shift_units_int8_int8
+  query: SELECT shift_units(arrow_cast(10,'Int8'),arrow_cast(3,'Int8')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_int16_int16
+  query: SELECT shift_units(arrow_cast(10,'Int16'),arrow_cast(3,'Int16')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_int32_int32
+  query: SELECT shift_units(arrow_cast(10,'Int32'),arrow_cast(3,'Int32')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_int64_int64
+  query: SELECT shift_units(arrow_cast(10,'Int64'),arrow_cast(3,'Int64')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_uint8_uint8
+  query: SELECT shift_units(arrow_cast(10,'UInt8'),arrow_cast(3,'UInt8')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_uint16_uint16
+  query: SELECT shift_units(arrow_cast(10,'UInt16'),arrow_cast(3,'UInt16')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_uint32_uint32
+  query: SELECT shift_units(arrow_cast(10,'UInt32'),arrow_cast(3,'UInt32')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_uint64_uint64
+  query: SELECT shift_units(arrow_cast(10,'UInt64'),arrow_cast(3,'UInt64')) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_utf8_utf8
+  query: SELECT shift_units('1.376988483056381409', '18') AS val;
+  results: |
+    [{"val": "1376988483056381409"}]
+
+- name: shift_units_no_arguments_fails
+  query: SELECT shift_units();
+  failure: |
+    does not support zero arguments No function matches the given name and argument types
+
+- name: shift_units_invalid_string_fails
+  query: SELECT shift_units('not_a_number', 18) AS wei;
+  failure: |
+    failed to parse value: invalid digit found in string
+
+- name: shift_units_invalid_units_fails
+  query: SELECT shift_units('1.5', 'not_a_number') AS wei;
+  failure: |
+    failed to parse integer: invalid digit found in string
+
+- name: shift_units_null_value_fails
+  query: SELECT shift_units(NULL, 18) AS wei;
+  failure: |
+    expected numeric type or Utf8 for first argument, got Null
+
+- name: shift_units_null_units_fails
+  query: SELECT shift_units('1.5', NULL) AS wei;
+  failure: |
+    expected numeric type for second argument, got Null
+
+- name: shift_units_zero_units_succeeds
+  query: SELECT shift_units('1.5', 0) AS value;
+  results: |
+    [{"value": "1.5"}]
+
+- name: shift_units_negative_units_succeeds
+  query: SELECT shift_units('1.5', -18) AS value;
+  results: |
+    [{"value": "0.0000000000000000015"}]
+
+- name: shift_units_array_value_succeeds
+  query: SELECT shift_units(value,3) as value from eth_rpc.transactions where value = '28998036497399455000';
+  results: |
+    [{"value": "28998036497399455000000"}]
+
+- name: shift_units_array_units_succeeds
+  query: SELECT shift_units('1.2422323',value) as value from eth_rpc.transactions where value = '0' limit 1;
+  results: |
+    [{"value": "1.2422323"}]
+
+- name: shift_units_value_float32_succeeds
+  query: SELECT shift_units(arrow_cast(10,'Float32'),3) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_value_float64_succeeds
+  query: SELECT shift_units(arrow_cast(10,'Float64'),3) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_value_decimal128_succeeds
+  query: SELECT shift_units(arrow_cast(10,'Decimal128(38,0)'),3) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_value_decimal256_succeeds
+  query: SELECT shift_units(arrow_cast(10,'Decimal256(38,0)'),3) AS val;
+  results: |
+    [{"val": "10000"}]
+
+- name: shift_units_nested_succeeds
+  query: SELECT shift_units(shift_units(value,-18),18) as value from eth_rpc.transactions where value = '28998036497399455000';
+  results: |
+    [{"value": "28998036497399455000"}]
+
+- name: shift_units_nested_succeeds
+  query: SELECT shift_units(shift_units(value,-18),18) as value from eth_rpc.transactions where value = '28998036497399455000';
+  results: |
+    [{"value": "28998036497399455000"}]
+
+- name: shift_units_max_units_fails
+  query: SELECT shift_units(value,33) as value from eth_rpc.transactions where value = '28998036497399455000';
+  failure: |
+    units must be between -32 and 32
+
+- name: shift_units_max_negative_units_fails
+  query: SELECT shift_units(value,-33) as value from eth_rpc.transactions where value = '28998036497399455000';
+  failure: |
+    units must be between -32 and 32

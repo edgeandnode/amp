@@ -32,6 +32,7 @@ pub use evm_encode_hex::EvmEncodeHex;
 pub use evm_encode_type::EvmEncodeType;
 pub use evm_function_params::{EvmDecodeParams, EvmEncodeParams};
 use itertools::izip;
+pub use shift_units::ShiftUnits;
 use tracing::trace;
 
 use crate::{
@@ -56,6 +57,7 @@ mod evm_decode_type;
 mod evm_encode_hex;
 mod evm_encode_type;
 mod evm_function_params;
+mod shift_units;
 
 type Unsigned = alloy::primitives::Uint<256, 4>;
 
