@@ -30,6 +30,7 @@ pub use evm_decode_type::EvmDecodeType;
 pub use evm_encode_type::EvmEncodeType;
 pub use evm_function_params::{EvmDecodeParams, EvmEncodeParams};
 use itertools::izip;
+pub use parse_units::ParseUnits;
 use tracing::trace;
 
 use crate::{
@@ -52,6 +53,7 @@ mod eth_call;
 mod evm_decode_type;
 mod evm_encode_type;
 mod evm_function_params;
+mod parse_units;
 
 type Unsigned = alloy::primitives::Uint<256, 4>;
 

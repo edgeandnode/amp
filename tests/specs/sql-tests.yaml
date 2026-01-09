@@ -498,3 +498,53 @@
   results: |
     []
   recordBatchCount: 2 # extra batch for app_metadata to signal completion
+
+- name: parse_units
+  query: SELECT parse_units('1.5', 18) AS wei;
+  results: |
+    [{"wei": "1500000000000000000"}]
+
+- name: parse_units_integer
+  query: SELECT parse_units('100', 6) AS value;
+  results: |
+    [{"value": "100000000"}]
+
+- name: parse_units_precise_eth
+  query: SELECT parse_units('1.376988483056381409', 18) AS wei;
+  results: |
+    [{"wei": "1376988483056381409"}]
+
+- name: parse_units_no_arguments_fails
+  query: SELECT parse_units();
+  failure: |
+    does not support zero arguments No function matches the given name and argument types
+
+- name: parse_units_invalid_string_fails
+  query: SELECT parse_units('not_a_number', 18) AS wei;
+  failure: |
+    failed to parse value: invalid digit found in string
+
+- name: parse_units_invalid_units_fails
+  query: SELECT parse_units('1.5', 'not_a_number') AS wei;
+  failure: |
+    No function matches the given name and argument types
+
+- name: parse_units_null_value_fails
+  query: SELECT parse_units(NULL, 18) AS wei;
+  failure: |
+    value must be a non-null string
+
+- name: parse_units_null_units_fails
+  query: SELECT parse_units('1.5', NULL) AS wei;
+  failure: |
+    units must be a non-null integer
+
+- name: parse_units_zero_units_succeeds
+  query: SELECT parse_units('1.5', 0) AS value;
+  results: |
+    [{"value": "1.5"}]
+
+- name: parse_units_negative_units_succeeds
+  query: SELECT parse_units('1.5', -18) AS value;
+  results: |
+    [{"value": "0.0000000000000000015"}]
