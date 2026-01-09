@@ -48,9 +48,10 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | gas_limit                | UInt64                                | NO          |
 | value                    | Utf8                                  | NO          |
 | input                    | Binary                                | NO          |
-| v                        | Binary                                | NO          |
-| r                        | Binary                                | NO          |
-| s                        | Binary                                | NO          |
+| r                        | FixedSizeBinary(32)                   | NO          |
+| s                        | FixedSizeBinary(32)                   | NO          |
+| v_parity                 | Boolean                               | NO          |
+| chain_id                 | UInt64                                | YES         |
 | gas_used                 | UInt64                                | NO          |
 | type                     | Int32                                 | NO          |
 | max_fee_per_gas          | Decimal128(38, 0)                     | YES         |

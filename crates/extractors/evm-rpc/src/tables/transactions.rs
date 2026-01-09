@@ -43,9 +43,10 @@ fn schema() -> Schema {
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
     let value = Field::new("value", DataType::Utf8, false);
     let input = Field::new("input", DataType::Binary, false);
-    let v = Field::new("v", DataType::Binary, false);
-    let r = Field::new("r", DataType::Binary, false);
-    let s = Field::new("s", DataType::Binary, false);
+    let r = Field::new("r", BYTES32_TYPE, false);
+    let s = Field::new("s", BYTES32_TYPE, false);
+    let v_parity = Field::new("v_parity", DataType::Boolean, false);
+    let chain_id = Field::new("chain_id", DataType::UInt64, true);
     let gas_used = Field::new("gas_used", DataType::UInt64, false);
     let r#type = Field::new("type", DataType::Int32, false);
     let max_fee_per_gas = Field::new("max_fee_per_gas", EVM_CURRENCY_TYPE, true);
@@ -67,9 +68,10 @@ fn schema() -> Schema {
         gas_limit,
         value,
         input,
-        v,
         r,
         s,
+        v_parity,
+        chain_id,
         gas_used,
         r#type,
         max_fee_per_gas,
@@ -102,9 +104,11 @@ pub(crate) struct Transaction {
     pub(crate) input: Vec<u8>,
 
     // Elliptic curve parameters.
-    pub(crate) v: Vec<u8>,
-    pub(crate) r: Vec<u8>,
-    pub(crate) s: Vec<u8>,
+    pub(crate) r: Bytes32,
+    pub(crate) s: Bytes32,
+    pub(crate) v_parity: bool,
+
+    pub(crate) chain_id: Option<u64>,
 
     // The total amount of gas unit used for the whole execution of the transaction.
     pub(crate) receipt_cumulative_gas_used: u64,
@@ -131,9 +135,10 @@ pub(crate) struct TransactionRowsBuilder {
     gas_limit: UInt64Builder,
     value: StringBuilder,
     input: BinaryBuilder,
-    v: BinaryBuilder,
-    r: BinaryBuilder,
-    s: BinaryBuilder,
+    r: Bytes32ArrayBuilder,
+    s: Bytes32ArrayBuilder,
+    v_parity: BooleanBuilder,
+    chain_id: UInt64Builder,
     gas_used: UInt64Builder,
     r#type: Int32Builder,
     max_fee_per_gas: EvmCurrencyArrayBuilder,
@@ -144,13 +149,7 @@ pub(crate) struct TransactionRowsBuilder {
 }
 
 impl TransactionRowsBuilder {
-    pub(crate) fn with_capacity(
-        count: usize,
-        total_input_size: usize,
-        total_v_size: usize,
-        total_r_size: usize,
-        total_s_size: usize,
-    ) -> Self {
+    pub(crate) fn with_capacity(count: usize, total_input_size: usize) -> Self {
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
             block_hash: Bytes32ArrayBuilder::with_capacity(count),
@@ -164,9 +163,10 @@ impl TransactionRowsBuilder {
             gas_limit: UInt64Builder::with_capacity(count),
             value: StringBuilder::new(),
             input: BinaryBuilder::with_capacity(count, total_input_size),
-            v: BinaryBuilder::with_capacity(count, total_v_size),
-            r: BinaryBuilder::with_capacity(count, total_r_size),
-            s: BinaryBuilder::with_capacity(count, total_s_size),
+            r: Bytes32ArrayBuilder::with_capacity(count),
+            s: Bytes32ArrayBuilder::with_capacity(count),
+            v_parity: BooleanBuilder::with_capacity(count),
+            chain_id: UInt64Builder::with_capacity(count),
             gas_used: UInt64Builder::with_capacity(count),
             r#type: Int32Builder::with_capacity(count),
             max_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(count),
@@ -190,9 +190,10 @@ impl TransactionRowsBuilder {
             gas_limit,
             value,
             input,
-            v,
             r,
             s,
+            v_parity,
+            chain_id,
             receipt_cumulative_gas_used,
             r#type,
             max_fee_per_gas,
@@ -214,9 +215,10 @@ impl TransactionRowsBuilder {
         self.gas_limit.append_value(*gas_limit);
         self.value.append_value(value);
         self.input.append_value(input);
-        self.v.append_value(v);
-        self.r.append_value(r);
-        self.s.append_value(s);
+        self.r.append_value(*r);
+        self.s.append_value(*s);
+        self.v_parity.append_value(*v_parity);
+        self.chain_id.append_option(*chain_id);
         self.gas_used.append_value(*receipt_cumulative_gas_used);
         self.r#type.append_value(*r#type);
         self.max_fee_per_gas.append_value(*max_fee_per_gas);
@@ -242,9 +244,10 @@ impl TransactionRowsBuilder {
             mut gas_limit,
             mut value,
             mut input,
-            mut v,
-            mut r,
-            mut s,
+            r,
+            s,
+            mut v_parity,
+            mut chain_id,
             mut gas_used,
             mut r#type,
             max_fee_per_gas,
@@ -267,9 +270,10 @@ impl TransactionRowsBuilder {
             Arc::new(gas_limit.finish()),
             Arc::new(value.finish()),
             Arc::new(input.finish()),
-            Arc::new(v.finish()),
             Arc::new(r.finish()),
             Arc::new(s.finish()),
+            Arc::new(v_parity.finish()),
+            Arc::new(chain_id.finish()),
             Arc::new(gas_used.finish()),
             Arc::new(r#type.finish()),
             Arc::new(max_fee_per_gas.finish()),
@@ -287,13 +291,7 @@ impl TransactionRowsBuilder {
 fn default_to_arrow() {
     let tx = Transaction::default();
     let rows = {
-        let mut builder = TransactionRowsBuilder::with_capacity(
-            1,
-            tx.input.len(),
-            tx.v.len(),
-            tx.r.len(),
-            tx.s.len(),
-        );
+        let mut builder = TransactionRowsBuilder::with_capacity(1, tx.input.len());
         builder.append(&tx);
         builder
             .build(BlockRange {
@@ -304,6 +302,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 22);
+    assert_eq!(rows.rows.num_columns(), 23);
     assert_eq!(rows.rows.num_rows(), 1);
 }

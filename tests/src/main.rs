@@ -61,7 +61,10 @@ use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use monitoring::logging;
 use tests::testlib::{
-    fixtures::{Ampctl, DaemonConfigBuilder, DaemonController, MetadataDb as MetadataDbFixture},
+    fixtures::{
+        Ampctl, DaemonConfigBuilder, DaemonController, DaemonWorker,
+        MetadataDb as MetadataDbFixture,
+    },
     helpers as test_helpers,
 };
 
@@ -193,6 +196,18 @@ async fn main() {
             )
             .await
             .expect("Failed to start controller for dependency restoration");
+
+            // Start a worker to handle dump jobs
+            let _worker = DaemonWorker::new(
+                config.clone(),
+                sysdb.conn_pool().clone(),
+                data_store.clone(),
+                dataset_store.clone(),
+                None,
+                "bless".parse().expect("valid worker node id"),
+            )
+            .await
+            .expect("Failed to start worker");
 
             // Register manifest with the Admin API (after controller is running).
             let ampctl = Ampctl::new(controller.admin_api_url());

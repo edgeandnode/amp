@@ -491,7 +491,7 @@
 - name: basic_explain
   query: EXPLAIN select block_num FROM eth_rpc.blocks
   results: |
-    [{"plan":"TableScan: eth_rpc.blocks projection=[block_num]","plan_type":"logical_plan"},{"plan":"DataSourceExec: file_groups={1 group: [[015000000-82eebeea2cd27638.parquet]]}, projection=[block_num], output_ordering=[block_num@0 ASC NULLS LAST], file_type=parquet, predicate=true\n","plan_type":"physical_plan"}]
+    [{"plan":"TableScan: eth_rpc.blocks projection=[block_num]","plan_type":"logical_plan"},{"plan":"DataSourceExec: file_groups={1 group: [[015000000-9b7d212e120c1da4.parquet]]}, projection=[block_num], output_ordering=[block_num@0 ASC NULLS LAST], file_type=parquet, predicate=true\n","plan_type":"physical_plan"}]
 
 - name: select_empty
   query: SELECT block_num FROM eth_rpc.blocks WHERE eth_rpc.blocks.block_num > 90000000000;
