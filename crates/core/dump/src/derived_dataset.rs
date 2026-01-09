@@ -96,10 +96,11 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
+use amp_data_store::file_name::FileName;
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::{FileName, Generation, segments::ResumeWatermark},
+    metadata::{Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
 };
 use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
@@ -502,7 +503,7 @@ async fn dump_sql_query(
             keep_alive_interval,
         )
         .await?
-        .as_stream()
+        .into_stream()
     };
 
     let mut microbatch_start = start;

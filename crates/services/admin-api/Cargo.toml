@@ -5,6 +5,7 @@ license-file.workspace = true
 edition.workspace = true
 
 [dependencies]
+amp-data-store = { path = "../../core/data-store" }
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }

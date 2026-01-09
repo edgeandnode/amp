@@ -1,6 +1,6 @@
 //! Object store abstraction layer.
 //!
-//! This module provides the [`Store`] wrapper.
+//! This module provides the [`DataStore`] wrapper.
 
 use std::sync::Arc;
 
@@ -19,14 +19,19 @@ use datafusion::{
 };
 use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use foyer::Cache;
+// Re-export foyer::Cache for use by downstream crates
+pub use foyer::Cache as FoyerCache;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
 use metadata_db::{LocationId, MetadataDb, PhysicalTable, files::FileId};
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
 
-use crate::{
-    catalog::physical::{PhyTablePath, PhyTableRevisionPath},
-    metadata::FileName,
+pub mod file_name;
+pub mod physical_table;
+
+use self::{
+    file_name::FileName,
+    physical_table::{PhyTablePath, PhyTableRevisionPath},
 };
 
 /// Data store.
@@ -39,13 +44,14 @@ use crate::{
 /// - Can be extended with helper functions.
 /// - Provides integrated metadata database operations.
 #[derive(Debug, Clone)]
-pub struct Store {
+pub struct DataStore {
     metadata_db: MetadataDb,
     object_store: Arc<dyn ObjectStore>,
     url: Arc<ObjectStoreUrl>,
+    parquet_footer_cache: Cache<FileId, CachedParquetData>,
 }
 
-impl Store {
+impl DataStore {
     /// Creates a store for an object store URL (or filesystem directory).
     ///
     /// Examples of valid formats for `data_location`:
@@ -55,16 +61,27 @@ impl Store {
     /// - Prefixed: `s3://bucket-name/my_prefix/`
     ///
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
+    ///
+    /// The `cache_size_mb` parameter controls the maximum memory footprint of the parquet
+    /// metadata cache. The cache uses a memory-weighted eviction policy.
     pub fn new(
         metadata_db: MetadataDb,
         url: ObjectStoreUrl,
+        cache_size_mb: u64,
     ) -> Result<Self, ObjectStoreCreationError> {
         let object_store: Arc<dyn ObjectStore> =
             amp_object_store::new_with_prefix(&url, url.path())?;
+
+        let cache_size_bytes = cache_size_mb * 1024 * 1024;
+        let parquet_footer_cache = foyer::CacheBuilder::new(cache_size_bytes as usize)
+            .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
+            .build();
+
         Ok(Self {
             metadata_db,
             object_store,
             url: Arc::new(url),
+            parquet_footer_cache,
         })
     }
 
@@ -92,7 +109,7 @@ impl Store {
 }
 
 /// Physical table revision management
-impl Store {
+impl DataStore {
     /// Registers a new physical table revision and marks it as active.
     ///
     /// This atomically registers the revision location in the metadata database
@@ -184,7 +201,7 @@ impl Store {
 }
 
 /// Physical table files management
-impl Store {
+impl DataStore {
     /// Registers a file in the metadata database.
     ///
     /// Associates the file with a specific location ID and stores its Parquet metadata.
@@ -328,10 +345,56 @@ impl Store {
                 .map(|r| r.map_err(DeleteFilesStreamError)),
         )
     }
+
+    /// Gets cached parquet metadata for a file, fetching from database on cache miss.
+    ///
+    /// This method encapsulates the cache lookup and database fetch logic. On cache miss,
+    /// it retrieves the footer bytes from the metadata database, parses the parquet metadata,
+    /// computes statistics, and stores the result in the cache.
+    ///
+    /// The `schema` parameter is required to compute DataFusion statistics from the parquet
+    /// metadata.
+    pub async fn get_cached_parquet_metadata(
+        &self,
+        file_id: FileId,
+        schema: SchemaRef,
+    ) -> Result<CachedParquetData, GetCachedMetadataError> {
+        let cache = self.parquet_footer_cache.clone();
+        let metadata_db = self.metadata_db.clone();
+        let file_id1 = file_id;
+
+        cache
+            .get_or_fetch(&file_id1, || async move {
+                // Cache miss, fetch from database
+                let footer = metadata_db::files::get_footer_bytes(&metadata_db, file_id1)
+                    .await
+                    .map_err(GetCachedMetadataError::FetchFooter)?;
+
+                let metadata = Arc::new(
+                    ParquetMetaDataReader::new()
+                        .with_page_index_policy(PageIndexPolicy::Required)
+                        .parse_and_finish(&Bytes::from_owner(footer))
+                        .map_err(GetCachedMetadataError::ParseMetadata)?,
+                );
+
+                let statistics = Arc::new(
+                    DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &schema)
+                        .map_err(GetCachedMetadataError::ComputeStatistics)?,
+                );
+
+                Ok::<CachedParquetData, GetCachedMetadataError>(CachedParquetData {
+                    metadata,
+                    statistics,
+                })
+            })
+            .await
+            .map(|entry| entry.value().clone())
+            .map_err(GetCachedMetadataError::CacheError)
+    }
 }
 
 /// Object store file readers and writers
-impl Store {
+impl DataStore {
     /// Creates a buffered writer for writing a file to a table revision.
     pub fn create_revision_file_writer(
         &self,
@@ -609,118 +672,6 @@ pub struct DeleteFileInObjectStoreError(#[source] pub object_store::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to delete file during streaming deletion")]
 pub struct DeleteFilesStreamError(#[source] pub object_store::Error);
-
-/// Cached data store.
-///
-/// A wrapper around [`Store`] that adds parquet metadata caching for query execution.
-///
-/// This type provides:
-/// - All [`Store`] functionality via [`Deref`]
-/// - Cached access to parquet file metadata via `get_cached_parquet_metadata()`
-/// - Automatic cache management with configurable size
-///
-/// Use this type in query contexts where repeated metadata access benefits from caching.
-/// For non-query contexts (dump, GC, etc.), use [`Store`] directly.
-#[derive(Debug, Clone)]
-pub struct CachedStore {
-    store: Store,
-    parquet_footer_cache: Cache<FileId, CachedParquetData>,
-}
-
-impl CachedStore {
-    /// Creates a cached store with the specified cache size.
-    ///
-    /// The cache uses a memory-weighted eviction policy based on the size of cached
-    /// parquet metadata. The `cache_size_mb` parameter controls the maximum memory
-    /// footprint of the cache.
-    pub fn new(store: Store, cache_size_mb: u64) -> Self {
-        let cache_size_bytes = cache_size_mb * 1024 * 1024;
-        let parquet_footer_cache = foyer::CacheBuilder::new(cache_size_bytes as usize)
-            .with_weighter(|_k, v: &CachedParquetData| v.metadata.memory_size())
-            .build();
-
-        Self {
-            store,
-            parquet_footer_cache,
-        }
-    }
-
-    /// Creates a cached store from existing store and cache instances.
-    ///
-    /// Use this when you already have a cache instance that should be shared
-    /// across multiple components.
-    pub fn from_parts(
-        store: Store,
-        parquet_footer_cache: Cache<FileId, CachedParquetData>,
-    ) -> Self {
-        Self {
-            store,
-            parquet_footer_cache,
-        }
-    }
-
-    /// Returns a clone of the inner `Store`.
-    ///
-    /// Use this when you need to pass a `Store` to code that doesn't support `CachedStore`.
-    /// Since `Store` is cheap to clone (uses `Arc` internally), this operation is efficient.
-    pub fn as_store(&self) -> Store {
-        self.store.clone()
-    }
-
-    /// Gets cached parquet metadata for a file, fetching from database on cache miss.
-    ///
-    /// This method encapsulates the cache lookup and database fetch logic. On cache miss,
-    /// it retrieves the footer bytes from the metadata database, parses the parquet metadata,
-    /// computes statistics, and stores the result in the cache.
-    ///
-    /// The `schema` parameter is required to compute DataFusion statistics from the parquet
-    /// metadata.
-    pub async fn get_cached_parquet_metadata(
-        &self,
-        file_id: FileId,
-        schema: SchemaRef,
-    ) -> Result<CachedParquetData, GetCachedMetadataError> {
-        let cache = self.parquet_footer_cache.clone();
-        let metadata_db = self.store.metadata_db.clone();
-        let file_id1 = file_id;
-
-        cache
-            .get_or_fetch(&file_id1, || async move {
-                // Cache miss, fetch from database
-                let footer = metadata_db::files::get_footer_bytes(&metadata_db, file_id1)
-                    .await
-                    .map_err(GetCachedMetadataError::FetchFooter)?;
-
-                let metadata = Arc::new(
-                    ParquetMetaDataReader::new()
-                        .with_page_index_policy(PageIndexPolicy::Required)
-                        .parse_and_finish(&Bytes::from_owner(footer))
-                        .map_err(GetCachedMetadataError::ParseMetadata)?,
-                );
-
-                let statistics = Arc::new(
-                    DFParquetMetadata::statistics_from_parquet_metadata(&metadata, &schema)
-                        .map_err(GetCachedMetadataError::ComputeStatistics)?,
-                );
-
-                Ok::<CachedParquetData, GetCachedMetadataError>(CachedParquetData {
-                    metadata,
-                    statistics,
-                })
-            })
-            .await
-            .map(|entry| entry.value().clone())
-            .map_err(GetCachedMetadataError::CacheError)
-    }
-}
-
-impl std::ops::Deref for CachedStore {
-    type Target = Store;
-
-    fn deref(&self) -> &Self::Target {
-        &self.store
-    }
-}
 
 /// Cached parquet data including metadata and computed statistics.
 #[derive(Clone)]

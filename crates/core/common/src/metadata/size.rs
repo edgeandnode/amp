@@ -835,12 +835,11 @@ pub fn le_bytes_to_nonzero_i64_opt(bytes: &[u8]) -> Result<Option<NonZeroI64>, T
 pub mod test {
     use std::sync::Arc;
 
+    use amp_data_store::file_name::FileName;
+
     use crate::{
         Timestamp,
-        metadata::{
-            file_name::FileName,
-            parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
-        },
+        metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         parquet::{
             basic::{Repetition, Type as PhysicalType},
             file::{

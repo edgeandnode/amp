@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
+use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BlockNum, BoxError, RawTableRows, Store,
+    BlockNum, BoxError, RawTableRows,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::{FileName, Generation, segments::BlockRange},
+    metadata::{Generation, segments::BlockRange},
 };
 use datasets_common::table_name::TableName;
 use metadata_db::MetadataDb;
@@ -30,7 +31,7 @@ impl RawDatasetWriter {
     pub fn new(
         catalog: Catalog,
         metadata_db: MetadataDb,
-        store: Store,
+        store: DataStore,
         opts: Arc<WriterProperties>,
         missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
         compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
@@ -114,7 +115,7 @@ impl RawDatasetWriter {
 
 struct RawTableWriter {
     table: Arc<PhysicalTable>,
-    store: Store,
+    store: DataStore,
     opts: Arc<WriterProperties>,
 
     /// The ranges of block numbers that this writer is responsible for.
@@ -132,7 +133,7 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        store: Store,
+        store: DataStore,
         compactor: Arc<AmpCompactor>,
         opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,

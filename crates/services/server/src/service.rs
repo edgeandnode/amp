@@ -5,6 +5,7 @@
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
+use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use axum::{
     Router,
@@ -12,7 +13,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, store::Store};
+use common::BoxError;
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
@@ -30,7 +31,7 @@ use crate::{config::Config, flight, jsonl};
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,

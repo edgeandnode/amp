@@ -5,7 +5,7 @@ use std::{
 };
 
 use amp_dataset_store::DatasetStore;
-use common::{BoxError, ParquetFooterCache, metadata::Generation};
+use common::{BoxError, metadata::Generation};
 use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
@@ -87,7 +87,6 @@ async fn sql_dataset_input_batch_size() {
 /// and collection workflows with specific batch size configurations.
 struct TestCtx {
     ctx: testlib::ctx::TestCtx,
-    cache: ParquetFooterCache,
 }
 
 impl TestCtx {
@@ -107,11 +106,6 @@ impl TestCtx {
             .await
             .expect("Failed to create test context");
 
-        let cache = ParquetFooterCache::builder(
-            (ctx.daemon_worker().config().parquet.cache_size_mb * 1024 * 1024) as usize,
-        )
-        .build();
-
         // Deploy the TypeScript dataset
         let sql_stream_ds = DatasetPackage::new("sql_stream_ds", Some("amp.config.ts"));
         let cli = ctx.new_amp_cli();
@@ -120,7 +114,7 @@ impl TestCtx {
             .await
             .expect("Failed to register sql_stream_ds dataset");
 
-        Self { ctx, cache }
+        Self { ctx }
     }
 
     /// Get reference to the dataset store.
@@ -174,12 +168,10 @@ impl TestCtx {
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.compactor.algorithm.cooldown_duration = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(100, 0, 0, 0, Generation::default(), 10);
-        let cache = self.cache.clone();
         let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
         let data_store = self.ctx.daemon_server().data_store().clone();
-        let cached_store = common::CachedStore::from_parts(data_store, cache);
         let mut task =
-            AmpCompactor::start(metadata_db, cached_store, opts.clone(), table.clone(), None);
+            AmpCompactor::start(metadata_db, data_store, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;
@@ -205,12 +197,10 @@ impl TestCtx {
         opts_mut.collector.interval = Duration::ZERO;
         opts_mut.compactor.interval = Duration::ZERO;
         opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, 0, Generation::default(), 1.5);
-        let cache = self.cache.clone();
         let metadata_db = self.ctx.daemon_worker().metadata_db().clone();
         let data_store = self.ctx.daemon_server().data_store().clone();
-        let cached_store = common::CachedStore::from_parts(data_store, cache);
         let mut task =
-            AmpCompactor::start(metadata_db, cached_store, opts.clone(), table.clone(), None);
+            AmpCompactor::start(metadata_db, data_store, opts.clone(), table.clone(), None);
         task.join_current_then_spawn_new().await.unwrap();
         while !task.is_finished() {
             tokio::task::yield_now().await;

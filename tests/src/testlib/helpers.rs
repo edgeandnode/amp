@@ -9,9 +9,10 @@ pub mod git;
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BoxError, LogicalCatalog, Store,
+    BoxError, LogicalCatalog,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -174,7 +175,7 @@ pub async fn deploy_and_wait(
 /// - Any physical table is not found in the data store
 pub async fn load_physical_tables(
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let hash_ref = dataset_store
@@ -208,7 +209,7 @@ pub async fn load_physical_tables(
 /// or synchronization issues between metadata and storage.
 pub async fn check_table_consistency(
     table: &Arc<PhysicalTable>,
-    store: &Store,
+    store: &DataStore,
 ) -> Result<(), BoxError> {
     consistency_check(table, store).await.map_err(Into::into)
 }
@@ -227,7 +228,7 @@ pub async fn check_table_consistency(
 pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     // 1. Restore via Admin API (indexes files into metadata DB)
@@ -409,7 +410,7 @@ pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext
 pub async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    data_store: &Store,
+    data_store: &DataStore,
 ) -> Result<Catalog, BoxError> {
     let dataset_ref: Reference = format!("_/{dataset_name}@latest")
         .parse()

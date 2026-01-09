@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use amp_config::{Addrs, Config as CommonConfig};
+use amp_data_store::DataStore;
 use amp_dataset_store::{
     DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
 };
 use amp_object_store::ObjectStoreCreationError;
-use common::{BoxError, store::Store};
+use common::BoxError;
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
@@ -21,8 +22,12 @@ pub async fn run(
         .await
         .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
 
-    let data_store = Store::new(metadata_db.clone(), config.data_store_url.clone())
-        .map_err(Error::DataStoreCreation)?;
+    let data_store = DataStore::new(
+        metadata_db.clone(),
+        config.data_store_url.clone(),
+        config.parquet.cache_size_mb,
+    )
+    .map_err(Error::DataStoreCreation)?;
 
     let dataset_store = {
         let provider_configs_store = ProviderConfigsStore::new(
@@ -146,6 +151,5 @@ pub fn config_from_common(config: &CommonConfig) -> ServerConfig {
         max_mem_mb: config.max_mem_mb,
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
-        parquet_cache_size_mb: config.parquet.cache_size_mb,
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "amp-data-store"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+amp-object-store = { path = "../object-store" }
+bytes.workspace = true
+datafusion.workspace = true
+datasets-common = { path = "../datasets-common" }
+foyer = "0.21"
+futures.workspace = true
+metadata-db = { path = "../metadata-db" }
+object_store.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+uuid.workspace = true

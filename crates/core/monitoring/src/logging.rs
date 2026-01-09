@@ -67,6 +67,7 @@ const AMP_CRATES: &[&str] = &[
     "admin_client",
     "amp_client",
     "amp_config",
+    "amp_data_store",
     "amp_dataset_store",
     "amp_object_store",
     "ampcc",

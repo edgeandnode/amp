@@ -1,6 +1,7 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
+use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use axum::{
     Router,
@@ -8,7 +9,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{BoxError, store::Store};
+use common::BoxError;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
@@ -32,7 +33,7 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
-    data_store: Store,
+    data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     at: SocketAddr,
