@@ -302,6 +302,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 22);
+    assert_eq!(rows.rows.num_columns(), 23);
     assert_eq!(rows.rows.num_rows(), 1);
 }

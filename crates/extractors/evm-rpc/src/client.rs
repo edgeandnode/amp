@@ -729,14 +729,17 @@ fn rpc_transaction_to_row(
 ) -> Result<Transaction, ToRowError> {
     let (signature, chain_id) = match &*tx.inner.inner {
         AnyTxEnvelope::Ethereum(envelope) => match envelope {
-            EthereumTxEnvelope::Legacy(signed) => (signed.signature(), signed.tx().chain_id()),
-            EthereumTxEnvelope::Eip2930(signed) => (signed.signature(), signed.tx().chain_id()),
-            EthereumTxEnvelope::Eip1559(signed) => (signed.signature(), signed.tx().chain_id()),
-            EthereumTxEnvelope::Eip4844(signed) => (signed.signature(), signed.tx().chain_id()),
-            EthereumTxEnvelope::Eip7702(signed) => (signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Legacy(signed) => (*signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip2930(signed) => (*signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip1559(signed) => (*signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip4844(signed) => (*signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip7702(signed) => (*signed.signature(), signed.tx().chain_id()),
         },
-        AnyTxEnvelope::Unknown(_) => {
-            todo!()
+        AnyTxEnvelope::Unknown(unknown) => {
+            // For unknown transaction types, use a default/zero signature.
+            let signature =
+                alloy::primitives::Signature::new(Default::default(), Default::default(), false);
+            (signature, unknown.chain_id())
         }
     };
     Ok(Transaction {

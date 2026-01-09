@@ -342,19 +342,28 @@
               "nullable": false
             },
             {
-              "name": "v",
-              "type": "Binary",
-              "nullable": false
-            },
-            {
               "name": "r",
-              "type": "Binary",
+              "type": {
+                "FixedSizeBinary": 32
+              },
               "nullable": false
             },
             {
               "name": "s",
-              "type": "Binary",
+              "type": {
+                "FixedSizeBinary": 32
+              },
               "nullable": false
+            },
+            {
+              "name": "v_parity",
+              "type": "Boolean",
+              "nullable": false
+            },
+            {
+              "name": "chain_id",
+              "type": "UInt64",
+              "nullable": true
             },
             {
               "name": "gas_used",
