@@ -1,6 +1,5 @@
 use std::{
     num::NonZeroU32,
-    ops::Deref,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -645,14 +644,12 @@ fn rpc_to_rows(
 
     let transactions_row = {
         let total_input_size: usize = transactions.iter().map(|t| t.input.len()).sum();
-        let total_v_size: usize = transactions.iter().map(|tx| tx.v.len()).sum();
         let total_r_size: usize = transactions.iter().map(|tx| tx.r.len()).sum();
         let total_s_size: usize = transactions.iter().map(|tx| tx.s.len()).sum();
 
         let mut builder = TransactionRowsBuilder::with_capacity(
             transactions.len(),
             total_input_size,
-            total_v_size,
             total_r_size,
             total_s_size,
         );
@@ -737,16 +734,16 @@ fn rpc_transaction_to_row(
     receipt: AnyTxReceipt,
     tx_index: usize,
 ) -> Result<Transaction, ToRowError> {
-    let sig = match tx.inner.inner.deref() {
+    let (signature, chain_id) = match &*tx.inner.inner {
         AnyTxEnvelope::Ethereum(envelope) => match envelope {
-            EthereumTxEnvelope::Legacy(signed) => signed.signature(),
-            EthereumTxEnvelope::Eip2930(signed) => signed.signature(),
-            EthereumTxEnvelope::Eip1559(signed) => signed.signature(),
-            EthereumTxEnvelope::Eip4844(signed) => signed.signature(),
-            EthereumTxEnvelope::Eip7702(signed) => signed.signature(),
+            EthereumTxEnvelope::Legacy(signed) => (signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip2930(signed) => (signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip1559(signed) => (signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip4844(signed) => (signed.signature(), signed.tx().chain_id()),
+            EthereumTxEnvelope::Eip7702(signed) => (signed.signature(), signed.tx().chain_id()),
         },
         AnyTxEnvelope::Unknown(_) => {
-            &alloy::primitives::Signature::from_raw(&[0u8; 65]).expect("invalid raw signature")
+            todo!()
         }
     };
     Ok(Transaction {
@@ -765,9 +762,10 @@ fn rpc_transaction_to_row(
         gas_limit: tx.gas_limit(),
         value: tx.value().to_string(),
         input: tx.input().to_vec(),
-        v: if sig.v() { vec![1] } else { vec![] },
-        r: sig.r().to_be_bytes_vec(),
-        s: sig.s().to_be_bytes_vec(),
+        r: signature.r().to_be_bytes_vec(),
+        s: signature.s().to_be_bytes_vec(),
+        v_parity: signature.v(),
+        chain_id,
         receipt_cumulative_gas_used: receipt.inner.inner.cumulative_gas_used(),
         r#type: tx.ty().into(),
         max_fee_per_gas: i128::try_from(tx.inner().inner.max_fee_per_gas())
