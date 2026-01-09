@@ -11,12 +11,12 @@ use axum::{
 };
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use monitoring::logging;
-use worker::{job::JobId, node_id::NodeId};
+use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
-    scheduler::ScheduleJobError,
+    scheduler::{NodeSelector, ScheduleJobError},
 };
 
 /// Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/deploy` endpoint
@@ -218,15 +218,18 @@ pub struct DeployRequest {
     #[serde(default = "default_parallelism")]
     pub parallelism: u16,
 
-    /// Optional worker ID to assign the job to
+    /// Optional worker selector - either an exact worker ID or a glob pattern.
     ///
-    /// If specified, the job will be assigned to this specific worker.
-    /// If not specified, a worker will be selected randomly from available workers.
+    /// Examples:
+    /// - `"worker-node-0"` - assigns to the specific worker with ID "worker-node-0"
+    /// - `"worker-eth-*"` - randomly selects from workers matching the pattern
     ///
+    /// If not specified, a worker will be selected randomly from all available workers.
+    /// If a glob pattern is provided, one matching worker will be randomly selected
     /// The worker must be active (has sent heartbeats recently) for the deployment to succeed.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub worker_id: Option<NodeId>,
+    pub worker_id: Option<NodeSelector>,
 }
 
 fn default_parallelism() -> u16 {

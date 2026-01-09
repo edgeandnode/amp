@@ -28,8 +28,8 @@ use std::time::Duration;
 
 use admin_api::scheduler::{
     DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsByDatasetError,
-    ListJobsError, ListWorkersError, ScheduleJobError, SchedulerJobs, SchedulerWorkers,
-    StopJobError,
+    ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError, SchedulerJobs,
+    SchedulerWorkers, StopJobError,
 };
 use amp_dataset_store::DatasetKind;
 use async_trait::async_trait;
@@ -69,14 +69,14 @@ impl Scheduler {
     /// Schedule a dataset synchronization job
     ///
     /// Checks for existing scheduled or running jobs to avoid duplicates, selects an available
-    /// worker node (or uses the specified worker_id), and registers the job in the metadata database.
+    /// worker node (either randomly, by exact worker_id, or by matching a glob pattern) and registers the job in the metadata database.
     async fn schedule_dataset_sync_job_impl(
         &self,
         end_block: EndBlock,
         max_writers: u16,
         hash_reference: HashReference,
         dataset_kind: DatasetKind,
-        worker_id: Option<NodeId>,
+        worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
         let existing_jobs =
@@ -100,16 +100,31 @@ impl Scheduler {
             .await
             .map_err(ScheduleJobError::ListActiveWorkers)?;
 
+        // If a specific worker_id is provided, use it.
+        // If a glob pattern is provided, choose a random worker node that matches the pattern.
+        // If no worker_id or glob pattern is provided, choose a random worker node from the list of active workers.
         let node_id = match worker_id {
-            Some(worker_id) => {
+            Some(NodeSelector::Exact(worker_id)) => {
                 let worker_id_ref = metadata_db::WorkerNodeId::from(&worker_id);
                 if !candidates.contains(&worker_id_ref) {
                     return Err(ScheduleJobError::WorkerNotAvailable(worker_id));
                 }
                 worker_id_ref.to_owned()
             }
+            Some(NodeSelector::Glob(pattern)) => {
+                let matching: Vec<_> = candidates
+                    .iter()
+                    .filter(|c| pattern.matches_str(c.as_str()))
+                    .collect();
+                if matching.is_empty() {
+                    return Err(ScheduleJobError::NoMatchingWorkers(pattern));
+                }
+                let Some(node_id) = matching.choose(&mut rand::rng()).cloned() else {
+                    return Err(ScheduleJobError::NoMatchingWorkers(pattern));
+                };
+                node_id.to_owned()
+            }
             None => {
-                // Randomly select from active workers
                 let Some(node_id) = candidates.choose(&mut rand::rng()).cloned() else {
                     return Err(ScheduleJobError::NoWorkersAvailable);
                 };
@@ -265,7 +280,7 @@ impl SchedulerJobs for Scheduler {
         dataset_kind: DatasetKind,
         end_block: EndBlock,
         max_writers: u16,
-        worker_id: Option<NodeId>,
+        worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
         self.schedule_dataset_sync_job_impl(
             end_block,

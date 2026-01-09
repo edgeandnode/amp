@@ -4,12 +4,12 @@
 //! and provider configurations with the Admin API in test environments. It uses
 //! the ampctl admin API client for direct programmatic access.
 
+use ampctl::client::datasets::NodeSelector;
 use common::BoxError;
 use datasets_common::{hash::Hash, reference::Reference};
 use dump::EndBlock;
 use serde_json::value::RawValue;
 use url::Url;
-use worker::node_id::NodeId;
 
 /// ampctl fixture for registering dataset manifests and provider configurations.
 ///
@@ -192,7 +192,7 @@ impl Ampctl {
         dataset_ref: &str,
         end_block: Option<u64>,
         parallelism: Option<u16>,
-        worker_id: Option<NodeId>,
+        worker_id: Option<NodeSelector>,
     ) -> Result<worker::job::JobId, BoxError> {
         let reference: Reference = dataset_ref.parse().map_err(|err| {
             format!(
