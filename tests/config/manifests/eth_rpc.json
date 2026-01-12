@@ -416,6 +416,52 @@
               "name": "status",
               "type": "Boolean",
               "nullable": false
+            },
+            {
+              "name": "access_list",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "nullable": false,
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "address",
+                        "nullable": false,
+                        "data_type": {
+                          "FixedSizeBinary": 20
+                        },
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "storage_keys",
+                        "nullable": false,
+                        "data_type": {
+                          "List": {
+                            "name": "item",
+                            "nullable": false,
+                            "data_type": {
+                              "FixedSizeBinary": 32
+                            },
+                            "dict_id": 0,
+                            "dict_is_ordered": false,
+                            "metadata": {}
+                          }
+                        },
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
             }
           ]
         }
