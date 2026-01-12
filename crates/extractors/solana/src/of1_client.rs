@@ -158,14 +158,20 @@ pub(crate) async fn car_file_manager(
                     }
                     CarManagerMessage::FileProcessed(epoch) => {
                         tracing::debug!(%epoch, "received CAR file processed message");
-                        let count = {
+                        let should_delete = {
                             let mut guard = file_interests.lock().unwrap();
                             let count = guard.get_mut(&epoch).expect("epoch previously inserted");
                             *count -= 1;
-                            *count
+
+                            if *count == 0 {
+                                guard.remove(&epoch);
+                                true
+                            } else {
+                                false
+                            }
                         };
 
-                        if count == 0 {
+                        if should_delete {
                             // No more interested streams, delete the file.
                             let dest = car_directory.join(local_car_filename(epoch));
                             match tokio::fs::remove_file(&dest).await {
@@ -180,9 +186,6 @@ pub(crate) async fn car_file_manager(
                                 }
                                 _ => {}
                             }
-
-                            let mut guard = file_interests.lock().unwrap();
-                            guard.remove(&epoch);
                         }
                     }
                 }

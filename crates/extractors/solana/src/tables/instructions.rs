@@ -3,7 +3,7 @@ use std::sync::{Arc, LazyLock};
 use common::{
     BoxResult, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
-        array::{ArrayRef, ListBuilder, StringBuilder, UInt8Builder, UInt32Builder, UInt64Builder},
+        array::{ArrayRef, ListBuilder, UInt8Builder, UInt32Builder, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
     metadata::segments::BlockRange,
@@ -33,7 +33,11 @@ fn schema() -> Schema {
             DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
             false,
         ),
-        Field::new("data", DataType::Utf8, false),
+        Field::new(
+            "data",
+            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+            false,
+        ),
         Field::new("stack_height", DataType::UInt32, true),
     ];
 
@@ -50,7 +54,7 @@ pub(crate) struct Instruction {
 
     pub(crate) program_id_index: u8,
     pub(crate) accounts: Vec<u8>,
-    pub(crate) data: String,
+    pub(crate) data: Vec<u8>,
     pub(crate) stack_height: Option<u32>,
 }
 
@@ -61,7 +65,7 @@ pub(crate) struct InstructionRowsBuilder {
     inner_index: UInt32Builder,
     program_id_index: UInt8Builder,
     accounts: ListBuilder<UInt8Builder>,
-    data: StringBuilder,
+    data: ListBuilder<UInt8Builder>,
     stack_height: UInt32Builder,
 }
 
@@ -75,7 +79,7 @@ impl InstructionRowsBuilder {
             inner_index: UInt32Builder::with_capacity(capacity),
             program_id_index: UInt8Builder::with_capacity(capacity),
             accounts: ListBuilder::with_capacity(UInt8Builder::new(), capacity),
-            data: StringBuilder::new(),
+            data: ListBuilder::with_capacity(UInt8Builder::new(), capacity),
             stack_height: UInt32Builder::with_capacity(capacity),
         }
     }
@@ -98,10 +102,13 @@ impl InstructionRowsBuilder {
         self.inner_index.append_option(*inner_index);
 
         self.program_id_index.append_value(*program_id_index);
+
         self.accounts.values().append_slice(accounts);
         self.accounts.append(true);
 
-        self.data.append_value(data);
+        self.data.values().append_slice(data);
+        self.data.append(true);
+
         self.stack_height.append_option(*stack_height);
     }
 

@@ -6,8 +6,9 @@ pub use solana_client::{
 };
 use solana_clock::Slot;
 pub use solana_transaction_status_client_types::{
-    EncodedTransaction, UiConfirmedBlock, UiInstruction, UiMessage, UiRawMessage, UiTransaction,
-    UiTransactionStatusMeta, UiTransactionTokenBalance,
+    EncodedTransaction, TransactionStatusMeta, TransactionTokenBalance, UiConfirmedBlock,
+    UiInstruction, UiMessage, UiRawMessage, UiTransaction, UiTransactionStatusMeta,
+    UiTransactionTokenBalance,
 };
 use url::Url;
 
