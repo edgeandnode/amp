@@ -778,5 +778,40 @@ fn rpc_transaction_to_row(
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.as_recovered().signer().into(),
         status: receipt.inner.inner.status(),
+        access_list: {
+            match &*tx.inner.inner {
+                AnyTxEnvelope::Ethereum(envelope) => match envelope {
+                    EthereumTxEnvelope::Legacy(_) => None,
+                    EthereumTxEnvelope::Eip2930(signed) => {
+                        Some(convert_access_list(&signed.tx().access_list))
+                    }
+                    EthereumTxEnvelope::Eip1559(signed) => {
+                        Some(convert_access_list(&signed.tx().access_list))
+                    }
+                    EthereumTxEnvelope::Eip4844(signed) => {
+                        Some(convert_access_list(&signed.tx().tx().access_list))
+                    }
+                    EthereumTxEnvelope::Eip7702(signed) => {
+                        Some(convert_access_list(&signed.tx().access_list))
+                    }
+                },
+                _ => None,
+            }
+        },
     })
+}
+
+/// Converts Alloy AccessList to our internal representation
+fn convert_access_list(
+    access_list: &alloy::eips::eip2930::AccessList,
+) -> Vec<([u8; 20], Vec<[u8; 32]>)> {
+    access_list
+        .0
+        .iter()
+        .map(|item| {
+            let address: [u8; 20] = item.address.0.0;
+            let storage_keys: Vec<[u8; 32]> = item.storage_keys.iter().map(|key| key.0).collect();
+            (address, storage_keys)
+        })
+        .collect()
 }

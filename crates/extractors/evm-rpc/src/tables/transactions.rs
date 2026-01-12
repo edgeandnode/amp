@@ -7,10 +7,10 @@ use common::{
     TimestampArrayBuilder,
     arrow::{
         array::{
-            ArrayRef, BinaryBuilder, BooleanBuilder, Int32Builder, StringBuilder, UInt32Builder,
-            UInt64Builder,
+            ArrayRef, BinaryBuilder, BooleanBuilder, FixedSizeBinaryBuilder, Int32Builder,
+            ListBuilder, StringBuilder, StructBuilder, UInt32Builder, UInt64Builder,
         },
-        datatypes::{DataType, Field, Schema, SchemaRef},
+        datatypes::{DataType, Field, Fields, Schema, SchemaRef},
     },
     metadata::segments::BlockRange,
 };
@@ -55,6 +55,24 @@ fn schema() -> Schema {
     let from = Field::new("from", ADDRESS_TYPE, false);
     let status = Field::new("status", DataType::Boolean, false);
 
+    // Access list: List<Struct<address: FixedSizeBinary(20), storage_keys: List<FixedSizeBinary(32)>>>
+    let storage_key_type = Field::new("item", BYTES32_TYPE, false);
+    let storage_keys_field = Field::new(
+        "storage_keys",
+        DataType::List(Arc::new(storage_key_type)),
+        false,
+    );
+    let access_list_item_fields = vec![
+        Field::new("address", ADDRESS_TYPE, false),
+        storage_keys_field,
+    ];
+    let access_list_item_type = DataType::Struct(access_list_item_fields.into());
+    let access_list = Field::new(
+        "access_list",
+        DataType::List(Arc::new(Field::new("item", access_list_item_type, false))),
+        true, // nullable - Legacy transactions don't have access lists
+    );
+
     let fields = vec![
         special_block_num,
         block_hash,
@@ -79,6 +97,7 @@ fn schema() -> Schema {
         max_fee_per_blob_gas,
         from,
         status,
+        access_list,
     ];
 
     Schema::new(fields)
@@ -120,6 +139,10 @@ pub(crate) struct Transaction {
     pub(crate) from: Address,
 
     pub(crate) status: bool,
+
+    // EIP-2930, EIP-1559, EIP-4844, EIP-7702 access list
+    // Each item contains an address and a list of storage keys
+    pub(crate) access_list: Option<Vec<(Address, Vec<[u8; 32]>)>>,
 }
 
 pub(crate) struct TransactionRowsBuilder {
@@ -146,10 +169,35 @@ pub(crate) struct TransactionRowsBuilder {
     max_fee_per_blob_gas: EvmCurrencyArrayBuilder,
     from: EvmAddressArrayBuilder,
     status: BooleanBuilder,
+    access_list: ListBuilder<StructBuilder>,
 }
 
 impl TransactionRowsBuilder {
     pub(crate) fn with_capacity(count: usize, total_input_size: usize) -> Self {
+        // Helper function to create the StructBuilder for access list items
+        fn access_list_item_builder() -> StructBuilder {
+            // Create the inner ListBuilder manually to control nullability
+            let inner_field = Field::new("item", BYTES32_TYPE, false);
+            let storage_keys_builder =
+                ListBuilder::new(FixedSizeBinaryBuilder::with_capacity(0, 32))
+                    .with_field(inner_field);
+
+            StructBuilder::new(
+                Fields::from(vec![
+                    Field::new("address", ADDRESS_TYPE, false),
+                    Field::new(
+                        "storage_keys",
+                        DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
+                        false,
+                    ),
+                ]),
+                vec![
+                    Box::new(FixedSizeBinaryBuilder::with_capacity(0, 20)) as _,
+                    Box::new(storage_keys_builder) as _,
+                ],
+            )
+        }
+
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
             block_hash: Bytes32ArrayBuilder::with_capacity(count),
@@ -174,6 +222,22 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas: EvmCurrencyArrayBuilder::with_capacity(count),
             from: EvmAddressArrayBuilder::with_capacity(count),
             status: BooleanBuilder::with_capacity(count),
+            access_list: {
+                let access_list_item_field = Field::new(
+                    "item",
+                    DataType::Struct(Fields::from(vec![
+                        Field::new("address", ADDRESS_TYPE, false),
+                        Field::new(
+                            "storage_keys",
+                            DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
+                            false,
+                        ),
+                    ])),
+                    false,
+                );
+                ListBuilder::with_capacity(access_list_item_builder(), count)
+                    .with_field(access_list_item_field)
+            },
         }
     }
 
@@ -201,6 +265,7 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas,
             from,
             status,
+            access_list,
         } = tx;
 
         self.special_block_num.append_value(*block_num);
@@ -228,6 +293,34 @@ impl TransactionRowsBuilder {
             .append_option(*max_fee_per_blob_gas);
         self.from.append_value(*from);
         self.status.append_value(*status);
+
+        if let Some(access_list) = access_list {
+            for (address, storage_keys) in access_list {
+                let struct_builder = self.access_list.values();
+
+                // Append address field (index 0)
+                struct_builder
+                    .field_builder::<FixedSizeBinaryBuilder>(0)
+                    .unwrap()
+                    .append_value(address)
+                    .unwrap();
+
+                // Append storage_keys field (index 1) - this is a List<FixedSizeBinary>
+                let storage_keys_builder = struct_builder
+                    .field_builder::<ListBuilder<FixedSizeBinaryBuilder>>(1)
+                    .unwrap();
+                for key in storage_keys {
+                    storage_keys_builder.values().append_value(key).unwrap();
+                }
+                storage_keys_builder.append(true);
+
+                struct_builder.append(true);
+            }
+            self.access_list.append(true);
+        } else {
+            // Legacy transactions don't have access lists
+            self.access_list.append(false);
+        }
     }
 
     pub(crate) fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
@@ -255,6 +348,7 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas,
             from,
             mut status,
+            mut access_list,
         } = self;
 
         let columns = vec![
@@ -281,6 +375,7 @@ impl TransactionRowsBuilder {
             Arc::new(max_fee_per_blob_gas.finish()),
             Arc::new(from.finish()),
             Arc::new(status.finish()),
+            Arc::new(access_list.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)
@@ -302,6 +397,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 23);
+    assert_eq!(rows.rows.num_columns(), 24);
     assert_eq!(rows.rows.num_rows(), 1);
 }
