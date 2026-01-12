@@ -219,3 +219,49 @@ Returns:
   }
 ]
 ```
+
+## `shift_units`
+
+```sql
+Utf8 shift_units(T value, Int64 units)
+```
+
+**Supported input types for `value`:**
+- `Utf8` (string)
+- `Int8`, `Int16`, `Int32`, `Int64`
+- `UInt8`, `UInt16`, `UInt32`, `UInt64`
+- `Float32`, `Float64`
+- `Decimal128`, `Decimal256`
+
+Shifts the decimal point of a numeric value by the specified number of places:
+
+- **Positive units**: Shifts right (multiplies by 10^units) - converts human-readable amounts to raw units
+- **Negative units**: Shifts left (divides by 10^units) - converts raw units to human-readable amounts
+
+For example:
+
+```sql
+-- Convert 1.5 ETH to wei (shift right by 18 places)
+SELECT shift_units('1.5', 18) AS wei
+-- Returns: "1500000000000000000"
+
+-- Convert wei back to ETH (shift left by 18 places)
+SELECT shift_units('1500000000000000000', -18) AS eth
+-- Returns: "1.5"
+```
+
+More examples:
+
+```sql
+-- Convert 100 USDC (6 decimals) to raw units
+SELECT shift_units('100', 6) AS usdc_raw
+-- Returns: "100000000"
+
+-- Convert raw USDC units back to human-readable
+SELECT shift_units('100000000', -6) AS usdc
+-- Returns: "100"
+
+-- Convert a precise ETH amount to wei
+SELECT shift_units('1.376988483056381409', 18) AS wei
+-- Returns: "1376988483056381409"
+```
