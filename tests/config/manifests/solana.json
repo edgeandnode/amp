@@ -87,7 +87,16 @@
             },
             {
               "name": "data",
-              "type": "Utf8",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
               "nullable": false
             },
             {
@@ -565,12 +574,30 @@
             },
             {
               "name": "return_data_program_id",
-              "type": "Utf8",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
               "nullable": true
             },
             {
               "name": "return_data",
-              "type": "Utf8",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
               "nullable": true
             },
             {

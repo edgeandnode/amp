@@ -14,7 +14,7 @@ use common::{
 use serde::Deserialize;
 use solana_clock::Slot;
 
-use crate::rpc_client::{UiInstruction, UiTransaction, UiTransactionStatusMeta};
+use crate::rpc_client;
 
 pub const TABLE_NAME: &str = "transactions";
 
@@ -70,8 +70,16 @@ fn schema() -> Schema {
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             true,
         ),
-        Field::new("return_data_program_id", DataType::Utf8, true),
-        Field::new("return_data", DataType::Utf8, true),
+        Field::new(
+            "return_data_program_id",
+            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+            true,
+        ),
+        Field::new(
+            "return_data",
+            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+            true,
+        ),
         Field::new("return_data_encoding", DataType::Utf8, true),
         Field::new("compute_units_consumed", DataType::UInt64, true),
         Field::new("cost_units", DataType::UInt64, true),
@@ -129,11 +137,9 @@ impl Transaction {
     pub(crate) fn from_of1_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_meta: TransactionStatusMeta,
         of_tx: solana_sdk::transaction::VersionedTransaction,
-        of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> Self {
-        let tx_meta = TransactionStatusMeta::from_of1_tx_meta(slot, tx_index, of_tx_meta);
-
         Self {
             tx_index,
             tx_signatures: of_tx.signatures.iter().map(|s| s.to_string()).collect(),
@@ -145,8 +151,8 @@ impl Transaction {
     pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
-        rpc_tx: &UiTransaction,
-        rpc_tx_meta: Option<&UiTransactionStatusMeta>,
+        rpc_tx: &rpc_client::UiTransaction,
+        rpc_tx_meta: Option<&rpc_client::UiTransactionStatusMeta>,
     ) -> Self {
         let tx_meta = rpc_tx_meta.map(|meta| {
             let inner_instructions = meta.inner_instructions.as_ref().map(|inners| {
@@ -158,7 +164,7 @@ impl Transaction {
                             .iter()
                             .cloned()
                             .map(|inst| {
-                                let UiInstruction::Compiled(compiled) = inst else {
+                                let rpc_client::UiInstruction::Compiled(compiled) = inst else {
                                     unreachable!(
                                         "the format of inner instructions has already been verified"
                                     )
@@ -169,7 +175,7 @@ impl Transaction {
                                     inner_index: Some(inner.index as u32),
                                     program_id_index: compiled.program_id_index,
                                     accounts: compiled.accounts,
-                                    data: compiled.data,
+                                    data: compiled.data.bytes().collect(),
                                     stack_height: compiled.stack_height,
                                 }
                             })
@@ -221,8 +227,8 @@ impl Transaction {
                 .return_data
                 .clone()
                 .map(|return_data| TransactionReturnData {
-                    program_id: return_data.program_id,
-                    data: return_data.data.0,
+                    program_id: return_data.program_id.bytes().collect(),
+                    data: return_data.data.0.bytes().collect(),
                     encoding: return_data.data.1.into(),
                 });
 
@@ -252,7 +258,7 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct TransactionStatusMeta {
     // `true` if the transaction succeeded, `false` otherwise.
     pub(crate) status: bool,
@@ -271,7 +277,101 @@ pub(crate) struct TransactionStatusMeta {
 }
 
 impl TransactionStatusMeta {
-    fn from_of1_tx_meta(
+    pub(crate) fn from_stored_meta(
+        slot: u64,
+        tx_index: u32,
+        stored_tx_meta: solana_storage_proto::StoredTransactionStatusMeta,
+    ) -> Self {
+        let rpc_tx_meta = crate::rpc_client::TransactionStatusMeta::from(stored_tx_meta);
+        let inner_instructions = rpc_tx_meta
+            .inner_instructions
+            .map(|inner_instructions_vec| {
+                inner_instructions_vec
+                    .iter()
+                    .map(|inner_instructions| {
+                        inner_instructions
+                            .instructions
+                            .iter()
+                            .cloned()
+                            .map(|inst| super::instructions::Instruction {
+                                slot,
+                                tx_index,
+                                inner_index: Some(inner_instructions.index as u32),
+                                program_id_index: inst.instruction.program_id_index,
+                                accounts: inst.instruction.accounts,
+                                data: inst.instruction.data,
+                                stack_height: inst.stack_height,
+                            })
+                            .collect()
+                    })
+                    .collect()
+            });
+
+        let pre_token_balances = rpc_tx_meta
+            .pre_token_balances
+            .map(|pre_token_balances| pre_token_balances.iter().cloned().map(From::from).collect());
+        let post_token_balances = rpc_tx_meta.post_token_balances.map(|post_token_balances| {
+            post_token_balances
+                .iter()
+                .cloned()
+                .map(From::from)
+                .collect()
+        });
+
+        let rewards = rpc_tx_meta.rewards.map(|rewards| {
+            rewards
+                .iter()
+                .map(|reward| Reward {
+                    pubkey: reward.pubkey.clone(),
+                    lamports: reward.lamports,
+                    post_balance: reward.post_balance,
+                    reward_type: reward.reward_type.map(From::from),
+                    commission: reward.commission,
+                })
+                .collect()
+        });
+
+        let loaded_addresses = LoadedAddresses {
+            writable: rpc_tx_meta
+                .loaded_addresses
+                .writable
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+            readonly: rpc_tx_meta
+                .loaded_addresses
+                .readonly
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+        };
+
+        let return_data = rpc_tx_meta
+            .return_data
+            .map(|return_data| TransactionReturnData {
+                program_id: Vec::from(return_data.program_id.to_bytes()),
+                data: return_data.data,
+                encoding: ReturnDataEncoding::Base64,
+            });
+
+        Self {
+            status: rpc_tx_meta.status.is_ok(),
+            fee: rpc_tx_meta.fee,
+            pre_balances: rpc_tx_meta.pre_balances,
+            post_balances: rpc_tx_meta.post_balances,
+            inner_instructions,
+            log_messages: rpc_tx_meta.log_messages,
+            pre_token_balances,
+            post_token_balances,
+            rewards,
+            loaded_addresses: Some(loaded_addresses),
+            return_data,
+            compute_units_consumed: rpc_tx_meta.compute_units_consumed,
+            cost_units: rpc_tx_meta.cost_units,
+        }
+    }
+
+    pub(crate) fn from_proto_meta(
         slot: u64,
         tx_index: u32,
         of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
@@ -290,7 +390,7 @@ impl TransactionStatusMeta {
                         inner_index: Some(inner.index),
                         program_id_index: inst.program_id_index as u8,
                         accounts: inst.accounts,
-                        data: String::from_utf8(inst.data).expect("invalid utf-8"),
+                        data: inst.data,
                         stack_height: inst.stack_height,
                     })
                     .collect()
@@ -318,7 +418,11 @@ impl TransactionStatusMeta {
                 lamports: reward.lamports,
                 post_balance: reward.post_balance,
                 reward_type: Some(reward.reward_type.into()),
-                commission: Some(reward.commission.parse().expect("commission parsing error")),
+                commission: if reward.commission.is_empty() {
+                    None
+                } else {
+                    Some(reward.commission.parse().expect("commission parsing error"))
+                },
             })
             .collect();
 
@@ -339,8 +443,8 @@ impl TransactionStatusMeta {
             .return_data
             .clone()
             .map(|return_data| TransactionReturnData {
-                program_id: String::from_utf8(return_data.program_id).expect("invalid utf-8"),
-                data: String::from_utf8(return_data.data).expect("invalid utf-8"),
+                program_id: return_data.program_id,
+                data: return_data.data,
                 encoding: ReturnDataEncoding::Base64,
             });
 
@@ -371,8 +475,8 @@ pub(crate) struct TransactionTokenBalance {
     program_id: Option<String>,
 }
 
-impl From<crate::rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
-    fn from(value: crate::rpc_client::UiTransactionTokenBalance) -> Self {
+impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
+    fn from(value: rpc_client::UiTransactionTokenBalance) -> Self {
         Self {
             account_index: value.account_index,
             mint: value.mint,
@@ -384,6 +488,24 @@ impl From<crate::rpc_client::UiTransactionTokenBalance> for TransactionTokenBala
             },
             owner: value.owner.map(|owner| owner),
             program_id: value.program_id.map(|pid| pid),
+        }
+    }
+}
+
+impl From<rpc_client::TransactionTokenBalance> for TransactionTokenBalance {
+    fn from(value: rpc_client::TransactionTokenBalance) -> Self {
+        let ui_token_amount = TokenAmount {
+            ui_amount: value.ui_token_amount.ui_amount,
+            decimals: value.ui_token_amount.decimals,
+            amount: value.ui_token_amount.amount,
+            ui_amount_string: value.ui_token_amount.ui_amount_string,
+        };
+        Self {
+            account_index: value.account_index,
+            mint: value.mint,
+            ui_token_amount,
+            owner: Some(value.owner),
+            program_id: Some(value.program_id),
         }
     }
 }
@@ -458,13 +580,13 @@ impl From<i32> for RewardType {
     }
 }
 
-impl From<crate::rpc_client::RewardType> for RewardType {
-    fn from(value: crate::rpc_client::RewardType) -> Self {
+impl From<rpc_client::RewardType> for RewardType {
+    fn from(value: rpc_client::RewardType) -> Self {
         match value {
-            crate::rpc_client::RewardType::Fee => Self::Fee,
-            crate::rpc_client::RewardType::Rent => Self::Rent,
-            crate::rpc_client::RewardType::Staking => Self::Staking,
-            crate::rpc_client::RewardType::Voting => Self::Voting,
+            rpc_client::RewardType::Fee => Self::Fee,
+            rpc_client::RewardType::Rent => Self::Rent,
+            rpc_client::RewardType::Staking => Self::Staking,
+            rpc_client::RewardType::Voting => Self::Voting,
         }
     }
 }
@@ -477,8 +599,8 @@ pub(crate) struct LoadedAddresses {
 
 #[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionReturnData {
-    program_id: String,
-    data: String,
+    program_id: Vec<u8>,
+    data: Vec<u8>,
     encoding: ReturnDataEncoding,
 }
 
@@ -496,10 +618,10 @@ impl std::fmt::Display for ReturnDataEncoding {
     }
 }
 
-impl From<crate::rpc_client::UiReturnDataEncoding> for ReturnDataEncoding {
-    fn from(value: crate::rpc_client::UiReturnDataEncoding) -> Self {
+impl From<rpc_client::UiReturnDataEncoding> for ReturnDataEncoding {
+    fn from(value: rpc_client::UiReturnDataEncoding) -> Self {
         match value {
-            crate::rpc_client::UiReturnDataEncoding::Base64 => Self::Base64,
+            rpc_client::UiReturnDataEncoding::Base64 => Self::Base64,
         }
     }
 }
@@ -521,8 +643,8 @@ pub(crate) struct TransactionRowsBuilder {
     rewards: ListBuilder<StructBuilder>,
     loaded_addresses_writable: ListBuilder<StringBuilder>,
     loaded_addresses_readonly: ListBuilder<StringBuilder>,
-    return_data_program_id: StringBuilder,
-    return_data: StringBuilder,
+    return_data_program_id: ListBuilder<UInt8Builder>,
+    return_data: ListBuilder<UInt8Builder>,
     return_data_encoding: StringBuilder,
     compute_units_consumed: UInt64Builder,
     cost_units: UInt64Builder,
@@ -600,8 +722,8 @@ impl TransactionRowsBuilder {
             rewards: ListBuilder::with_capacity(reward_builder(), count),
             loaded_addresses_writable: ListBuilder::with_capacity(StringBuilder::new(), count),
             loaded_addresses_readonly: ListBuilder::with_capacity(StringBuilder::new(), count),
-            return_data_program_id: StringBuilder::with_capacity(count, 0),
-            return_data: StringBuilder::with_capacity(count, 0),
+            return_data_program_id: ListBuilder::with_capacity(UInt8Builder::new(), count),
+            return_data: ListBuilder::with_capacity(UInt8Builder::new(), count),
             return_data_encoding: StringBuilder::with_capacity(count, 0),
             compute_units_consumed: UInt64Builder::with_capacity(count),
             cost_units: UInt64Builder::with_capacity(count),
@@ -802,8 +924,11 @@ impl TransactionRowsBuilder {
 
             if let Some(return_data) = &meta.return_data {
                 self.return_data_program_id
-                    .append_value(&return_data.program_id);
-                self.return_data.append_value(&return_data.data);
+                    .values()
+                    .append_slice(&return_data.program_id);
+                self.return_data_program_id.append(true);
+                self.return_data.values().append_slice(&return_data.data);
+                self.return_data.append(true);
                 self.return_data_encoding
                     .append_value(return_data.encoding.to_string());
             } else {

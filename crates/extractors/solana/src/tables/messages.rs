@@ -97,7 +97,7 @@ impl Message {
                 inner_index: None,
                 program_id_index: inst.program_id_index,
                 accounts: inst.accounts.clone(),
-                data: bs58::encode(&inst.data).into_string(),
+                data: inst.data.clone(),
                 stack_height: None,
             })
             .collect();
@@ -145,7 +145,7 @@ impl Message {
                 inner_index: None,
                 program_id_index: inst.program_id_index,
                 accounts: inst.accounts.clone(),
-                data: inst.data.clone(),
+                data: inst.data.bytes().collect(),
                 stack_height: inst.stack_height,
             })
             .collect();
