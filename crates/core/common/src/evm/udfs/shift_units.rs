@@ -554,6 +554,306 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn shift_units_with_integer_succeeds() {
+        //* Given
+        let value = ScalarValue::Utf8(Some("100".into()));
+        let units = 6;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Utf8, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with valid integer string");
+        assert_eq!(shifted, "100000000");
+    }
+
+    #[test]
+    fn shift_units_with_many_decimal_places_succeeds() {
+        //* Given
+        let value = ScalarValue::Utf8(Some("1.376988483056381409".into()));
+        let units = 18;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Utf8, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with many decimal places");
+        assert_eq!(shifted, "1376988483056381409");
+    }
+
+    #[test]
+    fn shift_units_with_zero_units_succeeds() {
+        //* Given
+        let value = ScalarValue::Utf8(Some("123.456".into()));
+        let units = 0;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Utf8, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with zero units");
+        assert_eq!(shifted, "123.456");
+    }
+
+    #[test]
+    fn shift_units_no_arguments_fails() {
+        //* Given
+        let udf = ShiftUnits::new();
+        let args: Vec<ColumnarValue> = vec![];
+        let arg_fields: Vec<FieldRef> = vec![];
+        let return_field = Field::new(udf.name(), DataType::Utf8, true).into();
+        let scalar_args = ScalarFunctionArgs {
+            args,
+            arg_fields,
+            number_rows: 1,
+            return_field,
+            config_options: Default::default(),
+        };
+
+        //* When
+        let result = udf.invoke_with_args(scalar_args);
+
+        //* Then
+        assert!(result.is_err(), "shift_units should fail with no arguments");
+        let error = result.expect_err("should return argument count error");
+        assert!(
+            error.message().contains("expected 2 arguments"),
+            "Error message should mention 'expected 2 arguments', got: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn shift_units_invalid_string_fails() {
+        //* Given
+        let invalid_value = ScalarValue::Utf8(Some("not_a_number".into()));
+        let units = 18;
+
+        //* When
+        let result = invoke_shift_units_typed(invalid_value, DataType::Utf8, units);
+
+        //* Then
+        assert!(
+            result.is_err(),
+            "shift_units should fail with invalid string input"
+        );
+        let error = result.expect_err("should return parse error");
+        assert!(
+            error.message().contains("failed to parse"),
+            "Error message should mention 'failed to parse', got: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn shift_units_negative_units_succeeds() {
+        //* Given
+        let value = ScalarValue::Utf8(Some("1.5".into()));
+        let units = -18;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Utf8, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with negative units");
+        assert_eq!(shifted, "0.0000000000000000015");
+    }
+
+    #[test]
+    fn shift_units_array_succeeds() {
+        //* Given
+        let values = vec![Some("1.5"), Some("100000"), Some("0.1")];
+        let units = 18;
+
+        //* When
+        let result = invoke_shift_units_array(values, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with array input");
+        assert_eq!(
+            shifted,
+            vec![
+                Some("1500000000000000000".to_string()),
+                Some("100000000000000000000000".to_string()),
+                Some("100000000000000000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn shift_units_array_with_nulls_succeeds() {
+        //* Given
+        let values = vec![Some("1.5"), None, Some("0.1")];
+        let units = 18;
+
+        //* When
+        let result = invoke_shift_units_array(values, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with array containing nulls");
+        assert_eq!(
+            shifted,
+            vec![
+                Some("1500000000000000000".to_string()),
+                None,
+                Some("100000000000000000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn shift_units_int64_succeeds() {
+        //* Given
+        let value = ScalarValue::Int64(Some(10));
+        let units = 3;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Int64, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with Int64 input");
+        assert_eq!(shifted, "10000");
+    }
+
+    #[test]
+    fn shift_units_float32_succeeds() {
+        //* Given
+        let value = ScalarValue::Float32(Some(10.0));
+        let units = 3;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Float32, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with Float32 input");
+        assert_eq!(shifted, "10000");
+    }
+
+    #[test]
+    fn shift_units_float64_succeeds() {
+        //* Given
+        let value = ScalarValue::Float64(Some(10.0));
+        let units = 3;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Float64, units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with Float64 input");
+        assert_eq!(shifted, "10000");
+    }
+
+    #[test]
+    fn shift_units_decimal128_succeeds() {
+        //* Given
+        let value = ScalarValue::Decimal128(Some(10), 38, 0);
+        let units = 3;
+
+        //* When
+        let result = invoke_shift_units_typed(value, DataType::Decimal128(38, 0), units);
+
+        //* Then
+        let shifted = result.expect("shift_units should succeed with Decimal128 input");
+        assert_eq!(shifted, "10000");
+    }
+
+    #[test]
+    fn shift_units_null_value_fails() {
+        //* Given
+        let udf = ShiftUnits::new();
+        let args = vec![
+            ColumnarValue::Scalar(ScalarValue::Null),
+            ColumnarValue::Scalar(ScalarValue::Int64(Some(18))),
+        ];
+        let arg_fields = vec![
+            Field::new("value", DataType::Null, true).into(),
+            Field::new("units", DataType::Int64, false).into(),
+        ];
+        let return_field: FieldRef = Field::new(udf.name(), DataType::Utf8, true).into();
+        let scalar_args = ScalarFunctionArgs {
+            args,
+            arg_fields,
+            number_rows: 1,
+            return_field,
+            config_options: Default::default(),
+        };
+
+        //* When
+        let result = udf.invoke_with_args(scalar_args);
+
+        //* Then
+        assert!(result.is_err(), "shift_units should fail with null value");
+        let error = result.expect_err("should return null value error");
+        assert!(
+            error
+                .message()
+                .contains("value must be a non-null numeric type"),
+            "Error message should mention 'value must be a non-null numeric type', got: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn shift_units_null_units_fails() {
+        //* Given
+        let udf = ShiftUnits::new();
+        let args = vec![
+            ColumnarValue::Scalar(ScalarValue::Utf8(Some("1.5".to_string()))),
+            ColumnarValue::Scalar(ScalarValue::Null),
+        ];
+        let arg_fields = vec![
+            Field::new("value", DataType::Utf8, false).into(),
+            Field::new("units", DataType::Null, true).into(),
+        ];
+        let return_field: FieldRef = Field::new(udf.name(), DataType::Utf8, true).into();
+        let scalar_args = ScalarFunctionArgs {
+            args,
+            arg_fields,
+            number_rows: 1,
+            return_field,
+            config_options: Default::default(),
+        };
+
+        //* When
+        let result = udf.invoke_with_args(scalar_args);
+
+        //* Then
+        assert!(result.is_err(), "shift_units should fail with null units");
+        let error = result.expect_err("should return null units error");
+        assert!(
+            error
+                .message()
+                .contains("expected numeric or string scalar"),
+            "Error message should mention 'expected numeric or string scalar', got: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn shift_units_roundtrip_succeeds() {
+        //* Given
+        // shift_units(shift_units(value, -18), 18) should return original value
+        let original = "28998036497399455000";
+
+        //* When
+        let shifted_left = invoke_shift_units_typed(
+            ScalarValue::Utf8(Some(original.into())),
+            DataType::Utf8,
+            -18,
+        )
+        .expect("shift_units should succeed shifting left");
+        let roundtrip =
+            invoke_shift_units_typed(ScalarValue::Utf8(Some(shifted_left)), DataType::Utf8, 18)
+                .expect("shift_units should succeed shifting right");
+
+        //* Then
+        assert_eq!(
+            roundtrip, original,
+            "roundtrip should return original value"
+        );
+    }
+
     fn invoke_shift_units_typed(
         value: ScalarValue,
         value_type: DataType,
@@ -632,212 +932,5 @@ mod tests {
             }
         }
         Ok(results)
-    }
-
-    #[test]
-    fn shift_units_with_integer_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Utf8(Some("100".into())), DataType::Utf8, 6)
-                .unwrap();
-        assert_eq!(result, "100000000");
-    }
-
-    #[test]
-    fn shift_units_with_many_decimal_places_succeeds() {
-        let result = invoke_shift_units_typed(
-            ScalarValue::Utf8(Some("1.376988483056381409".into())),
-            DataType::Utf8,
-            18,
-        )
-        .unwrap();
-        assert_eq!(result, "1376988483056381409");
-    }
-
-    #[test]
-    fn shift_units_with_zero_units_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Utf8(Some("123.456".into())), DataType::Utf8, 0)
-                .unwrap();
-        assert_eq!(result, "123.456");
-    }
-
-    #[test]
-    fn shift_units_no_arguments_fails() {
-        let udf = ShiftUnits::new();
-        let args: Vec<ColumnarValue> = vec![];
-        let arg_fields: Vec<FieldRef> = vec![];
-        let return_field = Field::new(udf.name(), DataType::Utf8, true).into();
-        let args = ScalarFunctionArgs {
-            args,
-            arg_fields,
-            number_rows: 1,
-            return_field,
-            config_options: Default::default(),
-        };
-
-        let result = udf.invoke_with_args(args);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message()
-                .contains("expected 2 arguments")
-        );
-    }
-
-    #[test]
-    fn shift_units_invalid_string_fails() {
-        let result = invoke_shift_units_typed(
-            ScalarValue::Utf8(Some("not_a_number".into())),
-            DataType::Utf8,
-            18,
-        );
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message().contains("failed to parse"));
-    }
-
-    #[test]
-    fn shift_units_negative_units_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Utf8(Some("1.5".into())), DataType::Utf8, -18);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "0.0000000000000000015");
-    }
-
-    #[test]
-    fn shift_units_array_succeeds() {
-        let result =
-            invoke_shift_units_array(vec![Some("1.5"), Some("100000"), Some("0.1")], 18).unwrap();
-        assert_eq!(
-            result,
-            vec![
-                Some("1500000000000000000".to_string()),
-                Some("100000000000000000000000".to_string()),
-                Some("100000000000000000".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn shift_units_array_with_nulls_succeeds() {
-        let result = invoke_shift_units_array(vec![Some("1.5"), None, Some("0.1")], 18).unwrap();
-        assert_eq!(
-            result,
-            vec![
-                Some("1500000000000000000".to_string()),
-                None,
-                Some("100000000000000000".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn shift_units_int64_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Int64(Some(10)), DataType::Int64, 3).unwrap();
-        assert_eq!(result, "10000");
-    }
-
-    #[test]
-    fn shift_units_float32_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Float32(Some(10.0)), DataType::Float32, 3)
-                .unwrap();
-        assert_eq!(result, "10000");
-    }
-
-    #[test]
-    fn shift_units_float64_succeeds() {
-        let result =
-            invoke_shift_units_typed(ScalarValue::Float64(Some(10.0)), DataType::Float64, 3)
-                .unwrap();
-        assert_eq!(result, "10000");
-    }
-
-    #[test]
-    fn shift_units_decimal128_succeeds() {
-        let result = invoke_shift_units_typed(
-            ScalarValue::Decimal128(Some(10), 38, 0),
-            DataType::Decimal128(38, 0),
-            3,
-        )
-        .unwrap();
-        assert_eq!(result, "10000");
-    }
-
-    #[test]
-    fn shift_units_null_value_fails() {
-        let udf = ShiftUnits::new();
-        let args = vec![
-            ColumnarValue::Scalar(ScalarValue::Null),
-            ColumnarValue::Scalar(ScalarValue::Int64(Some(18))),
-        ];
-        let arg_fields = vec![
-            Field::new("value", DataType::Null, true).into(),
-            Field::new("units", DataType::Int64, false).into(),
-        ];
-        let return_field: FieldRef = Field::new(udf.name(), DataType::Utf8, true).into();
-        let args = ScalarFunctionArgs {
-            args,
-            arg_fields,
-            number_rows: 1,
-            return_field,
-            config_options: Default::default(),
-        };
-
-        let result = udf.invoke_with_args(args);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message()
-                .contains("value must be a non-null numeric type")
-        );
-    }
-
-    #[test]
-    fn shift_units_null_units_fails() {
-        let udf = ShiftUnits::new();
-        let args = vec![
-            ColumnarValue::Scalar(ScalarValue::Utf8(Some("1.5".to_string()))),
-            ColumnarValue::Scalar(ScalarValue::Null),
-        ];
-        let arg_fields = vec![
-            Field::new("value", DataType::Utf8, false).into(),
-            Field::new("units", DataType::Null, true).into(),
-        ];
-        let return_field: FieldRef = Field::new(udf.name(), DataType::Utf8, true).into();
-        let args = ScalarFunctionArgs {
-            args,
-            arg_fields,
-            number_rows: 1,
-            return_field,
-            config_options: Default::default(),
-        };
-
-        let result = udf.invoke_with_args(args);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message()
-                .contains("expected numeric or string scalar")
-        );
-    }
-
-    #[test]
-    fn shift_units_roundtrip_succeeds() {
-        // shift_units(shift_units(value, -18), 18) should return original value
-        let original = "28998036497399455000";
-        let shifted_left = invoke_shift_units_typed(
-            ScalarValue::Utf8(Some(original.into())),
-            DataType::Utf8,
-            -18,
-        )
-        .unwrap();
-        let roundtrip =
-            invoke_shift_units_typed(ScalarValue::Utf8(Some(shifted_left)), DataType::Utf8, 18)
-                .unwrap();
-        assert_eq!(roundtrip, original);
     }
 }
