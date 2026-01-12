@@ -462,6 +462,22 @@
                 }
               },
               "nullable": true
+            },
+            {
+              "name": "blob_versioned_hashes",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "nullable": false,
+                  "data_type": {
+                    "FixedSizeBinary": 32
+                  },
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
             }
           ]
         }

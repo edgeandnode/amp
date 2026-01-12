@@ -70,6 +70,11 @@ fn schema() -> Schema {
         ))),
         true, // nullable - Legacy transactions don't have access lists
     );
+    let blob_versioned_hashes = Field::new(
+        "blob_versioned_hashes",
+        DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
+        true, // nullable - only EIP-4844 transactions have blob versioned hashes
+    );
 
     let fields = vec![
         special_block_num,
@@ -96,6 +101,7 @@ fn schema() -> Schema {
         from,
         status,
         access_list,
+        blob_versioned_hashes,
     ];
 
     Schema::new(fields)
@@ -141,6 +147,10 @@ pub(crate) struct Transaction {
     // EIP-2930, EIP-1559, EIP-4844, EIP-7702 access list
     // Each item contains an address and a list of storage keys
     pub(crate) access_list: Option<Vec<(Address, Vec<[u8; 32]>)>>,
+
+    // EIP-4844 blob versioned hashes
+    // List of KZG commitment versioned hashes for blob transactions
+    pub(crate) blob_versioned_hashes: Option<Vec<[u8; 32]>>,
 }
 
 pub(crate) struct TransactionRowsBuilder {
@@ -168,6 +178,7 @@ pub(crate) struct TransactionRowsBuilder {
     from: EvmAddressArrayBuilder,
     status: BooleanBuilder,
     access_list: ListBuilder<StructBuilder>,
+    blob_versioned_hashes: ListBuilder<FixedSizeBinaryBuilder>,
 }
 
 impl TransactionRowsBuilder {
@@ -225,6 +236,8 @@ impl TransactionRowsBuilder {
                     false,
                 ))
             },
+            blob_versioned_hashes: ListBuilder::new(FixedSizeBinaryBuilder::with_capacity(0, 32))
+                .with_field(Field::new("item", BYTES32_TYPE, false)),
         }
     }
 
@@ -253,6 +266,7 @@ impl TransactionRowsBuilder {
             from,
             status,
             access_list,
+            blob_versioned_hashes,
         } = tx;
 
         self.special_block_num.append_value(*block_num);
@@ -308,6 +322,20 @@ impl TransactionRowsBuilder {
             // Legacy transactions don't have access lists
             self.access_list.append(false);
         }
+
+        // Append blob_versioned_hashes (EIP-4844 only)
+        if let Some(hashes) = blob_versioned_hashes {
+            for hash in hashes {
+                self.blob_versioned_hashes
+                    .values()
+                    .append_value(hash)
+                    .unwrap();
+            }
+            self.blob_versioned_hashes.append(true);
+        } else {
+            // Non-EIP-4844 transactions don't have blob versioned hashes
+            self.blob_versioned_hashes.append(false);
+        }
     }
 
     pub(crate) fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
@@ -336,6 +364,7 @@ impl TransactionRowsBuilder {
             from,
             mut status,
             mut access_list,
+            mut blob_versioned_hashes,
         } = self;
 
         let columns = vec![
@@ -363,6 +392,7 @@ impl TransactionRowsBuilder {
             Arc::new(from.finish()),
             Arc::new(status.finish()),
             Arc::new(access_list.finish()),
+            Arc::new(blob_versioned_hashes.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)
@@ -384,6 +414,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 24);
+    assert_eq!(rows.rows.num_columns(), 25);
     assert_eq!(rows.rows.num_rows(), 1);
 }

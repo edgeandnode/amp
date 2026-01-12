@@ -60,6 +60,7 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | from                     | FixedSizeBinary(20)                                                                 | NO          |
 | status                   | Boolean                                                                             | NO          |
 | access_list              | List(Struct(address: FixedSizeBinary(20), storage_keys: List(FixedSizeBinary(32)))) | YES         |
+| blob_versioned_hashes    | List(FixedSizeBinary(32))                                                           | YES         |
 +--------------------------+-------------------------------------------------------------------------------------+-------------+
 ````
 ## logs

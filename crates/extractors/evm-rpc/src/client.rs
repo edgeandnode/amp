@@ -798,6 +798,21 @@ fn rpc_transaction_to_row(
                 _ => None,
             }
         },
+        blob_versioned_hashes: {
+            if let AnyTxEnvelope::Ethereum(EthereumTxEnvelope::Eip4844(signed)) = &*tx.inner.inner {
+                Some(
+                    signed
+                        .tx()
+                        .tx()
+                        .blob_versioned_hashes
+                        .iter()
+                        .map(|hash| hash.0)
+                        .collect(),
+                )
+            } else {
+                None
+            }
+        },
     })
 }
 
