@@ -535,32 +535,48 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
 
             let (tx, _) = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())?;
-            let tx_meta = {
-                let tx_meta = &tx_meta_df[..];
-                // Around epoch 200 transaction meta and block rewards become encoded with bincode
-                // instead of the protobuf scheme. Since there will be (already are as of writing
-                // this comment) more epochs that have bincode encoding for transaction meta,
-                // decoding for it is placed first and eventually (after epoch 200 or so) will
-                // never fail.
-                match bincode::serde::decode_from_slice(tx_meta, bincode::config::standard()) {
-                    Ok((tx_meta_bincode, _)) => tx_meta_bincode,
-                    Err(bincode_err) => match prost::Message::decode(tx_meta) {
-                        Ok(tx_meta_proto) => {
-                            let tx_index = idx.try_into().expect("conversion error");
-                            tables::transactions::TransactionStatusMeta::from_proto_meta(
-                                block.slot,
-                                tx_index,
-                                tx_meta_proto,
-                            )
+            let tx_meta = if tx_meta_df.is_empty() {
+                // Empty dataframe, return default transaction metadata.
+                tables::transactions::TransactionStatusMeta::default()
+            } else {
+                let tx_index = idx.try_into().expect("conversion error");
+
+                // Transaction metadata is ZSTD compressed in CAR files.
+                let tx_meta = zstd::decode_all(tx_meta_df.as_slice()).expect("zstd decode error");
+                let tx_meta = tx_meta.as_slice();
+
+                // It seems that in CAR files some transaction metadata is protobuf
+                // encoded and some is bincode encoded. We'll attempt both here and
+                // only return an error if both of them fail.
+                match prost::Message::decode(tx_meta) {
+                    Ok(tx_meta_proto) => {
+                        tables::transactions::TransactionStatusMeta::from_proto_meta(
+                            block.slot,
+                            tx_index,
+                            tx_meta_proto,
+                        )
+                    }
+                    Err(prost_err) => {
+                        match bincode::serde::decode_from_slice(
+                            tx_meta,
+                            bincode::config::standard(),
+                        ) {
+                            Ok((tx_meta_bincode, _)) => {
+                                tables::transactions::TransactionStatusMeta::from_stored_meta(
+                                    block.slot,
+                                    tx_index,
+                                    tx_meta_bincode,
+                                )
+                            }
+                            Err(bincode_err) => {
+                                let err = format!(
+                                    "failed to decode transaction metadata: prost_err={:?}, bincode_err={:?}",
+                                    prost_err, bincode_err
+                                );
+                                return Err(err.into());
+                            }
                         }
-                        Err(prost_err) => {
-                            let err = format!(
-                                "failed to decode transaction metadata: bincode_err={:?}, prost_err={:?}",
-                                bincode_err, prost_err
-                            );
-                            return Err(err.into());
-                        }
-                    },
+                    }
                 }
             };
 

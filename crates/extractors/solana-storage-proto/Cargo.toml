@@ -26,7 +26,9 @@ solana-signature = { version = "3.0.0", features = ["std"] }
 solana-transaction = "3.0.0"
 solana-transaction-context = { version = "3.0.0", features = ["serde"] }
 solana-transaction-error = "3.0.0"
-solana-transaction-status = "3.0.10"
+solana-transaction-status = { version = "3.0.0", features = [
+    "agave-unstable-api",
+] }
 
 [dev-dependencies]
 enum-iterator = "2.0"
