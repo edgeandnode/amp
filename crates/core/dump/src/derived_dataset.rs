@@ -124,21 +124,78 @@ use crate::{
 /// Dumps a set of derived dataset tables. All tables must belong to the same dataset.
 pub async fn dump(
     ctx: Ctx,
-    dataset: &HashReference,
-    tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    dataset_ref: &HashReference,
     microbatch_max_interval: u64,
     end: EndBlock,
+    writer: impl Into<Option<metadata_db::JobId>>,
 ) -> Result<(), Error> {
+    let writer = writer.into();
+
     // Resolve manifest once using the provided hash reference
     let manifest = ctx
         .dataset_store
-        .get_derived_manifest(dataset.hash())
+        .get_derived_manifest(dataset_ref.hash())
         .await
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
+    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+
+    // Get dataset for table resolution
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(dataset_ref)
+        .await
+        .map_err(Error::GetDataset)?;
+
+    // Initialize physical tables and compactors
+    let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
+    for table in dataset.resolved_tables(dataset_ref.to_reference().into()) {
+        // Try to get existing active physical table (handles retry case)
+        let physical_table: Arc<PhysicalTable> =
+            match PhysicalTable::get_active(ctx.data_store.clone(), table.clone())
+                .await
+                .map_err(Error::GetActivePhysicalTable)?
+            {
+                // Reuse existing table (retry scenario)
+                Some(pt) => pt,
+                // Create new table (initial attempt)
+                None => common::catalog::physical::register_new_table_revision(
+                    ctx.data_store.clone(),
+                    dataset_ref.clone(),
+                    table,
+                )
+                .await
+                .map_err(Error::RegisterNewPhysicalTable)?,
+            }
+            .into();
+
+        let compactor = AmpCompactor::start(
+            ctx.metadata_db.clone(),
+            ctx.data_store.clone(),
+            parquet_opts.clone(),
+            physical_table.clone(),
+            ctx.metrics.clone(),
+        )
+        .into();
+
+        tables.push((physical_table, compactor));
+    }
+
+    if tables.is_empty() {
+        return Ok(());
+    }
+
+    // Assign job writer if provided (locks tables to job)
+    if let Some(writer) = writer {
+        let location_ids: Vec<_> = tables.iter().map(|(pt, _)| pt.location_id()).collect();
+        metadata_db::physical_table::assign_job_writer(&ctx.metadata_db, &location_ids, writer)
+            .await
+            .map_err(Error::AssignJobWriter)?;
+    }
+
     // Pre-check all tables for consistency before spawning tasks
-    for (table, _) in tables {
+    for (table, _) in &tables {
         consistency_check(table, &ctx.data_store)
             .await
             .map_err(|err| Error::ConsistencyCheck {
@@ -150,14 +207,13 @@ pub async fn dump(
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
-    let opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
-    for (table, compactor) in tables {
+    for (table, compactor) in &tables {
         let ctx = ctx.clone();
         let env = env.clone();
         let table = Arc::clone(table);
         let compactor = Arc::clone(compactor);
-        let opts = opts.clone();
+        let opts = parquet_opts.clone();
         let metrics = ctx.metrics.clone();
         let manifest = manifest.clone();
 
@@ -207,6 +263,45 @@ pub async fn dump(
 /// when dumping derived datasets to Parquet files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to get dataset from dataset store
+    ///
+    /// This occurs when retrieving the dataset instance from the dataset store fails.
+    /// The dataset store loads dataset manifests and parses them into Dataset instances.
+    ///
+    /// Common causes:
+    /// - Dataset not found in metadata database
+    /// - Manifest file not accessible in object store
+    /// - Invalid or corrupted manifest content
+    /// - Manifest parsing errors
+    /// - Missing required manifest fields
+    #[error("Failed to get dataset")]
+    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+
+    /// Failed to get active physical table
+    ///
+    /// This error occurs when querying for an active physical table fails.
+    /// This typically happens due to database connection issues.
+    ///
+    /// Note: This wraps BoxError because PhysicalTable::get_active currently
+    /// returns BoxError. This should be replaced with a concrete error type.
+    #[error("Failed to get active physical table")]
+    GetActivePhysicalTable(#[source] BoxError),
+
+    /// Failed to register physical table revision
+    ///
+    /// This error occurs when registering a new physical table revision fails,
+    /// typically due to storage configuration issues, database connection problems,
+    /// or invalid URL construction.
+    #[error("Failed to register new physical table")]
+    RegisterNewPhysicalTable(#[source] common::catalog::physical::RegisterNewTableRevisionError),
+
+    /// Failed to assign job writer
+    ///
+    /// This error occurs when assigning the job as the writer for physical
+    /// table locations fails, typically due to database connection issues.
+    #[error("Failed to assign job writer")]
+    AssignJobWriter(#[source] metadata_db::Error),
+
     /// Failed to create query environment from configuration
     ///
     /// This occurs when the query environment cannot be initialized, typically due to:

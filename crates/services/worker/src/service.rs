@@ -411,9 +411,7 @@ impl Worker {
         let job_desc: crate::job::JobDescriptor =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
-        let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc)
-            .await
-            .map_err(SpawnJobError::JobInitializationFailed)?;
+        let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
 
         self.job_set.spawn(job_id, job_fut);
 
