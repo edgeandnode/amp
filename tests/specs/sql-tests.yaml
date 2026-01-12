@@ -498,3 +498,48 @@
   results: |
     []
   recordBatchCount: 2 # extra batch for app_metadata to signal completion
+
+- name: evm_address_with_0x_prefix
+  query: |
+    SELECT address
+    FROM eth_rpc.logs
+    WHERE address = evm_encode_hex('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
+    LIMIT 1
+  results: |
+    [{"address":"c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"}]
+
+- name: evm_address_with_prefix
+  query: |
+    SELECT tx_hash
+    FROM eth_rpc.transactions
+    WHERE tx_hash = evm_encode_hex('0x7ecdeea40834539df43b388d62c8e6bdee49107d10114b0d05c6adec1d16e322')
+    LIMIT 1
+  results: |
+    [{"tx_hash":"7ecdeea40834539df43b388d62c8e6bdee49107d10114b0d05c6adec1d16e322"}]
+
+- name: evm_address_without_prefix
+  query: |
+    SELECT tx_hash
+    FROM eth_rpc.transactions
+    WHERE tx_hash = evm_encode_hex('7ecdeea40834539df43b388d62c8e6bdee49107d10114b0d05c6adec1d16e322')
+    LIMIT 1
+  results: |
+    [{"tx_hash":"7ecdeea40834539df43b388d62c8e6bdee49107d10114b0d05c6adec1d16e322"}]
+
+- name: evm_address_invalid_hex
+  query: |
+    SELECT evm_encode_hex('0x123')
+  failure: |
+    invalid hex string: odd number of digits
+
+- name: evm_address_empty_string
+  query: |
+    SELECT evm_encode_hex('')
+  failure: |
+    expected 20 or 32 bytes, got 0
+
+- name: evm_address_no_args
+  query: |
+    SELECT evm_encode_hex()
+  failure: |
+    'evm_encode_hex' does not support zero arguments No function matches the given name and argument types 'evm_encode_hex()'
