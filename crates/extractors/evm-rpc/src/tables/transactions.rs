@@ -54,22 +54,20 @@ fn schema() -> Schema {
     let max_fee_per_blob_gas = Field::new("max_fee_per_blob_gas", EVM_CURRENCY_TYPE, true);
     let from = Field::new("from", ADDRESS_TYPE, false);
     let status = Field::new("status", DataType::Boolean, false);
-
-    // Access list: List<Struct<address: FixedSizeBinary(20), storage_keys: List<FixedSizeBinary(32)>>>
-    let storage_key_type = Field::new("item", BYTES32_TYPE, false);
-    let storage_keys_field = Field::new(
-        "storage_keys",
-        DataType::List(Arc::new(storage_key_type)),
-        false,
-    );
-    let access_list_item_fields = vec![
-        Field::new("address", ADDRESS_TYPE, false),
-        storage_keys_field,
-    ];
-    let access_list_item_type = DataType::Struct(access_list_item_fields.into());
     let access_list = Field::new(
         "access_list",
-        DataType::List(Arc::new(Field::new("item", access_list_item_type, false))),
+        DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Struct(Fields::from(vec![
+                Field::new("address", ADDRESS_TYPE, false),
+                Field::new(
+                    "storage_keys",
+                    DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
+                    false,
+                ),
+            ])),
+            false,
+        ))),
         true, // nullable - Legacy transactions don't have access lists
     );
 
@@ -174,30 +172,14 @@ pub(crate) struct TransactionRowsBuilder {
 
 impl TransactionRowsBuilder {
     pub(crate) fn with_capacity(count: usize, total_input_size: usize) -> Self {
-        // Helper function to create the StructBuilder for access list items
-        fn access_list_item_builder() -> StructBuilder {
-            // Create the inner ListBuilder manually to control nullability
-            let inner_field = Field::new("item", BYTES32_TYPE, false);
-            let storage_keys_builder =
-                ListBuilder::new(FixedSizeBinaryBuilder::with_capacity(0, 32))
-                    .with_field(inner_field);
-
-            StructBuilder::new(
-                Fields::from(vec![
-                    Field::new("address", ADDRESS_TYPE, false),
-                    Field::new(
-                        "storage_keys",
-                        DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
-                        false,
-                    ),
-                ]),
-                vec![
-                    Box::new(FixedSizeBinaryBuilder::with_capacity(0, 20)) as _,
-                    Box::new(storage_keys_builder) as _,
-                ],
-            )
-        }
-
+        let access_list_fields = Fields::from(vec![
+            Field::new("address", ADDRESS_TYPE, false),
+            Field::new(
+                "storage_keys",
+                DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
+                false,
+            ),
+        ]);
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
             block_hash: Bytes32ArrayBuilder::with_capacity(count),
@@ -222,21 +204,26 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas: EvmCurrencyArrayBuilder::with_capacity(count),
             from: EvmAddressArrayBuilder::with_capacity(count),
             status: BooleanBuilder::with_capacity(count),
+            // This is verbose, because we need to manually set the inner fields as non-nullable.
             access_list: {
-                let access_list_item_field = Field::new(
+                ListBuilder::with_capacity(
+                    StructBuilder::new(
+                        access_list_fields.clone(),
+                        vec![
+                            Box::new(FixedSizeBinaryBuilder::with_capacity(0, 20)),
+                            Box::new(
+                                ListBuilder::new(FixedSizeBinaryBuilder::with_capacity(0, 32))
+                                    .with_field(Field::new("item", BYTES32_TYPE, false)),
+                            ),
+                        ],
+                    ),
+                    count,
+                )
+                .with_field(Field::new(
                     "item",
-                    DataType::Struct(Fields::from(vec![
-                        Field::new("address", ADDRESS_TYPE, false),
-                        Field::new(
-                            "storage_keys",
-                            DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
-                            false,
-                        ),
-                    ])),
+                    DataType::Struct(access_list_fields),
                     false,
-                );
-                ListBuilder::with_capacity(access_list_item_builder(), count)
-                    .with_field(access_list_item_field)
+                ))
             },
         }
     }
