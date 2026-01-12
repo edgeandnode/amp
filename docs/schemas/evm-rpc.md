@@ -59,6 +59,7 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | max_fee_per_blob_gas     | Decimal128(38, 0)                                                                   | YES         |
 | from                     | FixedSizeBinary(20)                                                                 | NO          |
 | status                   | Boolean                                                                             | NO          |
+| state_root               | FixedSizeBinary(32)                                                                 | YES         |
 | access_list              | List(Struct(address: FixedSizeBinary(20), storage_keys: List(FixedSizeBinary(32)))) | YES         |
 | blob_versioned_hashes    | List(FixedSizeBinary(32))                                                           | YES         |
 +--------------------------+-------------------------------------------------------------------------------------+-------------+

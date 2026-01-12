@@ -54,6 +54,7 @@ fn schema() -> Schema {
     let max_fee_per_blob_gas = Field::new("max_fee_per_blob_gas", EVM_CURRENCY_TYPE, true);
     let from = Field::new("from", ADDRESS_TYPE, false);
     let status = Field::new("status", DataType::Boolean, false);
+    let state_root = Field::new("state_root", BYTES32_TYPE, true);
     let access_list = Field::new(
         "access_list",
         DataType::List(Arc::new(Field::new(
@@ -100,6 +101,7 @@ fn schema() -> Schema {
         max_fee_per_blob_gas,
         from,
         status,
+        state_root,
         access_list,
         blob_versioned_hashes,
     ];
@@ -144,6 +146,9 @@ pub(crate) struct Transaction {
 
     pub(crate) status: bool,
 
+    // State root from transaction receipt (pre-Byzantium only, post-Byzantium will be None)
+    pub(crate) state_root: Option<Bytes32>,
+
     // EIP-2930, EIP-1559, EIP-4844, EIP-7702 access list
     // Each item contains an address and a list of storage keys
     pub(crate) access_list: Option<Vec<(Address, Vec<[u8; 32]>)>>,
@@ -177,6 +182,7 @@ pub(crate) struct TransactionRowsBuilder {
     max_fee_per_blob_gas: EvmCurrencyArrayBuilder,
     from: EvmAddressArrayBuilder,
     status: BooleanBuilder,
+    state_root: Bytes32ArrayBuilder,
     access_list: ListBuilder<StructBuilder>,
     blob_versioned_hashes: ListBuilder<FixedSizeBinaryBuilder>,
 }
@@ -215,6 +221,7 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas: EvmCurrencyArrayBuilder::with_capacity(count),
             from: EvmAddressArrayBuilder::with_capacity(count),
             status: BooleanBuilder::with_capacity(count),
+            state_root: Bytes32ArrayBuilder::with_capacity(count),
             // This is verbose, because we need to manually set the inner fields as non-nullable.
             access_list: {
                 ListBuilder::with_capacity(
@@ -265,6 +272,7 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas,
             from,
             status,
+            state_root,
             access_list,
             blob_versioned_hashes,
         } = tx;
@@ -294,6 +302,7 @@ impl TransactionRowsBuilder {
             .append_option(*max_fee_per_blob_gas);
         self.from.append_value(*from);
         self.status.append_value(*status);
+        self.state_root.append_option(*state_root);
 
         if let Some(access_list) = access_list {
             for (address, storage_keys) in access_list {
@@ -363,6 +372,7 @@ impl TransactionRowsBuilder {
             max_fee_per_blob_gas,
             from,
             mut status,
+            state_root,
             mut access_list,
             mut blob_versioned_hashes,
         } = self;
@@ -391,6 +401,7 @@ impl TransactionRowsBuilder {
             Arc::new(max_fee_per_blob_gas.finish()),
             Arc::new(from.finish()),
             Arc::new(status.finish()),
+            Arc::new(state_root.finish()),
             Arc::new(access_list.finish()),
             Arc::new(blob_versioned_hashes.finish()),
         ];
@@ -414,6 +425,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 25);
+    assert_eq!(rows.rows.num_columns(), 26);
     assert_eq!(rows.rows.num_rows(), 1);
 }

@@ -418,6 +418,13 @@
               "nullable": false
             },
             {
+              "name": "state_root",
+              "type": {
+                "FixedSizeBinary": 32
+              },
+              "nullable": true
+            },
+            {
               "name": "access_list",
               "type": {
                 "List": {
