@@ -129,11 +129,9 @@ impl Transaction {
     pub(crate) fn from_of1_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_meta: TransactionStatusMeta,
         of_tx: solana_sdk::transaction::VersionedTransaction,
-        of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> Self {
-        let tx_meta = TransactionStatusMeta::from_of1_tx_meta(slot, tx_index, of_tx_meta);
-
         Self {
             tx_index,
             tx_signatures: of_tx.signatures.iter().map(|s| s.to_string()).collect(),
@@ -271,7 +269,7 @@ pub(crate) struct TransactionStatusMeta {
 }
 
 impl TransactionStatusMeta {
-    fn from_of1_tx_meta(
+    pub(crate) fn from_proto_meta(
         slot: u64,
         tx_index: u32,
         of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,

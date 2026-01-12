@@ -37,7 +37,7 @@ pub(crate) fn convert_of_data_to_db_rows(
         let tx_idx: u32 = tx_idx.try_into().expect("conversion error");
         let tx_message = tx.message.clone();
 
-        let db_tx = transactions::Transaction::from_of1_transaction(slot, tx_idx, tx, tx_meta);
+        let db_tx = transactions::Transaction::from_of1_transaction(slot, tx_idx, tx_meta, tx);
         if let Some(meta) = db_tx.tx_meta.as_ref()
             && let Some(inner_instructions) = meta.inner_instructions.as_ref()
         {
