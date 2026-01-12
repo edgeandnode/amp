@@ -543,3 +543,27 @@
     SELECT evm_encode_hex()
   failure: |
     'evm_encode_hex' does not support zero arguments No function matches the given name and argument types 'evm_encode_hex()'
+- name: evm_decode_hex_bytes20_address
+  query: SELECT evm_decode_hex(address) as address FROM eth_rpc.logs limit 1;
+  results: |
+    [{"address":"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"}]
+
+- name: evm_decode_hex_bytes32
+  query: SELECT evm_decode_hex(tx_hash) as tx_hash FROM eth_rpc.transactions limit 1;
+  results: |
+    [{"tx_hash":"0x7ecdeea40834539df43b388d62c8e6bdee49107d10114b0d05c6adec1d16e322"}]
+
+- name: evm_decode_hex_null
+  query: SELECT evm_decode_hex(topic3) FROM eth_rpc.logs limit 1;
+  results: |
+    [{}]
+
+- name: evm_decode_hex_no_args
+  query: SELECT evm_decode_hex()
+  failure: |
+    'evm_decode_hex' does not support zero arguments
+
+- name: evm_decode_hex_invalid_type
+  query: SELECT evm_decode_hex(1)
+  failure: |
+    failed No function matches the given name and argument types

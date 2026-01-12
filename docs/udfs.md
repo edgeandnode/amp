@@ -43,6 +43,36 @@ FixedSizeBinary(32) evm_topic(Utf8 signature)
 Returns the topic hash of the event signature. This is the first topic that will show up in the log
 when the event is emitted. The topic hash is the keccak256 hash of the event signature.
 
+## `evm_decode_hex`
+
+```sql
+Utf8 evm_decode_hex(
+    FixedSizeBinary(20) | FixedSizeBinary(32) binary
+)
+```
+
+Converts a binary EVM address or bytes32 to hex string with `0x` prefix.
+
+For example:
+
+```sql
+SELECT evm_decode_hex(address) AS address
+FROM eth_rpc.logs
+```
+
+Returns:
+
+```json
+[
+  {
+    "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+  }
+]
+```
+
+Works with both 20-byte addresses and 32-byte hashes.
+Returns null if input is null.
+
 ## `${dataset}.eth_call`
 
 ```sql

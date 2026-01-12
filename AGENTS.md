@@ -112,6 +112,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 
 ### Custom UDFs (User-Defined Functions)
 
+- `evm_decode_hex`: Convert EVM address or bytes32 to hex string
 - `evm_encode_hex`: Convert hex string to EVM address or bytes32
 - `evm_decode_log`: Decode EVM event logs
 - `evm_topic`: Get event topic hash
