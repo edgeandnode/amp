@@ -69,36 +69,6 @@ impl Default for ShiftUnits {
     }
 }
 
-impl ShiftUnits {
-    pub fn new() -> Self {
-        Self {
-            signature: Signature::one_of(vec![TypeSignature::Any(2)], Volatility::Immutable),
-        }
-    }
-
-    fn parse_value(value: BigDecimal, units: i64) -> datafusion::error::Result<String> {
-        if units == 0 {
-            return Ok(value.normalized().to_plain_string());
-        }
-        // Sanity check to prevent malicious input.
-        if units.abs() > MAX_UNITS {
-            return plan_err!(
-                "units must be between -{} and {} (got {})",
-                MAX_UNITS,
-                MAX_UNITS,
-                units
-            );
-        }
-        if units > 0 {
-            let multiplier = BigDecimal::from(10).powi(units);
-            Ok((value * multiplier).normalized().to_plain_string())
-        } else {
-            let divisor = BigDecimal::from(10).powi(-units);
-            Ok((value / divisor).normalized().to_plain_string())
-        }
-    }
-}
-
 impl ScalarUDFImpl for ShiftUnits {
     fn as_any(&self) -> &dyn Any {
         self
@@ -181,24 +151,28 @@ impl ScalarUDFImpl for ShiftUnits {
     ) -> datafusion::error::Result<ColumnarValue> {
         let args = args.args;
         if args.len() != 2 {
-            return plan_err!("expected 2 arguments, but got {}", args.len());
+            return plan_err!(
+                "{}: expected 2 arguments, but got {}",
+                self.name(),
+                args.len()
+            );
         }
 
         match (&args[0], &args[1]) {
             (ColumnarValue::Scalar(value), ColumnarValue::Scalar(units)) => {
-                let value = scalar_to_bigdecimal(value)?;
-                let units = scalar_to_i64(units)?;
-                let result = Self::parse_value(value, units)?;
+                let value = self.scalar_to_bigdecimal(value)?;
+                let units = self.scalar_to_i64(units)?;
+                let result = self.parse_value(value, units)?;
                 Ok(ColumnarValue::Scalar(ScalarValue::Utf8(Some(result))))
             }
             (ColumnarValue::Array(value_arr), ColumnarValue::Scalar(units)) => {
-                let units = scalar_to_i64(units)?;
-                let values = array_to_bigdecimal(value_arr)?;
+                let units = self.scalar_to_i64(units)?;
+                let values = self.array_to_bigdecimal(value_arr)?;
                 let mut builder = StringBuilder::new();
                 for value in values {
                     match value {
                         Some(value) => {
-                            let result = Self::parse_value(value, units)?;
+                            let result = self.parse_value(value, units)?;
                             builder.append_value(&result);
                         }
                         None => builder.append_null(),
@@ -207,24 +181,24 @@ impl ScalarUDFImpl for ShiftUnits {
                 Ok(ColumnarValue::Array(Arc::new(builder.finish())))
             }
             (ColumnarValue::Scalar(value), ColumnarValue::Array(units_arr)) => {
-                let value = scalar_to_bigdecimal(value)?;
+                let value = self.scalar_to_bigdecimal(value)?;
                 let mut builder = StringBuilder::new();
-                let units_arr = array_to_i64(units_arr)?;
+                let units_arr = self.array_to_i64(units_arr)?;
                 for units in units_arr {
-                    let result = Self::parse_value(value.clone(), units.unwrap_or(1))?;
+                    let result = self.parse_value(value.clone(), units.unwrap_or(1))?;
                     builder.append_value(&result);
                 }
                 Ok(ColumnarValue::Array(Arc::new(builder.finish())))
             }
             (ColumnarValue::Array(value_arr), ColumnarValue::Array(units_arr)) => {
-                let values = array_to_bigdecimal(value_arr)?;
-                let units_arr = array_to_i64(units_arr)?;
+                let values = self.array_to_bigdecimal(value_arr)?;
+                let units_arr = self.array_to_i64(units_arr)?;
                 let mut builder = StringBuilder::new();
                 for (value, units) in values.into_iter().zip(units_arr.into_iter()) {
                     match value {
                         Some(v) => {
                             let units = units.unwrap_or(1);
-                            let result = Self::parse_value(v, units)?;
+                            let result = self.parse_value(v, units)?;
                             builder.append_value(&result);
                         }
                         None => builder.append_null(),
@@ -238,15 +212,11 @@ impl ScalarUDFImpl for ShiftUnits {
 
 /// Macro to extract values from an array and convert to BigDecimal
 macro_rules! extract_bigdecimal {
-    ($array:expr, $len:expr, $result:expr, $array_type:ty, $convert:expr) => {{
-        let arr = $array
-            .as_any()
-            .downcast_ref::<$array_type>()
-            .ok_or_else(|| {
-                datafusion::error::DataFusionError::Plan(
-                    concat!("expected ", stringify!($array_type)).to_string(),
-                )
-            })?;
+    ($self:expr, $array:expr, $len:expr, $result:expr, $array_type:ty, $convert:expr) => {{
+        let arr = match $array.as_any().downcast_ref::<$array_type>() {
+            Some(arr) => arr,
+            None => return plan_err!("{}: expected {}", $self.name(), stringify!($array_type)),
+        };
         for i in 0..$len {
             if arr.is_null(i) {
                 $result.push(None);
@@ -260,15 +230,11 @@ macro_rules! extract_bigdecimal {
 
 /// Macro to extract numeric values from an array and convert to i64
 macro_rules! extract_i64 {
-    ($array:expr, $len:expr, $result:expr, $array_type:ty) => {{
-        let arr = $array
-            .as_any()
-            .downcast_ref::<$array_type>()
-            .ok_or_else(|| {
-                datafusion::error::DataFusionError::Plan(
-                    concat!("expected ", stringify!($array_type)).to_string(),
-                )
-            })?;
+    ($self:expr, $array:expr, $len:expr, $result:expr, $array_type:ty) => {{
+        let arr = match $array.as_any().downcast_ref::<$array_type>() {
+            Some(arr) => arr,
+            None => return plan_err!("{}: expected {}", $self.name(), stringify!($array_type)),
+        };
         for i in 0..$len {
             if arr.is_null(i) {
                 $result.push(None);
@@ -279,273 +245,296 @@ macro_rules! extract_i64 {
     }};
 }
 
-pub fn scalar_to_i64(scalar: &ScalarValue) -> datafusion::error::Result<i64> {
-    match scalar {
-        ScalarValue::Int8(Some(v)) => Ok(*v as i64),
-        ScalarValue::Int16(Some(v)) => Ok(*v as i64),
-        ScalarValue::Int32(Some(v)) => Ok(*v as i64),
-        ScalarValue::Int64(Some(v)) => Ok(*v),
-        ScalarValue::UInt8(Some(v)) => Ok(*v as i64),
-        ScalarValue::UInt16(Some(v)) => Ok(*v as i64),
-        ScalarValue::UInt32(Some(v)) => Ok(*v as i64),
-        ScalarValue::UInt64(Some(v)) => Ok(*v as i64),
-        ScalarValue::Float32(Some(v)) => Ok(*v as i64),
-        ScalarValue::Float64(Some(v)) => Ok(*v as i64),
-        ScalarValue::Utf8(Some(v)) => v
-            .parse::<i64>()
-            .or_else(|e| plan_err!("failed to parse integer: {}", e)),
-        _ => plan_err!("expected numeric or string scalar"),
-    }
-}
-
-/// Extracts all i64 values from an array, returning a Vec<Option<i64>>
-pub fn array_to_i64(array: &Arc<dyn Array>) -> datafusion::error::Result<Vec<Option<i64>>> {
-    let len = array.len();
-    let mut result = Vec::with_capacity(len);
-
-    match array.data_type() {
-        // Signed integers
-        DataType::Int8 => extract_i64!(array, len, result, Int8Array),
-        DataType::Int16 => extract_i64!(array, len, result, Int16Array),
-        DataType::Int32 => extract_i64!(array, len, result, Int32Array),
-        DataType::Int64 => extract_i64!(array, len, result, Int64Array),
-        // Unsigned integers
-        DataType::UInt8 => extract_i64!(array, len, result, UInt8Array),
-        DataType::UInt16 => extract_i64!(array, len, result, UInt16Array),
-        DataType::UInt32 => extract_i64!(array, len, result, UInt32Array),
-        DataType::UInt64 => extract_i64!(array, len, result, UInt64Array),
-        // Floats
-        DataType::Float32 => extract_i64!(array, len, result, Float32Array),
-        DataType::Float64 => extract_i64!(array, len, result, Float64Array),
-        // String
-        DataType::Utf8 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected StringArray".to_string())
-                })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
-                } else {
-                    let val = arr.value(i).parse::<i64>().map_err(|e| {
-                        datafusion::error::DataFusionError::Plan(format!(
-                            "failed to parse integer: {}",
-                            e
-                        ))
-                    })?;
-                    result.push(Some(val));
-                }
-            }
+impl ShiftUnits {
+    pub fn new() -> Self {
+        Self {
+            signature: Signature::one_of(vec![TypeSignature::Any(2)], Volatility::Immutable),
         }
-        dt => return plan_err!("unsupported data type for integer conversion: {}", dt),
     }
 
-    Ok(result)
-}
-
-pub fn scalar_to_bigdecimal(scalar: &ScalarValue) -> datafusion::error::Result<BigDecimal> {
-    match scalar {
-        // Signed integers
-        ScalarValue::Int8(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::Int16(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::Int32(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::Int64(Some(v)) => Ok(BigDecimal::from(*v)),
-        // Unsigned integers
-        ScalarValue::UInt8(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::UInt16(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::UInt32(Some(v)) => Ok(BigDecimal::from(*v)),
-        ScalarValue::UInt64(Some(v)) => Ok(BigDecimal::from(*v)),
-        // Floats
-        ScalarValue::Float32(Some(v)) => BigDecimal::from_str(&v.to_string()).map_err(|_| {
-            datafusion::error::DataFusionError::Plan("failed to parse float32".to_string())
-        }),
-        ScalarValue::Float64(Some(v)) => BigDecimal::from_str(&v.to_string()).map_err(|_| {
-            datafusion::error::DataFusionError::Plan("failed to parse float64".to_string())
-        }),
-        // Decimal types
-        ScalarValue::Decimal128(Some(v), _, scale) => {
-            let bd = BigDecimal::from(*v);
-            if *scale > 0 {
-                Ok(bd / BigDecimal::from(10).powi(*scale as i64))
-            } else {
-                Ok(bd)
-            }
+    fn parse_value(&self, value: BigDecimal, units: i64) -> datafusion::error::Result<String> {
+        if units == 0 {
+            return Ok(value.normalized().to_plain_string());
         }
-        ScalarValue::Decimal256(Some(v), _, scale) => {
-            let bd = BigDecimal::from_str(&v.to_string()).map_err(|e| {
-                datafusion::error::DataFusionError::Plan(format!(
-                    "failed to convert Decimal256: {}",
-                    e
-                ))
-            })?;
-            if *scale > 0 {
-                Ok(bd / BigDecimal::from(10).powi(*scale as i64))
-            } else {
-                Ok(bd)
-            }
+        // Sanity check to prevent malicious input.
+        if units.abs() > MAX_UNITS {
+            return plan_err!(
+                "{}: units must be between -{} and {} (got {})",
+                self.name(),
+                MAX_UNITS,
+                MAX_UNITS,
+                units
+            );
         }
-        // String
-        ScalarValue::Utf8(Some(s)) => BigDecimal::from_str(s).map_err(|e| {
-            datafusion::error::DataFusionError::Plan(format!("failed to parse value: {}", e))
-        }),
-        _ => plan_err!("value must be a non-null numeric type"),
+        if units > 0 {
+            let multiplier = BigDecimal::from(10).powi(units);
+            Ok((value * multiplier).normalized().to_plain_string())
+        } else {
+            let divisor = BigDecimal::from(10).powi(-units);
+            Ok((value / divisor).normalized().to_plain_string())
+        }
     }
-}
 
-/// Extracts all BigDecimal values from an array, returning a Vec<Option<BigDecimal>>
-pub fn array_to_bigdecimal(
-    array: &Arc<dyn Array>,
-) -> datafusion::error::Result<Vec<Option<BigDecimal>>> {
-    let len = array.len();
-    let mut result = Vec::with_capacity(len);
-
-    match array.data_type() {
-        // Signed integers
-        DataType::Int8 => {
-            extract_bigdecimal!(array, len, result, Int8Array, BigDecimal::from)
-        }
-        DataType::Int16 => {
-            extract_bigdecimal!(array, len, result, Int16Array, BigDecimal::from)
-        }
-        DataType::Int32 => {
-            extract_bigdecimal!(array, len, result, Int32Array, BigDecimal::from)
-        }
-        DataType::Int64 => {
-            extract_bigdecimal!(array, len, result, Int64Array, BigDecimal::from)
-        }
-        // Unsigned integers
-        DataType::UInt8 => {
-            extract_bigdecimal!(array, len, result, UInt8Array, BigDecimal::from)
-        }
-        DataType::UInt16 => {
-            extract_bigdecimal!(array, len, result, UInt16Array, BigDecimal::from)
-        }
-        DataType::UInt32 => {
-            extract_bigdecimal!(array, len, result, UInt32Array, BigDecimal::from)
-        }
-        DataType::UInt64 => {
-            extract_bigdecimal!(array, len, result, UInt64Array, BigDecimal::from)
-        }
-        // Floats: from_str is faster and preserves intended precision
-        // from_f64 adds spurious digits from exact binary representation
-        DataType::Float32 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected Float32Array".to_string())
-                })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
+    pub fn scalar_to_bigdecimal(
+        &self,
+        scalar: &ScalarValue,
+    ) -> datafusion::error::Result<BigDecimal> {
+        match scalar {
+            // Signed integers
+            ScalarValue::Int8(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::Int16(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::Int32(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::Int64(Some(v)) => Ok(BigDecimal::from(*v)),
+            // Unsigned integers
+            ScalarValue::UInt8(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::UInt16(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::UInt32(Some(v)) => Ok(BigDecimal::from(*v)),
+            ScalarValue::UInt64(Some(v)) => Ok(BigDecimal::from(*v)),
+            // Floats
+            ScalarValue::Float32(Some(v)) => BigDecimal::from_str(&v.to_string())
+                .or_else(|e| plan_err!("{}: failed to parse float32: {}", self.name(), e)),
+            ScalarValue::Float64(Some(v)) => BigDecimal::from_str(&v.to_string())
+                .or_else(|e| plan_err!("{}: failed to parse float64: {}", self.name(), e)),
+            // Decimal types
+            ScalarValue::Decimal128(Some(v), _, scale) => {
+                let bd = BigDecimal::from(*v);
+                if *scale > 0 {
+                    Ok(bd / BigDecimal::from(10).powi(*scale as i64))
                 } else {
-                    let bd = BigDecimal::from_str(&arr.value(i).to_string()).map_err(|e| {
-                        datafusion::error::DataFusionError::Plan(format!(
-                            "failed to convert String to BigDecimal: {}",
-                            e
-                        ))
-                    })?;
-                    result.push(Some(bd));
+                    Ok(bd)
                 }
             }
-        }
-        DataType::Float64 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected Float64Array".to_string())
+            ScalarValue::Decimal256(Some(v), _, scale) => {
+                let bd = BigDecimal::from_str(&v.to_string()).or_else(|e| {
+                    plan_err!("{}: failed to convert Decimal256: {}", self.name(), e)
                 })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
+                if *scale > 0 {
+                    Ok(bd / BigDecimal::from(10).powi(*scale as i64))
                 } else {
-                    let bd = BigDecimal::from_str(&arr.value(i).to_string()).map_err(|e| {
-                        datafusion::error::DataFusionError::Plan(format!(
-                            "failed to convert String to BigDecimal: {}",
-                            e
-                        ))
-                    })?;
-                    result.push(Some(bd));
+                    Ok(bd)
                 }
             }
+            // String
+            ScalarValue::Utf8(Some(s)) => BigDecimal::from_str(s)
+                .or_else(|e| plan_err!("{}: failed to parse value: {}", self.name(), e)),
+            _ => plan_err!("{}: value must be a non-null numeric type", self.name()),
         }
-        // Decimal types
-        DataType::Decimal128(_, scale) => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Decimal128Array>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected Decimal128Array".to_string())
-                })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
-                } else {
-                    let v = arr.value(i);
-                    let bd = BigDecimal::from(v);
-                    if *scale > 0 {
-                        result.push(Some(bd / BigDecimal::from(10).powi(*scale as i64)));
+    }
+
+    pub fn scalar_to_i64(&self, scalar: &ScalarValue) -> datafusion::error::Result<i64> {
+        match scalar {
+            ScalarValue::Int8(Some(v)) => Ok(*v as i64),
+            ScalarValue::Int16(Some(v)) => Ok(*v as i64),
+            ScalarValue::Int32(Some(v)) => Ok(*v as i64),
+            ScalarValue::Int64(Some(v)) => Ok(*v),
+            ScalarValue::UInt8(Some(v)) => Ok(*v as i64),
+            ScalarValue::UInt16(Some(v)) => Ok(*v as i64),
+            ScalarValue::UInt32(Some(v)) => Ok(*v as i64),
+            ScalarValue::UInt64(Some(v)) => Ok(*v as i64),
+            ScalarValue::Float32(Some(v)) => Ok(*v as i64),
+            ScalarValue::Float64(Some(v)) => Ok(*v as i64),
+            ScalarValue::Utf8(Some(v)) => v
+                .parse::<i64>()
+                .or_else(|e| plan_err!("{}: failed to parse integer: {}", self.name(), e)),
+            _ => plan_err!("{}: expected numeric or string scalar", self.name()),
+        }
+    }
+
+    /// Extracts all i64 values from an array, returning a Vec<Option<i64>>
+    pub fn array_to_i64(
+        &self,
+        array: &Arc<dyn Array>,
+    ) -> datafusion::error::Result<Vec<Option<i64>>> {
+        let len = array.len();
+        let mut result = Vec::with_capacity(len);
+
+        match array.data_type() {
+            // Signed integers
+            DataType::Int8 => extract_i64!(self, array, len, result, Int8Array),
+            DataType::Int16 => extract_i64!(self, array, len, result, Int16Array),
+            DataType::Int32 => extract_i64!(self, array, len, result, Int32Array),
+            DataType::Int64 => extract_i64!(self, array, len, result, Int64Array),
+            // Unsigned integers
+            DataType::UInt8 => extract_i64!(self, array, len, result, UInt8Array),
+            DataType::UInt16 => extract_i64!(self, array, len, result, UInt16Array),
+            DataType::UInt32 => extract_i64!(self, array, len, result, UInt32Array),
+            DataType::UInt64 => extract_i64!(self, array, len, result, UInt64Array),
+            // Floats
+            DataType::Float32 => extract_i64!(self, array, len, result, Float32Array),
+            DataType::Float64 => extract_i64!(self, array, len, result, Float64Array),
+            // String
+            DataType::Utf8 => {
+                let arr = match array.as_any().downcast_ref::<StringArray>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected StringArray", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
                     } else {
+                        let val = arr.value(i).parse::<i64>().or_else(|e| {
+                            plan_err!("{}: failed to parse integer: {}", self.name(), e)
+                        })?;
+                        result.push(Some(val));
+                    }
+                }
+            }
+            dt => {
+                return plan_err!(
+                    "{}: unsupported data type for integer conversion: {}",
+                    self.name(),
+                    dt
+                );
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Extracts all BigDecimal values from an array, returning a Vec<Option<BigDecimal>>
+    pub fn array_to_bigdecimal(
+        &self,
+        array: &Arc<dyn Array>,
+    ) -> datafusion::error::Result<Vec<Option<BigDecimal>>> {
+        let len = array.len();
+        let mut result = Vec::with_capacity(len);
+
+        match array.data_type() {
+            // Signed integers
+            DataType::Int8 => {
+                extract_bigdecimal!(self, array, len, result, Int8Array, BigDecimal::from)
+            }
+            DataType::Int16 => {
+                extract_bigdecimal!(self, array, len, result, Int16Array, BigDecimal::from)
+            }
+            DataType::Int32 => {
+                extract_bigdecimal!(self, array, len, result, Int32Array, BigDecimal::from)
+            }
+            DataType::Int64 => {
+                extract_bigdecimal!(self, array, len, result, Int64Array, BigDecimal::from)
+            }
+            // Unsigned integers
+            DataType::UInt8 => {
+                extract_bigdecimal!(self, array, len, result, UInt8Array, BigDecimal::from)
+            }
+            DataType::UInt16 => {
+                extract_bigdecimal!(self, array, len, result, UInt16Array, BigDecimal::from)
+            }
+            DataType::UInt32 => {
+                extract_bigdecimal!(self, array, len, result, UInt32Array, BigDecimal::from)
+            }
+            DataType::UInt64 => {
+                extract_bigdecimal!(self, array, len, result, UInt64Array, BigDecimal::from)
+            }
+            // Floats: from_str is faster and preserves intended precision
+            // from_f64 adds spurious digits from exact binary representation
+            DataType::Float32 => {
+                let arr = match array.as_any().downcast_ref::<Float32Array>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected Float32Array", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
+                    } else {
+                        let bd = BigDecimal::from_str(&arr.value(i).to_string()).or_else(|e| {
+                            plan_err!(
+                                "{}: failed to convert String to BigDecimal: {}",
+                                self.name(),
+                                e
+                            )
+                        })?;
                         result.push(Some(bd));
                     }
                 }
             }
-        }
-        DataType::Decimal256(_, scale) => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<Decimal256Array>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected Decimal256Array".to_string())
-                })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
-                } else {
-                    let v = arr.value(i);
-                    let bd = BigDecimal::from_str(&v.to_string()).map_err(|e| {
-                        datafusion::error::DataFusionError::Plan(format!(
-                            "failed to convert Decimal256: {}",
-                            e
-                        ))
-                    })?;
-                    if *scale > 0 {
-                        result.push(Some(bd / BigDecimal::from(10).powi(*scale as i64)));
+            DataType::Float64 => {
+                let arr = match array.as_any().downcast_ref::<Float64Array>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected Float64Array", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
                     } else {
+                        let bd = BigDecimal::from_str(&arr.value(i).to_string()).or_else(|e| {
+                            plan_err!(
+                                "{}: failed to convert String to BigDecimal: {}",
+                                self.name(),
+                                e
+                            )
+                        })?;
                         result.push(Some(bd));
                     }
                 }
             }
-        }
-        // String
-        DataType::Utf8 => {
-            let arr = array
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    datafusion::error::DataFusionError::Plan("expected StringArray".to_string())
-                })?;
-            for i in 0..len {
-                if arr.is_null(i) {
-                    result.push(None);
-                } else {
-                    let bd = BigDecimal::from_str(arr.value(i)).map_err(|e| {
-                        datafusion::error::DataFusionError::Plan(format!(
-                            "failed to convert String to BigDecimal: {}",
-                            e
-                        ))
-                    })?;
-                    result.push(Some(bd));
+            // Decimal types
+            DataType::Decimal128(_, scale) => {
+                let arr = match array.as_any().downcast_ref::<Decimal128Array>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected Decimal128Array", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
+                    } else {
+                        let v = arr.value(i);
+                        let bd = BigDecimal::from(v);
+                        if *scale > 0 {
+                            result.push(Some(bd / BigDecimal::from(10).powi(*scale as i64)));
+                        } else {
+                            result.push(Some(bd));
+                        }
+                    }
                 }
             }
+            DataType::Decimal256(_, scale) => {
+                let arr = match array.as_any().downcast_ref::<Decimal256Array>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected Decimal256Array", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
+                    } else {
+                        let v = arr.value(i);
+                        let bd = BigDecimal::from_str(&v.to_string()).or_else(|e| {
+                            plan_err!("{}: failed to convert Decimal256: {}", self.name(), e)
+                        })?;
+                        if *scale > 0 {
+                            result.push(Some(bd / BigDecimal::from(10).powi(*scale as i64)));
+                        } else {
+                            result.push(Some(bd));
+                        }
+                    }
+                }
+            }
+            // String
+            DataType::Utf8 => {
+                let arr = match array.as_any().downcast_ref::<StringArray>() {
+                    Some(arr) => arr,
+                    None => return plan_err!("{}: expected StringArray", self.name()),
+                };
+                for i in 0..len {
+                    if arr.is_null(i) {
+                        result.push(None);
+                    } else {
+                        let bd = BigDecimal::from_str(arr.value(i)).or_else(|e| {
+                            plan_err!(
+                                "{}: failed to convert String to BigDecimal: {}",
+                                self.name(),
+                                e
+                            )
+                        })?;
+                        result.push(Some(bd));
+                    }
+                }
+            }
+            dt => return plan_err!("{}: unsupported data type for value: {}", self.name(), dt),
         }
-        dt => return plan_err!("unsupported data type for value: {}", dt),
-    }
 
-    Ok(result)
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
