@@ -50,6 +50,47 @@ pub fn decode(
     Ok(Arc::new(structs))
 }
 
+/// DataFusion UDF that decodes EVM event logs into structured data.
+///
+/// This function parses Solidity event logs using the event signature to extract
+/// indexed and non-indexed parameters. Indexed reference types (string, bytes, arrays)
+/// are stored as their keccak256 hash in topics rather than the actual data.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Decode a Uniswap V3 Swap event
+/// evm_decode_log(
+///     topic1, topic2, topic3, data,
+///     'Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)'
+/// )
+///
+/// // Decode an ERC20 Transfer event
+/// evm_decode_log(
+///     topic1, topic2, topic3, data,
+///     'Transfer(address indexed from,address indexed to,uint256 value)'
+/// )
+/// ```
+///
+/// # Arguments
+///
+/// * `topic1` - `FixedSizeBinary(32)` first indexed topic (after topic0)
+/// * `topic2` - `FixedSizeBinary(32)` second indexed topic
+/// * `topic3` - `FixedSizeBinary(32)` third indexed topic
+/// * `data` - `Binary` non-indexed event data
+/// * `signature` - `Utf8` Solidity event signature (e.g., "Transfer(address indexed,address indexed,uint256)")
+///
+/// # Returns
+///
+/// A struct containing decoded event parameters. Field types are determined by the
+/// Solidity types in the signature. Returns `Null` type if the event has no parameters.
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Signature is not a valid Solidity event signature
+/// - Signature is not provided as a string literal
+/// - Number of arguments is not 5
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeLog {
     name: &'static str,

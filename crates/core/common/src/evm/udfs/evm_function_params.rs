@@ -83,6 +83,51 @@ impl TryFrom<&ScalarValue> for FunctionCall {
     }
 }
 
+/// DataFusion UDF that decodes function call input data into structured parameters.
+///
+/// This function parses the input data of a contract function call using the function
+/// signature. It validates the 4-byte selector and decodes the ABI-encoded parameters.
+/// Returns NULL for rows where the selector doesn't match or decoding fails.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Decode a transfer function call
+/// evm_decode_params(input_data, 'transfer(address to, uint256 amount)')
+///
+/// // Decode a swap function call
+/// evm_decode_params(
+///     input_data,
+///     'swap(uint256 amount0Out,uint256 amount1Out,address to,bytes data)'
+/// )
+/// ```
+///
+/// # Arguments
+///
+/// * `data` - `Binary` function call input data (including 4-byte selector)
+/// * `signature` - `Utf8` Solidity function signature with named parameters
+///
+/// # Returns
+///
+/// A struct containing decoded function parameters. Field names come from the
+/// signature. Returns a struct with NULL fields if selector doesn't match or
+/// decoding fails.
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Signature is not a valid Solidity function signature
+/// - Function parameters are unnamed
+/// - Signature is not provided as a string literal
+/// - Number of arguments is not 2
+///
+/// # Nullability
+///
+/// Returns null struct fields if:
+/// - Input data is null
+/// - Input data is less than 4 bytes
+/// - Function selector doesn't match
+/// - ABI decoding fails
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeParams {
     signature: Signature,
@@ -192,10 +237,6 @@ impl ScalarUDFImpl for EvmDecodeParams {
         Ok(Field::new_struct(self.name(), fields, true).into())
     }
 
-    fn aliases(&self) -> &[String] {
-        &[]
-    }
-
     fn simplify(
         &self,
         args: Vec<Expr>,
@@ -288,6 +329,40 @@ impl EvmDecodeParams {
     }
 }
 
+/// DataFusion UDF that encodes values into function call input data.
+///
+/// This function creates ABI-encoded function call data including the 4-byte
+/// selector. It's the inverse of `evm_decode_params` and is useful for preparing
+/// transaction input data.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Encode a transfer call
+/// evm_encode_params(recipient_address, amount, 'transfer(address to, uint256 amount)')
+///
+/// // Encode an approve call
+/// evm_encode_params(spender, max_uint256, 'approve(address spender, uint256 amount)')
+/// ```
+///
+/// # Arguments
+///
+/// * `...values` - Values to encode (one per function parameter, in order)
+/// * `signature` - `Utf8` Solidity function signature (must be last argument)
+///
+/// # Returns
+///
+/// `Binary` complete function call data with 4-byte selector followed by
+/// ABI-encoded parameters.
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Signature is not a valid Solidity function signature
+/// - Number of value arguments doesn't match function parameters
+/// - Values cannot be converted to the specified Solidity types
+/// - Signature is not provided as a string literal
+/// - No arguments provided
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmEncodeParams {
     signature: Signature,
@@ -376,9 +451,5 @@ impl ScalarUDFImpl for EvmEncodeParams {
         }
 
         Ok(ColumnarValue::Array(ArrayBuilder::finish(&mut builder)))
-    }
-
-    fn aliases(&self) -> &[String] {
-        &[]
     }
 }

@@ -8,6 +8,38 @@ use datafusion::{
 
 use crate::{arrow::datatypes::DataType, evm::udfs::Event};
 
+/// DataFusion UDF that computes the topic0 (event selector) for a Solidity event signature.
+///
+/// This function calculates the keccak256 hash of the event signature, which is used
+/// as topic0 in EVM event logs to identify the event type. This is useful for filtering
+/// logs by event type or validating event signatures.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Get topic0 for Transfer event
+/// evm_topic('Transfer(address indexed from,address indexed to,uint256 value)')
+/// // Returns 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+///
+/// // Get topic0 for Swap event
+/// evm_topic('Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)')
+/// // Returns 0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67
+/// ```
+///
+/// # Arguments
+///
+/// * `signature` - `Utf8` Solidity event signature (e.g., "Transfer(address,address,uint256)")
+///
+/// # Returns
+///
+/// `FixedSizeBinary(32)` the keccak256 hash of the canonical event signature.
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Signature is not a valid Solidity event signature
+/// - Signature is not provided as a scalar string literal
+/// - Event is anonymous (has no topic0)
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmTopic {
     signature: Signature,
