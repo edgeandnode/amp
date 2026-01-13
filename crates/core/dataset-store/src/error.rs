@@ -435,8 +435,8 @@ pub enum EthCallForDatasetError {
     ///
     /// This occurs when an EVM RPC dataset definition does not include the network
     /// field, which is required to determine the appropriate provider configuration.
-    #[error("Dataset '{manifest_hash}' is missing required 'network' field for EvmRpc kind")]
-    MissingNetwork { manifest_hash: String },
+    #[error("Dataset '{reference}' is missing required 'network' field for EvmRpc kind")]
+    MissingNetwork { reference: HashReference },
 
     /// No provider configuration found for the dataset kind and network combination.
     ///

@@ -29,7 +29,6 @@ use common::{
 use datafusion::sql::parser;
 use datasets_common::{
     deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
-    hash::Hash,
     hash_reference::HashReference,
     table_name::TableName,
 };
@@ -47,8 +46,8 @@ use crate::{
 ///
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
-/// name, version, manifest_hash) must be provided externally as they are not part of the manifest.
-pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, DatasetError> {
+/// name, version, hash reference) must be provided externally as they are not part of the manifest.
+pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, DatasetError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
@@ -89,7 +88,7 @@ pub fn dataset(manifest_hash: Hash, manifest: Manifest) -> Result<Dataset, Datas
         .collect();
 
     Ok(Dataset {
-        manifest_hash,
+        reference,
         dependencies: manifest.dependencies,
         kind: DerivedDatasetKind.to_string(),
         network: None,

@@ -243,7 +243,7 @@ impl StreamingQuery {
         let network = tables.iter().map(|t| t.network()).next().unwrap();
         let src_datasets = tables
             .iter()
-            .map(|t| (t.dataset().manifest_hash().clone(), t.dataset().clone()))
+            .map(|t| (t.dataset().reference().hash().clone(), t.dataset().clone()))
             .collect();
         let blocks_table =
             resolve_blocks_table(dataset_store, data_store.clone(), src_datasets, network).await?;
@@ -713,7 +713,7 @@ async fn resolve_blocks_table(
 
     // TODO: Have a dataset name here that is not made up.
     let dataset_name = Name::try_from("blocks_table".to_string())?;
-    let manifest_hash = dataset.manifest_hash().clone();
+    let manifest_hash = dataset.reference().hash().clone();
     let reference = PartialReference::new(
         None,
         dataset_name,
@@ -750,7 +750,7 @@ async fn search_dependencies_for_raw_dataset(
     let mut visited = BTreeSet::new();
 
     while let Some(dataset) = queue.pop_front() {
-        let hash = dataset.manifest_hash().clone();
+        let hash = dataset.reference().hash().clone();
 
         // Skip duplicates
         if !visited.insert(hash) {
