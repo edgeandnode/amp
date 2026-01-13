@@ -814,6 +814,29 @@ fn rpc_transaction_to_row(
                 None
             }
         },
+        authorization_list: {
+            if let AnyTxEnvelope::Ethereum(EthereumTxEnvelope::Eip7702(signed)) = &*tx.inner.inner {
+                Some(
+                    signed
+                        .tx()
+                        .authorization_list
+                        .iter()
+                        .map(|auth| {
+                            (
+                                auth.chain_id.try_into().unwrap_or(0),
+                                auth.address.0.0,
+                                auth.nonce,
+                                auth.y_parity() != 0,
+                                auth.r().to_be_bytes::<32>(),
+                                auth.s().to_be_bytes::<32>(),
+                            )
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            }
+        },
     })
 }
 

@@ -17,6 +17,9 @@ use common::{
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
+/// EIP-7702 authorization tuple: (chain_id, address, nonce, y_parity, r, s)
+type AuthorizationTuple = (u64, [u8; 20], u64, bool, [u8; 32], [u8; 32]);
+
 pub fn table(network: String) -> Table {
     let name = TABLE_NAME.parse().expect("table name is valid");
     Table::new(
@@ -76,6 +79,22 @@ fn schema() -> Schema {
         DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
         true, // nullable - only EIP-4844 transactions have blob versioned hashes
     );
+    let authorization_list = Field::new(
+        "authorization_list",
+        DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Struct(Fields::from(vec![
+                Field::new("chain_id", DataType::UInt64, false),
+                Field::new("address", ADDRESS_TYPE, false),
+                Field::new("nonce", DataType::UInt64, false),
+                Field::new("y_parity", DataType::Boolean, false),
+                Field::new("r", BYTES32_TYPE, false),
+                Field::new("s", BYTES32_TYPE, false),
+            ])),
+            false,
+        ))),
+        true, // nullable - only EIP-7702 transactions have authorization lists
+    );
 
     let fields = vec![
         special_block_num,
@@ -104,6 +123,7 @@ fn schema() -> Schema {
         state_root,
         access_list,
         blob_versioned_hashes,
+        authorization_list,
     ];
 
     Schema::new(fields)
@@ -156,6 +176,10 @@ pub(crate) struct Transaction {
     // EIP-4844 blob versioned hashes
     // List of KZG commitment versioned hashes for blob transactions
     pub(crate) blob_versioned_hashes: Option<Vec<[u8; 32]>>,
+
+    // EIP-7702 authorization list
+    // Each authorization tuple: (chain_id, address, nonce, y_parity, r, s)
+    pub(crate) authorization_list: Option<Vec<AuthorizationTuple>>,
 }
 
 pub(crate) struct TransactionRowsBuilder {
@@ -185,6 +209,7 @@ pub(crate) struct TransactionRowsBuilder {
     state_root: Bytes32ArrayBuilder,
     access_list: ListBuilder<StructBuilder>,
     blob_versioned_hashes: ListBuilder<FixedSizeBinaryBuilder>,
+    authorization_list: ListBuilder<StructBuilder>,
 }
 
 impl TransactionRowsBuilder {
@@ -196,6 +221,14 @@ impl TransactionRowsBuilder {
                 DataType::List(Arc::new(Field::new("item", BYTES32_TYPE, false))),
                 false,
             ),
+        ]);
+        let authorization_list_fields = Fields::from(vec![
+            Field::new("chain_id", DataType::UInt64, false),
+            Field::new("address", ADDRESS_TYPE, false),
+            Field::new("nonce", DataType::UInt64, false),
+            Field::new("y_parity", DataType::Boolean, false),
+            Field::new("r", BYTES32_TYPE, false),
+            Field::new("s", BYTES32_TYPE, false),
         ]);
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
@@ -245,6 +278,25 @@ impl TransactionRowsBuilder {
             },
             blob_versioned_hashes: ListBuilder::new(FixedSizeBinaryBuilder::with_capacity(0, 32))
                 .with_field(Field::new("item", BYTES32_TYPE, false)),
+            authorization_list: ListBuilder::with_capacity(
+                StructBuilder::new(
+                    authorization_list_fields.clone(),
+                    vec![
+                        Box::new(UInt64Builder::with_capacity(0)), // chain_id
+                        Box::new(FixedSizeBinaryBuilder::with_capacity(0, 20)), // address
+                        Box::new(UInt64Builder::with_capacity(0)), // nonce
+                        Box::new(BooleanBuilder::with_capacity(0)), // y_parity
+                        Box::new(FixedSizeBinaryBuilder::with_capacity(0, 32)), // r
+                        Box::new(FixedSizeBinaryBuilder::with_capacity(0, 32)), // s
+                    ],
+                ),
+                count,
+            )
+            .with_field(Field::new(
+                "item",
+                DataType::Struct(authorization_list_fields),
+                false,
+            )),
         }
     }
 
@@ -275,6 +327,7 @@ impl TransactionRowsBuilder {
             state_root,
             access_list,
             blob_versioned_hashes,
+            authorization_list,
         } = tx;
 
         self.special_block_num.append_value(*block_num);
@@ -345,6 +398,58 @@ impl TransactionRowsBuilder {
             // Non-EIP-4844 transactions don't have blob versioned hashes
             self.blob_versioned_hashes.append(false);
         }
+
+        // Append authorization_list (EIP-7702 only)
+        if let Some(auths) = authorization_list {
+            for (chain_id, address, nonce, y_parity, r, s) in auths {
+                let struct_builder = self.authorization_list.values();
+
+                // Field 0: chain_id
+                struct_builder
+                    .field_builder::<UInt64Builder>(0)
+                    .unwrap()
+                    .append_value(*chain_id);
+
+                // Field 1: address (20 bytes)
+                struct_builder
+                    .field_builder::<FixedSizeBinaryBuilder>(1)
+                    .unwrap()
+                    .append_value(address)
+                    .unwrap();
+
+                // Field 2: nonce
+                struct_builder
+                    .field_builder::<UInt64Builder>(2)
+                    .unwrap()
+                    .append_value(*nonce);
+
+                // Field 3: y_parity
+                struct_builder
+                    .field_builder::<BooleanBuilder>(3)
+                    .unwrap()
+                    .append_value(*y_parity);
+
+                // Field 4: r (32 bytes)
+                struct_builder
+                    .field_builder::<FixedSizeBinaryBuilder>(4)
+                    .unwrap()
+                    .append_value(r)
+                    .unwrap();
+
+                // Field 5: s (32 bytes)
+                struct_builder
+                    .field_builder::<FixedSizeBinaryBuilder>(5)
+                    .unwrap()
+                    .append_value(s)
+                    .unwrap();
+
+                struct_builder.append(true);
+            }
+            self.authorization_list.append(true);
+        } else {
+            // Non-EIP-7702 transactions don't have authorization lists
+            self.authorization_list.append(false);
+        }
     }
 
     pub(crate) fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
@@ -375,6 +480,7 @@ impl TransactionRowsBuilder {
             state_root,
             mut access_list,
             mut blob_versioned_hashes,
+            mut authorization_list,
         } = self;
 
         let columns = vec![
@@ -404,6 +510,7 @@ impl TransactionRowsBuilder {
             Arc::new(state_root.finish()),
             Arc::new(access_list.finish()),
             Arc::new(blob_versioned_hashes.finish()),
+            Arc::new(authorization_list.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)
@@ -425,6 +532,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 26);
+    assert_eq!(rows.rows.num_columns(), 27);
     assert_eq!(rows.rows.num_rows(), 1);
 }

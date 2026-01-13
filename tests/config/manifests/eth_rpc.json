@@ -485,6 +485,77 @@
                 }
               },
               "nullable": true
+            },
+            {
+              "name": "authorization_list",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "nullable": false,
+                  "data_type": {
+                    "Struct": [
+                      {
+                        "name": "chain_id",
+                        "nullable": false,
+                        "data_type": "UInt64",
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "address",
+                        "nullable": false,
+                        "data_type": {
+                          "FixedSizeBinary": 20
+                        },
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "nonce",
+                        "nullable": false,
+                        "data_type": "UInt64",
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "y_parity",
+                        "nullable": false,
+                        "data_type": "Boolean",
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "r",
+                        "nullable": false,
+                        "data_type": {
+                          "FixedSizeBinary": 32
+                        },
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      },
+                      {
+                        "name": "s",
+                        "nullable": false,
+                        "data_type": {
+                          "FixedSizeBinary": 32
+                        },
+                        "dict_id": 0,
+                        "dict_is_ordered": false,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
+              "nullable": true
             }
           ]
         }
