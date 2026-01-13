@@ -1,6 +1,6 @@
 ---
-name: Code Generation
-description: Generate JSON schemas and OpenAPI specs using justfile tasks (just gen, just gen-*-schema). Use when user modifies dataset manifests, API definitions, adds/removes schema fields, or mentions code generation, schemas, OpenAPI specs. Outputs to docs/manifest-schemas/ and docs/openapi-specs/.
+name: code-gen
+description: Regenerate JSON schemas and OpenAPI specs after manifest/API changes. Use when modifying dataset manifests, API definitions, or schema fields. Outputs updated specs to docs/ directories.
 ---
 
 # Code Generation Skill

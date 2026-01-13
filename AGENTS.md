@@ -147,13 +147,13 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 
 **If you're an AI agent working on this codebase, here's what you need to know immediately:**
 
-1. **Commands come from Skills** → Always check `.claude/skills/` before running ANY command
-2. **Use justfile tasks** → Prefer `just` commands over direct tool usage (`cargo`, `pnpm`)
+1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`) instead of running commands directly
+2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
 3. **Follow the workflow** → Format → Check → Clippy → Test (in that order)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
 5. **Check patterns** → Review `.patterns/` before implementing code
 
-**Your first action**: If you need to run a command, check the relevant Skill file first!
+**Your first action**: If you need to run a command, invoke the relevant Skill!
 
 ### 📚 Documentation Structure: Separation of Concerns
 
@@ -168,37 +168,35 @@ This project uses three complementary documentation systems. Understanding their
 **Navigation Guide for AI Agents:**
 
 - Need to understand the project? → Read this file (AGENTS.md)
-- Need to run a command? → Check Skills (`.claude/skills/<skill-name>/SKILL.md`)
+- Need to run a command? → Invoke the appropriate Skill (`/code-format`, `/code-check`, `/code-test`, `/code-gen`)
 - Need to write code? → Consult Patterns ([`.patterns/README.md`](.patterns/README.md))
 
 ### 🎯 Core Operating Principle
 
-**🚨 MANDATORY: PREFER justfile tasks as documented in Skills. Use direct tool commands only when not available in
-justfile.**
+**🚨 MANDATORY: USE Skills for all common operations. Skills wrap justfile tasks with proper guidance.**
 
 #### The Golden Rule
 
-**PREFER `just` commands as documented in Skills. Only use `cargo`, `pnpm`, or other tools directly when the operation
-is NOT available in the justfile.**
+**USE Skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`) for all common operations. Only use `cargo`, `pnpm`, or other tools directly when the operation is NOT covered by a skill or NOT available in the justfile.**
 
 **Decision process:**
 
-1. **First**: Check if a justfile task exists for your operation (consult Skills)
-2. **If exists**: Use the justfile task (includes proper flags, setup, and error handling)
+1. **First**: Check if a skill exists for your operation
+2. **If exists**: Invoke the skill (provides proper flags, setup, and error handling)
 3. **If not exists**: You may run the tool directly (e.g., `cargo run`, `cargo build`, tool-specific commands)
 
-#### Why Justfile Tasks Are Preferred
+#### Why Skills Are Preferred
 
 - **Consistency**: Uniform command execution across all developers and AI agents
-- **Correctness**: Tasks include proper flags, environment setup, and error handling
-- **Maintainability**: Changes to tooling are centralized in the justfile
+- **Correctness**: Skills ensure proper flags, setup, and error handling
+- **Guidance**: Skills provide context on when and how to use commands
 - **Pre-approved workflows**: Skills document which commands can run without user permission
 
 #### Examples
 
-- ✅ **Use justfile**: `just fmt-file src/main.rs` (formatting is in justfile)
-- ✅ **Use justfile**: `just check-crate metadata-db` (checking is in justfile)
-- ✅ **Use justfile**: `just test-local` (testing is in justfile)
+- ✅ **Use skill**: `/code-format` skill (formatting)
+- ✅ **Use skill**: `/code-check` skill (checking and linting)
+- ✅ **Use skill**: `/code-test` skill (testing)
 - ✅ **Direct tool OK**: `cargo run -p ampd -- dump --help` (running binaries not in justfile)
 - ✅ **Direct tool OK**: `cargo build --release` (release builds not in justfile's check task)
 - ✅ **Direct tool OK**: Tool-specific commands not covered by justfile tasks
@@ -220,41 +218,40 @@ When determining which command to run, follow this strict hierarchy:
    - Other documentation is supplementary
    - When in conflict, Skills always win
 
-#### Workflow Gate: Check Skills First
+#### Workflow Gate: Use Skills First
 
 **Before running ANY command:**
 
 1. Ask yourself: "Which Skill covers this operation?"
-2. Open the relevant Skill file (format/check/test/gen)
-3. Find the exact command for your use case
-4. Use that command verbatim
+2. Invoke the appropriate skill (e.g., `/code-format`, `/code-check`, `/code-test`, `/code-gen`)
+3. Let the skill guide you through the operation
 
 **Example decision tree:**
 
-- Need to format a file? → Check `.claude/skills/code-format/SKILL.md` → Use `just fmt-file <file>`
-- Need to check a crate? → Check `.claude/skills/code-check/SKILL.md` → Use `just check-crate <crate>`
-- Need to run tests? → Check `.claude/skills/code-test/SKILL.md` → Use `just test-local`
+- Need to format a file? → Use `/code-format` skill
+- Need to check a crate? → Use `/code-check` skill
+- Need to run tests? → Use `/code-test` skill
 
 ### ⚙️ Command-Line Operations Reference
 
-**🚨 CRITICAL: Skills are your command reference - consult them before EVERY operation.**
+**🚨 CRITICAL: Use skills for all operations - invoke them before running commands.**
 
-Skills document when, how, and why to run each justfile task:
+Available skills and their purposes:
 
-- **Formatting**: See `.claude/skills/code-format/SKILL.md` - Format code after editing files
-- **Checking/Linting**: See `.claude/skills/code-check/SKILL.md` - Validate and lint code changes
-- **Testing**: See `.claude/skills/code-test/SKILL.md` - Run tests to validate functionality
-- **Code Generation**: See `.claude/skills/code-gen/SKILL.md` - Generate schemas and specs
+- **Formatting**: Use `/code-format` skill - Format code after editing files
+- **Checking/Linting**: Use `/code-check` skill - Validate and lint code changes
+- **Testing**: Use `/code-test` skill - Run tests to validate functionality
+- **Code Generation**: Use `/code-gen` skill - Generate schemas and specs
 
-Each Skill file contains:
+Each Skill provides:
 
 - ✅ **When to use** - Clear guidance on appropriate usage
-- ✅ **Available commands** - All justfile tasks with exact syntax
+- ✅ **Available operations** - All supported tasks with proper execution
 - ✅ **Examples** - Real-world usage patterns
-- ✅ **Pre-approved commands** - Which can run without user permission
-- ✅ **Workflow integration** - How commands fit into development flow
+- ✅ **Pre-approved workflows** - Operations that can run without user permission
+- ✅ **Workflow integration** - How operations fit into development flow
 
-**Remember: If you don't know which command to run, the answer is in Skills.**
+**Remember: If you don't know which operation to perform, invoke the appropriate Skill.**
 
 ### 📋 Pre-Implementation Checklist
 
@@ -285,19 +282,19 @@ Each Skill file contains:
 
 #### 3. Implementation Phase
 
-**🚨 CRITICAL: Before running ANY command in this phase, consult the relevant Skill file.**
+**🚨 CRITICAL: Before running ANY command in this phase, invoke the relevant Skill.**
 
 **Copy this checklist and track your progress:**
 
 ```
 Development Progress:
 - [ ] Step 1: Write code following patterns from .patterns/
-- [ ] Step 2: Format code (just fmt-file <file>)
-- [ ] Step 3: Check compilation (just check-crate <crate>)
+- [ ] Step 2: Format code (use /code-format skill)
+- [ ] Step 3: Check compilation (use /code-check skill)
 - [ ] Step 4: Fix all compilation errors
-- [ ] Step 5: Run clippy (just clippy-crate <crate>)
+- [ ] Step 5: Run clippy (use /code-check skill)
 - [ ] Step 6: Fix ALL clippy warnings
-- [ ] Step 7: Run tests (just test-local)
+- [ ] Step 7: Run tests (use /code-test skill)
 - [ ] Step 8: Fix all test failures
 - [ ] Step 9: All checks pass ✅
 ```
@@ -307,25 +304,21 @@ Development Progress:
 1. **Write code** following patterns from `.patterns/`
 
 2. **Format immediately** (MANDATORY after EVERY edit):
-   - **Check Skill**: `.claude/skills/code-format/SKILL.md`
-   - **Command**: `just fmt-file <file>` after editing ANY Rust or TypeScript file
-   - **Validation**: Run `just fmt-rs-check` to verify no formatting changes remain
+   - **Use**: `/code-format` skill after editing ANY Rust or TypeScript file
+   - **Validation**: Verify no formatting changes remain
 
 3. **Check compilation**:
-   - **Check Skill**: `.claude/skills/code-check/SKILL.md`
-   - **Command**: `just check-crate <crate-name>` after changes
+   - **Use**: `/code-check` skill after changes
    - **Must pass**: Fix all compilation errors
    - **Validation**: Ensure zero errors before proceeding
 
 4. **Lint with clippy**:
-   - **Check Skill**: `.claude/skills/code-check/SKILL.md`
-   - **Command**: `just clippy-crate <crate-name>`
+   - **Use**: `/code-check` skill for linting
    - **Must pass**: Fix all clippy warnings
    - **Validation**: Re-run until zero warnings before proceeding
 
 5. **Run tests**:
-   - **Check Skill**: `.claude/skills/code-test/SKILL.md`
-   - **Command**: `just test-local` to validate changes
+   - **Use**: `/code-test` skill to validate changes
    - **Must pass**: Fix all test failures
    - **Validation**: All tests green
 
@@ -334,18 +327,18 @@ Development Progress:
 **Visual Workflow:**
 
 ```
-Edit File → [Check Skills: format] → just fmt-file
+Edit File → /code-format skill
           ↓
-[Check Skills: check] → just check-crate → Fix errors?
-          ↓                                    ↓ Yes
-[Check Skills: check] → just clippy-crate → (loop back)
+    /code-check skill (compile) → Fix errors?
+          ↓                            ↓ Yes
+    /code-check skill (clippy) → (loop back)
           ↓
-[Check Skills: test] → just test-local → Fix failures?
-          ↓                                    ↓ Yes
-    All Pass ✅                          (loop back)
+    /code-test skill → Fix failures?
+          ↓                 ↓ Yes
+    All Pass ✅      (loop back)
 ```
 
-**Remember**: Every command comes from Skills. If unsure, check Skills first.
+**Remember**: Invoke Skills for all operations. If unsure which skill to use, refer to the Command-Line Operations Reference above.
 
 #### 4. Completion Phase
 
@@ -386,32 +379,32 @@ Edit File → [Check Skills: format] → just fmt-file
 - **Never expose secrets/keys**: All sensitive data in environment variables
 - **Maintain type safety**: Leverage Rust's type system fully
 - **Prefer async operations**: This codebase uses async/await extensively
-- **Always run tests**: See `.claude/skills/code-test/SKILL.md` for commands
-- **Always format code**: See `.claude/skills/code-format/SKILL.md` for commands
-- **Fix all warnings**: See `.claude/skills/code-check/SKILL.md` for clippy usage
+- **Always run tests**: Use `/code-test` skill
+- **Always format code**: Use `/code-format` skill
+- **Fix all warnings**: Use `/code-check` skill for clippy
 
 ### 📦 Summary: Key Takeaways for AI Agents
 
 **You've learned the complete workflow. Here's what to remember:**
 
-| What             | Where               | When                               |
-| ---------------- | ------------------- | ---------------------------------- |
-| **Run commands** | `.claude/skills/`   | Check Skills BEFORE any command    |
-| **Write code**   | `.patterns/`        | Follow patterns for implementation |
-| **Format**       | `just fmt-file`     | IMMEDIATELY after each edit        |
-| **Check**        | `just check-crate`  | After formatting                   |
-| **Lint**         | `just clippy-crate` | Fix ALL warnings                   |
-| **Test**         | `just test-local`   | Validate all changes               |
+| What             | Where             | When                               |
+| ---------------- | ----------------- | ---------------------------------- |
+| **Run commands** | `.claude/skills/` | Check Skills BEFORE any command    |
+| **Write code**   | `.patterns/`      | Follow patterns for implementation |
+| **Format**       | `/code-format`    | IMMEDIATELY after each edit        |
+| **Check**        | `/code-check`     | After formatting                   |
+| **Lint**         | `/code-check`     | Fix ALL warnings                   |
+| **Test**         | `/code-test`      | Validate all changes               |
 
 **Golden Rules:**
 
-1. ✅ Skills are the single source of truth for commands
-2. ✅ Use justfile tasks, not direct tools (when available)
+1. ✅ Invoke Skills for all common operations
+2. ✅ Skills wrap justfile tasks with proper guidance
 3. ✅ Follow the workflow: Format → Check → Clippy → Test
 4. ✅ Zero tolerance for errors and warnings
 5. ✅ Every change improves the codebase
 
-**Remember**: When in doubt, check Skills first!
+**Remember**: When in doubt, invoke the appropriate Skill!
 
 ## 📝 Additional Resources
 
