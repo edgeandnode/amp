@@ -29,6 +29,7 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | blob_gas_used      | UInt64                        | YES         |
 | excess_blob_gas    | UInt64                        | YES         |
 | parent_beacon_root | FixedSizeBinary(32)           | YES         |
+| requests_hash      | FixedSizeBinary(32)           | YES         |
 +--------------------+-------------------------------+-------------+
 ````
 ## transactions

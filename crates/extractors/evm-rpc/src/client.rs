@@ -688,6 +688,7 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
         blob_gas_used: header.blob_gas_used,
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_root: header.parent_beacon_block_root.map(Into::into),
+        requests_hash: header.requests_hash.map(Into::into),
     })
 }
 

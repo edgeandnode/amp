@@ -328,6 +328,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
                     .map_err(|b| Malformed("parent_beacon_root", b))?,
             ),
         },
+        requests_hash: None,
     };
 
     Ok(header)

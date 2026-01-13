@@ -52,6 +52,7 @@ fn schema() -> Schema {
         Field::new("blob_gas_used", DataType::UInt64, true),
         Field::new("excess_blob_gas", DataType::UInt64, true),
         Field::new("parent_beacon_root", BYTES32_TYPE, true),
+        Field::new("requests_hash", BYTES32_TYPE, true),
     ])
 }
 
@@ -83,6 +84,7 @@ pub struct Block {
     pub blob_gas_used: Option<u64>,
     pub excess_blob_gas: Option<u64>,
     pub parent_beacon_root: Option<Bytes32>,
+    pub requests_hash: Option<Bytes32>,
 }
 
 pub struct BlockRowsBuilder {
@@ -109,6 +111,7 @@ pub struct BlockRowsBuilder {
     blob_gas_used: UInt64Builder,
     excess_blob_gas: UInt64Builder,
     parent_beacon_root: Bytes32ArrayBuilder,
+    requests_hash: Bytes32ArrayBuilder,
 }
 
 impl BlockRowsBuilder {
@@ -137,6 +140,7 @@ impl BlockRowsBuilder {
             blob_gas_used: UInt64Builder::with_capacity(1),
             excess_blob_gas: UInt64Builder::with_capacity(1),
             parent_beacon_root: Bytes32ArrayBuilder::with_capacity(1),
+            requests_hash: Bytes32ArrayBuilder::with_capacity(1),
         }
     }
 
@@ -164,6 +168,7 @@ impl BlockRowsBuilder {
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_root,
+            requests_hash,
         } = row;
 
         self.special_block_num.append_value(*block_num);
@@ -189,6 +194,7 @@ impl BlockRowsBuilder {
         self.blob_gas_used.append_option(*blob_gas_used);
         self.excess_blob_gas.append_option(*excess_blob_gas);
         self.parent_beacon_root.append_option(*parent_beacon_root);
+        self.requests_hash.append_option(*requests_hash);
     }
 
     pub fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
@@ -216,6 +222,7 @@ impl BlockRowsBuilder {
             mut blob_gas_used,
             mut excess_blob_gas,
             parent_beacon_root,
+            requests_hash,
         } = self;
 
         let columns = vec![
@@ -242,6 +249,7 @@ impl BlockRowsBuilder {
             Arc::new(blob_gas_used.finish()),
             Arc::new(excess_blob_gas.finish()),
             Arc::new(parent_beacon_root.finish()),
+            Arc::new(requests_hash.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)
@@ -263,6 +271,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 23);
+    assert_eq!(rows.rows.num_columns(), 24);
     assert_eq!(rows.rows.num_rows(), 1);
 }
