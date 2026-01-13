@@ -10,6 +10,7 @@ use datafusion::{
 };
 use datasets_common::{
     deps::{alias::DepAlias, reference::DepReference},
+    hash_reference::HashReference,
     partial_reference::PartialReference,
     table_name::TableName,
 };
@@ -21,7 +22,7 @@ use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
-    pub manifest_hash: datasets_common::hash::Hash,
+    pub reference: HashReference,
     pub dependencies: BTreeMap<DepAlias, DepReference>,
     pub kind: String,
     pub network: Option<String>,
@@ -76,8 +77,8 @@ impl Dataset {
         })
     }
 
-    pub fn manifest_hash(&self) -> &datasets_common::hash::Hash {
-        &self.manifest_hash
+    pub fn reference(&self) -> &HashReference {
+        &self.reference
     }
 }
 

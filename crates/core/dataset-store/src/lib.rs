@@ -67,10 +67,10 @@ pub struct DatasetStore {
     provider_configs_store: ProviderConfigsStore,
     // Store for dataset definitions (manifests).
     dataset_manifests_store: DatasetManifestsStore,
-    // Cache maps dataset name to eth_call UDF.
-    eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
-    // This cache maps dataset name to the dataset definition.
-    dataset_cache: Arc<RwLock<HashMap<Hash, Arc<Dataset>>>>,
+    // Cache maps HashReference to eth_call UDF.
+    eth_call_cache: Arc<RwLock<HashMap<HashReference, ScalarUDF>>>,
+    // This cache maps HashReference to the dataset definition.
+    dataset_cache: Arc<RwLock<HashMap<HashReference, Arc<Dataset>>>>,
 }
 
 impl DatasetStore {
@@ -649,23 +649,19 @@ impl DatasetStore {
         &self,
         reference: &HashReference,
     ) -> Result<Arc<Dataset>, GetDatasetError> {
-        let namespace = reference.namespace();
-        let name = reference.name();
         let hash = reference.hash();
 
-        // Check cache using manifest hash as the key
-        if let Some(dataset) = self.dataset_cache.read().get(hash).cloned() {
-            tracing::trace!(manifest_hash = %hash, "Cache hit, returning cached dataset");
+        // Check cache using HashReference as the key
+        if let Some(dataset) = self.dataset_cache.read().get(reference).cloned() {
+            tracing::trace!(dataset = %reference.short_display(), "Cache hit, returning cached dataset");
             tracing::debug!(
-                dataset_namespace = %namespace,
-                dataset_name = %name,
-                manifest_hash = %hash,
+                dataset = %reference.short_display(),
                 "Dataset loaded successfully"
             );
             return Ok(dataset);
         }
 
-        tracing::debug!(manifest_hash = %hash, "Cache miss, loading from store");
+        tracing::debug!(dataset = %reference.short_display(), "Cache miss, loading from store");
 
         // Get the manifest path from metadata database
         let Some(path) = metadata_db::manifests::get_path(&self.metadata_db, hash)
@@ -715,7 +711,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                evm_rpc_datasets::dataset(hash.clone(), manifest)
+                evm_rpc_datasets::dataset(reference.clone(), manifest)
             }
             DatasetKind::Solana => {
                 let manifest = manifest_content
@@ -725,7 +721,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                solana_datasets::dataset(hash.clone(), manifest)
+                solana_datasets::dataset(reference.clone(), manifest)
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
@@ -735,7 +731,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                eth_beacon_datasets::dataset(hash.clone(), manifest)
+                eth_beacon_datasets::dataset(reference.clone(), manifest)
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
@@ -745,7 +741,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                firehose_datasets::evm::dataset(hash.clone(), manifest)
+                firehose_datasets::evm::dataset(reference.clone(), manifest)
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content
@@ -755,7 +751,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                datasets_derived::dataset(hash.clone(), manifest).map_err(|source| {
+                datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
                     GetDatasetError::CreateDerivedDataset {
                         reference: reference.clone(),
                         source,
@@ -769,12 +765,10 @@ impl DatasetStore {
         // Cache the dataset
         self.dataset_cache
             .write()
-            .insert(hash.clone(), dataset.clone());
+            .insert(reference.clone(), dataset.clone());
 
         tracing::debug!(
-            dataset_namespace = %namespace,
-            dataset_name = %name,
-            manifest_hash = %hash,
+            dataset = %reference.short_display(),
             "Dataset loaded successfully"
         );
 
@@ -1007,19 +1001,18 @@ impl DatasetStore {
         }
 
         // Check if we already have the provider cached.
-        let cache_key = dataset.manifest_hash().as_str();
-        if let Some(udf) = self.eth_call_cache.read().get(cache_key) {
+        if let Some(udf) = self.eth_call_cache.read().get(dataset.reference()) {
             return Ok(Some(udf.clone()));
         }
 
         // Load the provider from the dataset definition.
         let Some(network) = &dataset.network else {
             tracing::warn!(
-                manifest_hash = %dataset.manifest_hash(),
+                dataset = %dataset.reference().short_display(),
                 "dataset is missing required 'network' field for evm-rpc kind"
             );
             return Err(EthCallForDatasetError::MissingNetwork {
-                manifest_hash: dataset.manifest_hash().to_string(),
+                reference: dataset.reference().clone(),
             });
         };
 
@@ -1064,7 +1057,7 @@ impl DatasetStore {
         // Cache the EthCall UDF
         self.eth_call_cache
             .write()
-            .insert(cache_key.to_string(), udf.clone());
+            .insert(dataset.reference().clone(), udf.clone());
 
         Ok(Some(udf))
     }

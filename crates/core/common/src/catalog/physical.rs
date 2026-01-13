@@ -346,7 +346,7 @@ impl PhysicalTable {
         store: DataStore,
         table: ResolvedTable,
     ) -> Result<Option<Self>, BoxError> {
-        let manifest_hash = table.dataset().manifest_hash();
+        let manifest_hash = table.dataset().reference().hash();
         let table_name = table.name();
 
         let Some(db_row) = store

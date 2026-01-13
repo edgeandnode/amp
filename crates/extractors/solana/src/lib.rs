@@ -14,7 +14,7 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset};
-use datasets_common::manifest::TableSchema;
+use datasets_common::{hash_reference::HashReference, manifest::TableSchema};
 use serde_with::serde_as;
 use url::Url;
 
@@ -84,11 +84,11 @@ pub struct ProviderConfig {
 
 /// Convert a Solana manifest into a logical dataset representation.
 ///
-/// Dataset identity (namespace, name, version) must be provided externally as they are not part
-/// of the manifest.
-pub fn dataset(manifest_hash: datasets_common::hash::Hash, manifest: Manifest) -> Dataset {
+/// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
+/// are not part of the manifest.
+pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
     Dataset {
-        manifest_hash,
+        reference,
         dependencies: BTreeMap::new(),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),

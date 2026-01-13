@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroU32};
 
 use common::{BlockNum, Dataset};
+use datasets_common::hash_reference::HashReference;
 use reqwest::Url;
 
 mod block;
@@ -65,12 +66,12 @@ pub struct ProviderConfig {
 
 /// Convert an Eth Beacon manifest into a logical dataset representation.
 ///
-/// Dataset identity (namespace, name, version, manifest_hash) must be provided externally as they
+/// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(manifest_hash: datasets_common::hash::Hash, manifest: Manifest) -> Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
     let network = manifest.network;
     Dataset {
-        manifest_hash,
+        reference,
         dependencies: BTreeMap::new(),
         kind: manifest.kind.to_string(),
         start_block: Some(manifest.start_block),
