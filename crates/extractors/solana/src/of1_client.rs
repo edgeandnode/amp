@@ -56,8 +56,9 @@ pub(crate) enum CarManagerMessage {
 }
 
 pub(crate) async fn car_file_manager(
-    car_directory: PathBuf,
     mut car_manager_rx: tokio::sync::mpsc::Receiver<CarManagerMessage>,
+    car_directory: PathBuf,
+    keep_car_files: bool,
     provider: String,
     network: String,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -165,7 +166,7 @@ pub(crate) async fn car_file_manager(
 
                             if *count == 0 {
                                 guard.remove(&epoch);
-                                true
+                                !keep_car_files
                             } else {
                                 false
                             }

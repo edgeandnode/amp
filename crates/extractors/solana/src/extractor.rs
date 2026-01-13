@@ -44,6 +44,7 @@ impl SolanaExtractor {
         network: String,
         provider_name: String,
         of1_car_directory: PathBuf,
+        keep_of1_car_files: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let rpc_client = rpc_client::SolanaRpcClient::new(
@@ -56,8 +57,9 @@ impl SolanaExtractor {
 
         let (of1_car_manager_tx, of1_car_manager_rx) = tokio::sync::mpsc::channel(128);
         let of1_car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
-            of1_car_directory.clone(),
             of1_car_manager_rx,
+            of1_car_directory.clone(),
+            keep_of1_car_files,
             provider_name.clone(),
             network.clone(),
             metrics.clone(),
@@ -281,6 +283,7 @@ mod tests {
             String::new(),
             String::new(),
             PathBuf::new(),
+            false,
             None,
         );
 
@@ -326,6 +329,7 @@ mod tests {
             String::new(),
             String::new(),
             PathBuf::new(),
+            false,
             None,
         );
 
