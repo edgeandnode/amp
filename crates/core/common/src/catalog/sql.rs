@@ -130,15 +130,23 @@ pub async fn catalog_for_sql(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(data_store.clone(), table.clone())
+        let dataset_ref = table.dataset().reference();
+
+        let revision = data_store
+            .get_table_active_revision(dataset_ref, table.name())
             .await
-            .map_err(|err| CatalogForSqlError::PhysicalTableRetrieval {
-                table: table.to_string(),
-                source: err,
+            .map_err(|source| CatalogForSqlError::PhysicalTableRetrieval {
+                dataset: dataset_ref.clone(),
+                table: table.name().clone(),
+                source,
             })?
             .ok_or_else(|| CatalogForSqlError::TableNotSynced {
-                table: table.to_string(),
+                dataset: dataset_ref.clone(),
+                table: table.name().clone(),
             })?;
+
+        let physical_table =
+            PhysicalTable::from_active_revision(data_store.clone(), table.clone(), revision);
         tables.push(Arc::new(physical_table));
     }
 

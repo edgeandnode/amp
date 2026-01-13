@@ -93,17 +93,26 @@ async fn get_physical_catalog_with_deps(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let physical_table = PhysicalTable::get_active(data_store.clone(), table.clone())
+        let dataset_ref = table.dataset().reference();
+        let table_name = table.name();
+
+        let revision = data_store
+            .get_table_active_revision(dataset_ref, table_name)
             .await
             .map_err(
                 |err| GetPhysicalCatalogWithDepsError::PhysicalTableRetrieval {
-                    table: table.to_string(),
+                    dataset: dataset_ref.clone(),
+                    table: table_name.clone(),
                     source: err,
                 },
             )?
             .ok_or(GetPhysicalCatalogWithDepsError::TableNotSynced {
-                table: table.to_string(),
+                dataset: dataset_ref.clone(),
+                table: table_name.clone(),
             })?;
+
+        let physical_table =
+            PhysicalTable::from_active_revision(data_store.clone(), table.clone(), revision);
         tables.push(physical_table.into());
     }
     Ok(Catalog::new(tables, logical_catalog))
@@ -766,16 +775,26 @@ pub enum GetPhysicalCatalogWithDepsError {
     /// This occurs when querying the metadata database for the active physical
     /// location of a table fails due to database connection issues, query errors,
     /// or other database-related problems.
-    #[error("Failed to retrieve physical table metadata for table '{table}': {source}")]
-    PhysicalTableRetrieval { table: String, source: BoxError },
+    #[error(
+        "Failed to retrieve physical table metadata for table '{table}' in dataset '{dataset}'"
+    )]
+    PhysicalTableRetrieval {
+        dataset: HashReference,
+        table: TableName,
+        #[source]
+        source: amp_data_store::GetTableActiveRevisionError,
+    },
 
     /// Table has not been synced and no physical location exists.
     ///
     /// This occurs when attempting to load a physical catalog for a table that
     /// has been defined but has not yet been dumped/synced to storage. The table
     /// exists in the dataset definition but has no physical parquet files.
-    #[error("Table '{table}' has not been synced")]
-    TableNotSynced { table: String },
+    #[error("Table '{table}' in dataset '{dataset}' has not been synced")]
+    TableNotSynced {
+        dataset: HashReference,
+        table: TableName,
+    },
 }
 
 /// Errors specific to get_logical_catalog_with_deps_and_funcs operations

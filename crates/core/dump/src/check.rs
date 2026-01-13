@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use amp_data_store::{DataStore, file_name::FileName};
 use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
-use futures::TryStreamExt as _;
 use metadata_db::LocationId;
 use object_store::ObjectMeta;
 
@@ -46,9 +45,8 @@ pub async fn consistency_check(
 
     let registered_files: BTreeSet<FileName> = files.into_iter().map(|m| m.file_name).collect();
 
-    let stored_files: BTreeMap<FileName, ObjectMeta> = table
-        .list_files()
-        .try_collect::<Vec<ObjectMeta>>()
+    let stored_files: BTreeMap<FileName, ObjectMeta> = store
+        .list_revision_files_in_object_store(table.path())
         .await
         .map_err(|err| ConsistencyError::ListObjectStore {
             location_id,
@@ -134,7 +132,7 @@ pub enum ConsistencyError {
     ListObjectStore {
         location_id: LocationId,
         #[source]
-        source: amp_data_store::StreamRevisionFilesInObjectStoreError,
+        source: amp_data_store::ListRevisionFilesInObjectStoreError,
     },
 
     /// Failed to delete orphaned file from object store
