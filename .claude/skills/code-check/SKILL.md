@@ -1,6 +1,6 @@
 ---
-name: Code Checking
-description: Check and lint Rust/TypeScript code using justfile tasks (just check-crate, just clippy-crate). Use after code changes, when user mentions compilation, type checking, linting, clippy warnings, or needs to validate code quality. Runs cargo check and clippy with proper flags.
+name: code-check
+description: Validate and lint code after changes. Use after editing Rust/TypeScript files, when user mentions compilation errors, type checking, linting, clippy warnings, or before commits/PRs. Ensures all code passes checks and has zero warnings.
 ---
 
 # Code Checking Skill
@@ -14,6 +14,20 @@ Use this skill when you need to:
 - Run compiler checks without building
 - Lint code with clippy
 - Ensure code quality before commits or PRs
+
+## Command Selection Rules
+
+Choose the appropriate command based on the number of crates edited:
+
+| Crates Edited | Check Command | Clippy Command | Rationale |
+|---------------|---------------|----------------|-----------|
+| 1-2 crates    | `just check-crate <crate>` | `just clippy-crate <crate>` | Faster, focused feedback |
+| 3+ crates     | `just check-rs` | `just clippy` | More efficient than multiple per-crate calls |
+
+**Decision process:**
+1. Identify which crates contain your edited files
+2. If 2 or fewer crates: use per-crate commands for each crate
+3. If 3 or more crates: use global commands
 
 ## Available Commands
 
@@ -79,22 +93,29 @@ Checks TypeScript code using `pnpm check`.
 ## Important Guidelines
 
 ### MANDATORY: Run Checks After Changes
-**You MUST run checks after making code changes:**
+**You MUST run checks after making code changes. Use the Command Selection Rules above to choose the right command.**
 
-1. After editing a single file in a crate: `just check-crate <crate-name>` AND `just clippy-crate <crate-name>`
-2. After editing multiple crates: `just check-rs` AND `just clippy`
-3. Before considering a task complete: all checks MUST pass AND all clippy warnings MUST be fixed
+Before considering a task complete: all checks MUST pass AND all clippy warnings MUST be fixed.
 
-### Example Workflow with Validation Loop
+### Example Workflows
+
+**Single crate (1-2 crates edited):**
 1. Edit files in `metadata-db` crate
-2. Format: `just fmt-file <edited-files>`
+2. Format: use `/code-format` skill
 3. **Check compilation**: `just check-crate metadata-db`
    - If errors → fix → return to step 2
 4. **Check clippy**: `just clippy-crate metadata-db`
    - If warnings → fix ALL → return to step 2
-5. **Fix ALL clippy warnings** in files you modified
-6. Repeat until: zero compilation errors AND zero clippy warnings
-7. Once passing, optionally run full check: `just check-rs` and `just clippy`
+5. Repeat until: zero compilation errors AND zero clippy warnings
+
+**Multiple crates (3+ crates edited):**
+1. Edit files across multiple crates
+2. Format: use `/code-format` skill
+3. **Check compilation**: `just check-rs`
+   - If errors → fix → return to step 2
+4. **Check clippy**: `just clippy`
+   - If warnings → fix ALL → return to step 2
+5. Repeat until: zero compilation errors AND zero clippy warnings
 
 ## Common Mistakes to Avoid
 
@@ -103,13 +124,15 @@ Checks TypeScript code using `pnpm check`.
 - **Never run `cargo clippy` directly** - Justfile adds proper flags like `--no-deps`
 - **Never ignore clippy warnings** - Clippy is enforced in CI, warnings will fail builds
 - **Never skip the check step** - Even if "it should compile"
-- **Never check multiple crates at once initially** - Check the modified crate first
+- **Never use global commands for 1-2 crates** - Use per-crate commands for efficiency
+- **Never use per-crate commands for 3+ crates** - Use global commands for efficiency
 
 ### ✅ Best Practices
-- Check single crate first (`just check-crate <name>`) - faster feedback
+- Follow Command Selection Rules based on number of crates edited
+- Use per-crate commands for 1-2 crates (faster, focused feedback)
+- Use global commands for 3+ crates (more efficient)
 - Fix compilation errors before running clippy
 - Run clippy after EVERY code change
-- Use `just clippy-crate` for focused results (--no-deps flag)
 - Document any warnings you absolutely cannot fix (rare exception)
 
 ## Pre-approved Commands

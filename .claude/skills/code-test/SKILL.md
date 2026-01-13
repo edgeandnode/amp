@@ -1,6 +1,6 @@
 ---
-name: Code Testing
-description: Run tests using justfile tasks (just test-local for local development, just test-unit, just test-it). Use after implementing features, fixing bugs, when user mentions tests, validation, or before commits. Primary command is 'just test-local' which runs without external dependencies.
+name: code-test
+description: Run tests to validate changes. Use after implementing features, fixing bugs, or before commits. Defaults to 'just test-local' which runs without external dependencies (recommended for local development).
 ---
 
 # Code Testing Skill
