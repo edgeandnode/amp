@@ -25,6 +25,45 @@ use crate::{
     plan,
 };
 
+/// DataFusion UDF that decodes ABI-encoded binary data into a Solidity type.
+///
+/// This function decodes raw binary data according to a specified Solidity type.
+/// It's useful for decoding arbitrary ABI-encoded values, return data from contract
+/// calls, or individual fields from complex encoded data.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Decode a uint256 value
+/// evm_decode_type(binary_data, 'uint256')
+///
+/// // Decode an address
+/// evm_decode_type(binary_data, 'address')
+///
+/// // Decode a tuple
+/// evm_decode_type(binary_data, '(uint256,address,bool)')
+/// ```
+///
+/// # Arguments
+///
+/// * `data` - `Binary` ABI-encoded binary data to decode
+/// * `type` - `Utf8` Solidity type string (e.g., "uint256", "address", "(uint256,bool)")
+///
+/// # Returns
+///
+/// The decoded value with Arrow type corresponding to the Solidity type.
+/// Returns NULL if decoding fails (e.g., data too short, invalid encoding).
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Type string is not a valid Solidity type
+/// - Type argument is not a string literal
+/// - Number of arguments is not 2
+///
+/// # Nullability
+///
+/// Returns null if input data is null or if decoding fails.
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmDecodeType {
     signature: Signature,
@@ -144,10 +183,6 @@ impl ScalarUDFImpl for EvmDecodeType {
             .map_err(|e| plan!("failed to parse Solidity type: {}", e))?;
         let ty = sol_to_arrow_type(&sol_ty)?;
         Ok(Field::new(self.name(), ty, false).into())
-    }
-
-    fn aliases(&self) -> &[String] {
-        &[]
     }
 
     fn simplify(

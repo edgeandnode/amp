@@ -14,6 +14,41 @@ use datafusion::{
 use super::{array_to_sol_value, num_rows, scalar_to_sol_value};
 use crate::plan;
 
+/// DataFusion UDF that ABI-encodes a value according to a Solidity type.
+///
+/// This function encodes a value into ABI-encoded binary format using the specified
+/// Solidity type. It's the inverse of `evm_decode_type` and is useful for preparing
+/// data for contract calls or encoding values for storage.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Encode a uint256 value
+/// evm_encode_type(12345, 'uint256')
+///
+/// // Encode an address
+/// evm_encode_type(address_column, 'address')
+///
+/// // Encode a boolean
+/// evm_encode_type(true, 'bool')
+/// ```
+///
+/// # Arguments
+///
+/// * `value` - The value to encode (type must be compatible with the Solidity type)
+/// * `type` - `Utf8` Solidity type string (e.g., "uint256", "address", "bool")
+///
+/// # Returns
+///
+/// `Binary` ABI-encoded representation of the value.
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - Type string is not a valid Solidity type
+/// - Value cannot be converted to the specified Solidity type
+/// - Type argument is not a string literal
+/// - Number of arguments is not 2
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct EvmEncodeType {
     signature: Signature,
@@ -92,9 +127,5 @@ impl ScalarUDFImpl for EvmEncodeType {
         }
 
         Ok(ColumnarValue::Array(ArrayBuilder::finish(&mut builder)))
-    }
-
-    fn aliases(&self) -> &[String] {
-        &[]
     }
 }

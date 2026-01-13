@@ -29,6 +29,45 @@ use itertools::izip;
 
 type TransactionRequest = <Ethereum as alloy::network::Network>::TransactionRequest;
 
+/// DataFusion UDF that executes an `eth_call` against an Ethereum JSON-RPC endpoint.
+///
+/// This async UDF performs read-only contract calls at a specified block, returning
+/// the call result or error message. It's commonly used for querying contract state,
+/// simulating transactions, or reading view functions without sending a transaction.
+///
+/// # SQL Usage
+///
+/// ```ignore
+/// // Call a contract function at the latest block
+/// eth_call(NULL, 0x1234...address, 0xabcd...calldata, 'latest')
+///
+/// // Call with a specific sender address at block 19000000
+/// eth_call(0xsender...addr, 0xcontract...addr, 0xcalldata, '19000000')
+///
+/// // Query token balance (balanceOf call)
+/// eth_call(NULL, token_address, balanceOf_calldata, 'latest')
+/// ```
+///
+/// # Arguments
+///
+/// * `from` - `FixedSizeBinary(20)` sender address (optional, can be NULL)
+/// * `to` - `FixedSizeBinary(20)` target contract address (required)
+/// * `input` - `Binary` encoded function call data (optional)
+/// * `block` - `Utf8` block number or tag ("latest", "pending", "earliest", or integer)
+///
+/// # Returns
+///
+/// A struct with two fields:
+/// * `data` - `Binary` the return data from the call (NULL on error)
+/// * `message` - `Utf8` error message if the call reverted (NULL on success)
+///
+/// # Errors
+///
+/// Returns a planning error if:
+/// - `to` address is NULL
+/// - `block` is NULL
+/// - `block` is not a valid integer or block tag
+/// - Address conversion fails
 #[derive(Debug, Clone)]
 pub struct EthCall {
     name: String,
