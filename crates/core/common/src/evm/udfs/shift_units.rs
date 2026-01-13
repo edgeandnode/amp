@@ -275,10 +275,7 @@ impl ShiftUnits {
         }
     }
 
-    pub fn scalar_to_bigdecimal(
-        &self,
-        scalar: &ScalarValue,
-    ) -> datafusion::error::Result<BigDecimal> {
+    fn scalar_to_bigdecimal(&self, scalar: &ScalarValue) -> datafusion::error::Result<BigDecimal> {
         match scalar {
             // Signed integers
             ScalarValue::Int8(Some(v)) => Ok(BigDecimal::from(*v)),
@@ -321,7 +318,7 @@ impl ShiftUnits {
         }
     }
 
-    pub fn scalar_to_i64(&self, scalar: &ScalarValue) -> datafusion::error::Result<i64> {
+    fn scalar_to_i64(&self, scalar: &ScalarValue) -> datafusion::error::Result<i64> {
         match scalar {
             ScalarValue::Int8(Some(v)) => Ok(*v as i64),
             ScalarValue::Int16(Some(v)) => Ok(*v as i64),
@@ -341,10 +338,7 @@ impl ShiftUnits {
     }
 
     /// Extracts all i64 values from an array, returning a Vec<Option<i64>>
-    pub fn array_to_i64(
-        &self,
-        array: &Arc<dyn Array>,
-    ) -> datafusion::error::Result<Vec<Option<i64>>> {
+    fn array_to_i64(&self, array: &Arc<dyn Array>) -> datafusion::error::Result<Vec<Option<i64>>> {
         let len = array.len();
         let mut result = Vec::with_capacity(len);
 
@@ -392,7 +386,7 @@ impl ShiftUnits {
     }
 
     /// Extracts all BigDecimal values from an array, returning a Vec<Option<BigDecimal>>
-    pub fn array_to_bigdecimal(
+    fn array_to_bigdecimal(
         &self,
         array: &Arc<dyn Array>,
     ) -> datafusion::error::Result<Vec<Option<BigDecimal>>> {

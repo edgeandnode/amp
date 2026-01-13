@@ -126,7 +126,7 @@ impl std::fmt::Display for AppendError {
     }
 }
 
-pub(super) struct FieldBuilder<'a> {
+struct FieldBuilder<'a> {
     builder: &'a mut StructBuilder,
     ty: &'a DynSolType,
     field: usize,
@@ -165,7 +165,7 @@ impl<'a> FieldBuilder<'a> {
     }
 }
 
-pub(super) struct Event {
+struct Event {
     name: String,
     topic0: Option<B256>,
     topic_names: Vec<String>,
@@ -220,7 +220,7 @@ impl Event {
     /// Return `Fields` for the event. The fields are arranged so that the
     /// fields for the indexed attributes come first, followed by the fields
     /// for the non-indexed attributes.
-    pub(super) fn fields(&self) -> Result<Fields, DataFusionError> {
+    fn fields(&self) -> Result<Fields, DataFusionError> {
         let mut fields = Vec::new();
 
         // Handle indexed (topic) fields - reference types become bytes32
@@ -245,7 +245,7 @@ impl Event {
         Ok(Fields::from(fields))
     }
 
-    pub(super) fn topic0(&self) -> Result<B256, DataFusionError> {
+    fn topic0(&self) -> Result<B256, DataFusionError> {
         match self.topic0 {
             Some(topic0) => Ok(topic0),
             None => plan_err!("anonymous event {} has no topic0", self.name),

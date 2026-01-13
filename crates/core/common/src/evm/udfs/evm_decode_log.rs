@@ -22,34 +22,6 @@ use crate::{
     evm::udfs::Event,
 };
 
-pub fn decode(
-    topic1: &Bytes32ArrayType,
-    topic2: &Bytes32ArrayType,
-    topic3: &Bytes32ArrayType,
-    data: &BinaryArray,
-    signature: &ScalarValue,
-) -> Result<Arc<dyn Array>, DataFusionError> {
-    let event = Event::try_from(signature)?;
-    let fields = event.fields()?;
-    if fields.is_empty() {
-        let mut builder = NullBuilder::new();
-        builder.append_nulls(topic1.len());
-        return Ok(Arc::new(builder.finish()));
-    }
-
-    let mut builder = StructBuilder::from_fields(fields, topic1.len());
-    for (t1, t2, t3, d) in izip!(topic1, topic2, topic3, data) {
-        event.decode_topic(&mut builder, 1, t1)?;
-        event.decode_topic(&mut builder, 2, t2)?;
-        event.decode_topic(&mut builder, 3, t3)?;
-        event.decode_body(&mut builder, d)?;
-        builder.append(true);
-    }
-
-    let structs = builder.finish();
-    Ok(Arc::new(structs))
-}
-
 /// DataFusion UDF that decodes EVM event logs into structured data.
 ///
 /// This function parses Solidity event logs using the event signature to extract
@@ -214,6 +186,34 @@ impl ScalarUDFImpl for EvmDecodeLog {
     ) -> datafusion::error::Result<ExprSimplifyResult> {
         Ok(ExprSimplifyResult::Original(args))
     }
+}
+
+fn decode(
+    topic1: &Bytes32ArrayType,
+    topic2: &Bytes32ArrayType,
+    topic3: &Bytes32ArrayType,
+    data: &BinaryArray,
+    signature: &ScalarValue,
+) -> Result<Arc<dyn Array>, DataFusionError> {
+    let event = Event::try_from(signature)?;
+    let fields = event.fields()?;
+    if fields.is_empty() {
+        let mut builder = NullBuilder::new();
+        builder.append_nulls(topic1.len());
+        return Ok(Arc::new(builder.finish()));
+    }
+
+    let mut builder = StructBuilder::from_fields(fields, topic1.len());
+    for (t1, t2, t3, d) in izip!(topic1, topic2, topic3, data) {
+        event.decode_topic(&mut builder, 1, t1)?;
+        event.decode_topic(&mut builder, 2, t2)?;
+        event.decode_topic(&mut builder, 3, t3)?;
+        event.decode_body(&mut builder, d)?;
+        builder.append(true);
+    }
+
+    let structs = builder.finish();
+    Ok(Arc::new(structs))
 }
 
 #[cfg(test)]

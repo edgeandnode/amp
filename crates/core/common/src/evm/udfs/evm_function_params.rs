@@ -30,59 +30,6 @@ use crate::{
     plan,
 };
 
-struct FunctionCall {
-    alloy_function: AlloyFunction,
-    input_names: Vec<String>,
-    input_types: Vec<DynSolType>,
-}
-
-impl FunctionCall {
-    fn new(alloy_function: AlloyFunction) -> Result<Self, DataFusionError> {
-        let mut input_names = Vec::with_capacity(alloy_function.inputs.len());
-        let mut input_types = Vec::with_capacity(alloy_function.inputs.len());
-
-        for param in &alloy_function.inputs {
-            let ty = param.resolve().unwrap();
-            if param.name.is_empty() {
-                return plan_err!(
-                    "function {} has unnamed input parameter",
-                    alloy_function.name
-                );
-            }
-            input_types.push(ty);
-            input_names.push(param.name.clone());
-        }
-
-        Ok(Self {
-            alloy_function,
-            input_names,
-            input_types,
-        })
-    }
-}
-
-impl FromStr for FunctionCall {
-    type Err = DataFusionError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let alloy_event =
-            AlloyFunction::parse(s).or_else(|e| plan_err!("parse function signature: {}", e))?;
-        Self::new(alloy_event)
-    }
-}
-
-impl TryFrom<&ScalarValue> for FunctionCall {
-    type Error = DataFusionError;
-
-    fn try_from(value: &ScalarValue) -> Result<Self, Self::Error> {
-        let s = match value {
-            ScalarValue::Utf8(Some(s)) => s,
-            v => return plan_err!("expected Utf8, got {}", v.data_type()),
-        };
-        s.parse()
-    }
-}
-
 /// DataFusion UDF that decodes function call input data into structured parameters.
 ///
 /// This function parses the input data of a contract function call using the function
@@ -451,5 +398,58 @@ impl ScalarUDFImpl for EvmEncodeParams {
         }
 
         Ok(ColumnarValue::Array(ArrayBuilder::finish(&mut builder)))
+    }
+}
+
+struct FunctionCall {
+    alloy_function: AlloyFunction,
+    input_names: Vec<String>,
+    input_types: Vec<DynSolType>,
+}
+
+impl FunctionCall {
+    fn new(alloy_function: AlloyFunction) -> Result<Self, DataFusionError> {
+        let mut input_names = Vec::with_capacity(alloy_function.inputs.len());
+        let mut input_types = Vec::with_capacity(alloy_function.inputs.len());
+
+        for param in &alloy_function.inputs {
+            let ty = param.resolve().unwrap();
+            if param.name.is_empty() {
+                return plan_err!(
+                    "function {} has unnamed input parameter",
+                    alloy_function.name
+                );
+            }
+            input_types.push(ty);
+            input_names.push(param.name.clone());
+        }
+
+        Ok(Self {
+            alloy_function,
+            input_names,
+            input_types,
+        })
+    }
+}
+
+impl FromStr for FunctionCall {
+    type Err = DataFusionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let alloy_event =
+            AlloyFunction::parse(s).or_else(|e| plan_err!("parse function signature: {}", e))?;
+        Self::new(alloy_event)
+    }
+}
+
+impl TryFrom<&ScalarValue> for FunctionCall {
+    type Error = DataFusionError;
+
+    fn try_from(value: &ScalarValue) -> Result<Self, Self::Error> {
+        let s = match value {
+            ScalarValue::Utf8(Some(s)) => s,
+            v => return plan_err!("expected Utf8, got {}", v.data_type()),
+        };
+        s.parse()
     }
 }
