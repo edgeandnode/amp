@@ -10,7 +10,7 @@ use alloy::{
     hex::{self, ToHexExt},
     network::{
         AnyHeader, AnyNetwork, AnyReceiptEnvelope, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope,
-        TransactionResponse,
+        ReceiptResponse as _, TransactionResponse,
     },
     providers::Provider as _,
     rpc::{
@@ -778,6 +778,7 @@ fn rpc_transaction_to_row(
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.as_recovered().signer().into(),
         status: receipt.inner.inner.status(),
+        state_root: receipt.state_root().map(|root| root.0),
         access_list: {
             match &*tx.inner.inner {
                 AnyTxEnvelope::Ethereum(envelope) => match envelope {
@@ -796,6 +797,21 @@ fn rpc_transaction_to_row(
                     }
                 },
                 _ => None,
+            }
+        },
+        blob_versioned_hashes: {
+            if let AnyTxEnvelope::Ethereum(EthereumTxEnvelope::Eip4844(signed)) = &*tx.inner.inner {
+                Some(
+                    signed
+                        .tx()
+                        .tx()
+                        .blob_versioned_hashes
+                        .iter()
+                        .map(|hash| hash.0)
+                        .collect(),
+                )
+            } else {
+                None
             }
         },
     })
