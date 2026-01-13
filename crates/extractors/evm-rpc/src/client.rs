@@ -688,6 +688,7 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
         blob_gas_used: header.blob_gas_used,
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_root: header.parent_beacon_block_root.map(Into::into),
+        requests_hash: header.requests_hash.map(Into::into),
     })
 }
 
@@ -808,6 +809,29 @@ fn rpc_transaction_to_row(
                         .blob_versioned_hashes
                         .iter()
                         .map(|hash| hash.0)
+                        .collect(),
+                )
+            } else {
+                None
+            }
+        },
+        authorization_list: {
+            if let AnyTxEnvelope::Ethereum(EthereumTxEnvelope::Eip7702(signed)) = &*tx.inner.inner {
+                Some(
+                    signed
+                        .tx()
+                        .authorization_list
+                        .iter()
+                        .map(|auth| {
+                            (
+                                auth.chain_id.try_into().unwrap_or(0),
+                                auth.address.0.0,
+                                auth.nonce,
+                                auth.y_parity() != 0,
+                                auth.r().to_be_bytes::<32>(),
+                                auth.s().to_be_bytes::<32>(),
+                            )
+                        })
                         .collect(),
                 )
             } else {
