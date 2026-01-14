@@ -204,8 +204,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alloy"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cb837e538ce3eac04e357ef47b8acead0b14c83ec6bcafedd167e6a60c40876"
 dependencies = [
  "alloy-consensus",
  "alloy-contract",
@@ -241,8 +242,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12870ab65b131f609257436935047eec3cfabee8809732f6bf5a69fe2a18cf2e"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -267,8 +269,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus-any"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47c66b14d2187de0c4efe4ef678aaa57a6a34cccdbea3a0773627fac9bd128f4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -280,8 +283,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-contract"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9bf6afe8c25b63c98927c6f76d90cf8dc443cc4980a7d824151c84a6e568934"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -369,8 +373,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f076d25ddfcd2f1cbcc234e072baf97567d1df0e3fccdc1f8af8cc8b18dc6299"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -391,8 +396,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48d424ac007b5f89d65eecb4ed6cc5ca74cbaf231f471789a8158fdf4cc5f446"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -428,8 +434,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-rpc"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "250dbd8496f04eabe997e6e4c5186a0630b8bc3dbe7552e1fd917d491ef811e9"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -442,8 +449,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd45cdac957d1fa1d0c18f54f262350eb72f1adc38dd1f8b15f33f0747c6a60c"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -467,8 +475,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fba5c43e055effb5bd33dbc74b1ab7fe0f367d8801a25af9e7c716b3ef5e440b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -479,8 +488,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-node-bindings"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eb084113406450d3895fbfec5015d6afe8f3a88acfc033c1de18a2b1c70af02"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks",
@@ -489,6 +499,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "k256",
+ "libc",
  "rand 0.8.5",
  "serde_json",
  "tempfile",
@@ -527,8 +538,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-provider"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e87a90cacc27dffd91fa6440145934a782227d31b9876444c5924d3607084ea"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -555,7 +567,7 @@ dependencies = [
  "either",
  "futures",
  "futures-utils-wasm",
- "lru 0.13.0",
+ "lru 0.16.3",
  "parking_lot",
  "pin-project",
  "reqwest",
@@ -570,8 +582,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-pubsub"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c24a102935aa9d5a8b8fc8c47f39a0823672c33f0b27b5806292cb80988e6345"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -613,8 +626,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-client"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a65bb9060e43e9738bbd7c30d742ed962d609f2123a665bbdab7e6e0f13fd3"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -638,8 +652,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98bfd40f4e36cb29015ec744bc764629edbe823ec6b95aceef2684090c142976"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-anvil",
@@ -650,8 +665,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-anvil"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ac7d0dbb62e807028554e34c2b5724a1f57132792684107c32009e84fcf4044"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -661,8 +677,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8faa6f22068857f58579271b15e042f4725ad35cdce2ed4778ba32ffd3102b92"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -671,8 +688,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-eth"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ec734cce11f7fe889950b36b51589397528b26beb6f890834a2131ee9f174d7"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -691,8 +709,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-serde"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27f076bfd74fccc63d50546e1765359736357a953de2eb778b7b6191571735e6"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -701,8 +720,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d80748c209a68421ab6f737828ce6ede7543569a5cad099c1ec16fc1baa05620"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -715,8 +735,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer-local"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17eb1eb39351b4bf20bb0710d8d3a91eb7918d3f3de2f3835f556842e33865cb"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -803,8 +824,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a0c1a0288cdff6ee2b2c2c98ab42889d221ca8a9ee4120ede59b5449e0dcb20"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -825,8 +847,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-http"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36dfa207caf6b528b9466c714626f5b2dfd5e8d4595a74631d5670672dac102b"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -839,8 +862,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ipc"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf45686199d20b395d5912163f8fe497853b7f13de110bd552e50a0447bb4f48"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -858,14 +882,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ws"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91620efb46f8d011e37f74fac53a643e830a7bb24982143094b887003cbfb6be"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
  "futures",
  "http 1.4.0",
- "rustls",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.26.2",
@@ -891,8 +915,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-tx-macros"
-version = "1.1.3"
-source = "git+https://github.com/sistemd/alloy.git?branch=sistemd%2Fsaturate-unknown-tx-gas-price#c4c5d5b8206d1becb1b83eee563b38cce0ea53a7"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb0d567f4830dea921868c7680004ae0c7f221b05e6477db6c077c7953698f56"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -6428,15 +6453,6 @@ name = "lru"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
-dependencies = [
- "hashbrown 0.15.5",
-]
-
-[[package]]
-name = "lru"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
 dependencies = [
  "hashbrown 0.15.5",
 ]

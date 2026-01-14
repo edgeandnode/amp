@@ -47,11 +47,7 @@ version = "0.1.0"
 license-file = "LICENSE"
 
 [workspace.dependencies]
-# Temporarily using a forked version of alloy with a fix for unknown (non ethereum)
-# transaction gas price deserialization. Use the official crate once the PR is merged and released.
-#
-# <https://github.com/alloy-rs/alloy/pull/3095>
-alloy = { git = "https://github.com/sistemd/alloy.git", branch = "sistemd/saturate-unknown-tx-gas-price", default-features = false, features = [
+alloy = { version = "1.2.1", default-features = false, features = [
     "contract",
     "dyn-abi",
     "json-abi",

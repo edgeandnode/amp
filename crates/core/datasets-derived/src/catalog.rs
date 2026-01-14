@@ -775,9 +775,7 @@ pub enum GetPhysicalCatalogWithDepsError {
     /// This occurs when querying the metadata database for the active physical
     /// location of a table fails due to database connection issues, query errors,
     /// or other database-related problems.
-    #[error(
-        "Failed to retrieve physical table metadata for table '{table}' in dataset '{dataset}'"
-    )]
+    #[error("Failed to retrieve physical table metadata for table {dataset}.{table}")]
     PhysicalTableRetrieval {
         dataset: HashReference,
         table: TableName,
@@ -790,7 +788,7 @@ pub enum GetPhysicalCatalogWithDepsError {
     /// This occurs when attempting to load a physical catalog for a table that
     /// has been defined but has not yet been dumped/synced to storage. The table
     /// exists in the dataset definition but has no physical parquet files.
-    #[error("Table '{table}' in dataset '{dataset}' has not been synced")]
+    #[error("Table {dataset}.{table} has not been synced")]
     TableNotSynced {
         dataset: HashReference,
         table: TableName,
