@@ -280,9 +280,8 @@ pub(crate) fn stream(
             }
 
             let dest = car_directory.join(local_car_filename(epoch));
-
-            let buf_reader = match tokio::fs::File::open(&dest).await.map(tokio::io::BufReader::new) {
-                Ok(reader) => reader,
+            let file = match fs_err::File::open(dest) {
+                Ok(f) => f,
                 Err(e) => {
                     car_manager_tx
                         .send(CarManagerMessage::FileProcessed(epoch))
@@ -292,7 +291,20 @@ pub(crate) fn stream(
                     return;
                 }
             };
-            let mut node_reader = car_parser::node::NodeReader::new(buf_reader);
+            // SAFETY: The file is not modified/deleted while the mmap is in use.
+            let mmap = match unsafe { memmap2::Mmap::map(&file) } {
+                Ok(mmap) => mmap,
+                Err(e) => {
+                    car_manager_tx
+                        .send(CarManagerMessage::FileProcessed(epoch))
+                        .await
+                        .expect("receiver not dropped");
+                    yield Err(e.into());
+                    return;
+                }
+            };
+
+            let mut node_reader = car_parser::node::NodeReader::new(&mmap[..]);
 
             while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await.transpose() {
                 let block = match block {

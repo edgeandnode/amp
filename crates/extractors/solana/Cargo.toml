@@ -19,6 +19,7 @@ futures.workspace = true
 fs-err.workspace = true
 governor.workspace = true
 monitoring = { path = "../../core/monitoring" }
+memmap2 = "0.9.9"
 reqwest.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
