@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::{catalog::physical::PhysicalTable, store::CachedStore};
+use common::catalog::physical::PhysicalTable;
 use datasets_common::{
     name::Name, namespace::Namespace, partial_reference::PartialReference, reference::Reference,
     revision::Revision,
@@ -135,9 +135,6 @@ pub async fn handler(
         .map(|info| (info.table_name.to_string(), info))
         .collect();
 
-    // Create a cached store for snapshot operations (ephemeral cache)
-    let cached_store = CachedStore::new(ctx.data_store.clone(), 0);
-
     let partial_ref = PartialReference::new(namespace, name, Some(revision.clone()));
     let mut tables = Vec::new();
 
@@ -164,7 +161,7 @@ pub async fn handler(
             if let Some(pt) = physical_table {
                 // Take a snapshot to get accurate synced range
                 let snapshot = pt
-                    .snapshot(false, cached_store.clone())
+                    .snapshot(false, ctx.data_store.clone())
                     .await
                     .map_err(|err| {
                         tracing::error!(
