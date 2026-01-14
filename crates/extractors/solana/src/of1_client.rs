@@ -280,7 +280,7 @@ pub(crate) fn stream(
             }
 
             let dest = car_directory.join(local_car_filename(epoch));
-            let file = match std::fs::File::open(dest) {
+            let file = match fs_err::File::open(dest) {
                 Ok(f) => f,
                 Err(e) => {
                     car_manager_tx
